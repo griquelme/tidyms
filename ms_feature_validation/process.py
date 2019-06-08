@@ -146,7 +146,7 @@ class Filter(object):
 
 class Corrector(object):
     """
-    Corrects data in a DataContainer.
+    Corrects examples in a DataContainer.
     """
     def __init__(self, axis=None):
         self.axis = axis

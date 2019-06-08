@@ -1,9 +1,9 @@
-from ms_feature_validation import processor
+from ms_feature_validation import process
 import numpy as np
 import pandas as pd
 
 
-# simulated data used for tests
+# simulated examples used for tests
 ft_names = ["FT{:02d}".format(x) for x in range(1, 7)]
 sample_names = ["sample{:2d}".format(x) for x in range(1, 9)]
 classes = ["SV", "SV", "disease", "disease", "healthy", "healthy", "healthy", "SV"]
@@ -14,7 +14,7 @@ sample_information = pd.DataFrame(data=classes, index=sample_names, columns=["cl
 feature_definitions = pd.DataFrame(data=np.random.normal(loc=200, scale=30, size=(len(ft_names), 2)),
                                    columns=["m/z", "Retention time (min)"],
                                    index=ft_names)
-data = processor.DataContainer(data_matrix, feature_definitions, sample_information)
+data = process.DataContainer(data_matrix, feature_definitions, sample_information)
 
 
 def test_group_by_class():

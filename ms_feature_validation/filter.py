@@ -6,7 +6,7 @@ def get_blank_correction(data_container, blank_classes, correction_type, blank_r
     # corrector function
     corrector = {"max": lambda x: x.max(),
                  "mean": lambda x: x.mean()}
-    correction = corrector[correction_type](blanks.data_matrix) * blank_relation
+    correction = corrector[correction_type](blanks) * blank_relation
     return correction
 
 
@@ -38,7 +38,7 @@ def prevalence_filter(data_container, include_classes, lb, ub):
         if class_group in include_classes:
             lb_group, ub_group = lb * group.shape[0], ub * group.shape[0]
             feature_counts = (group > 0).sum()
-            outside_bounds_features = feature_counts[feature_counts < lb_group | feature_counts > ub_group].index
+            outside_bounds_features = feature_counts[(feature_counts < lb_group) | (feature_counts > ub_group)].index
             remove_features = remove_features.union(outside_bounds_features)
     return remove_features
 
