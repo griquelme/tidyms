@@ -193,12 +193,12 @@ class PrevalenceFilter(Filter):
     def __init__(self, include_classes=None, lb=0.5, ub=1):
         # TODO : add all classes when include_classes is None
         super(PrevalenceFilter, self).__init__(axis="features")
-        self.includeClasses = include_classes
+        self.include_classes = include_classes
         self.lb = lb
         self.ub = ub
 
     def fit(self, data_container):
-        self.filter = filter.prevalence_filter(data_container, self.includeClasses, self.lb, self.ub)
+        self.filter = filter.prevalence_filter(data_container, self.include_classes, self.lb, self.ub)
 
 
 @register
@@ -233,14 +233,44 @@ class Pipeline(list):
 def data_container_from_excel(excel_file):
     data_matrix = pd.read_excel(excel_file, sheet_name="data_matrix", index_col="sample")
     sample_information = pd.read_excel(excel_file, sheet_name="sample_information", index_col="sample")
-    feature_definitions = pd.read_excel(excel_file, sheet_name="feature_definitions", index_col="name")
-    return DataContainer(data_matrix, feature_definitions, sample_information)
+    feature_definitions = pd.read_excel(excel_file, sheet_name="feature_definitions", index_col="feature")
+    data_container = DataContainer(data_matrix, feature_definitions, sample_information)
+    _validate_data_container(data_container)
+    return data_container
 
 
 def _validate_pipeline(t):
     for filt in t:
         if not isinstance(filt, (Filter, Corrector)):
             raise TypeError("elements of the Pipeline must be instances of Filter or DataCorrector")
+
+
+def _validate_data_container(data_container):
+
+    # feature names and sample names check
+    if not data_container.data_matrix.index.equals(data_container.sample_information.index):
+        raise ValueError("sample_information data_matrix indices should be equal")
+    if not data_container.data_matrix.columns.equals(data_container.feature_definitions.index):
+        raise  ValueError("sample_information columns and feature_definitions should be equal")
+    # rt, mz and class information check
+    if not "mz" in data_container.feature_definitions.columns:
+        raise KeyError("mz values are required for all features")
+    if not "rt" in data_container.feature_definitions.columns:
+        raise KeyError("rt values are required for all features")
+    if not "class" in data_container.sample_information.columns:
+        raise KeyError("class information is required for all samples")
+    # rt, mz and class and data matrix check:
+    if (data_container.feature_definitions["mz"] < 0).any():
+        raise ValueError("mz values should be greater than zero")
+    if (data_container.feature_definitions["rt"] < 0).any():
+        raise ValueError("mz values should be greater than zero")
+    if (data_container.data_matrix < 0).any().any():
+        raise ValueError("Raw values in data_matrix should be greater than zero")
+    # TODO: pensar si siempre seria valido imputar NaN en datamatrix como 0.
+
+
+
+
 
 
 # TODO: leer filtros desde un archivo yaml a diccionario. Hacer test para todos los filtros.
