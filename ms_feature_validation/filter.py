@@ -4,49 +4,39 @@ import pandas as pd
 def blank_correction(data, blanks, mode, blank_relation):
     corrector = {"max": lambda x: x.max(), "mean": lambda x: x.mean()}
     correction = corrector[mode](blanks) * blank_relation
-    corrected =  data.subtract(correction)
+    corrected = data.subtract(correction)
     corrected[corrected < 0] = 0
     return corrected
 
 
-def prevalence_filter(data_container, include_classes, lb, ub):
+def prevalence_filter(data, lb, ub):
     """
-    Return features  with prevalence outside the [lb, ub] interval in each of
-    included classes.
+    Return columns with relative counts outside the [lb, ub] interval.
 
     Parameters
     ----------
-    data_container : DataContainer
-    include_classes : Iterable[str]
-                      classes selected to evaluate prevalence
+    data : pandas.DataFrame
     lb : float.
-         lower bound of prevalence
+         Relative lower bound of occurrence.
     ub : float.
-         upper bound of prevalence
+         Relative upper bound of prevalence.
     Returns
     -------
-    remove_features: pandas.Index
+    outside_bounds_columns: pandas.Index
     """
-    remove_features = pd.Index([])
-    for class_group, group in data_container.group_by_class():
-        if class_group in include_classes:
-            lb_group, ub_group = lb * group.shape[0], ub * group.shape[0]
-            feature_counts = (group > 0).sum()
-            bounds = (feature_counts < lb_group) | (feature_counts > ub_group)
-            outside_bounds_features = feature_counts[bounds].index
-            remove_features = remove_features.union(outside_bounds_features)
-    return remove_features
+    nlb, nub = lb * data.shape[0], ub * data.shape[0]
+    column_counts = (data > 0).sum()
+    bounds = (column_counts < nlb) | (column_counts > nub)
+    outside_bounds_columns = column_counts[bounds].index
+    return outside_bounds_columns
 
 
-def variation_filter(data_container, include_classes, lb, ub, robust):
+def variation_filter(data, lb, ub, robust):
     """
-    Return features with variation outside the [lb, ub] interval in each of
-    include_classes.
+    Return columns with variation outside the [lb, ub] interval.
     Parameters
     ----------
-    data_container : DataContainer
-    include_classes : Iterable[str]
-                      classes selected to evaluate variation
+    data : pandas.DataFrame
     lb : float
          lower bound of variation
     ub : float
@@ -62,14 +52,10 @@ def variation_filter(data_container, include_classes, lb, ub, robust):
         variation = iqr
     else:
         variation = cv
-    remove_columns = pd.Index([])
-    for class_group, group in data_container.group_by_class():
-        if class_group in include_classes:
-            group_variation = variation(group)
-            bounds = (group_variation < lb) | (group_variation > ub)
-            outside_bounds_features = group_variation[bounds].index
-            remove_columns = remove_columns.union(outside_bounds_features)
-    return remove_columns
+    data_variation = variation(data)
+    bounds = (data_variation < lb) | (data_variation > ub)
+    outside_bounds_columns = data_variation[bounds].index
+    return outside_bounds_columns
 
 
 def iqr(df):
@@ -78,32 +64,3 @@ def iqr(df):
 
 def cv(df):
     return df.std() / df.mean()
-
-
-def corrector_map(data_container, mapper):
-    """
-    Generates tuples of DataContainers one used to generate a correction and
-    other to be corrected.
-    Parameters
-    ----------
-    data_container : DataContainer
-    mapper: dict[str: list[str]]
-            dictionary of
-
-    Yields
-    ------
-    corrector_dc, to_correct_dc
-    """
-    for k, v in mapper.items():
-        if isinstance(k, str):
-            k = [k]
-        else:
-            k = list(k)
-        if isinstance(v, str):
-            v = [v]
-        else:
-            v = list(v)
-        corrector_dc = data_container.select_classes(list(k))
-        to_correct_dc = data_container.select_classes(list(v))
-        yield corrector_dc.index, to_correct_dc.index
-#TODO: corregir esto porque tiene que apuntar al data container original para que lacorreccion se aplique

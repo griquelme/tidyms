@@ -2,10 +2,6 @@ import ms_feature_validation
 
 if __name__ == "__main__":
     data = ms_feature_validation.process.data_container_from_excel("examples/example_sim.xlsx")
-    blank_corrector = ms_feature_validation.process.BlankCorrector(mapper={("SV"): ("healthy", "disease")})
-    #prevalence_filter = ms_feature_validation.process.PrevalenceFilter(["healthy", "disease"], 0.8)
-    #variation_filter = ms_feature_validation.process.VariationFilter()
-    #pipeline = ms_feature_validation.process.Pipeline(blank_corrector, prevalence_filter)
-    #pipeline.transform(data)
-    blank_corrector.transform(data)
-
+    config = ms_feature_validation.process.read_config("examples/config.yaml")
+    pipeline = ms_feature_validation.process.pipeline_from_list(config["Pipeline"])
+    pipeline.transform(data)

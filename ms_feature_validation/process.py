@@ -1,6 +1,7 @@
 from . import filter
 import pandas as pd
 import numpy as np
+import yaml
 
 
 FILTERS = dict()
@@ -136,13 +137,13 @@ class DataContainer(object):
         corrector: function.
                    function used to correct data.
         """
-        for corrector_index, to_correct_index in self._generate_mapper(mapper):
+        for corrector_index, to_correct_index in self.generate_mapper(mapper):
             corrected = corrector(self.data_matrix.loc[to_correct_index],
                                   self.data_matrix.loc[corrector_index],
                                   **kwargs)
             self.data_matrix.loc[to_correct_index] = corrected
 
-    def _generate_mapper(self, mapper):
+    def generate_mapper(self, mapper):
         """
         yields a tuple of indexes corresponding to classes in key and values
         of mapper.
@@ -157,18 +158,19 @@ class DataContainer(object):
         ------
         corrector_dc, to_correct_dc
         """
-        for k, v in mapper.items():
-            if isinstance(k, str):
-                k = [k]
-            else:
-                k = list(k)
-            if isinstance(v, str):
-                v = [v]
-            else:
-                v = list(v)
-            corrector_dc = self.select_classes(list(k))
-            to_correct_dc = self.select_classes(list(v))
-            yield corrector_dc.index, to_correct_dc.index
+        if isinstance(mapper, dict):
+            for k, v in mapper.items():
+                k = [k] if isinstance(k, str) else list(k)
+                v = [v] if isinstance(v, str) else list(v)
+                corrector_dc = self.select_classes(k)
+                to_correct_dc = self.select_classes(v)
+                yield corrector_dc.index, to_correct_dc.index
+        elif isinstance(mapper, (list, tuple)):
+            for k in mapper:
+                yield self.select_classes([k])
+        elif mapper is None:
+            yield self.data_matrix.index
+        # TODO: este metodo necesita un nombre y documentacion mas clara.
 
 
 class Filter(object):
@@ -179,10 +181,12 @@ class Filter(object):
     def __init__(self, axis=None, mode="remove"):
         self.axis = axis
         self.mode = mode
+        self.mapper = None
         self.filter = None
+        self.params = dict()
 
     def fit(self, data_container):
-        self.filter = lambda x: None
+        pass
 
     def transform(self, data_container):
         if self.filter is None:
@@ -215,10 +219,10 @@ class ClassSelector(Filter):
     """
     def __init__(self, classes=None):
         super(ClassSelector, self).__init__(axis="samples", mode="select")
-        self.classes = classes
+        self.param["classes"] = classes
 
     def fit(self, data_container):
-        self.filter = data_container.select_classes(self.classes).index
+        self.filter = data_container.select_classes(**self.params).index
 
 
 @register
@@ -240,16 +244,16 @@ class PrevalenceFilter(Filter):
     Performs a prevalence filter on selected classes
     """
     def __init__(self, include_classes=None, lb=0.5, ub=1):
-        # TODO : add all classes when include_classes is None
-        super(PrevalenceFilter, self).__init__(axis="features")
-        self.include_classes = include_classes
-        self.lb = lb
-        self.ub = ub
+        super(PrevalenceFilter, self).__init__(axis="features", mode="remove")
+        self.mapper = include_classes
+        self.params["lb"] = lb
+        self.params["ub"] = ub
 
     def fit(self, data_container):
-        self.filter = filter.prevalence_filter(data_container,
-                                               self.include_classes, self.lb,
-                                               self.ub)
+        self.filter = pd.Index([])
+        for groups in data_container.generate_mapper(self.mapper):
+            func = filter.prevalence_filter
+            self.filter = self.filter.union(func(groups, **self.params))
 
 
 @register
@@ -258,18 +262,17 @@ class VariationFilter(Filter):
     Remove samples with high variation coefficient.
     """
     def __init__(self, lb=0, ub=0.25, include_classes=None, robust=False):
-        super(VariationFilter, self).__init__(axis="features")
-        self.lb = lb
-        self.ub = ub
-        self.robust = robust
-        self.include_classes = include_classes
+        super(VariationFilter, self).__init__(axis="features", mode="remove")
+        self.params["lb"] = lb
+        self.params["ub"] = ub
+        self.params["robust"] = robust
+        self.mapper = include_classes
 
     def fit(self, data_container):
-        self.filter = filter.variation_filter(data_container,
-                                              self.include_classes,
-                                              self.lb,
-                                              self.ub,
-                                              self.robust)
+        self.filter = pd.Index([])
+        func = filter.variation_filter
+        for groups in data_container.generate_mapper(self.mapper):
+            self.filter = self.filter.union(func(groups, **self.params))
 
 
 class Pipeline(list):
@@ -342,12 +345,18 @@ def _validate_data_container(data_container):
     # TODO: pensar si siempre seria valido imputar NaN en datamatrix como 0.
 
 
+def read_config(path):
+    with open(path) as fin:
+        config = yaml.load(fin, Loader=yaml.UnsafeLoader)
+    return config
 
+def pipeline_from_list(l):
+    pipeline = Pipeline()
+    for d in l:
+        pipeline.append(filter_from_dictionary(d))
+    return pipeline
 
-
-
-# TODO: leer filtros desde un archivo yaml a diccionario.
-# snippet para leer un archivo yaml
-# import yaml
-# with open(yaml_path) as fin:
-#   config = yaml.load(fin, Loader=yaml.UnsafeLoader)
+def filter_from_dictionary(d):
+    for name, params in d.items():
+        filter = FILTERS[name](**params)
+    return filter
