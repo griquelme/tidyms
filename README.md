@@ -6,7 +6,8 @@ object, which stores three types of data:
 
 
 - Data Matrix: Areas of detected Features. Each column is a feature (pair rt, mz)
-- and each row is a sample. Features Definitions: Information about features
+and each row is a sample.
+- Features Definitions: Information about features
   (mz, rt, etc…).
 - Sample Information: Information about samples (class, run order, etc…)
 
@@ -17,7 +18,7 @@ Correctors:
 (prevalence, type of sample, etc…).
 - Correctors transform Data (blank correction, inter batch correction, etc…).
 
-Filters and correctors can be grouped together using a Pipeline object which
+Filters and correctors can be coupled together using a Pipeline object which
 concatenates each filter and reports features or samples removed in each step
 or metrics associated with a correction step (eg: diminution of CV after
 performing interbatch correction).
@@ -42,8 +43,8 @@ TODO
 xcms, mzmine, etc…).
 - Create chromatograms and pseudospectra from raw mzML data.
 - Review intensity filter, peak shape filter, peak area filter.
-- Add flag attribute to data_container.
-- Refactor evaluate isotopic profile code.
+- Add a flag attribute to data_container.
+- Refactor code used to evaluate isotopic profile.
 - Test filter on real data sets and compare with manually curated data.
 
 Filter details
