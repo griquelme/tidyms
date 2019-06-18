@@ -17,7 +17,7 @@ def prevalence_filter(data, lb, ub):
     ----------
     data : pandas.DataFrame
     lb : float.
-         Relative lower bound of occurrence.
+         Relative lower bound of prevalence.
     ub : float.
          Relative upper bound of prevalence.
     Returns
@@ -48,10 +48,7 @@ def variation_filter(data, lb, ub, robust):
     remove_features : pandas.Index
     """
 
-    if robust:
-        variation = iqr
-    else:
-        variation = cv
+    variation = iqr if robust else cv
     data_variation = variation(data)
     bounds = (data_variation < lb) | (data_variation > ub)
     outside_bounds_columns = data_variation[bounds].index
