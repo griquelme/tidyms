@@ -343,6 +343,7 @@ def _validate_data_container(data_container):
         msg = "Raw values in data_matrix should be greater than zero"
         raise ValueError(msg)
     # TODO: pensar si siempre seria valido imputar NaN en datamatrix como 0.
+    # TODO: separar esta funcion en tres funciones distintas
 
 
 def read_config(path):
