@@ -54,7 +54,7 @@ def prevalence_filter(data, lb, ub):
     """
     nlb, nub = lb * data.shape[0], ub * data.shape[0]
     column_counts = (data > 0).sum()
-    bounds = (column_counts < nlb) | (column_counts > nub)
+    bounds = (column_counts <= nlb) | (column_counts >= nub)
     outside_bounds_columns = column_counts[bounds].index
     return outside_bounds_columns
 
@@ -79,7 +79,7 @@ def variation_filter(data, lb, ub, robust):
 
     variation = iqr if robust else cv
     data_variation = variation(data)
-    bounds = (data_variation < lb) | (data_variation > ub)
+    bounds = (data_variation <= lb) | (data_variation >= ub)
     outside_bounds_columns = data_variation[bounds].index
     return outside_bounds_columns
 
@@ -92,18 +92,33 @@ def cv(df):
     return df.std() / df.mean()
 
 
-def loess_correction(corrector_order, corrector, samples_order, samples):
+def cspline_correction(x, y, xq):
+    sp = CubicSpline(x, y)
+    yq = sp(xq)
+    return yq
+
+
+def loess_correction(x, y, xq, **kwargs):
+    y_loess = lowess(y, x, return_sorted=False, **kwargs)
+    yq = cspline_correction(x, y_loess, xq)
+    return yq
+
+
+def batch_correction(reference_order, reference, samples_order, samples,
+                     mode, **kwargs):
     """
     Correct instrument response drift using LOESS regression [1].
 
     Parameters
     ----------
-    corrector_order : Iterable[int]
+    reference_order : Iterable[int]
         Order of corrector samples.
-    corrector: pandas.DataFrame
+    reference: pandas.DataFrame
     samples_order: Iterable[int]
         Order of samples
     samples: pandas.DataFrame
+    mode: {'loess', 'splines'}
+    kwargs: optional arguments to pass to loess corrector
 
     Returns
     -------
@@ -117,12 +132,9 @@ def loess_correction(corrector_order, corrector, samples_order, samples):
 
     """
     corrected = pd.DataFrame()
+    corrector = {"loess": loess_correction, "splines": cspline_correction}
     for features in samples.columns:
-        corrector_loess = lowess(corrector[features], corrector_order,
-                                 return_sorted=False)
-        spline = CubicSpline(corrector_order,
-                             corrector_loess / corrector[features])
-        correction_factor = spline(samples_order)
-        corrected[features] = correction_factor * samples[features]
+        x, y, xq = reference_order, reference[features], samples_order
+        correction_factor = corrector[mode](x, y, xq, **kwargs)
+        corrected[features] = samples[features] / correction_factor
     return corrected
-

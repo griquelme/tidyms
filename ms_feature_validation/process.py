@@ -99,14 +99,17 @@ class DataContainer(object):
     def get_classes(self):
         return self.sample_information["class"].unique()
 
-    def group_by_class(self):
+    def group_by(self, name):
         """
         groups data_matrix Using class information.
         Returns
         -------
         grouped_data_matrix : DataFrameGroupBy
         """
-        return self.data_matrix.groupby(self.sample_information["class"])
+        for group_name, group in self.sample_information.groupby(name):
+            yield DataContainer(self.data_matrix.loc[group.index],
+                                self.feature_definitions,
+                                self.sample_information.loc[group.index])
 
     def select_classes(self, classes):
         """
@@ -120,6 +123,10 @@ class DataContainer(object):
         -------
         data_matrix_selection : DataFrame
         """
+
+        if isinstance(classes, str):
+            classes = [classes]
+
         if self.is_valid_class_name(classes):
             selection = self.sample_information["class"].isin(classes)
             return self.data_matrix[selection]
@@ -237,23 +244,84 @@ class BlankCorrector(Corrector):
         self.params["blank_relation"] = blank_relation
         self.corrector = filter.blank_correction
 
+@register
+class BatchCorrector(Corrector):
+    """
+    Corrects instrumental drift between batches.
+    """
+    def __init__(self, mapper=None, mode="splines"):
+        super(BatchCorrector, self).__init__(mapper=mapper)
+        self.params["mode"] = mode
+        self.corrector = filter.batch_correction
+
+    def transform(self, data_container):
+        sample_classes = list(self.mapper.values())[0]
+        corrector_classes = list(self.mapper.keys())[0]
+        scaling_factor = data_container.select_classes(corrector_classes).mean()
+        # Prefilters and LOESS
+        steps = [PrevalenceFilter(include_classes=corrector_classes, lb=1),
+                 VariationFilter(include_classes=corrector_classes, ub=0.5),
+                 IntraBatchCorrector(mode=self.params["mode"],
+                                     mapper=self.mapper)]
+        pipe = Pipeline(*steps)
+        batches = list()
+        for batch in data_container.group_by("batch"):
+            pipe.transform(batch)
+            batches.append(batch)
+        corrected = merge_data_containers(batches)
+        data_container.data_matrix =corrected.data_matrix
+        data_container.sample_information = corrected.sample_information
+        data_container.feature_definitions = corrected.feature_definitions
+
+        # Prevalence post LOESS on QC
+        data_container.data_matrix = (data_container.data_matrix
+                                      * scaling_factor).dropna(axis=1)
+        prev_filter = PrevalenceFilter(include_classes=corrector_classes, lb=1)
+        prev_filter.transform(data_container)
+
+
+class IntraBatchCorrector(Corrector):
+    """
+    Corrects instrumental drift between in a batch.
+    """
+    def __init__(self, mapper=None, mode="splines"):
+        super(IntraBatchCorrector, self).__init__(mapper=mapper)
+        self.params["mode"] = mode
+        self.corrector = filter.batch_correction
+
+    def transform(self, dc):
+        for ref_index, sample_index in dc.generate_mapper(self.mapper):
+            ref_order = dc.sample_information["order"].loc[ref_index]
+            ref = dc.data_matrix.loc[ref_index]
+            sample_order = dc.sample_information["order"].loc[sample_index]
+            sample = dc.data_matrix.loc[sample_index]
+            correction = self.corrector(ref_order, ref, sample_order,
+                                        sample, **self.params)
+            dc.data_matrix.loc[sample_index] = correction
+
+
 
 @register
 class PrevalenceFilter(Filter):
     """
     Performs a prevalence filter on selected classes
     """
-    def __init__(self, include_classes=None, lb=0.5, ub=1):
+    def __init__(self, include_classes=None, lb=0.5, ub=1, intraclass=True):
         super(PrevalenceFilter, self).__init__(axis="features", mode="remove")
         self.mapper = include_classes
+        self.intraclass = intraclass
         self.params["lb"] = lb
         self.params["ub"] = ub
 
     def fit(self, data_container):
-        self.filter = pd.Index([])
-        for groups in data_container.generate_mapper(self.mapper):
-            func = filter.prevalence_filter
-            self.filter = self.filter.union(func(groups, **self.params))
+        func = filter.prevalence_filter
+        if self.intraclass:
+            self.filter = pd.Index([])
+            for groups in data_container.generate_mapper(self.mapper):
+                self.filter = self.filter.union(func(groups, **self.params))
+        else:
+            self.filter = func(data_container.select_classes(self.mapper),
+                               **self.params)
 
 
 @register
@@ -261,18 +329,24 @@ class VariationFilter(Filter):
     """
     Remove samples with high variation coefficient.
     """
-    def __init__(self, lb=0, ub=0.25, include_classes=None, robust=False):
+    def __init__(self, lb=0, ub=0.25, include_classes=None,
+                 robust=False, intraclass=True):
         super(VariationFilter, self).__init__(axis="features", mode="remove")
         self.params["lb"] = lb
         self.params["ub"] = ub
         self.params["robust"] = robust
         self.mapper = include_classes
+        self.intraclass = intraclass
 
     def fit(self, data_container):
-        self.filter = pd.Index([])
         func = filter.variation_filter
-        for groups in data_container.generate_mapper(self.mapper):
-            self.filter = self.filter.union(func(groups, **self.params))
+        if self.intraclass:
+            self.filter = pd.Index([])
+            for groups in data_container.generate_mapper(self.mapper):
+                self.filter = self.filter.union(func(groups, **self.params))
+        else:
+            self.filter = func(data_container.select_classes(self.mapper),
+                               **self.params)
 
 
 class Pipeline(list):
@@ -286,6 +360,27 @@ class Pipeline(list):
     def transform(self, data_container):
         for x in self:
             x.transform(data_container)
+
+
+def merge_data_containers(dcs):
+    """
+    Applies concat on `data_matrix`, `sample_information` and
+    `feature_definitions`.
+    Parameters
+    ----------
+    dcs : Iterable[DataContainer]
+
+    Returns
+    -------
+    merged_dc : DataContainer
+    """
+    dms = [x.data_matrix for x in dcs]
+    sis = [x.sample_information for x in dcs]
+    fds = [x.feature_definitions for x in dcs]
+    dm = pd.concat(dms)
+    si = pd.concat(sis)
+    fd = pd.concat(fds)
+    return DataContainer(dm, fd, si)
 
 
 def data_container_from_excel(excel_file):
@@ -305,11 +400,28 @@ def data_container_from_excel(excel_file):
     return data_container
 
 
+def read_progenesis(path):
+    """
+    Read a progenesis file into a DataContainer
+
+    Parameters
+    ----------
+    path : path to an Excel file
+
+    Returns
+    -------
+    dc = DataContainer
+    """
+
+
+
 def _validate_pipeline(t):
+    if len(t) == 1 and isinstance(t[0], tuple):
+        t = t[0]
     for filt in t:
-        if not isinstance(filt, (Filter, Corrector)):
+        if not isinstance(filt, (Filter, Corrector, Pipeline)):
             msg = ("elements of the Pipeline must be",
-                   "instances of Filter or DataCorrector")
+                   "instances of Filter, DataCorrector or another Pipeline.")
             raise TypeError(msg)
 
 
@@ -361,3 +473,6 @@ def filter_from_dictionary(d):
     for name, params in d.items():
         filter = FILTERS[name](**params)
     return filter
+
+# TODO: posible acortamiento de nombres: data_matrix: data,
+#  sample_information: sample, feature_definitions: features.
