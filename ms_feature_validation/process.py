@@ -1,7 +1,10 @@
 from . import filter
+from . import chromatograms
+from . import fileio
 import pandas as pd
 import numpy as np
 import yaml
+import os.path
 
 
 FILTERS = dict()
@@ -38,13 +41,24 @@ class DataContainer(object):
     feature_definitions : pandas.DataFrame.
                           DataFrame with features names as indices. mz and rt
                           are required columns.
+    data_path : str.
+        Path to raw data directory.
     """
 
     def __init__(self, data_matrix_df, feature_definitions_df,
-                 sample_information_df):
+                 sample_information_df, data_path=None):
         self.data_matrix = data_matrix_df
         self.feature_definitions = feature_definitions_df
         self.sample_information = sample_information_df
+        self.data_path = data_path
+
+    def get_raw_path(self):
+        available_files = list()
+        for sample in self.sample_information.index:
+            sample_file = os.path.join(self.data_path, sample + ".mzML")
+            if os.path.isfile(sample_file):
+                available_files.append(sample_file)
+        return available_files
 
     def is_valid_class_name(self, class_names):
         valid_classes = np.isin(class_names, self.sample_information["class"])
@@ -167,8 +181,9 @@ class DataContainer(object):
         """
         if isinstance(mapper, dict):
             for k, v in mapper.items():
-                k = [k] if isinstance(k, str) else list(k)
+                #k = [k] if isinstance(k, str) else list(k)
                 v = [v] if isinstance(v, str) else list(v)
+                k = k.split(", ")
                 corrector_dc = self.select_classes(k)
                 to_correct_dc = self.select_classes(v)
                 yield corrector_dc.index, to_correct_dc.index
@@ -178,6 +193,19 @@ class DataContainer(object):
         elif mapper is None:
             yield self.data_matrix.index
         # TODO: este metodo necesita un nombre y documentacion mas clara.
+        # TODO: setear data_path como una propiedad
+
+
+class MetadataAdder(object):
+    """
+    Adds columns to `sample_information` or `feature_definitions`
+    in a DataContainer object
+    """
+    def __init__(self):
+        self.function = lambda x: None
+
+    def transform(self, dc):
+        self.function(dc)
 
 
 class Filter(object):
@@ -313,14 +341,23 @@ class PrevalenceFilter(Filter):
         self.params["lb"] = lb
         self.params["ub"] = ub
 
-    def fit(self, data_container):
+    def fit(self, dc):
         func = filter.prevalence_filter
         if self.intraclass:
-            self.filter = pd.Index([])
-            for groups in data_container.generate_mapper(self.mapper):
-                self.filter = self.filter.union(func(groups, **self.params))
+            class_counts = dc.sample_information["class"].value_counts()
+            counts_per_class = (dc.data_matrix
+                                .groupby(dc.sample_information["class"])
+                                .sum())
+            prevalence = counts_per_class.divide(class_counts, axis=0)
+            prevalence = prevalence.loc[self.mapper]
+            bounds = (prevalence.min() > lb) & (prevalence.max() < ub)
+
+            # self.filter = pd.Index([])
+            # for groups in data_container.generate_mapper(self.mapper):
+            #     self.filter = self.filter.union(func(groups, **self.params))
+            # el error aparece cuando la igualdad es estricta, verificar esto
         else:
-            self.filter = func(data_container.select_classes(self.mapper),
+            self.filter = func(dc.select_classes(self.mapper),
                                **self.params)
 
 
@@ -347,6 +384,34 @@ class VariationFilter(Filter):
         else:
             self.filter = func(data_container.select_classes(self.mapper),
                                **self.params)
+
+
+@register
+class ChromatogramMaker(MetadataAdder):
+    """
+    Computes chromatograms for all samples using available raw data.
+    """
+    def __init__(self, tolerance=0.005):
+        super(ChromatogramMaker, self).__init__()
+        self.params = dict()
+        self.params["tolerance"] = tolerance
+
+    def transform(self, dc):
+        mz_cluster = chromatograms.cluster(dc.feature_definitions["mz"],
+                                           0.0002)
+        dc.feature_definitions["mz cluster"] = mz_cluster
+        mean_mz_cluster = (dc.feature_definitions
+                           .groupby("mz cluster")["mz"]
+                           .mean().values)
+        chromatogram_dict = dict()
+        for sample in dc.get_raw_path():
+            reader = fileio.read(sample)
+            c = fileio.chromatogram(reader,
+                                    mean_mz_cluster,
+                                    tolerance=self.params["tolerance"])
+            sample_name = sample_name_from_path(sample)
+            chromatogram_dict[sample_name] = c
+        dc.chromatograms = chromatogram_dict
 
 
 class Pipeline(list):
@@ -444,7 +509,7 @@ def _validate_pipeline(t):
     if len(t) == 1 and isinstance(t[0], tuple):
         t = t[0]
     for filt in t:
-        if not isinstance(filt, (Filter, Corrector, Pipeline)):
+        if not isinstance(filt, (Filter, Corrector, Pipeline, MetadataAdder)):
             msg = ("elements of the Pipeline must be",
                    "instances of Filter, DataCorrector or another Pipeline.")
             raise TypeError(msg)
@@ -488,16 +553,25 @@ def read_config(path):
         config = yaml.load(fin, Loader=yaml.UnsafeLoader)
     return config
 
+
 def pipeline_from_list(l):
     pipeline = Pipeline()
     for d in l:
         pipeline.append(filter_from_dictionary(d))
     return pipeline
 
+
 def filter_from_dictionary(d):
     for name, params in d.items():
         filter = FILTERS[name](**params)
     return filter
+
+
+def sample_name_from_path(path):
+    fname = os.path.split(path)[1]
+    sample_name = os.path.splitext(fname)[0]
+    return sample_name
+
 
 # TODO: posible acortamiento de nombres: data_matrix: data,
 #  sample_information: sample, feature_definitions: features.
