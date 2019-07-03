@@ -1,5 +1,25 @@
 import pyopenms
 import numpy as np
+from scipy.interpolate import interp1d
+
+
+def read(path):
+    """
+    Load `path` file into an OnDiskExperiment. If the file is not indexed, load
+    the file.
+    Parameters
+    ----------
+    path
+
+    Returns
+    -------
+
+    """
+    exp_reader = pyopenms.OnDiscMSExperiment()
+    if not exp_reader.openFile(path):
+        exp_reader = pyopenms.MSExperiment()
+        pyopenms.MzMLFile().load(path, exp_reader)
+    return exp_reader
 
 
 def chromatogram(msexp, mz, tolerance=0.005):
@@ -15,45 +35,75 @@ def chromatogram(msexp, mz, tolerance=0.005):
     Returns
     -------
     rt, chromatograms: tuple
-                       rt is an array of retention times. chromatograms is an array with rows of EICs.
+        rt is an array of retention times. chromatograms is an array with rows
+        of EICs.
     """
     if not isinstance(mz, np.ndarray):
         mz = np.array(mz)
-
+    mz_intervals = (np.vstack((mz - tolerance, mz + tolerance))
+                    .T.reshape(mz.size * 2))
     nsp = msexp.getNrSpectra()
-    chromatograms = list()
-    rt = list()
-    for k in range(nsp):
-        spectrum = exp.getSpectrum(k_sp)
-        if len(rt) > 1 and (rt[-1] > spectrum.getRT()):
-            break
-        if spectrum.getMSLevel() == mslevel:
-            rt.append(spectrum.getRT())
-            current_mz, current_int = spectrum.get_peaks()
-            mz_index = _select_roi(current_mz, mz, tolerance)
+    chromatograms = np.zeros((nsp, mz.size))
+    rt = np.zeros(nsp)
+    for ksp in range(nsp):
+        sp = msexp.getSpectrum(ksp)
+        rt[ksp] = sp.getRT()
+        mz_sp, int_sp = sp.get_peaks()
+        ind_sp = np.searchsorted(mz_sp, mz_intervals)
+        # elements added at the end of mz_sp raise IndexError
+        ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
+        chromatograms[ksp, :] = np.add.reduceat(int_sp, ind_sp)[::2]
+    return rt, chromatograms
 
 
-    return int_list, mz_list, scan_times, num_scan_times
-
-
-def _select_roi(x, x_roi, tolerance):
+def accumulate_spectra(msexp, scans, ref, subtract=None, accumulator="sum"):
     """
-    returns an mask for x with regions [x_roi - tolerance, x_roi + tolerance].
+    accumulates a spectra into a single spectrum.
+
     Parameters
     ----------
-    x: array[float].
-       sorted array of floats
-    x_roi: array[float]
-       x values of interest
-    tolerance: float
-               tolerance to build the mask
+    msexp : pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
+    scans : tuple[int] : start, end
+        scan range to accumulate. `start` and `end` are used as slice index.
+    ref: int.
+        Scan used to pass to the interpolator.
+    subtract : None or Tuple[int], left, right
+        Scans regions to substract. `left` must be smaller than `start` and
+        `right` greater than `end`.
+    accumulator : {"sum", "mean"}
+
     Returns
     -------
-    x_tolerance:
+    accum_mz, accum_int : tuple[np.array]
     """
-    x_vals = np.zeros(x_roi.size * 2, dtype=x_roi.dtype)
-    x_vals[0::2] = x_roi - tolerance
-    x_vals[1::2] = x_roi + tolerance
-    x_tol = np.searchsorted(x, x_vals)
-    x_tol = np.reshape(x_tol, (x_roi.size, 2))
-    return x_tol
+    accumulator_functions = {"sum": np.sum, "mean": np.mean}
+    accumulator = accumulator_functions[accumulator]
+
+    if subtract is not None:
+        if (subtract[0] > scans[0]) or (subtract[-1] < scans[-1]):
+            raise ValueError("subtract region outside scan region.")
+    else:
+        subtract = scans
+
+    rows = scans[1] - subtract[0]
+    mz_ref, int_ref = msexp.getSpectrum(ref).get_peaks()
+    interp_int = np.zeros((rows, mz_ref.size))
+    for krow, scan in zip(range(rows), range(*subtract)):
+        mz_scan, int_scan = msexp.getSpectrum(scan).get_peaks()
+        interpolator = interp1d(mz_scan, int_scan)
+        interp_int[krow, :] = interpolator(mz_ref)
+
+    # substract indices to match interp_int rows
+    scans = scans[0] - subtract[0], scans[1] - subtract[0]
+    subtract = 0, subtract[1] - subtract[0]
+
+    accum_int = (accumulator(interp_int[scans[0]:scans[1]], axis=0)
+                - accumulator(interp_int[subtract[0]:scans[0]], axis=0)
+                - accumulator(interp_int[scans[1]:subtract[1]], axis=0))
+    accum_mz = mz_ref
+
+    return accum_mz, accum_int
+
+
+
+
