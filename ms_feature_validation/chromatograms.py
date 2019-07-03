@@ -1,5 +1,6 @@
 from scipy.signal import find_peaks
 import numpy as np
+import pandas as pd
 
 
 def find_experimental_rt(rt, chromatogram, rt_guess, width, tolerance):
@@ -101,3 +102,44 @@ def cluster(s, tolerance):
     return cluster_number
 
 
+def overlap_groups(df, rt_tolerance, mz_tolerance):
+    """
+    returns index with overalap in Retention Time and Mass-to-charge ratio.
+
+    Parameters
+    ----------
+    sample_information : pandas.DataFrame
+    rt_tolerance : float
+    mz_tolerance : float
+
+    Returns
+    -------
+    overlap_cluster
+
+    """
+    mz = df["mz"]
+    rt = df["rt"]
+
+    def has_overlap_helper(x, tol):
+        xx, xy = np.meshgrid(x, x)
+        x_overlap = np.abs(xx - xy) < tol
+        x_overlap[np.diag_indices_from(x_overlap)] = False
+        return x_overlap
+
+    def overlap_groups_helper(overlap):
+        return list(df.index[overlap])
+
+    mz_overlap = has_overlap_helper(mz, mz_tolerance)
+    rt_ovelap = has_overlap_helper(rt, rt_tolerance)
+    overlap_df = pd.DataFrame(mz_overlap & rt_ovelap,
+                              index=df.index,
+                              columns=df.index)
+    overlap_series = overlap_df.apply(overlap_groups_helper, axis=0)
+    return overlap_series
+
+def get_eic_threshold(sp_threshold, mz_res, fwhm):
+    sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
+    x = np.arange(-fwhm / 2, fwhm / 2, mz_res)
+    y = gauss(x, 0, sigma, sp_threshold)
+    threshold = y.sum()
+    return threshold
