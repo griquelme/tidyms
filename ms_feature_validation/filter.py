@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 from scipy.interpolate import CubicSpline
 from statsmodels.nonparametric.smoothers_lowess import lowess
@@ -97,8 +96,8 @@ def variation_filter(data, classes, include_classes, lb, ub,
     ub : float
         upper bound of variation
     intraclass : bool
-         if True computes prevalence for each class separately and return columns
-        that are outside bounds in all of `include_classes`.
+         if True computes prevalence for each class separately and return
+         columns that are outside bounds in all of `include_classes`.
     robust : bool
         if True uses iqr as a metric of variation. if False uses cv
     Returns
@@ -117,15 +116,15 @@ def variation_filter(data, classes, include_classes, lb, ub,
     return outside_bounds_columns
 
 
-
 def normalizer(classes, intraclass):
     class_counts = classes.value_counts()
-    n =class_counts.sum()
+    n = class_counts.sum()
     return lambda x: x.divide(class_counts, axis=0) if intraclass else x / n
 
 
 def grouper(classes, intraclass):
     return lambda x: x.groupby(classes) if intraclass else x
+
 
 def bounds_checker(lb, ub, intraclass):
     if intraclass:
@@ -136,10 +135,9 @@ def bounds_checker(lb, ub, intraclass):
 
 def variation(robust):
     if robust:
-        func = lambda x: (x.quantile(0.75) - x.quantile(0.25)) / x.quantile(0.5)
+        return lambda x: (x.quantile(0.75) - x.quantile(0.25)) / x.quantile(0.5)
     else:
-        func = lambda x: x.std() / x.mean()
-    return func
+        return lambda x: x.std() / x.mean()
 
 
 def cspline_correction(x, y, xq):
@@ -154,21 +152,24 @@ def loess_correction(x, y, xq, **kwargs):
     return yq
 
 
-def batch_correction(reference_order, reference, samples_order, samples,
+def batch_correction(data, run_order, classes, corrector_class, sample_classes,
                      mode, **kwargs):
     """
     Correct instrument response drift using LOESS regression [1].
 
     Parameters
     ----------
-    reference_order : Iterable[int]
-        Order of corrector samples.
-    reference: pandas.DataFrame
-    samples_order: Iterable[int]
-        Order of samples
-    samples: pandas.DataFrame
+    data : pandas.DataFrame
+    run_order : pandas.Series
+        run order of samples
+    classes : pandas.Series
+        class label for samples
+    corrector_class : str
+        label of corrector class
+    sample_classes: list[str]
+        samples to correct
     mode: {'loess', 'splines'}
-    kwargs: optional arguments to pass to loess corrector
+    kwargs: optional arguments to pass to loess corrector.
 
     Returns
     -------
@@ -181,10 +182,54 @@ def batch_correction(reference_order, reference, samples_order, samples,
     to mass spectrometry", Nature Protocols volume 6, pages 1060–1083 (2011).
 
     """
-    corrected = pd.DataFrame()
     corrector = {"loess": loess_correction, "splines": cspline_correction}
-    for features in samples.columns:
-        x, y, xq = reference_order, reference[features], samples_order
-        correction_factor = corrector[mode](x, y, xq, **kwargs)
-        corrected[features] = samples[features] / correction_factor
+    corrector = corrector[mode]
+    corrector_class_mask = classes.isin([corrector_class])
+    corrector_run = run_order[corrector_class_mask]
+    sample_classes_mask = classes.isin(sample_classes)
+    sample_run = run_order[sample_classes_mask]
+    corrected = data.apply(lambda x: corrector(corrector_run,
+                                               x[corrector_class_mask],
+                                               sample_run,
+                                               **kwargs))
+    return corrected
+
+
+def interbatch_correction(data, batch, run_order, classes, corrector_class,
+                          sample_classes, mode, **kwargs):
+    """
+    Apply batch correction to several batches. Interbatch correction is achieved
+    using a scaling factor obtained from the mean values in corrector samples.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+    batch : pd.Series
+        batch number for a given sample
+    run_order : pd.Series
+    classes : pd.Series
+        Class labels for samples
+    corrector_class : str
+        class used to correct samples
+    sample_classes : list[str]
+        class labels to correct.
+    mode : {"loess", "splines"}
+    kwargs : optional arguments to pass to loess corrector
+
+    Returns
+    -------
+    corrected: pandas.DataFrame
+    """
+    corrector_samples_mask = classes.isin([corrector_class])
+    scaling_factor = data[corrector_samples_mask].mean()
+
+    def corrector_helper(x):
+        corrected_batch = batch_correction(x, run_order.loc[x.index], classes,
+                                           corrector_class, sample_classes,
+                                           mode, **kwargs)
+        return corrected_batch
+
+    corrected = (data.groupby(batch)
+                 .apply(corrector_helper)
+                 * scaling_factor)
     return corrected
