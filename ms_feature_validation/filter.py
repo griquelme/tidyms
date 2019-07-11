@@ -104,7 +104,6 @@ def variation_filter(data, classes, include_classes, lb, ub,
     -------
     remove_features : pandas.Index
     """
-
     # selects include_classes
     classes = classes[classes.isin(include_classes)]
     data = data.loc[classes.index, :]
@@ -128,7 +127,7 @@ def grouper(classes, intraclass):
 
 def bounds_checker(lb, ub, intraclass):
     if intraclass:
-        return lambda x: ((x < lb) | (x > ub)).any()
+        return lambda x: ((x < lb) | (x > ub)).all()
     else:
         return lambda x: ((x < lb) | (x > ub))
 
@@ -192,6 +191,7 @@ def batch_correction(data, run_order, classes, corrector_class, sample_classes,
                                                x[corrector_class_mask],
                                                sample_run,
                                                **kwargs))
+    data[sample_classes_mask] = corrected.values
     return corrected
 
 
@@ -233,3 +233,8 @@ def interbatch_correction(data, batch, run_order, classes, corrector_class,
                  .apply(corrector_helper)
                  * scaling_factor)
     return corrected
+
+
+class EmptyDataFrameException(ValueError):
+    """Empty data error"""
+    pass
