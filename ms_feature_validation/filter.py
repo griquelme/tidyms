@@ -44,7 +44,7 @@ def blank_correction(data, classes, blank_classes, sample_classes, mode, blank_r
     return data
 
 
-def prevalence_filter(data, classes, include_classes, lb, ub, intraclass):
+def prevalence_filter(data, classes, include, lb, ub, intraclass):
     """
     Return columns with relative counts outside the [lb, ub] interval.
 
@@ -53,7 +53,7 @@ def prevalence_filter(data, classes, include_classes, lb, ub, intraclass):
     data : pandas.DataFrame
     classes : pandas.Series
         sample class labels
-    include_classes : list[str]
+    include : list[str]
         classes included in the filter
     lb : float.
         Relative lower bound of prevalence.
@@ -66,8 +66,8 @@ def prevalence_filter(data, classes, include_classes, lb, ub, intraclass):
     -------
     outside_bounds_columns: pandas.Index
     """
-    # selects include_classes
-    classes = classes[classes.isin(include_classes)]
+    # selects include
+    classes = classes[classes.isin(include)]
     data = data.loc[classes.index, :]
     # pipeline for prevalence filter
     is_outside_bounds = ((data > 0)
@@ -79,7 +79,7 @@ def prevalence_filter(data, classes, include_classes, lb, ub, intraclass):
     return outside_bounds_columns
 
 
-def variation_filter(data, classes, include_classes, lb, ub,
+def variation_filter(data, classes, include, lb, ub,
                      intraclass, robust):
     """
     Return columns with variation outside the [lb, ub] interval.
@@ -89,7 +89,7 @@ def variation_filter(data, classes, include_classes, lb, ub,
     data : pandas.DataFrame
     classes : pandas.Series
         class labels of samples.
-    include_classes : list[str]
+    include : list[str]
         classes included in the filter
     lb : float
         lower bound of variation
@@ -104,8 +104,8 @@ def variation_filter(data, classes, include_classes, lb, ub,
     -------
     remove_features : pandas.Index
     """
-    # selects include_classes
-    classes = classes[classes.isin(include_classes)]
+    # selects include
+    classes = classes[classes.isin(include)]
     data = data.loc[classes.index, :]
     # pipeline for variation filter
     is_outside_bound = (data.pipe(grouper(classes, intraclass))
@@ -132,23 +132,33 @@ def bounds_checker(lb, ub, intraclass):
         return lambda x: ((x < lb) | (x > ub))
 
 
+def cv(df):
+    return df.std() / df.mean()
+
+
+def iqr(df):
+    return (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
+
+
 def variation(robust):
     if robust:
-        return lambda x: (x.quantile(0.75) - x.quantile(0.25)) / x.quantile(0.5)
+        return iqr
     else:
-        return lambda x: x.std() / x.mean()
+        return cv
 
 
-def cspline_correction(x, y, xq):
+def cspline_correction(x, y, xq, yq):
     sp = CubicSpline(x, y)
-    yq = sp(xq)
-    return yq
+    y_coeff = sp(xq)
+    y_corrected = (yq / y_coeff)
+    y_corrected *= yq.mean() / y_corrected.mean()   # scaling to yq mean
+    return y_corrected
 
 
-def loess_correction(x, y, xq, **kwargs):
+def loess_correction(x, y, xq, yq, **kwargs):
     y_loess = lowess(y, x, return_sorted=False, **kwargs)
-    yq = cspline_correction(x, y_loess, xq)
-    return yq
+    y_corrected = cspline_correction(x, y_loess, xq, yq)
+    return y_corrected
 
 
 def batch_correction(data, run_order, classes, corrector_class, sample_classes,
@@ -190,8 +200,8 @@ def batch_correction(data, run_order, classes, corrector_class, sample_classes,
     corrected = data.apply(lambda x: corrector(corrector_run,
                                                x[corrector_class_mask],
                                                sample_run,
+                                               x[sample_classes_mask],
                                                **kwargs))
-    data[sample_classes_mask] = corrected.values
     return corrected
 
 
@@ -227,11 +237,13 @@ def interbatch_correction(data, batch, run_order, classes, corrector_class,
         corrected_batch = batch_correction(x, run_order.loc[x.index], classes,
                                            corrector_class, sample_classes,
                                            mode, **kwargs)
+        corrected_batch = corrected_batch.divide(corrected_batch.mean())
         return corrected_batch
 
     corrected = (data.groupby(batch)
                  .apply(corrector_helper)
                  * scaling_factor)
+    corrected.index = corrected.index.droplevel("batch")
     return corrected
 
 

@@ -61,7 +61,7 @@ class DataContainer(object):
         return available_files
 
     def is_valid_class_name(self, class_names):
-        valid_classes = np.isin(class_names, self.sample_information["class"])
+        valid_classes = np.isin(class_names, self.get_classes().unique())
         return np.all(valid_classes)
 
     def remove(self, remove, axis):
@@ -111,320 +111,230 @@ class DataContainer(object):
         return data_selection
 
     def get_classes(self):
-        return self.sample_information["class"].unique()
+        return self.sample_information["class"]
 
-    def group_by(self, name):
-        """
-        groups data_matrix Using class information.
-        Returns
-        -------
-        grouped_data_matrix : DataFrameGroupBy
-        """
-        for group_name, group in self.sample_information.groupby(name):
-            yield DataContainer(self.data_matrix.loc[group.index],
-                                self.feature_definitions,
-                                self.sample_information.loc[group.index])
+    def get_batches(self):
+        try:
+            return self.sample_information["batch"]
+        except KeyError:
+            raise BatchInformationError("No batch information available.")
 
-    def select_classes(self, classes):
-        """
-        select classes from data_matrix
+    def get_run_order(self):
+        try:
+            return self.sample_information["order"]
+        except KeyError:
+            raise RunOrderError("No run order information available")
 
-        Parameters
-        ----------
-        classes: Iterable[str]
+    def get_n_features(self):
+        return self.data_matrix.shape[1]
 
-        Returns
-        -------
-        data_matrix_selection : DataFrame
-        """
-
-        if isinstance(classes, str):
+    def get_mean_cv(self, classes=None):
+        if classes is None:
+            return filter.cv(self.data_matrix).mean()
+        elif isinstance(classes, str):
             classes = [classes]
-
-        if self.is_valid_class_name(classes):
-            selection = self.sample_information["class"].isin(classes)
-            return self.data_matrix[selection]
-        else:
-            raise ValueError("Invalid class names")
-
-    def apply_correction(self, mapper, corrector, **kwargs):
-        """
-        applies corrector to data_matrix.
-
-        Parameters
-        ----------
-        mapper: dict[str: list[str]]
-                dictionary to generate a mapper
-        corrector: function.
-                   function used to correct data.
-        """
-        for corrector_index, to_correct_index in self.generate_mapper(mapper):
-            corrected = corrector(self.data_matrix.loc[to_correct_index],
-                                  self.data_matrix.loc[corrector_index],
-                                  **kwargs)
-            self.data_matrix.loc[to_correct_index] = corrected
-
-    def generate_mapper(self, mapper):
-        """
-        yields a tuple of indexes corresponding to classes in key and values
-        of mapper.
-
-        Parameters
-        ----------
-        mapper: dict[str: list[str]]
-                dictionary  whose keys are classes used to generate a
-                correction and the values are classes to be corrected.
-
-        Yields
-        ------
-        corrector_dc, to_correct_dc
-        """
-        if isinstance(mapper, dict):
-            for k, v in mapper.items():
-                #k = [k] if isinstance(k, str) else list(k)
-                v = [v] if isinstance(v, str) else list(v)
-                k = k.split(", ")
-                corrector_dc = self.select_classes(k)
-                to_correct_dc = self.select_classes(v)
-                yield corrector_dc.index, to_correct_dc.index
-        elif isinstance(mapper, (list, tuple)):
-            for k in mapper:
-                yield self.select_classes([k])
-        elif mapper is None:
-            yield self.data_matrix.index
-        # TODO: este metodo necesita un nombre y documentacion mas clara.
-        # TODO: setear data_path como una propiedad
+        classes_mask = self.get_classes().isin(classes)
+        return filter.cv(self.data_matrix[classes_mask]).mean()
 
 
-class MetadataAdder(object):
+class Processor(object):
     """
-    Adds columns to `sample_information` or `feature_definitions`
-    in a DataContainer object
+    Abstract class to process DataContainer Objects.
     """
-    def __init__(self):
-        self.function = lambda x: None
-
-    def transform(self, dc):
-        self.function(dc)
-
-
-class Filter(object):
-    """
-    Selects or removes samples or features from a DataContainer.
-    """
-
-    def __init__(self, axis=None, mode="remove"):
-        self.axis = axis
+    def __init__(self, mode, axis):
+        self.name = None
         self.mode = mode
-        self.mapper = None
-        self.filter = None
+        self.axis = axis
         self.params = dict()
+        self.metrics = dict()
 
-    def fit(self, data_container):
-        pass
+    def func(self, func):
+        raise NotImplementedError
 
-    def transform(self, data_container):
-        if self.filter is None:
-            self.fit(data_container)
-        if self.mode == "select":
-            return data_container.select(self.filter, self.axis)
-        elif self.mode == "remove":
-            data_container.remove(self.filter, self.axis)
+    def process(self, dc):
+        self._record_metrics(dc, "before")
+        if self.mode == "filter":
+            remove = self.func(dc)
+            dc.remove(remove, self.axis)
+        if self.mode == "add":
+            self.func(dc)
+        if self.mode == "correction":
+            dc.data_matrix = self.func(dc)
+        self._record_metrics(dc, "after")
 
+    def _record_metrics(self, dc, name):
+        metrics = dict()
+        metrics["cv"] = dc.get_mean_cv(self.params["include"])
+        metrics["features"] = dc.get_n_features()
+        self.metrics[name] = metrics
 
-class Corrector(object):
-    """
-    Corrects data_matrix in a DataContainer.
-    """
-    def __init__(self, mapper=None):
-        self.mapper = mapper
-        self.corrector = None
-        self.params = dict()
-
-    def transform(self, data_container):
-        data_container.apply_correction(self.mapper,
-                                        self.corrector,
-                                        **self.params)
+    def report(self):
+        removed_features = (self.metrics["before"]["features"]
+                            - self.metrics["after"]["features"])
+        cv_reduction = (self.metrics["before"]["cv"]
+                        - self.metrics["after"]["cv"]) * 100
+        msg = "Applying {}: {} features removed. Mean CV reduced by {:.2f} %."
+        return msg.format(self.name, removed_features, cv_reduction)
 
 
 @register
-class ClassSelector(Filter):
+class ClassRemover(Processor):
     """
-    A filter to select samples of a given class
+    A filter to remove samples of a given class
     """
     def __init__(self, classes=None):
-        super(ClassSelector, self).__init__(axis="samples", mode="select")
+        super(ClassRemover, self).__init__(axis="samples", mode="filter")
         self.param["classes"] = classes
 
-    def fit(self, data_container):
-        self.filter = data_container.select_classes(**self.params).index
+    def func(self, dc):
+        remove_samples = dc.get_classes().isin(self.param["classes"])
+        return remove_samples.index
 
 
 @register
-class BlankCorrector(Corrector):
+class BlankCorrector(Processor):
     """
     Corrects values using blank information
     """
-    def __init__(self, mapper=None, mode="mean",
+    def __init__(self, blank_classes = None, sample_classes=None, mode="mean",
                  blank_relation=3):
-        super(BlankCorrector, self).__init__(mapper=mapper)
-        self.params["mode"] = mode
-        self.params["blank_relation"] = blank_relation
-        self.corrector = filter.blank_correction
+        super(BlankCorrector, self).__init__(axis=None, mode="correction")
+        self.name = "Blank Correction"
+        self.params = get_function_parameters()
 
-@register
-class BatchCorrector(Corrector):
-    """
-    Corrects instrumental drift between batches.
-    """
-    def __init__(self, mapper=None, mode="splines"):
-        super(BatchCorrector, self).__init__(mapper=mapper)
-        self.params["mode"] = mode
-        self.corrector = filter.batch_correction
+    def func(self, dc):
+        return filter.blank_correction(dc.data_matrix,
+                                       dc.get_classes(),
+                                       **self.params)
+#
+# @register
+# class BatchCorrector(Corrector):
+#     """
+#     Corrects instrumental drift between batches.
+#     """
+#     def __init__(self, mapper=None, mode="splines"):
+#         super(BatchCorrector, self).__init__(mapper=mapper)
+#         self.params["mode"] = mode
+#         self.corrector = filter.batch_correction
+#
+#     def transform(self, data_container):
+#         sample_classes = list(self.mapper.values())[0]
+#         corrector_classes = list(self.mapper.keys())[0]
+#         scaling_factor = data_container.select_classes(corrector_classes).mean()
+#         # Prefilters and LOESS
+#         steps = [PrevalenceFilter(include_classes=corrector_classes, lb=1),
+#                  VariationFilter(include_classes=corrector_classes, ub=0.5),
+#                  IntraBatchCorrector(mode=self.params["mode"],
+#                                      mapper=self.mapper)]
+#         pipe = Pipeline(*steps)
+#         batches = list()
+#         for batch in data_container.group_by("batch"):
+#             pipe.transform(batch)
+#             batches.append(batch)
+#         corrected = merge_data_containers(batches)
+#         data_container.data_matrix =corrected.data_matrix
+#         data_container.sample_information = corrected.sample_information
+#         data_container.feature_definitions = corrected.feature_definitions
+#
+#         # Prevalence post LOESS on QC
+#         data_container.data_matrix = (data_container.data_matrix
+#                                       * scaling_factor).dropna(axis=1)
+#         prev_filter = PrevalenceFilter(include_classes=corrector_classes, lb=1)
+#         prev_filter.transform(data_container)
+#
+#
+# class IntraBatchCorrector(Corrector):
+#     """
+#     Corrects instrumental drift between in a batch.
+#     """
+#     def __init__(self, mapper=None, mode="splines"):
+#         super(IntraBatchCorrector, self).__init__(mapper=mapper)
+#         self.params["mode"] = mode
+#         self.corrector = filter.batch_correction
+#
+#     def transform(self, dc):
+#         for ref_index, sample_index in dc.generate_mapper(self.mapper):
+#             ref_order = dc.sample_information["order"].loc[ref_index]
+#             ref = dc.data_matrix.loc[ref_index]
+#             sample_order = dc.sample_information["order"].loc[sample_index]
+#             sample = dc.data_matrix.loc[sample_index]
+#             correction = self.corrector(ref_order, ref, sample_order,
+#                                         sample, **self.params)
+#             dc.data_matrix.loc[sample_index] = correction
 
-    def transform(self, data_container):
-        sample_classes = list(self.mapper.values())[0]
-        corrector_classes = list(self.mapper.keys())[0]
-        scaling_factor = data_container.select_classes(corrector_classes).mean()
-        # Prefilters and LOESS
-        steps = [PrevalenceFilter(include_classes=corrector_classes, lb=1),
-                 VariationFilter(include_classes=corrector_classes, ub=0.5),
-                 IntraBatchCorrector(mode=self.params["mode"],
-                                     mapper=self.mapper)]
-        pipe = Pipeline(*steps)
-        batches = list()
-        for batch in data_container.group_by("batch"):
-            pipe.transform(batch)
-            batches.append(batch)
-        corrected = merge_data_containers(batches)
-        data_container.data_matrix =corrected.data_matrix
-        data_container.sample_information = corrected.sample_information
-        data_container.feature_definitions = corrected.feature_definitions
-
-        # Prevalence post LOESS on QC
-        data_container.data_matrix = (data_container.data_matrix
-                                      * scaling_factor).dropna(axis=1)
-        prev_filter = PrevalenceFilter(include_classes=corrector_classes, lb=1)
-        prev_filter.transform(data_container)
-
-
-class IntraBatchCorrector(Corrector):
-    """
-    Corrects instrumental drift between in a batch.
-    """
-    def __init__(self, mapper=None, mode="splines"):
-        super(IntraBatchCorrector, self).__init__(mapper=mapper)
-        self.params["mode"] = mode
-        self.corrector = filter.batch_correction
-
-    def transform(self, dc):
-        for ref_index, sample_index in dc.generate_mapper(self.mapper):
-            ref_order = dc.sample_information["order"].loc[ref_index]
-            ref = dc.data_matrix.loc[ref_index]
-            sample_order = dc.sample_information["order"].loc[sample_index]
-            sample = dc.data_matrix.loc[sample_index]
-            correction = self.corrector(ref_order, ref, sample_order,
-                                        sample, **self.params)
-            dc.data_matrix.loc[sample_index] = correction
-
-
-
-@register
-class PrevalenceFilter(Filter):
-    """
-    Performs a prevalence filter on selected classes
-    """
-    def __init__(self, include_classes=None, lb=0.5, ub=1, intraclass=True):
-        super(PrevalenceFilter, self).__init__(axis="features", mode="remove")
-        self.mapper = include_classes
-        self.intraclass = intraclass
-        self.params["lb"] = lb
-        self.params["ub"] = ub
-
-    def fit(self, dc):
-        func = filter.prevalence_filter
-        if self.intraclass:
-            class_counts = dc.sample_information["class"].value_counts()
-            counts_per_class = (dc.data_matrix
-                                .groupby(dc.sample_information["class"])
-                                .sum())
-            prevalence = counts_per_class.divide(class_counts, axis=0)
-            prevalence = prevalence.loc[self.mapper]
-            bounds = (prevalence.min() > lb) & (prevalence.max() < ub)
-
-            # self.filter = pd.Index([])
-            # for groups in data_container.generate_mapper(self.mapper):
-            #     self.filter = self.filter.union(func(groups, **self.params))
-            # el error aparece cuando la igualdad es estricta, verificar esto
-        else:
-            self.filter = func(dc.select_classes(self.mapper),
-                               **self.params)
 
 
 @register
-class VariationFilter(Filter):
+class PrevalenceFilter(Processor):
     """
-    Remove samples with high variation coefficient.
+    Remove Features with a low number of occurrences.
     """
-    def __init__(self, lb=0, ub=0.25, include_classes=None,
-                 robust=False, intraclass=True):
-        super(VariationFilter, self).__init__(axis="features", mode="remove")
-        self.params["lb"] = lb
-        self.params["ub"] = ub
-        self.params["robust"] = robust
-        self.mapper = include_classes
-        self.intraclass = intraclass
+    def __init__(self, include=None, lb=0.5, ub=1, intraclass=True):
+        super(PrevalenceFilter, self).__init__(axis="features", mode="filter")
+        self.name = "Prevalence Filter"
+        self.params = get_function_parameters()
 
-    def fit(self, data_container):
-        func = filter.variation_filter
-        if self.intraclass:
-            self.filter = pd.Index([])
-            for groups in data_container.generate_mapper(self.mapper):
-                self.filter = self.filter.union(func(groups, **self.params))
-        else:
-            self.filter = func(data_container.select_classes(self.mapper),
-                               **self.params)
-
+    def func(self, dc):
+        return filter.prevalence_filter(dc.data_matrix, dc.get_classes(),
+                                        **self.params)
 
 @register
-class ChromatogramMaker(MetadataAdder):
+class VariationFilter(Processor):
     """
-    Computes chromatograms for all samples using available raw data.
+    Remove samples with high coefficient of variation.
     """
-    def __init__(self, tolerance=0.005):
-        super(ChromatogramMaker, self).__init__()
-        self.params = dict()
-        self.params["tolerance"] = tolerance
+    def __init__(self, lb=0, ub=0.25, include=None, robust=False, intraclass=True):
+        super(VariationFilter, self).__init__(axis="features", mode="filter")
+        self.name = "Variation Filter"
+        self.params = get_function_parameters()
 
-    def transform(self, dc):
-        mz_cluster = chromatograms.cluster(dc.feature_definitions["mz"],
-                                           0.0002)
-        dc.feature_definitions["mz cluster"] = mz_cluster
-        mean_mz_cluster = (dc.feature_definitions
-                           .groupby("mz cluster")["mz"]
-                           .mean().values)
-        chromatogram_dict = dict()
-        for sample in dc.get_raw_path():
-            reader = fileio.read(sample)
-            c = fileio.chromatogram(reader,
-                                    mean_mz_cluster,
-                                    tolerance=self.params["tolerance"])
-            sample_name = sample_name_from_path(sample)
-            chromatogram_dict[sample_name] = c
-        dc.chromatograms = chromatogram_dict
+    def func(self, dc):
+        return filter.variation_filter(dc.data_matrix, dc.get_classes(),
+                                       **self.params)
+
+# @register
+# class ChromatogramMaker(MetadataAdder):
+#     """
+#     Computes chromatograms for all samples using available raw data.
+#     """
+#     def __init__(self, tolerance=0.005):
+#         super(ChromatogramMaker, self).__init__()
+#         self.params = dict()
+#         self.params["tolerance"] = tolerance
+#
+#     def transform(self, dc):
+#         mz_cluster = chromatograms.cluster(dc.feature_definitions["mz"],
+#                                            0.0002)
+#         dc.feature_definitions["mz cluster"] = mz_cluster
+#         mean_mz_cluster = (dc.feature_definitions
+#                            .groupby("mz cluster")["mz"]
+#                            .mean().values)
+#         chromatogram_dict = dict()
+#         for sample in dc.get_raw_path():
+#             reader = fileio.read(sample)
+#             c = fileio.chromatogram(reader,
+#                                     mean_mz_cluster,
+#                                     tolerance=self.params["tolerance"])
+#             sample_name = sample_name_from_path(sample)
+#             chromatogram_dict[sample_name] = c
+#         dc.chromatograms = chromatogram_dict
 
 
 class Pipeline(list):
     """
     Applies a series of Filters and Correctors to a DataContainer
     """
-    def __init__(self, *args):
+    def __init__(self, *args, verbose=False):
         _validate_pipeline(args)
         super(Pipeline, self).__init__(args)
+        self.verbose = verbose
 
     def transform(self, data_container):
         for x in self:
-            x.transform(data_container)
+            x.process(data_container)
+            if self.verbose:
+                x.process
+
 
 
 def merge_data_containers(dcs):
@@ -509,7 +419,7 @@ def _validate_pipeline(t):
     if len(t) == 1 and isinstance(t[0], tuple):
         t = t[0]
     for filt in t:
-        if not isinstance(filt, (Filter, Corrector, Pipeline, MetadataAdder)):
+        if not isinstance(filt, (Processor, Pipeline)):
             msg = ("elements of the Pipeline must be",
                    "instances of Filter, DataCorrector or another Pipeline.")
             raise TypeError(msg)
@@ -573,5 +483,51 @@ def sample_name_from_path(path):
     return sample_name
 
 
+class BatchInformationError(KeyError):
+    """Error class when there is no batch information"""
+    pass
+
+
+class RunOrderError(KeyError):
+    """Error class raised when there is no run order information"""
+    pass
+
+
+class InvalidClassName(ValueError):
+    "Error class raised when using invalid class names"
+
+
+def get_function_parameters(only=None, exclude=None, ignore='self'):
+    """Returns a dictionary of the calling functions
+       parameter names and values.
+
+       The optional arguments can be used to filter the result:
+
+           only           use this to only return parameters
+                          from this list of names.
+
+           exclude        use this to return every parameter
+                          *except* those included in this list
+                          of names.
+
+           ignore         use this inside methods to ignore
+                          the calling object's name. For
+                          convenience, it ignores 'self'
+                          by default.
+
+    """
+    import inspect
+    args, varargs, varkw, defaults = \
+        inspect.getargvalues(inspect.stack()[1][0])
+    if only is None:
+        only = args[:]
+        if varkw:
+            only.extend(defaults[varkw].keys())
+            defaults.update(defaults[varkw])
+    if exclude is None:
+        exclude = []
+    exclude.append(ignore)
+    return dict([(attrname, defaults[attrname])
+        for attrname in only if attrname not in exclude])
 # TODO: posible acortamiento de nombres: data_matrix: data,
 #  sample_information: sample, feature_definitions: features.
