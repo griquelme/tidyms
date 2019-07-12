@@ -137,30 +137,14 @@ class DataContainer(object):
         return filter.cv(self.data_matrix[classes_mask]).mean()
 
 
-class Processor(object):
+class Reporter(object):
     """
-    Abstract class to process DataContainer Objects.
+    Abstract class with methods to report metrics.
     """
-    def __init__(self, mode, axis):
-        self.name = None
-        self.mode = mode
-        self.axis = axis
-        self.params = dict()
+    def __init__(self):
         self.metrics = dict()
-
-    def func(self, func):
-        raise NotImplementedError
-
-    def process(self, dc):
-        self._record_metrics(dc, "before")
-        if self.mode == "filter":
-            remove = self.func(dc)
-            dc.remove(remove, self.axis)
-        if self.mode == "add":
-            self.func(dc)
-        if self.mode == "correction":
-            dc.data_matrix = self.func(dc)
-        self._record_metrics(dc, "after")
+        self.params = dict()
+        self.name = None
 
     def _record_metrics(self, dc, name):
         metrics = dict()
@@ -176,6 +160,52 @@ class Processor(object):
         msg = "Applying {}: {} features removed. Mean CV reduced by {:.2f} %."
         return msg.format(self.name, removed_features, cv_reduction)
 
+
+class Processor(Reporter):
+    """
+    Abstract class to process DataContainer Objects.
+    """
+    def __init__(self, mode, axis):
+        super(Processor, self).__init__()
+        self.mode = mode
+        self.axis = axis
+
+    def func(self, func):
+        raise NotImplementedError
+
+    def process(self, dc):
+        self._record_metrics(dc, "before")
+        if self.mode == "filter":
+            remove = self.func(dc)
+            dc.remove(remove, self.axis)
+        if self.mode == "add":
+            self.func(dc)
+        if self.mode == "correction":
+            dc.data_matrix = self.func(dc)
+        self._record_metrics(dc, "after")
+
+
+
+class Pipeline(Reporter):
+    """
+    Applies a series of Filters and Correctors to a DataContainer
+    """
+    def __init__(self, processors, verbose=False):
+        _validate_pipeline(processors)
+        super(Pipeline, self).__init__()
+        self.processors = processors
+        self.verbose = verbose
+
+    def process(self, dc):
+        self._record_metrics(dc, "before")
+        for x in self.processors:
+            x.process(dc)
+            if self.verbose:
+                x.report()
+        self._record_metrics(dc, "after")
+
+
+# Filters and Correctors implementation
 
 @register
 class ClassRemover(Processor):
@@ -241,26 +271,26 @@ class BlankCorrector(Processor):
 #                                       * scaling_factor).dropna(axis=1)
 #         prev_filter = PrevalenceFilter(include_classes=corrector_classes, lb=1)
 #         prev_filter.transform(data_container)
-#
-#
-# class IntraBatchCorrector(Corrector):
-#     """
-#     Corrects instrumental drift between in a batch.
-#     """
-#     def __init__(self, mapper=None, mode="splines"):
-#         super(IntraBatchCorrector, self).__init__(mapper=mapper)
-#         self.params["mode"] = mode
-#         self.corrector = filter.batch_correction
-#
-#     def transform(self, dc):
-#         for ref_index, sample_index in dc.generate_mapper(self.mapper):
-#             ref_order = dc.sample_information["order"].loc[ref_index]
-#             ref = dc.data_matrix.loc[ref_index]
-#             sample_order = dc.sample_information["order"].loc[sample_index]
-#             sample = dc.data_matrix.loc[sample_index]
-#             correction = self.corrector(ref_order, ref, sample_order,
-#                                         sample, **self.params)
-#             dc.data_matrix.loc[sample_index] = correction
+
+
+class IntraBatchCorrector(Corrector):
+    """
+    Corrects instrumental drift between in a batch.
+    """
+    def __init__(self, mapper=None, mode="splines"):
+        super(IntraBatchCorrector, self).__init__(mapper=mapper)
+        self.params["mode"] = mode
+        self.corrector = filter.batch_correction
+
+    def transform(self, dc):
+        for ref_index, sample_index in dc.generate_mapper(self.mapper):
+            ref_order = dc.sample_information["order"].loc[ref_index]
+            ref = dc.data_matrix.loc[ref_index]
+            sample_order = dc.sample_information["order"].loc[sample_index]
+            sample = dc.data_matrix.loc[sample_index]
+            correction = self.corrector(ref_order, ref, sample_order,
+                                        sample, **self.params)
+            dc.data_matrix.loc[sample_index] = correction
 
 
 
@@ -318,23 +348,6 @@ class VariationFilter(Processor):
 #             sample_name = sample_name_from_path(sample)
 #             chromatogram_dict[sample_name] = c
 #         dc.chromatograms = chromatogram_dict
-
-
-class Pipeline(list):
-    """
-    Applies a series of Filters and Correctors to a DataContainer
-    """
-    def __init__(self, *args, verbose=False):
-        _validate_pipeline(args)
-        super(Pipeline, self).__init__(args)
-        self.verbose = verbose
-
-    def transform(self, data_container):
-        for x in self:
-            x.process(data_container)
-            if self.verbose:
-                x.process
-
 
 
 def merge_data_containers(dcs):
