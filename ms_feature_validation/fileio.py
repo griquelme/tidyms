@@ -1,3 +1,8 @@
+"""
+Functions to read Raw LC-MS data using pyopenms and functions to create
+chromatograms and accumulate spectra.
+"""
+
 import pyopenms
 import numpy as np
 from scipy.interpolate import interp1d
@@ -98,12 +103,8 @@ def accumulate_spectra(msexp, scans, ref, subtract=None, accumulator="sum"):
     subtract = 0, subtract[1] - subtract[0]
 
     accum_int = (accumulator(interp_int[scans[0]:scans[1]], axis=0)
-                - accumulator(interp_int[subtract[0]:scans[0]], axis=0)
-                - accumulator(interp_int[scans[1]:subtract[1]], axis=0))
+                 - accumulator(interp_int[subtract[0]:scans[0]], axis=0)
+                 - accumulator(interp_int[scans[1]:subtract[1]], axis=0))
     accum_mz = mz_ref
 
     return accum_mz, accum_int
-
-
-
-

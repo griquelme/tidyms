@@ -1,3 +1,8 @@
+"""
+Functions to correct and filter data matrix from LC-MS Metabolomics data.
+"""
+
+
 import pandas as pd
 from scipy.interpolate import CubicSpline
 from statsmodels.nonparametric.smoothers_lowess import lowess
