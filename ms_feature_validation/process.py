@@ -119,6 +119,9 @@ class DataContainer(object):
     def get_classes(self):
         return self.sample_information["class"]
 
+    def get_id(self):
+        return self.sample_information["id"]
+
     def get_batches(self):
         try:
             return self.sample_information["batch"]
@@ -187,7 +190,7 @@ class Processor(Reporter):
         if self.mode == "add":
             self.func(dc)
         if self.mode == "correction":
-            dc.data_matrix = self.func(dc)
+            self.func(dc)
         self._record_metrics(dc, "after")
 
 
@@ -211,6 +214,25 @@ class Pipeline(Reporter):
 
 
 # Filters and Correctors implementation
+
+
+@register
+class DuplicateAverager(Processor):
+    """
+    A filter that averages duplicates
+    """
+    def __init__(self, process_classes):
+        super(DuplicateAverager, self).__init__(axis=None, mode="correction")
+        self.params["process_classes"] = process_classes
+
+    def func(self, dc):
+        dc.data_matrix = filter.replicate_averager(dc.data_matrix,
+                                                   dc.get_id(),
+                                                   dc.get_classes(),
+                                                   **self.params)
+        dc.sample_information = (dc.sample_information
+                                     .loc[dc.data_matrix.index,:])
+
 
 @register
 class ClassRemover(Processor):
@@ -238,11 +260,11 @@ class BlankCorrector(Processor):
         self.params = get_function_parameters()
 
     def func(self, dc):
-        return filter.blank_correction(dc.data_matrix,
-                                       dc.get_classes(),
-                                       **self.params)
+        dc.data_matrix =  filter.blank_correction(dc.data_matrix,
+                                                  dc.get_classes(),
+                                                  **self.params)
 
-
+@register
 class BatchCorrector(Processor):
     """
     Corrects instrumental drift between in a batch.
@@ -253,10 +275,10 @@ class BatchCorrector(Processor):
         self.params = get_function_parameters()
 
     def func(self, dc):
-        return filter.batch_correction(dc.data_matrix,
-                                       dc.get_run_order(),
-                                       dc.get_classes(),
-                                       **self.params)
+        dc.data_matrix = filter.batch_correction(dc.data_matrix,
+                                                 dc.get_run_order(),
+                                                 dc.get_classes(),
+                                                 **self.params)
 
 
 @register
