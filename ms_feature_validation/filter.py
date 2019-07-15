@@ -8,6 +8,20 @@ from scipy.interpolate import CubicSpline
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 
+def replicate_averager(data, sample_id, classes, process_classes):
+    include_samples = classes[classes.isin(process_classes)].index
+    exclude_samples = classes[~classes.isin(process_classes)].index
+    mapper = sample_id[include_samples].drop_duplicates()
+    mapper = pd.Series(data=mapper.index, index=mapper.values)
+    included_data = data.loc[include_samples, :]
+    excluded_data = data.loc[exclude_samples, :]
+    averaged_data = (included_data.groupby(sample_id[include_samples])
+                     .mean())
+    averaged_data.index = averaged_data.index.map(mapper)
+    result = pd.concat((averaged_data, excluded_data)).sort_index()
+    return result
+
+
 def blank_correction(data, classes, corrector_classes, process_classes,
                      mode, blank_relation):
     """
@@ -43,9 +57,9 @@ def blank_correction(data, classes, corrector_classes, process_classes,
                  "mean": lambda x: x.mean(axis=0)}
     samples = data[classes.isin(process_classes)]
     blanks = data[classes.isin(corrector_classes)]
-    correction = corrector[mode](blanks) * blank_relation
+    correction = corrector[mode](blanks)
     corrected = samples - correction
-    corrected[corrected < 0] = 0
+    corrected[(corrected - (blank_relation - 1) * correction) < 0] = 0
     data[classes.isin(process_classes)] = corrected
     return data
 
