@@ -1,3 +1,9 @@
+"""
+Implementations of DataContainer, Processor and Pipeline Classes for automatic
+correction and validation of LC-MS metabolomics data.
+"""
+
+
 from . import filter
 from . import chromatograms
 from . import fileio
@@ -148,7 +154,7 @@ class Reporter(object):
 
     def _record_metrics(self, dc, name):
         metrics = dict()
-        metrics["cv"] = dc.get_mean_cv(self.params["include"])
+        metrics["cv"] = dc.get_mean_cv(self.params.get("process_classes"))
         metrics["features"] = dc.get_n_features()
         self.metrics[name] = metrics
 
@@ -158,7 +164,7 @@ class Reporter(object):
         cv_reduction = (self.metrics["before"]["cv"]
                         - self.metrics["after"]["cv"]) * 100
         msg = "Applying {}: {} features removed. Mean CV reduced by {:.2f} %."
-        return msg.format(self.name, removed_features, cv_reduction)
+        print(msg.format(self.name, removed_features, cv_reduction))
 
 
 class Processor(Reporter):
@@ -185,7 +191,6 @@ class Processor(Reporter):
         self._record_metrics(dc, "after")
 
 
-
 class Pipeline(Reporter):
     """
     Applies a series of Filters and Correctors to a DataContainer
@@ -193,7 +198,7 @@ class Pipeline(Reporter):
     def __init__(self, processors, verbose=False):
         _validate_pipeline(processors)
         super(Pipeline, self).__init__()
-        self.processors = processors
+        self.processors = list(processors)
         self.verbose = verbose
 
     def process(self, dc):
@@ -226,7 +231,7 @@ class BlankCorrector(Processor):
     """
     Corrects values using blank information
     """
-    def __init__(self, blank_classes = None, sample_classes=None, mode="mean",
+    def __init__(self, corrector_classes = None, process_classes=None, mode="mean",
                  blank_relation=3):
         super(BlankCorrector, self).__init__(axis=None, mode="correction")
         self.name = "Blank Correction"
@@ -236,62 +241,22 @@ class BlankCorrector(Processor):
         return filter.blank_correction(dc.data_matrix,
                                        dc.get_classes(),
                                        **self.params)
-#
-# @register
-# class BatchCorrector(Corrector):
-#     """
-#     Corrects instrumental drift between batches.
-#     """
-#     def __init__(self, mapper=None, mode="splines"):
-#         super(BatchCorrector, self).__init__(mapper=mapper)
-#         self.params["mode"] = mode
-#         self.corrector = filter.batch_correction
-#
-#     def transform(self, data_container):
-#         sample_classes = list(self.mapper.values())[0]
-#         corrector_classes = list(self.mapper.keys())[0]
-#         scaling_factor = data_container.select_classes(corrector_classes).mean()
-#         # Prefilters and LOESS
-#         steps = [PrevalenceFilter(include_classes=corrector_classes, lb=1),
-#                  VariationFilter(include_classes=corrector_classes, ub=0.5),
-#                  IntraBatchCorrector(mode=self.params["mode"],
-#                                      mapper=self.mapper)]
-#         pipe = Pipeline(*steps)
-#         batches = list()
-#         for batch in data_container.group_by("batch"):
-#             pipe.transform(batch)
-#             batches.append(batch)
-#         corrected = merge_data_containers(batches)
-#         data_container.data_matrix =corrected.data_matrix
-#         data_container.sample_information = corrected.sample_information
-#         data_container.feature_definitions = corrected.feature_definitions
-#
-#         # Prevalence post LOESS on QC
-#         data_container.data_matrix = (data_container.data_matrix
-#                                       * scaling_factor).dropna(axis=1)
-#         prev_filter = PrevalenceFilter(include_classes=corrector_classes, lb=1)
-#         prev_filter.transform(data_container)
 
 
-class IntraBatchCorrector(Corrector):
+class BatchCorrector(Processor):
     """
     Corrects instrumental drift between in a batch.
     """
-    def __init__(self, mapper=None, mode="splines"):
-        super(IntraBatchCorrector, self).__init__(mapper=mapper)
-        self.params["mode"] = mode
-        self.corrector = filter.batch_correction
+    def __init__(self, corrector_classes=None, process_classes=None,
+                 mode="splines", **kwargs):
+        super(BatchCorrector, self).__init__(axis=None, mode="correction")
+        self.params = get_function_parameters()
 
-    def transform(self, dc):
-        for ref_index, sample_index in dc.generate_mapper(self.mapper):
-            ref_order = dc.sample_information["order"].loc[ref_index]
-            ref = dc.data_matrix.loc[ref_index]
-            sample_order = dc.sample_information["order"].loc[sample_index]
-            sample = dc.data_matrix.loc[sample_index]
-            correction = self.corrector(ref_order, ref, sample_order,
-                                        sample, **self.params)
-            dc.data_matrix.loc[sample_index] = correction
-
+    def func(self, dc):
+        return filter.batch_correction(dc.data_matrix,
+                                       dc.get_run_order(),
+                                       dc.get_classes(),
+                                       **self.params)
 
 
 @register
@@ -299,7 +264,7 @@ class PrevalenceFilter(Processor):
     """
     Remove Features with a low number of occurrences.
     """
-    def __init__(self, include=None, lb=0.5, ub=1, intraclass=True):
+    def __init__(self, process_classes=None, lb=0.5, ub=1, intraclass=True):
         super(PrevalenceFilter, self).__init__(axis="features", mode="filter")
         self.name = "Prevalence Filter"
         self.params = get_function_parameters()
@@ -308,12 +273,14 @@ class PrevalenceFilter(Processor):
         return filter.prevalence_filter(dc.data_matrix, dc.get_classes(),
                                         **self.params)
 
+
 @register
 class VariationFilter(Processor):
     """
     Remove samples with high coefficient of variation.
     """
-    def __init__(self, lb=0, ub=0.25, include=None, robust=False, intraclass=True):
+    def __init__(self, lb=0, ub=0.25, process_classes=None, robust=False,
+                 intraclass=True):
         super(VariationFilter, self).__init__(axis="features", mode="filter")
         self.name = "Variation Filter"
         self.params = get_function_parameters()
@@ -429,8 +396,8 @@ def read_progenesis(path):
 
 
 def _validate_pipeline(t):
-    if len(t) == 1 and isinstance(t[0], tuple):
-        t = t[0]
+    if not isinstance(t, (list, tuple)):
+        t = [t]
     for filt in t:
         if not isinstance(filt, (Processor, Pipeline)):
             msg = ("elements of the Pipeline must be",
@@ -480,11 +447,12 @@ def read_config(path):
 def pipeline_from_list(l):
     pipeline = Pipeline()
     for d in l:
-        pipeline.append(filter_from_dictionary(d))
+        pipeline.proccesors.append(filter_from_dictionary(d))
     return pipeline
 
 
 def filter_from_dictionary(d):
+    filter = None
     for name, params in d.items():
         filter = FILTERS[name](**params)
     return filter
@@ -497,17 +465,23 @@ def sample_name_from_path(path):
 
 
 class BatchInformationError(KeyError):
-    """Error class when there is no batch information"""
+    """
+    Error class when there is no batch information
+    """
     pass
 
 
 class RunOrderError(KeyError):
-    """Error class raised when there is no run order information"""
+    """
+    Error class raised when there is no run order information
+    """
     pass
 
 
 class InvalidClassName(ValueError):
-    "Error class raised when using invalid class names"
+    """
+    Error class raised when using invalid class names
+    """
 
 
 def get_function_parameters(only=None, exclude=None, ignore='self'):
