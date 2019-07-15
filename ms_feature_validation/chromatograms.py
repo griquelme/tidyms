@@ -36,23 +36,25 @@ def find_experimental_rt(rt, chromatogram, rt_guess, width, tolerance):
     return exp_rt
 
 
-def gauss(x, mu, sigma, amp):
+def gauss(x, mu, sigma, amp=None):
     """
-    Normalized gaussian curve.
+    gaussian curve.
 
     Parameters
     ----------
     x : np.array
     mu : float
     sigma : float
-    amp : float
+    amp : float / None
+        If None returns a normalized gaussian curve.
 
     Returns
     -------
     gaussian : np.array
     """
-    norm = 1 / np.sqrt(2 * np.pi * sigma ** 2)
-    gaussian = amp * norm * np.power(np.e, - 2 * ((x - mu) / sigma) ** 2)
+    if amp is None:
+        amp = 1 / (np.sqrt(2 * np.pi) * sigma)
+    gaussian = amp * np.power(np.e, - 0.5 * ((x - mu) / sigma) ** 2)
     return gaussian
 
 
