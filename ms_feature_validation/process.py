@@ -7,6 +7,7 @@ correction and validation of LC-MS metabolomics data.
 from . import filter
 from . import chromatograms
 from . import fileio
+from . import peaks
 import pandas as pd
 import numpy as np
 import yaml
@@ -145,6 +146,25 @@ class DataContainer(object):
         classes_mask = self.get_classes().isin(classes)
         return filter.cv(self.data_matrix[classes_mask]).mean()
 
+    def get_mz(self):
+        return self.feature_definitions["mz"]
+
+    def get_rt(self):
+        return self.feature_definitions["rt"]
+
+    def cluster_mz(self, tolerance=0.0002):
+        """
+        Groups features with similar mz to reduce the number of calculated EICs.
+
+        Parameters
+        ----------
+        tolerance : float
+        """
+        self.feature_definitions["mz_cluster"] = peaks.cluster(self.get_mz(),
+                                                               tolerance)
+    def get_mz_cluster(self):
+        return self.feature_definitions["mz_cluster"]
+
 
 class Reporter(object):
     """
@@ -174,10 +194,11 @@ class Processor(Reporter):
     """
     Abstract class to process DataContainer Objects.
     """
-    def __init__(self, mode, axis):
+    def __init__(self, mode=None, axis=None, verbose=None):
         super(Processor, self).__init__()
         self.mode = mode
         self.axis = axis
+        self.verbose = verbose
 
     def func(self, func):
         raise NotImplementedError
@@ -187,11 +208,13 @@ class Processor(Reporter):
         if self.mode == "filter":
             remove = self.func(dc)
             dc.remove(remove, self.axis)
-        if self.mode == "add":
+        elif self.mode == "add":
             self.func(dc)
-        if self.mode == "correction":
+        elif self.mode == "correction":
             self.func(dc)
         self._record_metrics(dc, "after")
+        if self.verbose:
+            self.report()
 
 
 class Pipeline(Reporter):
@@ -202,14 +225,22 @@ class Pipeline(Reporter):
         _validate_pipeline(processors)
         super(Pipeline, self).__init__()
         self.processors = list(processors)
-        self.verbose = verbose
+        self._verbose = verbose
+
+    @property
+    def verbose(self):
+        return self._verbose
+
+    @verbose.setter
+    def verbose(self, value):
+        self._verbose = value
+        for processor in self.processors:
+            processor.verbose = value
 
     def process(self, dc):
         self._record_metrics(dc, "before")
         for x in self.processors:
             x.process(dc)
-            if self.verbose:
-                x.report()
         self._record_metrics(dc, "after")
 
 
@@ -253,16 +284,21 @@ class BlankCorrector(Processor):
     """
     Corrects values using blank information
     """
-    def __init__(self, corrector_classes = None, process_classes=None, mode="mean",
-                 blank_relation=3):
-        super(BlankCorrector, self).__init__(axis=None, mode="correction")
+    def __init__(self, corrector_classes=None, process_classes=None,
+                 mode="mean", blank_relation=3, verbose=False):
+        super(BlankCorrector, self).__init__(axis=None, mode="correction",
+                                             verbose=verbose)
         self.name = "Blank Correction"
-        self.params = get_function_parameters()
+        self.params["corrector_classes"] = corrector_classes
+        self.params["process_classes"] = process_classes
+        self.params["mode"] = mode
+        self.params["blank_relation"] = blank_relation
 
     def func(self, dc):
-        dc.data_matrix =  filter.blank_correction(dc.data_matrix,
-                                                  dc.get_classes(),
-                                                  **self.params)
+        dc.data_matrix = filter.blank_correction(dc.data_matrix,
+                                                 dc.get_classes(),
+                                                 **self.params)
+
 
 @register
 class BatchCorrector(Processor):
@@ -270,9 +306,14 @@ class BatchCorrector(Processor):
     Corrects instrumental drift between in a batch.
     """
     def __init__(self, corrector_classes=None, process_classes=None,
-                 mode="splines", **kwargs):
-        super(BatchCorrector, self).__init__(axis=None, mode="correction")
-        self.params = get_function_parameters()
+                 mode="splines", verbose=False, **kwargs):
+        super(BatchCorrector, self).__init__(axis=None, mode="correction",
+                                             verbose=verbose)
+        self.params["corrector_classes"] = corrector_classes
+        self.params["process_classes"] = process_classes
+        self.params["mode"] = mode
+        self.params = {**self.params, **kwargs}
+        # TODO: chequear la linea de kwargs
 
     def func(self, dc):
         dc.data_matrix = filter.batch_correction(dc.data_matrix,
@@ -286,10 +327,15 @@ class PrevalenceFilter(Processor):
     """
     Remove Features with a low number of occurrences.
     """
-    def __init__(self, process_classes=None, lb=0.5, ub=1, intraclass=True):
-        super(PrevalenceFilter, self).__init__(axis="features", mode="filter")
+    def __init__(self, process_classes=None, lb=0.5, ub=1,
+                 intraclass=True, verbose=False):
+        super(PrevalenceFilter, self).__init__(axis="features", mode="filter",
+                                               verbose=verbose)
         self.name = "Prevalence Filter"
-        self.params = get_function_parameters()
+        self.params["process_classes"] = process_classes
+        self.params["lb"] = lb
+        self.params["ub"] = ub
+        self.params["intraclass"] = intraclass
 
     def func(self, dc):
         return filter.prevalence_filter(dc.data_matrix, dc.get_classes(),
@@ -302,41 +348,52 @@ class VariationFilter(Processor):
     Remove samples with high coefficient of variation.
     """
     def __init__(self, lb=0, ub=0.25, process_classes=None, robust=False,
-                 intraclass=True):
-        super(VariationFilter, self).__init__(axis="features", mode="filter")
+                 intraclass=True, verbose=False):
+        super(VariationFilter, self).__init__(axis="features", mode="filter",
+                                              verbose=verbose)
         self.name = "Variation Filter"
-        self.params = get_function_parameters()
+        self.params["lb"] = lb
+        self.params["ub"] = ub
+        self.params["process_classes"] = process_classes
+        self.params["robust"] = robust
+        self.params["intraclass"] = intraclass
 
     def func(self, dc):
         return filter.variation_filter(dc.data_matrix, dc.get_classes(),
                                        **self.params)
 
-# @register
-# class ChromatogramMaker(MetadataAdder):
-#     """
-#     Computes chromatograms for all samples using available raw data.
-#     """
-#     def __init__(self, tolerance=0.005):
-#         super(ChromatogramMaker, self).__init__()
-#         self.params = dict()
-#         self.params["tolerance"] = tolerance
-#
-#     def transform(self, dc):
-#         mz_cluster = chromatograms.cluster(dc.feature_definitions["mz"],
-#                                            0.0002)
-#         dc.feature_definitions["mz cluster"] = mz_cluster
-#         mean_mz_cluster = (dc.feature_definitions
-#                            .groupby("mz cluster")["mz"]
-#                            .mean().values)
-#         chromatogram_dict = dict()
-#         for sample in dc.get_raw_path():
-#             reader = fileio.read(sample)
-#             c = fileio.chromatogram(reader,
-#                                     mean_mz_cluster,
-#                                     tolerance=self.params["tolerance"])
-#             sample_name = sample_name_from_path(sample)
-#             chromatogram_dict[sample_name] = c
-#         dc.chromatograms = chromatogram_dict
+
+@register
+class ChromatogramMaker(Processor):
+    """
+    Computes chromatograms for all samples using available raw data.
+    """
+    def __init__(self, tolerance=0.005, cluster_tolerance=0.0002,
+                 verbose=False):
+        super(ChromatogramMaker, self).__init__("add")
+        self.name = "Chromatogram Maker"
+        self.params["tolerance"] = tolerance
+        self.params["cluster_tolerance"] = cluster_tolerance
+        self.verbose = verbose
+
+    def func(self, dc):
+        dc.cluster_mz(self.params["cluster_tolerance"])
+        mean_mz_cluster = peaks.mean_cluster_value(dc.get_mz(),
+                                                   dc.get_mz_cluster())
+        chromatogram_dict = dict()
+        samples = dc.get_raw_path()
+        for k, sample in enumerate(samples):
+            reader = fileio.read(sample)
+            c = fileio.chromatogram(reader,
+                                    mean_mz_cluster,
+                                    tolerance=self.params["tolerance"])
+            sample_name = sample_name_from_path(sample)
+            chromatogram_dict[sample_name] = c
+            if self.verbose:
+                msg = "Computing EICs for {} ({}/{})".format(sample, k + 1,
+                                                             len(samples))
+                print(msg)
+        dc.chromatograms = chromatogram_dict
 
 
 def merge_data_containers(dcs):
