@@ -21,7 +21,11 @@ def read(path):
 
     """
     exp_reader = pyopenms.OnDiscMSExperiment()
-    if not exp_reader.openFile(path):
+    try:
+        exp_reader.openFile(path)
+    except RuntimeError:
+        msg = "{} is not an indexed mzML file, switching to MSExperiment"
+        print(msg.format(path))
         exp_reader = pyopenms.MSExperiment()
         pyopenms.MzMLFile().load(path, exp_reader)
     return exp_reader
