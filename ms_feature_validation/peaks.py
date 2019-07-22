@@ -3,6 +3,7 @@ Utilities to work with peaks
 """
 
 import numpy as np
+import pandas as pd
 from scipy.signal import find_peaks
 from scipy.signal import peak_widths
 from scipy.integrate import trapz
@@ -86,4 +87,121 @@ def find_overlap(intervals):
     return overlap
 
 
+def gauss(x, mu, sigma, amp=None):
+    """
+    gaussian curve.
 
+    Parameters
+    ----------
+    x : np.array
+    mu : float
+    sigma : float
+    amp : float / None
+        If None returns a normalized gaussian curve.
+
+    Returns
+    -------
+    gaussian : np.array
+    """
+    if amp is None:
+        amp = 1 / (np.sqrt(2 * np.pi) * sigma)
+    gaussian = amp * np.power(np.e, - 0.5 * ((x - mu) / sigma) ** 2)
+    return gaussian
+
+
+def gaussian_mixture(x, mu, sigma, amp):
+    """
+    Mixture of gaussian curves.
+
+    Parameters
+    ----------
+    x : np.array
+    mu : np.array
+    sigma : np.array
+    amp : np.array
+
+    Returns
+    -------
+    """
+    mixture = np.zeros((len(mu), x.size))
+    for k, m, s, a in zip(range(len(mu)), mu, sigma, amp):
+        mixture[k, :] = gauss(x, m, s, a)
+    mixture = mixture.sum(axis=0)
+    return mixture
+
+
+def cluster(s, tolerance):
+    """
+    cluster values within a given tolerance
+
+    Parameters
+    ----------
+    s : pandas.Series
+    tolerance : float
+
+    Returns
+    -------
+    cluster_number : pandas.Series
+
+    Notes
+    -----
+    The clustering algorithm is as follow:
+
+    1. sort values
+    2. find successive values within `tolerance`
+    3. These values are assigned a cluster number
+    """
+    cluster_number = (s.sort_values().diff() > tolerance).cumsum()
+    return cluster_number
+
+
+def mean_cluster_value(mz, cluster):
+    """
+    Returns the mean cluster value.
+
+    Parameters
+    ----------
+    mz : pandas.Series
+    cluster : pandas.Series
+
+    Returns
+    -------
+    mean: pandas.Series
+    """
+    return mz.groupby(cluster).mean()
+
+
+def overlap_groups(df, rt_tolerance, mz_tolerance):
+    """
+    returns index with overlap in Retention Time and Mass-to-charge ratio.
+
+    Parameters
+    ----------
+    sample_information : pandas.DataFrame
+    rt_tolerance : float
+    mz_tolerance : float
+
+    Returns
+    -------
+    overlap_cluster
+
+    """
+    mz = df["mz"]
+    rt = df["rt"]
+
+    def has_overlap_helper(x, tol):
+        xx, xy = np.meshgrid(x, x)
+        x_overlap = np.abs(xx - xy) < tol
+        x_overlap[np.diag_indices_from(x_overlap)] = False
+        return x_overlap
+
+    def overlap_groups_helper(overlap):
+        return list(df.index[overlap])
+
+    mz_overlap = has_overlap_helper(mz, mz_tolerance)
+    rt_ovelap = has_overlap_helper(rt, rt_tolerance)
+    overlap_df = pd.DataFrame(mz_overlap & rt_ovelap,
+                              index=df.index,
+                              columns=df.index)
+    overlap_series = overlap_df.apply(overlap_groups_helper, axis=0)
+    return overlap_series
