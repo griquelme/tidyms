@@ -104,9 +104,25 @@ def cluster(s, tolerance):
     return cluster_number
 
 
+def mean_cluster_value(mz, cluster):
+    """
+    Returns the mean cluster value.
+
+    Parameters
+    ----------
+    mz : pandas.Series
+    cluster : pandas.Series
+
+    Returns
+    -------
+    mean: pandas.Series
+    """
+    return mz.groupby(cluster).mean()
+
+
 def overlap_groups(df, rt_tolerance, mz_tolerance):
     """
-    returns index with overalap in Retention Time and Mass-to-charge ratio.
+    returns index with overlap in Retention Time and Mass-to-charge ratio.
 
     Parameters
     ----------
