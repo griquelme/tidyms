@@ -79,13 +79,13 @@ def gaussian_mixture(x, mu, sigma, amp):
     return mixture
 
 
-def cluster(s, tolerance):
+def cluster(s: pd.Series, tolerance: float) -> pd.Series:
     """
     cluster values within a given tolerance
 
     Parameters
     ----------
-    s : pandas.Series
+    s : pd.Series
     tolerance : float
 
     Returns
@@ -104,7 +104,7 @@ def cluster(s, tolerance):
     return cluster_number
 
 
-def mean_cluster_value(mz, cluster):
+def mean_cluster_value(mz: pd.Series, cluster: pd.Series) -> pd.Series:
     """
     Returns the mean cluster value.
 
@@ -120,7 +120,8 @@ def mean_cluster_value(mz, cluster):
     return mz.groupby(cluster).mean()
 
 
-def overlap_groups(df, rt_tolerance, mz_tolerance):
+def overlap_groups(df: pd.Series, rt_tolerance: float,
+                   mz_tolerance: float) -> pd.Series:
     """
     returns index with overlap in Retention Time and Mass-to-charge ratio.
 
@@ -161,3 +162,19 @@ def get_eic_threshold(sp_threshold, mz_res, fwhm):
     y = gauss(x, 0, sigma, sp_threshold)
     threshold = y.sum()
     return threshold
+
+
+def recommend_samples(df: pd.DataFrame, q: float,
+                      min_samples: float) -> list:
+    q_values = df > df.quantile(q)
+    recommended_samples = list()
+    samples_count = pd.Series(data=np.zeros(q_values.columns.size),
+                                    index=q_values.columns)
+    while q_values.shape[1] > 0:
+        add_sample = q_values.sum(axis=1).idxmax()
+        recommended_samples.append(add_sample)
+        samples_count += q_values.loc[add_sample, :]
+        samples_count = samples_count[samples_count < min_samples]
+        q_values.drop(index=add_sample, inplace=True)
+        q_values = q_values.loc[:, samples_count.index]
+    return recommended_samples

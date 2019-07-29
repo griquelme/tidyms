@@ -5,7 +5,7 @@ correction and validation of LC-MS metabolomics data.
 
 
 from . import filter
-from . import chromatograms
+from . import utils
 from . import fileio
 from . import peaks
 import pandas as pd
