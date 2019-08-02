@@ -52,7 +52,7 @@ def chromatogram(msexp, mz, tolerance=0.005):
     mz_intervals = (np.vstack((mz - tolerance, mz + tolerance))
                     .T.reshape(mz.size * 2))
     nsp = msexp.getNrSpectra()
-    chromatograms = np.zeros((nsp, mz.size))
+    chromatograms = np.zeros((mz.size, nsp))
     rt = np.zeros(nsp)
     for ksp in range(nsp):
         sp = msexp.getSpectrum(ksp)
@@ -61,7 +61,7 @@ def chromatogram(msexp, mz, tolerance=0.005):
         ind_sp = np.searchsorted(mz_sp, mz_intervals)
         # elements added at the end of mz_sp raise IndexError
         ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
-        chromatograms[ksp, :] = np.add.reduceat(int_sp, ind_sp)[::2]
+        chromatograms[:, ksp] = np.add.reduceat(int_sp, ind_sp)[::2]
     return rt, chromatograms
 
 
