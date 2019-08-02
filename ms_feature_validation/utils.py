@@ -41,7 +41,7 @@ def gauss(x, mu, sigma, amp=None):
     gaussian curve.
 
     Parameters
-    ----------
+    ----------.sum(axis=0)
     x : np.array
     mu : float
     sigma : float
@@ -58,24 +58,24 @@ def gauss(x, mu, sigma, amp=None):
     return gaussian
 
 
-def gaussian_mixture(x, mu, sigma, amp):
+def gaussian_mixture(x: np.array, *params: float) -> np.array:
     """
     Mixture of gaussian curves.
 
     Parameters
     ----------
     x : np.array
-    mu : np.array
-    sigma : np.array
-    amp : np.array
+    params: mu1, sigma1, amp1, mu2, sigma2, amp2, ...
 
     Returns
     -------
     """
-    mixture = np.zeros((len(mu), x.size))
-    for k, m, s, a in zip(range(len(mu)), mu, sigma, amp):
-        mixture[k, :] = gauss(x, m, s, a)
-    mixture = mixture.sum(axis=0)
+    mixture = np.zeros_like(x)
+    for i in range(0, len(params), 3):
+        mu_i = params[i]
+        sigma_i = params[i + 1]
+        amp_i = params[i + 2]
+        mixture += gauss(x, mu_i, sigma_i, amp_i)
     return mixture
 
 
