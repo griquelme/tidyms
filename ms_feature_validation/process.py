@@ -160,7 +160,7 @@ class DataContainer(object):
         ----------
         tolerance : float
         """
-        self.feature_definitions["mz_cluster"] = peaks.cluster(self.get_mz(),
+        self.feature_definitions["mz_cluster"] = utils.cluster(self.get_mz(),
                                                                tolerance)
     def get_mz_cluster(self):
         return self.feature_definitions["mz_cluster"]
@@ -378,21 +378,21 @@ class ChromatogramMaker(Processor):
 
     def func(self, dc):
         dc.cluster_mz(self.params["cluster_tolerance"])
-        mean_mz_cluster = peaks.mean_cluster_value(dc.get_mz(),
+        mean_mz_cluster = utils.mean_cluster_value(dc.get_mz(),
                                                    dc.get_mz_cluster())
         chromatogram_dict = dict()
         samples = dc.get_raw_path()
         for k, sample in enumerate(samples):
+            if self.verbose:
+                msg = "Computing EICs for {} ({}/{})"
+                msg = msg.format(sample, k + 1, len(samples))
+                print(msg)
             reader = fileio.read(sample)
             c = fileio.chromatogram(reader,
                                     mean_mz_cluster,
                                     tolerance=self.params["tolerance"])
             sample_name = sample_name_from_path(sample)
             chromatogram_dict[sample_name] = c
-            if self.verbose:
-                msg = "Computing EICs for {} ({}/{})".format(sample, k + 1,
-                                                             len(samples))
-                print(msg)
         dc.chromatograms = chromatogram_dict
 
 
