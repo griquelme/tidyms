@@ -7,6 +7,8 @@ import pandas as pd
 from scipy.signal import find_peaks
 from scipy.signal import peak_widths
 from scipy.integrate import trapz
+from scipy.optimize import curve_fit
+from . import utils
 
 
 def pick(x, y, fwhm=None, height=None, asymmetry=False,
@@ -87,121 +89,60 @@ def find_overlap(intervals):
     return overlap
 
 
-def gauss(x, mu, sigma, amp=None):
+def fit_gaussian(x, y):
     """
-    gaussian curve.
+    Fit multiple gaussians.
 
     Parameters
     ----------
-    x : np.array
-    mu : float
-    sigma : float
-    amp : float / None
-        If None returns a normalized gaussian curve.
+    x: np.array
+    y: np.array
 
     Returns
     -------
-    gaussian : np.array
+    result
     """
-    if amp is None:
-        amp = 1 / (np.sqrt(2 * np.pi) * sigma)
-    gaussian = amp * np.power(np.e, - 0.5 * ((x - mu) / sigma) ** 2)
-    return gaussian
+    # initial parameters guess
+    peak_list = pick(x, y, fwhm=[0, 1], asymmetry=True)
+    mu = peak_list["loc"]
+    # correct peaks fwhm in cases of overlap
+    fwhm = guess_fwhm(peak_list["fwhm"], peak_list["fwhm overlap"])
+    sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
+    amp = peak_list["height"]
+    guess = np.vstack((mu, sigma, amp)).T.flatten()
+    popt, pcov = curve_fit(utils.gaussian_mixture, x, y, p0=guess)
+    return popt, pcov
 
 
-def gaussian_mixture(x, mu, sigma, amp):
+def overlap_groups(overlap):
     """
-    Mixture of gaussian curves.
+    Group contiguous overlapped peaks.
 
     Parameters
     ----------
-    x : np.array
-    mu : np.array
-    sigma : np.array
-    amp : np.array
+    overlap: list[bool].
+        returned from pick.
 
     Returns
     -------
+    groups: list[int].
+        List of peaks with overlap.
     """
-    mixture = np.zeros((len(mu), x.size))
-    for k, m, s, a in zip(range(len(mu)), mu, sigma, amp):
-        mixture[k, :] = gauss(x, m, s, a)
-    mixture = mixture.sum(axis=0)
-    return mixture
+    groups = list()
+    group = list()
+    for i, has_overlap in enumerate(overlap):
+        group.append(i)
+        if not has_overlap:
+            groups.append(group)
+            group = list()
+    if group:
+        groups.append(group)
+    return groups
 
 
-def cluster(s, tolerance):
-    """
-    cluster values within a given tolerance
-
-    Parameters
-    ----------
-    s : pandas.Series
-    tolerance : float
-
-    Returns
-    -------
-    cluster_number : pandas.Series
-
-    Notes
-    -----
-    The clustering algorithm is as follow:
-
-    1. sort values
-    2. find successive values within `tolerance`
-    3. These values are assigned a cluster number
-    """
-    cluster_number = (s.sort_values().diff() > tolerance).cumsum()
-    return cluster_number
-
-
-def mean_cluster_value(mz, cluster):
-    """
-    Returns the mean cluster value.
-
-    Parameters
-    ----------
-    mz : pandas.Series
-    cluster : pandas.Series
-
-    Returns
-    -------
-    mean: pandas.Series
-    """
-    return mz.groupby(cluster).mean()
-
-
-def overlap_groups(df, rt_tolerance, mz_tolerance):
-    """
-    returns index with overlap in Retention Time and Mass-to-charge ratio.
-
-    Parameters
-    ----------
-    sample_information : pandas.DataFrame
-    rt_tolerance : float
-    mz_tolerance : float
-
-    Returns
-    -------
-    overlap_cluster
-
-    """
-    mz = df["mz"]
-    rt = df["rt"]
-
-    def has_overlap_helper(x, tol):
-        xx, xy = np.meshgrid(x, x)
-        x_overlap = np.abs(xx - xy) < tol
-        x_overlap[np.diag_indices_from(x_overlap)] = False
-        return x_overlap
-
-    def overlap_groups_helper(overlap):
-        return list(df.index[overlap])
-
-    mz_overlap = has_overlap_helper(mz, mz_tolerance)
-    rt_ovelap = has_overlap_helper(rt, rt_tolerance)
-    overlap_df = pd.DataFrame(mz_overlap & rt_ovelap,
-                              index=df.index,
-                              columns=df.index)
-    overlap_series = overlap_df.apply(overlap_groups_helper, axis=0)
-    return overlap_series
+def guess_fwhm(fwhm, overlap):
+    groups = overlap_groups(overlap)
+    guess = np.zeros_like(fwhm)
+    for group in groups:
+        guess[group] = fwhm[group].mean()
+    return guess
