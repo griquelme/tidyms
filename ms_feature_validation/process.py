@@ -67,6 +67,11 @@ class DataContainer(object):
                 available_files.append(sample_file)
         return available_files
 
+    def get_available_samples(self):
+        get_fname = lambda x: os.path.splitext(os.path.split(x)[1])[0]
+        available = [get_fname(x) for x in self.get_raw_path()]
+        return available
+
     def is_valid_class_name(self, class_names):
         valid_classes = np.isin(class_names, self.get_classes().unique())
         return np.all(valid_classes)
@@ -469,6 +474,7 @@ def read_progenesis(path):
     ft_def.rename({"m/z": "mz", "Retention time (min)": "rt"},
                   axis="columns",
                   inplace=True)
+    ft_def["rt"] = ft_def["rt"] * 60
     dc = DataContainer(data, ft_def, sample_info)
     _validate_data_container(dc)
     return dc

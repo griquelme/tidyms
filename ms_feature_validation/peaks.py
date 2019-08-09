@@ -15,14 +15,17 @@ def pick(x, y, fwhm=None, height=None, asymmetry=False,
          tailing=False, integrate=False, integrate_height=0.95):
 
     peak_params = dict()
-    peaks, _ = find_peaks(y, height)
+    peaks, _ = find_peaks(y, height, prominence=500)
     if fwhm:
         fwhm_index = get_peak_widths(y, peaks, 0.5)
         peaks_fwhm = x[fwhm_index[1, :]] - x[fwhm_index[0, :]]
-        peaks = peaks[(peaks_fwhm >= fwhm[0]) & (peaks_fwhm <= fwhm[1])]
+        # fwhm filter
+        fwhm_filter = (peaks_fwhm >= fwhm[0]) & (peaks_fwhm <= fwhm[1])
+        fwhm_index = fwhm_index[:, fwhm_filter]
+        peaks = peaks[fwhm_filter]
         peak_params["fwhm left"] = x[fwhm_index[0, :]]
         peak_params["fwhm right"] = x[fwhm_index[1, :]]
-        peak_params["fwhm"] = peaks_fwhm
+        peak_params["fwhm"] = peaks_fwhm[fwhm_filter]
         peak_params["fwhm overlap"] = find_overlap(fwhm_index)
     if asymmetry:
         peak_params["asymmetry"] = analyse_peak_shape(x, y, peaks, "asymmetry")
@@ -43,6 +46,16 @@ def pick(x, y, fwhm=None, height=None, asymmetry=False,
     peak_params["loc"] = x[peaks]
     peak_params["height"] = y[peaks]
     return peak_params
+
+
+def make_empty_peaks(fwhm=False):
+    d = dict()
+    params = ["index", "fwhm left", "fwhm right", "fwhm", "fwhm overlap",
+              "asymmetry", "tailing", "area", "area left", "area right",
+              "area overlap", "loc", "height"]
+    for param in params:
+        d[param] = np.array([])
+    return d
 
 
 def get_peak_widths(y, peaks, rel_height):
@@ -146,3 +159,5 @@ def guess_fwhm(fwhm, overlap):
     for group in groups:
         guess[group] = fwhm[group].mean()
     return guess
+
+
