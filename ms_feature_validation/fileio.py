@@ -31,7 +31,7 @@ def read(path):
     return exp_reader
 
 
-def chromatogram(msexp, mz, tolerance=0.005):
+def chromatogram(msexp, mz, tolerance=0.005, mode="sum"):
     """
     Calculates the EIC for the msexperiment
     Parameters
@@ -41,6 +41,9 @@ def chromatogram(msexp, mz, tolerance=0.005):
         mz values used to build the EICs.
     tolerance: float.
                Tolerance to build the EICs.
+    mode: ["sum", "mean"]
+        "mean" divides the intensity in the EIC using the number of points in
+        the window.
     Returns
     -------
     rt, chromatograms: tuple
@@ -62,6 +65,10 @@ def chromatogram(msexp, mz, tolerance=0.005):
         # elements added at the end of mz_sp raise IndexError
         ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
         chromatograms[:, ksp] = np.add.reduceat(int_sp, ind_sp)[::2]
+        if mode == "mean":
+            norm = ind_sp[1::2] - ind_sp[::2]
+            norm[norm == 0] = 1
+            chromatograms[:, ksp] = chromatograms[:, ksp] / norm
     return rt, chromatograms
 
 
@@ -95,11 +102,11 @@ def accumulate_spectra(msexp, scans, ref, subtract=None, accumulator="sum"):
         subtract = scans
 
     rows = scans[1] - subtract[0]
-    mz_ref, int_ref = msexp.getSpectrum(ref).get_peaks()
+    mz_ref = _get_mz_roi(msexp, subtract)
     interp_int = np.zeros((rows, mz_ref.size))
     for krow, scan in zip(range(rows), range(*subtract)):
         mz_scan, int_scan = msexp.getSpectrum(scan).get_peaks()
-        interpolator = interp1d(mz_scan, int_scan)
+        interpolator = interp1d(mz_scan, int_scan, kind="nearest")
         interp_int[krow, :] = interpolator(mz_ref)
 
     # substract indices to match interp_int rows
@@ -112,3 +119,32 @@ def accumulate_spectra(msexp, scans, ref, subtract=None, accumulator="sum"):
     accum_mz = mz_ref
 
     return accum_mz, accum_int
+
+
+def _get_mz_roi(msexp, scans):
+    """
+    make an mz array with regions of interest in the selected scans.
+
+    Parameters
+    ----------
+    msexp: pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
+    scans : tuple[int] : start, end
+
+    Returns
+    -------
+    mz_ref = numpy.array
+    """
+    mz_0, _ = msexp.getSpectrum(scans[0]).get_peaks()
+    mz_min = mz_0.min()
+    mz_max = mz_0.max()
+    mz_res = np.diff(mz_0).min()
+    mz_ref = np.arange(mz_min, mz_max, mz_res)
+    roi = np.zeros(mz_ref.size + 1)
+    # +1 used to prevent error due to mz values bigger than mz_max
+    for k in range(*scans):
+        curr_mz, _ = msexp.getSpectrum(k).get_peaks()
+        roi_index = np.searchsorted(mz_ref, curr_mz)
+        roi[roi_index] += 1
+    roi = roi.astype(bool)
+    return mz_ref[roi[:-1]]
+
