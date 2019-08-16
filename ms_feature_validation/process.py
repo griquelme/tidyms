@@ -277,10 +277,11 @@ class ClassRemover(Processor):
     """
     def __init__(self, classes=None):
         super(ClassRemover, self).__init__(axis="samples", mode="filter")
-        self.param["classes"] = classes
+        self.params["classes"] = classes
 
     def func(self, dc):
-        remove_samples = dc.get_classes().isin(self.param["classes"])
+        remove_samples = dc.get_classes().isin(self.params["classes"])
+        remove_samples = remove_samples[remove_samples]
         return remove_samples.index
 
 
