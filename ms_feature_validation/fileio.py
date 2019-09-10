@@ -72,7 +72,7 @@ def chromatogram(msexp, mz, tolerance=0.005, mode="sum"):
     return rt, chromatograms
 
 
-def accumulate_spectra(msexp, scans, ref, subtract=None, accumulator="sum"):
+def accumulate_spectra(msexp, scans, subtract=None, accumulator="sum"):
     """
     accumulates a spectra into a single spectrum.
 
@@ -81,8 +81,6 @@ def accumulate_spectra(msexp, scans, ref, subtract=None, accumulator="sum"):
     msexp : pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
     scans : tuple[int] : start, end
         scan range to accumulate. `start` and `end` are used as slice index.
-    ref: int.
-        Scan used to pass to the interpolator.
     subtract : None or Tuple[int], left, right
         Scans regions to substract. `left` must be smaller than `start` and
         `right` greater than `end`.
