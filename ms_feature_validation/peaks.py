@@ -3,7 +3,6 @@ Utilities to work with peaks
 """
 
 import numpy as np
-import pandas as pd
 from scipy.signal import find_peaks
 from scipy.signal import peak_widths
 from scipy.integrate import trapz
@@ -48,7 +47,7 @@ def pick(x, y, fwhm=None, height=None, asymmetry=False,
     return peak_params
 
 
-def make_empty_peaks(fwhm=False):
+def make_empty_peaks():
     d = dict()
     params = ["index", "fwhm left", "fwhm right", "fwhm", "fwhm overlap",
               "asymmetry", "tailing", "area", "area left", "area right",
@@ -81,11 +80,16 @@ def analyse_peak_shape(x, y, peaks, mode):
     -------
     factor : np.array
     """
-    w = get_peak_widths(y, peaks, 0.1)
+
+    rel_height = {"asymmetry": 0.9, "tailing": 0.95}
+    rel_height = rel_height[mode]
+
+    w = get_peak_widths(y, peaks, rel_height)
     left_width = x[peaks] - x[w[0, :]]
     right_width = x[w[1, :]] - x[peaks]
+    left_width[left_width == 0] = np.nan
     if mode == "asymmetry":
-        factor = left_width / right_width
+        factor = right_width / left_width
     elif mode == "tailing":
         factor = (left_width + right_width) / (2 * left_width)
     else:
@@ -159,5 +163,3 @@ def guess_fwhm(fwhm, overlap):
     for group in groups:
         guess[group] = fwhm[group].mean()
     return guess
-
-
