@@ -1,6 +1,7 @@
 from scipy.signal import find_peaks
 import numpy as np
 import pandas as pd
+import os.path
 
 
 def find_experimental_rt(rt, chromatogram, rt_guess, width, tolerance):
@@ -178,3 +179,62 @@ def recommend_samples(df: pd.DataFrame, q: float,
         q_values.drop(index=add_sample, inplace=True)
         q_values = q_values.loc[:, samples_count.index]
     return recommended_samples
+
+
+def sample_to_path(samples, path):
+    """
+    map sample names to raw path if available.
+
+    Parameters
+    ----------
+    samples : Iterable[str].
+        samples names
+    path : str.
+        path to raw sample data.
+
+    Returns
+    -------
+    d: dict
+    """
+    available_files = os.listdir(path)
+    filenames = [os.path.splitext(x)[0] for x in available_files]
+    full_path = [os.path.join(path, x) for x in available_files]
+    d = dict()
+    for k, name in enumerate(filenames):
+        if name in samples:
+            d[name] = full_path[k]
+    return d
+
+
+def get_function_parameters(only=None, exclude=None, ignore='self'):
+    """Returns a dictionary of the calling functions
+       parameter names and values.
+
+       The optional arguments can be used to filter the result:
+
+           only           use this to only return parameters
+                          from this list of names.
+
+           exclude        use this to return every parameter
+                          *except* those included in this list
+                          of names.
+
+           ignore         use this inside methods to ignore
+                          the calling object's name. For
+                          convenience, it ignores 'self'
+                          by default.
+
+    """
+    import inspect
+    args, varargs, varkw, defaults = \
+        inspect.getargvalues(inspect.stack()[1][0])
+    if only is None:
+        only = args[:]
+        if varkw:
+            only.extend(defaults[varkw].keys())
+            defaults.update(defaults[varkw])
+    if exclude is None:
+        exclude = []
+    exclude.append(ignore)
+    return dict([(attrname, defaults[attrname])
+        for attrname in only if attrname not in exclude])
