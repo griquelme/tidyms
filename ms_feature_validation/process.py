@@ -216,9 +216,9 @@ class Pipeline(Reporter):
     def process(self, dc):
         self._record_metrics(dc, "before")
         for x in self.processors:
-            x.process(dc)
             if self.verbose:
-                x.report()
+                x.verbose = True
+            x.process(dc)
         self._record_metrics(dc, "after")
 
 

@@ -270,10 +270,11 @@ def read_config(path):
     return config
 
 
-def pipeline_from_list(l):
-    pipeline = Pipeline()
+def pipeline_from_list(l, verbose=False):
+    procs = list()
     for d in l:
-        pipeline.proccesors.append(filter_from_dictionary(d))
+        procs.append(filter_from_dictionary(d))
+    pipeline = Pipeline(procs, verbose)
     return pipeline
 
 
