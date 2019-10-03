@@ -277,6 +277,13 @@ def pipeline_from_list(l):
     return pipeline
 
 
+def pipeline_from_yaml(path):
+    d = read_config(path)
+    filters_list = d["Pipeline"]
+    pipeline = pipeline_from_list(filters_list)
+    return pipeline
+
+
 def filter_from_dictionary(d):
     filter = None
     for name, params in d.items():
