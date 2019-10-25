@@ -213,7 +213,7 @@ def batch_correction(data, run_order, classes, corrector_classes,
     """
     corrector = {"loess": loess_correction, "splines": cspline_correction}
     corrector = corrector[mode]
-    corrector_class_mask = classes.isin([corrector_classes])
+    corrector_class_mask = classes.isin(corrector_classes)
     corrector_run = run_order[corrector_class_mask]
     sample_classes_mask = classes.isin(process_classes)
     sample_run = run_order[sample_classes_mask]
