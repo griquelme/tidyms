@@ -250,7 +250,7 @@ def interbatch_correction(data, batch, run_order, classes, corrector_classes,
     -------
     corrected: pandas.DataFrame
     """
-    corrector_samples_mask = classes.isin([corrector_classes])
+    corrector_samples_mask = classes.isin(corrector_classes) #modificar
     scaling_factor = data[corrector_samples_mask].mean()
 
     def corrector_helper(x):
