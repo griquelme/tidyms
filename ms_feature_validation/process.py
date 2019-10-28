@@ -8,21 +8,28 @@ from . import filter_functions
 from . import utils
 from . import validation
 import numpy as np
+import pandas as pd
 
+
+RAW_PATH = "raw path"
 
 class DataContainer(object):
     """
     A container class for Metabolomics Data.
+    
+    Consists of three Pandas DataFrames with features values, feature metadata
+    and sammple metadata. Index are shared for features and samples respectively.
+    
+    Contains functions to remove samples and features.
 
     Attributes
     ---------
-    data_matrix : pandas.DataFrame.
-                  DataFrame with sample names on indices and features on the
-                  columns.
-    sample_information : pandas.DataFrame.
-                         DataFrame with sample names as indices. class is a
-                         required column.
-    feature_definitions : pandas.DataFrame.
+    data_matrix : pd.DataFrame.
+                  Feature values for each measured sample. Each row is a
+                  sample and each column is a feature.                  
+    sample_information : pd.DataFrame.
+                         Metadata for each sample. class is a required column.
+    feature_definitions : pd.DataFrame.
                           DataFrame with features names as indices. mz and rt
                           are required columns.
     data_path : str.
@@ -31,6 +38,24 @@ class DataContainer(object):
 
     def __init__(self, data_matrix_df, feature_definitions_df,
                  sample_information_df, data_path=None):
+        
+        """
+        Creates a DataContainer from feature values, features metadata and
+        sample metadata.
+        
+        Atributes
+        ---------
+        data_matrix_df : pd.DataFrame.
+            Feature values for each measured sample. Each row is a sample and
+            each column is a feature.                  
+        sample_information_df : pd.DataFrame.
+            Metadata for each sample. class is a required column.
+        feature_definitions_df : pd.DataFrame.
+            DataFrame with features names as indices. mz and rt are required
+            columns.
+        data_path : str.
+            path to raw Data. Files must have the same name as each sample.
+        """
         validation.validate_data_container(data_matrix_df,
                                            feature_definitions_df,
                                            sample_information_df,
@@ -40,15 +65,37 @@ class DataContainer(object):
         self.sample_information = sample_information_df
         if data_path is not None:
             path_mapping = utils.sample_to_path(data_matrix_df.index, data_path)
-            self.sample_information["raw path"] = \
+            self.sample_information[RAW_PATH] = \
                 self.sample_information.index.map(path_mapping)
 
     def get_available_samples(self):
-        return self.sample_information["raw path"].dropna()
+        """
+        Returns the absolute path for each raw data file present in
+        data_path.
+        
+        Returns
+        -------
+        available_samples : pd.Series
+            Pandas series with absolute path for each available file.
+        """
+        available_samples = self.sample_information[RAW_PATH].dropna()
+        return available_samples
 
     def is_valid_class_name(self, class_names):
+        """
+        Check if at least one sample class is`class_names`.
+        
+        Atributes
+        ---------
+        class_names : str
+        
+        Returns
+        -------
+        is_valid : bool
+        """
         valid_classes = np.isin(class_names, self.get_classes().unique())
-        return np.all(valid_classes)
+        is_valid = np.all(valid_classes)
+        return is_valid
 
     def remove(self, remove, axis):
         """
@@ -57,7 +104,7 @@ class DataContainer(object):
         Parameters
         ----------
         remove : list[str]
-                   Feature/Samples names to remove.
+                   Feature / Sample names to remove.
         axis : str
                "features", "samples". axis to remove from
         """
@@ -70,7 +117,8 @@ class DataContainer(object):
 
     def select(self, selection, axis):
         """
-        Return a selection of the DataContainer
+        Return a selection of the DataContainer.
+        
         Parameters
         ----------
         selection : list[str]
@@ -97,8 +145,11 @@ class DataContainer(object):
         return data_selection
 
     def set_raw_path(self, path):
+        """
+        
+        """
         mapper = utils.sample_to_path(self.sample_information, path)
-        self.sample_information["raw path"] = \
+        self.sample_information[RAW_PATH] = \
             self.sample_information.index.map(mapper)
 
     def get_classes(self):
@@ -254,4 +305,8 @@ def _validate_pipeline(t):
             raise TypeError(msg)
 
 # TODO: posible acortamiento de nombres: data_matrix: data,
-#  sample_information: sample, feature_definitions: features.
+# TODO:  sample_information: sample, feature_definitions: features.
+# TODO: documentar todos los metodos
+# TODO: agregar tests para el modulo
+# TODO: agregar una funcion de validacion luego de aplicar correccion (chequear
+# la igualdad de columnas y filas)
