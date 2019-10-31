@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 """
-Implementations of DataContainer, Processor and Pipeline Classes for automatic
-correction and validation of LC-MS metabolomics data.
+Objects used for automatic curation and validation of LC-MS metabolomics data.
+
+Complete with examples.    
 """
 
 
@@ -11,7 +13,12 @@ import numpy as np
 import pandas as pd
 
 
-RAW_PATH = "raw path"
+# variables used to name sample information columns
+_raw_path = "raw path"
+_sample_class = "class"
+_sample_id = "id"
+_sample_batch = "batch"
+_sample_order = "order"
 
 class DataContainer(object):
     """
@@ -20,7 +27,7 @@ class DataContainer(object):
     Consists of three Pandas DataFrames with features values, feature metadata
     and sammple metadata. Index are shared for features and samples respectively.
     
-    Contains functions to remove samples and features.
+    Contains functions to remove samples or features.
 
     Attributes
     ---------
@@ -63,10 +70,70 @@ class DataContainer(object):
         self.data_matrix = data_matrix_df
         self.feature_definitions = feature_definitions_df
         self.sample_information = sample_information_df
-        if data_path is not None:
-            path_mapping = utils.sample_to_path(data_matrix_df.index, data_path)
-            self.sample_information[RAW_PATH] = \
+        self.data_path = data_path
+    
+    @property
+    def data_path(self):
+        """str : directory where raw data is stored."""
+        return self._data_path
+    
+    @data_path.setter
+    def data_path(self, path):
+        """
+        sets raw data path, search for available samples and adds them to
+        sample information.
+        """
+        if path is not None:
+            path_mapping = utils.sample_to_path(self.data_matrix.index, path)
+            self.sample_information[_raw_path] = \
                 self.sample_information.index.map(path_mapping)
+            self._data_path = path
+        else:
+            self._data_path = None
+    
+    @property
+    def id(self):
+        """pd.Series[str] : name id of each sample."""
+        return self.sample_information[_sample_id]
+
+    @id.setter
+    def id(self, id):
+        self.sample_information[_sample_id] = id
+        
+    
+    @property
+    def classes(self):
+        """pd.Series[str] : class of each sample."""
+        return self.sample_information[_sample_class]
+    
+    @classes.setter
+    def classes(self, classes):
+        self.sample_information[_sample_class] = classes
+    
+    @property
+    def batch(self):
+        """pd.Series[str] or pd.Series[int]. Batch identification"""
+        try:
+            return self.sample_information[_sample_batch]
+        except KeyError:
+            raise BatchInformationError("No batch information available.")
+            
+    @batch.setter
+    def batch(self, batch):
+        self.sample_information[_sample_batch] = batch
+    
+    @property
+    def order(self):
+        """pd.Series[int] : order of analysis of samples"""
+        try:
+            return self.sample_information[_sample_order]
+        except KeyError:
+            raise RunOrderError("No run order information available")
+    
+    @order.setter
+    def order(self, order):
+        self.sample_information[_sample_order] = order
+        
 
     def get_available_samples(self):
         """
@@ -78,22 +145,22 @@ class DataContainer(object):
         available_samples : pd.Series
             Pandas series with absolute path for each available file.
         """
-        available_samples = self.sample_information[RAW_PATH].dropna()
+        available_samples = self.sample_information[_raw_path].dropna()
         return available_samples
 
-    def is_valid_class_name(self, class_names):
+    def is_valid_class_name(self, class_name):
         """
-        Check if at least one sample class is`class_names`.
+        Check if at least one sample class is`class_name`.
         
         Atributes
         ---------
-        class_names : str
+        class_name : str
         
         Returns
         -------
         is_valid : bool
         """
-        valid_classes = np.isin(class_names, self.get_classes().unique())
+        valid_classes = np.isin(class_name, self.get_classes().unique())
         is_valid = np.all(valid_classes)
         return is_valid
 
@@ -144,16 +211,9 @@ class DataContainer(object):
         data_selection = DataContainer(dm_selection, fd_selection, si_selection)
         return data_selection
 
-    def set_raw_path(self, path):
-        """
-        
-        """
-        mapper = utils.sample_to_path(self.sample_information, path)
-        self.sample_information[RAW_PATH] = \
-            self.sample_information.index.map(mapper)
 
     def get_classes(self):
-        return self.sample_information["class"]
+        return self.sample_information[_sample_class]
 
     def get_id(self):
         return self.sample_information["id"]
@@ -273,8 +333,6 @@ class Pipeline(Reporter):
         self._record_metrics(dc, "after")
 
 
-# Filters and Correctors implementation
-
 class BatchInformationError(KeyError):
     """
     Error class when there is no batch information
@@ -310,3 +368,4 @@ def _validate_pipeline(t):
 # TODO: agregar tests para el modulo
 # TODO: agregar una funcion de validacion luego de aplicar correccion (chequear
 # la igualdad de columnas y filas)
+# TODO: documentacion para Reporter, Processor y Pipeline.
