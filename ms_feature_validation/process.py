@@ -19,13 +19,15 @@ _sample_class = "class"
 _sample_id = "id"
 _sample_batch = "batch"
 _sample_order = "order"
+SAMPLE_TYPES = ["sample", "qc", "blank", "suitability", "zero"]
 
 class DataContainer(object):
     """
     A container class for Metabolomics Data.
     
     Consists of three Pandas DataFrames with features values, feature metadata
-    and sammple metadata. Index are shared for features and samples respectively.
+    and sammple metadata. Index are shared for features and samples
+    respectively.
     
     Contains functions to remove samples or features.
 
@@ -41,10 +43,12 @@ class DataContainer(object):
                           are required columns.
     data_path : str.
         Path to raw data directory.
+    mapping : dict.
+        maps a sample types to sample classes.
     """
 
     def __init__(self, data_matrix_df, feature_definitions_df,
-                 sample_information_df, data_path=None):
+                 sample_information_df, data_path=None, mapping=None):
         
         """
         Creates a DataContainer from feature values, features metadata and
@@ -62,6 +66,8 @@ class DataContainer(object):
             columns.
         data_path : str.
             path to raw Data. Files must have the same name as each sample.
+        mapping : dict or None
+            if dict, set each sample class to sample type.
         """
         validation.validate_data_container(data_matrix_df,
                                            feature_definitions_df,
@@ -71,6 +77,8 @@ class DataContainer(object):
         self.feature_definitions = feature_definitions_df
         self.sample_information = sample_information_df
         self.data_path = data_path
+        self.set_mapping(mapping)
+
     
     @property
     def data_path(self):
@@ -90,6 +98,33 @@ class DataContainer(object):
             self._data_path = path
         else:
             self._data_path = None
+            
+    
+    @property
+    def mapping(self):
+        """
+        dict : Set the sample type of a sample_classes. keys must be one of
+        the following: {'qc', 'blank', 'zero', 'sample', 'suitability'}
+        """
+        return self._mapping
+    
+    @mapping.setter
+    def mapping(self, mapping):        
+        if (mapping is None) or (not mapping):
+            self.mapping = {"qc": None, "blank": None, "sample": None,
+                            "suitability": None, "zero": None}
+        else:
+            for k, v in mapping.items():
+                if not k in SAMPLE_TYPES:
+                    msg = "keys should be one of the following: "
+                    msg += SAMPLE_TYPES.strip("[]") + "."
+                    raise ValueError(msg)
+                for c in v:
+                    if not self.is_valid_class_name(c):
+                        msg = "{} is not a valid class name".format(c)
+                        raise ValueError(msg)
+            self.mapping = mapping
+
     
     @property
     def id(self):
@@ -160,7 +195,7 @@ class DataContainer(object):
         -------
         is_valid : bool
         """
-        valid_classes = np.isin(class_name, self.get_classes().unique())
+        valid_classes = np.isin(class_name, self.classes.unique())
         is_valid = np.all(valid_classes)
         return is_valid
 
@@ -181,6 +216,8 @@ class DataContainer(object):
         elif axis == "samples":
             self.data_matrix.drop(index=remove, inplace=True)
             self.sample_information.drop(index=remove, inplace=True)
+        else:
+            raise ValueError("axis should be `columns` or `features`")
 
     def select(self, selection, axis):
         """
@@ -208,30 +245,31 @@ class DataContainer(object):
         else:
             raise ValueError("axis should be `columns` or `features`")
 
-        data_selection = DataContainer(dm_selection, fd_selection, si_selection)
+        data_selection = DataContainer(dm_selection, fd_selection,
+                                       si_selection)
         return data_selection
 
-
-    def get_classes(self):
-        return self.sample_information[_sample_class]
-
-    def get_id(self):
-        return self.sample_information["id"]
-
-    def get_batches(self):
-        try:
-            return self.sample_information["batch"]
-        except KeyError:
-            raise BatchInformationError("No batch information available.")
-
-    def get_run_order(self):
-        try:
-            return self.sample_information["order"]
-        except KeyError:
-            raise RunOrderError("No run order information available")
-
-    def get_n_features(self):
-        return self.data_matrix.shape[1]
+# to remove after doing some tests
+#    def get_classes(self):
+#        return self.sample_information[_sample_class]
+#
+#    def get_id(self):
+#        return self.sample_information["id"]
+#
+#    def get_batches(self):
+#        try:
+#            return self.sample_information["batch"]
+#        except KeyError:
+#            raise BatchInformationError("No batch information available.")
+#
+#    def get_run_order(self):
+#        try:
+#            return self.sample_information["order"]
+#        except KeyError:
+#            raise RunOrderError("No run order information available")
+#
+#    def get_n_features(self):
+#        return self.data_matrix.shape[1]
 
     def get_mean_cv(self, classes=None):
         if classes is None:
@@ -240,26 +278,27 @@ class DataContainer(object):
             classes = [classes]
         classes_mask = self.get_classes().isin(classes)
         return filter_functions.cv(self.data_matrix[classes_mask]).mean()
-
-    def get_mz(self):
-        return self.feature_definitions["mz"]
-
-    def get_rt(self):
-        return self.feature_definitions["rt"]
-
-    def cluster_mz(self, tolerance=0.0002):
-        """
-        Groups features with similar mz to reduce the number of calculated EICs.
-
-        Parameters
-        ----------
-        tolerance : float
-        """
-        self.feature_definitions["mz_cluster"] = utils.cluster(self.get_mz(),
-                                                               tolerance)
-
-    def get_mz_cluster(self):
-        return self.feature_definitions["mz_cluster"]
+# this should be moved to a MSDataContainer object
+#    def get_mz(self):
+#        return self.feature_definitions["mz"]
+#
+#    def get_rt(self):
+#        return self.feature_definitions["rt"]
+#
+#    def cluster_mz(self, tolerance=0.0002):
+#        """
+#        Groups features with similar mz to reduce the number of calculated
+#        EICs.
+#
+#        Parameters
+#        ----------
+#        tolerance : float
+#        """
+#        self.feature_definitions["mz_cluster"] = utils.cluster(self.get_mz(),
+#                                                               tolerance)
+#
+#    def get_mz_cluster(self):
+#        return self.feature_definitions["mz_cluster"]
 
 
 class Reporter(object):
@@ -369,3 +408,4 @@ def _validate_pipeline(t):
 # TODO: agregar una funcion de validacion luego de aplicar correccion (chequear
 # la igualdad de columnas y filas)
 # TODO: documentacion para Reporter, Processor y Pipeline.
+# TODO: crear subclasses para DataContainer de RMN y MS (agregar DI, LC)
