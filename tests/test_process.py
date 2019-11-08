@@ -86,5 +86,70 @@ def test_is_valid_class_name_with_invalid_names():
 
 
 def test_mapping_setter():
-    pass
+    mapping = {"sample": ["healthy", "disease"],
+               "blank": ["SV"]}
+    expected_mapping = {"sample": ["healthy", "disease"],
+                        "blank": ["SV"], "qc": None, "zero": None,
+                        "suitability": None}
+    data.mapping = mapping
+    assert data.mapping == expected_mapping
+
+def test_mapping_setter_bad_sample_type():
+    mapping = {"sample": ["healthy", "disease"],
+               "blank": ["SV"], "bad_sample_type": ["healthy"]}
+    with pytest.raises(ValueError):
+        data.mapping = mapping
+
+
+def test_mapping_setter_bad_sample_class():
+    mapping = {"sample": ["healthy", "disease"],
+               "blank": ["SV", "bad_sample_class"]}
+    with pytest.raises(ValueError):
+        data.mapping = mapping
+
+
+def test_remove_empty_feature_list():
+    features = data.data_matrix.columns.copy()
+    data.remove([], "features")
+    assert data.data_matrix.columns.equals(features)
+
+
+def test_remove_empty_sample_list():
+    samples = data.data_matrix.index.copy()
+    data.remove([], "samples")
+    assert data.data_matrix.index.equals(samples)
+
+
+def test_remove_correct_samples():
+    samples = data.data_matrix.index.copy()
+    rm_samples = ["sample 1", "sample 2"]
+    data.remove(rm_samples, "samples")
+    assert data.data_matrix.index.equals(samples.difference(rm_samples))
+
+
+def test_remove_correct_features():
+    features = data.data_matrix.columns.copy()
+    rm_features = ["FT01", "FT02"]
+    data.remove(rm_features, "features")
+    assert data.data_matrix.columns.equals(features.difference(rm_features))
+    
+
+def test_equal_feature_index():
+    assert data.feature_definitions.index.equals(data.data_matrix.columns)
+
+
+def test_equal_sample_index():
+    assert data.data_matrix.index.equals(data.sample_information.index)
+
+
+def test_remove_nonexistent_feature():
+    with pytest.raises(KeyError):
+        data.remove("bad_feature_name", "features")
+
+
+def test_remove_nonexistent_sample():
+    with pytest.raises(KeyError):
+        data.remove("bad_sample_name", "samples")
+
+
 # TODO: think about how to test data_path and get_available_samples

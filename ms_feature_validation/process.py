@@ -77,7 +77,7 @@ class DataContainer(object):
         self.feature_definitions = feature_definitions_df
         self.sample_information = sample_information_df
         self.data_path = data_path
-        self.set_mapping(mapping)
+        self.mapping = mapping
 
     
     @property
@@ -109,21 +109,25 @@ class DataContainer(object):
         return self._mapping
     
     @mapping.setter
-    def mapping(self, mapping):        
+    def mapping(self, mapping):
+        
+        
         if (mapping is None) or (not mapping):
-            self.mapping = {"qc": None, "blank": None, "sample": None,
-                            "suitability": None, "zero": None}
+            self._mapping = {"qc": None, "blank": None, "sample": None,
+                             "suitability": None, "zero": None}
         else:
-            for k, v in mapping.items():
-                if not k in SAMPLE_TYPES:
-                    msg = "keys should be one of the following: "
-                    msg += SAMPLE_TYPES.strip("[]") + "."
+            # check valid sample types
+            if not set(SAMPLE_TYPES).issuperset(set(mapping)):
+                msg = "keys should be one of the following: "
+                msg += str(SAMPLE_TYPES).strip("[]") + "."
+                raise ValueError(msg)
+            for k in SAMPLE_TYPES:
+                c = mapping.setdefault(k)
+                if (not self.is_valid_class_name(c)) and (c is not None):
+                    msg = "one of the following is an invalid class:"
+                    msg += str(c).strip("[]") + "."
                     raise ValueError(msg)
-                for c in v:
-                    if not self.is_valid_class_name(c):
-                        msg = "{} is not a valid class name".format(c)
-                        raise ValueError(msg)
-            self.mapping = mapping
+            self._mapping = mapping
 
     
     @property
@@ -219,35 +223,35 @@ class DataContainer(object):
         else:
             raise ValueError("axis should be `columns` or `features`")
 
-    def select(self, selection, axis):
-        """
-        Return a selection of the DataContainer.
-        
-        Parameters
-        ----------
-        selection : list[str]
-                    features/samples to select
-        axis : str
-               "features" or "samples".
-        Returns
-        -------
-        data_selection : DataContainer
-                         DataContainer with selection.
-        """
-        if axis == "samples":
-            dm_selection = self.data_matrix.loc[selection, :]
-            si_selection = self.sample_information.loc[selection, :]
-            fd_selection = self.feature_definitions
-        elif axis == "features":
-            dm_selection = self.data_matrix.loc[:, selection]
-            si_selection = self.sample_information
-            fd_selection = self.feature_definitions.loc[selection, :]
-        else:
-            raise ValueError("axis should be `columns` or `features`")
-
-        data_selection = DataContainer(dm_selection, fd_selection,
-                                       si_selection)
-        return data_selection
+#    def select(self, selection, axis):
+#        """
+#        Return a selection of the DataContainer.
+#        
+#        Parameters
+#        ----------
+#        selection : list[str]
+#                    features/samples to select
+#        axis : str
+#               "features" or "samples".
+#        Returns
+#        -------
+#        data_selection : DataContainer
+#                         DataContainer with selection.
+#        """
+#        if axis == "samples":
+#            dm_selection = self.data_matrix.loc[selection, :]
+#            si_selection = self.sample_information.loc[selection, :]
+#            fd_selection = self.feature_definitions
+#        elif axis == "features":
+#            dm_selection = self.data_matrix.loc[:, selection]
+#            si_selection = self.sample_information
+#            fd_selection = self.feature_definitions.loc[selection, :]
+#        else:
+#            raise ValueError("axis should be `columns` or `features`")
+#
+#        data_selection = DataContainer(dm_selection, fd_selection,
+#                                       si_selection)
+#        return data_selection
 
 # to remove after doing some tests
 #    def get_classes(self):
@@ -372,25 +376,31 @@ class Pipeline(Reporter):
         self._record_metrics(dc, "after")
 
 
-class BatchInformationError(KeyError):
+class BatchInformationError(Exception):
     """
     Error class when there is no batch information
     """
     pass
 
 
-class RunOrderError(KeyError):
+class RunOrderError(Exception):
     """
     Error class raised when there is no run order information
     """
     pass
 
 
-class InvalidClassName(ValueError):
+class InvalidClassName(Exception):
     """
     Error class raised when using invalid class names
     """
+    pass
 
+class EmptyDataContainerError(Exception):
+    """
+    Error class raised when remove leaves an empty DataContainer.
+    """
+    pass
 
 def _validate_pipeline(t):
     if not isinstance(t, (list, tuple)):
@@ -409,3 +419,5 @@ def _validate_pipeline(t):
 # la igualdad de columnas y filas)
 # TODO: documentacion para Reporter, Processor y Pipeline.
 # TODO: crear subclasses para DataContainer de RMN y MS (agregar DI, LC)
+# TODO: repensar la forma en que se miden metricas a lo largo de la aplicacion
+            # de los distintos filtros
