@@ -170,6 +170,7 @@ def variation(robust):
 def cspline_correction(x, y, xq, yq):
     sp = CubicSpline(x, y)
     y_coeff = sp(xq)
+    yq.sort_index(inplace=True)  #to order pandas Series before scaling
     y_corrected = (yq / y_coeff)
     y_corrected *= yq.mean() / y_corrected.mean()   # scaling to yq mean
     return y_corrected
@@ -194,7 +195,7 @@ def batch_correction(data, run_order, classes, corrector_classes,
     classes : pandas.Series
         class label for samples
     corrector_classes : str
-        label of corrector class
+        label of corrector class1+*-|
     process_classes: list[str]
         samples to correct
     mode: {'loess', 'splines'}
