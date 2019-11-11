@@ -195,7 +195,7 @@ def batch_correction(data, run_order, classes, corrector_classes,
     classes : pandas.Series
         class label for samples
     corrector_classes : str
-        label of corrector class1+*-|
+        label of corrector class
     process_classes: list[str]
         samples to correct
     mode: {'loess', 'splines'}
