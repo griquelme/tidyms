@@ -8,6 +8,34 @@ from scipy.interpolate import CubicSpline
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 
+def input_na(df, classes, mode):
+    """
+    Fill missing values.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+    mode : {'zero', 'mean', 'min'}
+    
+    Returns
+    -------
+    filled : pd.DataFrame    
+    """
+    if mode == "zero":
+        return df.fillna(0)
+    elif mode == "mean":
+        return (df.groupby(classes)
+                .apply(lambda x: x.fillna(x.mean()))
+                .droplevel(0))
+    elif mode == "min":
+        return (df.groupby(classes)
+                .apply(lambda x: x.fillna(x.min()))
+                .droplevel(0))
+    else:
+        msg = "mode should be `zero`, `mean` or `min`"
+        raise ValueError(msg)
+
+
 def replicate_averager(data, sample_id, classes, process_classes):
     include_samples = classes[classes.isin(process_classes)].index
     exclude_samples = classes[~classes.isin(process_classes)].index
@@ -37,9 +65,7 @@ def blank_correction(data, classes, corrector_classes, process_classes,
         Classes to be used as blanks.
     process_classes : list[str]
         Classes to be used as samples
-    mode : {'mean', 'max'}, optional
-    blank_relation: float.
-        minimum relation between samples and correction to
+    mode : {'mean', 'max', 'lod', 'loq'}
 
     Returns
     -------
@@ -53,18 +79,21 @@ def blank_correction(data, classes, corrector_classes, process_classes,
 
     .. math:: X_{corrected} = X_{uncorrected} - blank_relation * mode(X_{blank})
     """
-    corrector = {"max": lambda x: x.max(axis=0),
-                 "mean": lambda x: x.mean(axis=0)}
+    corrector = {"max": lambda x, relation: x.max(),
+                 "mean": lambda x, rel: x.mean(),
+                 "lod": lambda x, rel: x.mean() + 3 * x.std(),
+                 "loq": lambda x, rel: x.mean() + 10 * x.std(),}
     samples = data[classes.isin(process_classes)]
     blanks = data[classes.isin(corrector_classes)]
     correction = corrector[mode](blanks)
     corrected = samples - correction
-    corrected[(samples * blank_relation - correction) < 0] = 0
+    corrected[corrected < 0] = 0
     data[classes.isin(process_classes)] = corrected
     return data
 
 
-def prevalence_filter(data, classes, process_classes, lb, ub, intraclass):
+def prevalence_filter(data, classes, process_classes,
+                      lb, ub, intraclass, threshold):
     """
     Return columns with relative counts outside the [lb, ub] interval.
 
@@ -82,6 +111,8 @@ def prevalence_filter(data, classes, process_classes, lb, ub, intraclass):
     intraclass : bool
         if True computes prevalence for each class separately and return columns
         that are outside bounds in all of `include_classes`.
+    threshold : float
+        minimum value to define prevalence
     Returns
     -------
     outside_bounds_columns: pandas.Index
@@ -90,7 +121,7 @@ def prevalence_filter(data, classes, process_classes, lb, ub, intraclass):
     classes = classes[classes.isin(process_classes)]
     data = data.loc[classes.index, :]
     # pipeline for prevalence filter
-    is_outside_bounds = ((data > 0)
+    is_outside_bounds = ((data > threshold)
                          .pipe(grouper(classes, intraclass))
                          .sum()
                          .pipe(normalizer(classes, intraclass))
@@ -136,6 +167,20 @@ def variation_filter(data, classes, process_classes, lb, ub,
 
 
 def normalizer(classes, intraclass):
+    """
+    function to normalize data using samples count or classes count.
+    
+    Parameters
+    ----------
+    classes : pd.Series
+        Class label of samples
+    intraclass : bool
+        wether to normalize using total number of samples, or class count.
+    
+    Returns
+    -------
+    normalizer : function
+    """
     class_counts = classes.value_counts()
     n = class_counts.sum()
     return lambda x: x.divide(class_counts, axis=0) if intraclass else x / n
@@ -153,11 +198,41 @@ def bounds_checker(lb, ub, intraclass):
 
 
 def cv(df):
-    return df.std() / df.mean()
+    res = df.std() / df.mean()
+    res = res.fillna(0)
+    return res
 
 
 def iqr(df):
-    return (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
+    res = (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
+    res = res.fillna(0)
+    return res
+
+
+def d_ratio(qc_df, samples_df):
+    """
+    Computes the D-Ratio using sample variation and quality control
+    variaton [1].
+    
+    Parameters
+    ----------
+    qc_df : pd.DataFrame
+        DataFrame with quality control samples
+    samples_df : pd.DataFrame
+        DataFrame with biological samples
+    Returns
+    -------
+    dr : pd.Series:
+        D-Ratio for each feature
+    
+    
+    References
+    ----------
+    .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use of
+    system suitability and quality control samples in mass spectrometry assays
+    applied in untargeted clinical metabolomic studies", Metabolomics (2018)
+    14:72.    
+    """
 
 
 def variation(robust):

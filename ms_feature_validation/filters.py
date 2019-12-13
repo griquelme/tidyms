@@ -44,7 +44,7 @@ class DuplicateAverager(Processor):
     def func(self, dc):
         dc.data_matrix = filter_functions.replicate_averager(dc.data_matrix,
                                                              dc.get_id(),
-                                                             dc.get_classes(),
+                                                             dc.classes,
                                                              **self.params)
         dc.sample_information = (dc.sample_information
                                      .loc[dc.data_matrix.index, :])

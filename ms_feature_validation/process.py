@@ -171,8 +171,7 @@ class DataContainer(object):
     
     @order.setter
     def order(self, order):
-        self.sample_information[_sample_order] = order
-        
+        self.sample_information[_sample_order] = order    
 
     def get_available_samples(self):
         """
@@ -193,7 +192,7 @@ class DataContainer(object):
         
         Atributes
         ---------
-        class_name : str
+        class_name : str or Iterable[str]
         
         Returns
         -------
@@ -222,58 +221,32 @@ class DataContainer(object):
             self.sample_information.drop(index=remove, inplace=True)
         else:
             raise ValueError("axis should be `columns` or `features`")
-
-#    def select(self, selection, axis):
-#        """
-#        Return a selection of the DataContainer.
-#        
-#        Parameters
-#        ----------
-#        selection : list[str]
-#                    features/samples to select
-#        axis : str
-#               "features" or "samples".
-#        Returns
-#        -------
-#        data_selection : DataContainer
-#                         DataContainer with selection.
-#        """
-#        if axis == "samples":
-#            dm_selection = self.data_matrix.loc[selection, :]
-#            si_selection = self.sample_information.loc[selection, :]
-#            fd_selection = self.feature_definitions
-#        elif axis == "features":
-#            dm_selection = self.data_matrix.loc[:, selection]
-#            si_selection = self.sample_information
-#            fd_selection = self.feature_definitions.loc[selection, :]
-#        else:
-#            raise ValueError("axis should be `columns` or `features`")
-#
-#        data_selection = DataContainer(dm_selection, fd_selection,
-#                                       si_selection)
-#        return data_selection
-
-# to remove after doing some tests
-#    def get_classes(self):
-#        return self.sample_information[_sample_class]
-#
-#    def get_id(self):
-#        return self.sample_information["id"]
-#
-#    def get_batches(self):
-#        try:
-#            return self.sample_information["batch"]
-#        except KeyError:
-#            raise BatchInformationError("No batch information available.")
-#
-#    def get_run_order(self):
-#        try:
-#            return self.sample_information["order"]
-#        except KeyError:
-#            raise RunOrderError("No run order information available")
-#
-#    def get_n_features(self):
-#        return self.data_matrix.shape[1]
+    
+    def diagnose(self):
+        """
+        Check if DataContainer has information to perform several correction
+        types
+        
+        Returns
+        -------
+        rep : dict
+        """
+        
+        rep = dict()
+        rep["empty"] = self.data_matrix.empty
+        rep["missing"] = self.data_matrix.isna().any().any()
+        rep["qc"] = bool(self.mapping["qc"])
+        rep["blank"] = bool(self.mapping["blank"])
+        try:
+            rep["order"] = self.order
+        except RunOrderError:
+            rep["order"] = False
+        
+        try:
+            rep["batch"] = self.batch
+        except BatchInformationError:
+            rep["batch"] = False
+        return rep
 
     def get_mean_cv(self, classes=None):
         if classes is None:
@@ -282,6 +255,10 @@ class DataContainer(object):
             classes = [classes]
         classes_mask = self.get_classes().isin(classes)
         return filter_functions.cv(self.data_matrix[classes_mask]).mean()
+    
+#    def _remove_empty_features(self):
+#        remove_index = (self.data_matrix.sum() == 0).columns
+#        self.remove(remove_index, "features")
 # this should be moved to a MSDataContainer object
 #    def get_mz(self):
 #        return self.feature_definitions["mz"]

@@ -4,35 +4,18 @@ import pandas as pd
 import pytest
 
 
-# simulated examples used for tests
+# simulated data used for tests
 ft_names = ["FT{:02d}".format(x) for x in range(1, 7)]
 sample_names = ["sample{:2d}".format(x) for x in range(1, 9)]
 classes = ["SV", "SV", "disease", "disease", "healthy",
            "healthy", "healthy", "SV"]
 n_features = len(ft_names)
 n_samples = len(sample_names)
-#data_matrix = pd.DataFrame(data=np.random.normal(loc=10,
-#                                                 size=(len(sample_names),
-#                                                       len(ft_names))),
-#                           columns=ft_names,
-#                           index=sample_names)
-#sample_information = pd.DataFrame(data=classes,
-#                                  index=sample_names,
-#                                  columns=["class"])
 batch = [1, 1, 1, 1, 2, 2, 2, 2]
 order = [1, 2, 3, 4, 5, 6, 7, 8]
 dm_data = np.random.normal(loc=10, size=(n_samples, n_features))
 ft_data = np.random.normal(loc=200, scale=30, size=(n_features, 2))
-#sample_information["batch"] = batch
-#sample_information["order"] = order
-#feature_definitions = pd.DataFrame(data=np.random.normal(loc=200,
-#                                                         scale=30,
-#                                                         size=(len(ft_names), 2)),
-#                                   columns=["mz", "rt"],
-#                                   index=ft_names)
-#data = process.DataContainer(data_matrix,
-#                             feature_definitions,
-#                             sample_information)
+
 
 @pytest.fixture
 def data_container_example():   

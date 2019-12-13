@@ -1,4 +1,4 @@
-from ms_feature_validation import filter
+from ms_feature_validation import filter_functions
 import numpy as np
 import pandas as pd
 import pytest
