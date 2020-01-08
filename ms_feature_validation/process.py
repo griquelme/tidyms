@@ -78,6 +78,10 @@ class DataContainer(object):
         self.sample_information = sample_information_df
         self.data_path = data_path
         self.mapping = mapping
+        self._sample_mask = data_matrix_df.index
+        self._feature_mask = data_matrix_df.columns
+        self._original_data = data_matrix_df.copy()
+        self.metrics = Metrics(self)
 
     
     @property
@@ -98,8 +102,31 @@ class DataContainer(object):
             self._data_path = path
         else:
             self._data_path = None
-            
     
+    @property
+    def data_matrix(self):
+        return self._data_matrix.loc[self._sample_mask, self._feature_mask]
+    
+    @data_matrix.setter
+    def data_matrix(self, value):
+        self._data_matrix = value
+        
+    @property
+    def feature_definitions(self):
+        return self._feature_definitions.loc[self._feature_mask, :]
+    
+    @feature_definitions.setter
+    def feature_definitions(self, value):
+        self._feature_definitions = value
+    
+    @property
+    def sample_information(self):
+        return self._sample_information.loc[self._sample_mask, :]
+    
+    @sample_information.setter
+    def sample_information(self, value):
+        self._sample_information = value
+               
     @property
     def mapping(self):
         """
@@ -136,42 +163,42 @@ class DataContainer(object):
         return self.sample_information[_sample_id]
 
     @id.setter
-    def id(self, id):
-        self.sample_information[_sample_id] = id
+    def id(self, value):
+        self.sample_information[_sample_id] = value
         
     
     @property
     def classes(self):
         """pd.Series[str] : class of each sample."""
-        return self.sample_information[_sample_class]
+        return self._sample_information[_sample_class]
     
     @classes.setter
-    def classes(self, classes):
-        self.sample_information[_sample_class] = classes
+    def classes(self, value):
+        self._sample_information[_sample_class] = value
     
     @property
     def batch(self):
         """pd.Series[str] or pd.Series[int]. Batch identification"""
         try:
-            return self.sample_information[_sample_batch]
+            return self._sample_information[_sample_batch]
         except KeyError:
             raise BatchInformationError("No batch information available.")
             
     @batch.setter
-    def batch(self, batch):
-        self.sample_information[_sample_batch] = batch
+    def batch(self, value):
+        self._sample_information[_sample_batch] = value
     
     @property
     def order(self):
         """pd.Series[int] : order of analysis of samples"""
         try:
-            return self.sample_information[_sample_order]
+            return self._sample_information[_sample_order]
         except KeyError:
             raise RunOrderError("No run order information available")
     
     @order.setter
-    def order(self, order):
-        self.sample_information[_sample_order] = order    
+    def order(self, value):
+        self._sample_information[_sample_order] = value
 
     def get_available_samples(self):
         """
@@ -213,14 +240,43 @@ class DataContainer(object):
         axis : str
                "features", "samples". axis to remove from
         """
+        
+        if not self._is_valid(remove, axis):
+            msg = "Some samples/features aren't in the DataContainer"
+            raise ValueError(msg)
+        
         if axis == "features":
-            self.data_matrix.drop(columns=remove, inplace=True)
-            self.feature_definitions.drop(index=remove, inplace=True)
+            # self.data_matrix.drop(columns=remove, inplace=True)
+            # self.feature_definitions.drop(index=remove, inplace=True)
+            self._feature_mask = self._feature_mask.difference(remove)
         elif axis == "samples":
-            self.data_matrix.drop(index=remove, inplace=True)
-            self.sample_information.drop(index=remove, inplace=True)
+            # self.data_matrix.drop(index=remove, inplace=True)
+            # self.sample_information.drop(index=remove, inplace=True)
+            self._sample_mask = self._sample_mask.difference(remove)
         else:
-            raise ValueError("axis should be `columns` or `features`")
+            msg = "axis should be `columns` or `features`"
+            raise ValueError(msg)
+        
+    def _is_valid(self, index, axis):
+        """
+        Check if all samples/features are present in the DataContainer.
+        
+        Parameters
+        ----------
+        index: list[str]
+            Features / Samples name to check.
+        axis: {"sample", "feature"}
+            axis to check.
+        """
+        ind = pd.Index(index)
+        if axis == "features":
+            return ind.isin(self.data_matrix.columns).all()
+        elif axis == "samples":
+            return ind.isin(self.data_matrix.index).all()
+        else:
+            msg = "axis must be `features` or `samples`."
+            raise ValueError(msg)
+            
     
     def diagnose(self):
         """
@@ -256,6 +312,14 @@ class DataContainer(object):
         classes_mask = self.get_classes().isin(classes)
         return filter_functions.cv(self.data_matrix[classes_mask]).mean()
     
+    def reset(self):
+        """
+        Reset applied filters/corrections.
+        """
+        self._sample_mask = self._original_data.index
+        self._feature_mask = self._original_data.columns
+        self.data_matrix = self._original_data
+    
 #    def _remove_empty_features(self):
 #        remove_index = (self.data_matrix.sum() == 0).columns
 #        self.remove(remove_index, "features")
@@ -280,6 +344,113 @@ class DataContainer(object):
 #
 #    def get_mz_cluster(self):
 #        return self.feature_definitions["mz_cluster"]
+
+class Metrics:
+    """
+    Functions to get metrics from DataContainer
+    """
+    
+    def __init__(self, data):
+        self.data = data
+    
+    def cv(self, mode="intraclass", robust=False):
+        """
+        Coefficient of variation.
+        
+        Parameters
+        ----------
+        mode: {"intraclass", "global"}
+            if "intraclass", computes the coefficient of variation for each
+            class. if "global", computes the mean coefficient of variation
+            for all sample classes.
+        robust: bool
+            If True, computes the relative MAD. Else, computes the Coefficient
+            of variation.
+        """
+        if robust:
+            cv_func = utils.rmad
+        else:
+            cv_func = utils.cv
+        
+        if mode == "intraclass":
+            result = (self.data.data_matrix
+                      .groupby(self.data.classes)
+                      .apply(cv_func))
+        elif mode == "global":
+            sample_class = self.data.mapping[_sample_class]
+            is_sample_class = self.data.classes.isin(sample_class)
+            result = cv_func(self.data.data_matrix[is_sample_class])
+        else:
+            msg = "`mode` must be intraclass or global"
+            raise ValueError(msg)
+        return result
+    
+    def dratio(self, robust=False):
+        """
+        Computes the D-Ratio using sample variation and quality control
+        variaton [1].
+        
+        Parameters
+        ----------
+        qc_df : pd.DataFrame
+            DataFrame with quality control samples
+        samples_df : pd.DataFrame
+            DataFrame with biological samples
+        Returns
+        -------
+        dr : pd.Series:
+            D-Ratio for each feature
+        References
+        ----------
+        .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use
+        of system suitability and quality control samples in mass spectrometry
+        assays applied in untargeted clinical metabolomic studies",
+        Metabolomics (2018) 14:72.
+        """
+        if robust:
+            cv_func = utils.rmad
+        else:
+            cv_func = utils.cv
+            
+        sample_class = self.data.mapping["sample"]
+        is_sample_class = self.data.classes.isin(sample_class)
+        qc_class = sample_class = self.data.mapping["qc"]
+        is_qc_class = self.data.classes.isin(qc_class)
+        sample_variation = cv_func(self.data.data_matrix[is_sample_class],
+                                   robust = robust)
+        qc_variation = cv_func(self.data.data_matrix[is_qc_class],
+                               robust=robust)
+        dr = qc_variation / sample_variation
+        dr = dr.fillna(np.inf)
+        return dr
+    
+    def detection_rate(self, mode="intraclass", threshold=0):
+        """
+        Computes the fraction of samples with intensity above a threshold
+        
+        Parameters
+        ----------
+        mode: {"intraclass", "global"}
+            if intraclass, computes the detection rate for each class, if
+            global computes the mean detection rate
+        threshold: float
+            Minimum value to consider a feature detected
+        """
+        dr_func = lambda x: x[x > threshold].count() / x.count()
+        if mode == "intraclass":
+            results = (self.data.data_matrix
+                       .groupby(self.data.classes)
+                       .apply(dr_func))
+        elif mode == "global":
+            sample_class = self.data.mapping["sample"]
+            is_sample_class = self.data.classes.isin(sample_class)
+            results = self.data.data_matrix[is_sample_class].apply()
+        else:
+            msg = "`mode` must be intraclass or global"
+            raise ValueError(msg)
+        return results
+    
+    # TODO: implement PCA function that return scores and loadings
 
 
 class Reporter(object):
@@ -398,3 +569,5 @@ def _validate_pipeline(t):
 # TODO: crear subclasses para DataContainer de RMN y MS (agregar DI, LC)
 # TODO: repensar la forma en que se miden metricas a lo largo de la aplicacion
             # de los distintos filtros
+# TODO: set sample type
+# TODO: generic Filter Object

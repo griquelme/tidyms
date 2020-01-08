@@ -58,6 +58,7 @@ def test_class_setter(data_container_example):
 def test_batch_getter(data_container_example):
     data = data_container_example
     batch_series = pd.Series(data=batch, index=sample_names)
+    print(data.batch)
     assert data.batch.equals(batch_series)
 
 
@@ -165,14 +166,14 @@ def test_equal_sample_index(data_container_example):
 
 def test_remove_nonexistent_feature(data_container_example):
     data = data_container_example
-    with pytest.raises(KeyError):
-        data.remove("bad_feature_name", "features")
+    with pytest.raises(ValueError):
+        data.remove(["bad_feature_name"], "features")
 
 
 def test_remove_nonexistent_sample(data_container_example):
     data = data_container_example
-    with pytest.raises(KeyError):
-        data.remove("bad_sample_name", "samples")
+    with pytest.raises(ValueError):
+        data.remove(["bad_sample_name"], "samples")
 
 
 # TODO: think about how to test data_path and get_available_samples

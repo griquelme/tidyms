@@ -238,3 +238,46 @@ def get_function_parameters(only=None, exclude=None, ignore='self'):
     exclude.append(ignore)
     return dict([(attrname, defaults[attrname])
         for attrname in only if attrname not in exclude])
+
+    
+def cv(df):
+    res = df.std() / df.mean()
+    res = res.fillna(0)
+    return res
+
+
+def iqr(df):
+    res = (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
+    res = res.fillna(0)
+    return res
+
+def rmad(df):
+    res = 1.4826 * df.mad() / df.mean()
+    res = res.fillna(0)
+    return res
+
+
+def d_ratio(qc_df, samples_df):
+    """
+    Computes the D-Ratio using sample variation and quality control
+    variaton [1].
+    
+    Parameters
+    ----------
+    qc_df : pd.DataFrame
+        DataFrame with quality control samples
+    samples_df : pd.DataFrame
+        DataFrame with biological samples
+    Returns
+    -------
+    dr : pd.Series:
+        D-Ratio for each feature
+    
+    
+    References
+    ----------
+    .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use of
+    system suitability and quality control samples in mass spectrometry assays
+    applied in untargeted clinical metabolomic studies", Metabolomics (2018)
+    14:72.    
+    """
