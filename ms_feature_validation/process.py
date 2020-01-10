@@ -11,6 +11,10 @@ from . import utils
 from . import validation
 import numpy as np
 import pandas as pd
+from sklearn.decomposition import PCA
+from bokeh.plotting import figure
+from bokeh.models import ColumnDataSource
+from bokeh.transform import factor_cmap
 
 
 # variables used to name sample information columns
@@ -294,24 +298,16 @@ class DataContainer(object):
         rep["qc"] = bool(self.mapping["qc"])
         rep["blank"] = bool(self.mapping["blank"])
         try:
-            rep["order"] = self.order
+            rep["order"] = bool(self.order)
         except RunOrderError:
             rep["order"] = False
         
         try:
-            rep["batch"] = self.batch
+            rep["batch"] = bool(self.batch)
         except BatchInformationError:
             rep["batch"] = False
         return rep
-
-    def get_mean_cv(self, classes=None):
-        if classes is None:
-            return filter_functions.cv(self.data_matrix).mean()
-        elif isinstance(classes, str):
-            classes = [classes]
-        classes_mask = self.get_classes().isin(classes)
-        return filter_functions.cv(self.data_matrix[classes_mask]).mean()
-    
+   
     def reset(self):
         """
         Reset applied filters/corrections.
@@ -320,30 +316,6 @@ class DataContainer(object):
         self._feature_mask = self._original_data.columns
         self.data_matrix = self._original_data
     
-#    def _remove_empty_features(self):
-#        remove_index = (self.data_matrix.sum() == 0).columns
-#        self.remove(remove_index, "features")
-# this should be moved to a MSDataContainer object
-#    def get_mz(self):
-#        return self.feature_definitions["mz"]
-#
-#    def get_rt(self):
-#        return self.feature_definitions["rt"]
-#
-#    def cluster_mz(self, tolerance=0.0002):
-#        """
-#        Groups features with similar mz to reduce the number of calculated
-#        EICs.
-#
-#        Parameters
-#        ----------
-#        tolerance : float
-#        """
-#        self.feature_definitions["mz_cluster"] = utils.cluster(self.get_mz(),
-#                                                               tolerance)
-#
-#    def get_mz_cluster(self):
-#        return self.feature_definitions["mz_cluster"]
 
 class Metrics:
     """
@@ -450,7 +422,81 @@ class Metrics:
             raise ValueError(msg)
         return results
     
-    # TODO: implement PCA function that return scores and loadings
+    def pca(self, n_components=2):
+        """
+        Computes PCA score, loadings and variance of each component.
+        
+        Parameters
+        ----------
+        n_components: int
+            Number of Principal components to compute.
+        
+        Returns
+        -------
+        scores: np.array
+        loadings: np.array
+        variance: np.array
+            Explained variance for each component.
+        """
+        pca = PCA(n_components=n_components)
+        scores = pca.fit_transform(self.data.data_matrix)
+        loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
+        variance = pca.explained_variance_
+        PC_str = ["PC" + x for x in range(1, n_components + 1)]
+        scores = pd.DataFrame(data=scores,
+                              index = self.data.data_matrix.index,
+                              columns=PC_str)
+        loadings = pd.DataFrame(data=loadings,
+                              index = self.data.data_matrix.columns,
+                              columns=PC_str)
+        variance = pd.Series(data=variance, index=PC_str)
+        return scores, loadings, variance
+
+
+class Plotter:
+    """
+    Functions to plot data from a DataContainer.
+    The methods return Bokeh figure objects
+    """
+    def __init__(self, data):
+        self._data_container = data
+        self.data = None
+        self.chromographic_data = None
+        self.ms_data = None
+    
+    def pca_scores(self, x=1, y=2, fig=None, **kwargs):
+        """
+        plots PCA scores
+        
+        Parameters
+        ----------
+        x: int
+            Principal component number to plot along X axis.
+        y: int
+            Principal component number to plot along Y axis.
+        figure: bokeh.plotting.figure, optional
+            Figure used to plot. If None returns a new figure
+        kwargs: optional arguments to pass into figure
+        
+        Returns
+        -------
+        If no figure is specified returns a new figure. Else returns None.
+        """
+        return_fig = False
+        if fig is None:
+            return_fig = True
+            fig = figure(**kwargs)
+        x_name = "PC" + str(x)
+        y_name = "PC" + str(y)
+        n = max(x, y)
+        scores, _, _ = self._data_container.metrics.pca(n_components=n)
+        scores = ColumnDataSource(scores)
+        scores.add(self._data_container.classes)
+        classes = self._data_container.classes.unique()
+        figure.scatter(data=scores, x=x_name, y=y_name,
+                       color=factor_cmap('class', 'Category10_3', classes))
+        if return_fig:
+            return figure    
 
 
 class Reporter(object):
@@ -561,13 +607,9 @@ def _validate_pipeline(t):
 
 # TODO: posible acortamiento de nombres: data_matrix: data,
 # TODO:  sample_information: sample, feature_definitions: features.
-# TODO: documentar todos los metodos
-# TODO: agregar tests para el modulo
 # TODO: agregar una funcion de validacion luego de aplicar correccion (chequear
 # la igualdad de columnas y filas)
 # TODO: documentacion para Reporter, Processor y Pipeline.
 # TODO: crear subclasses para DataContainer de RMN y MS (agregar DI, LC)
-# TODO: repensar la forma en que se miden metricas a lo largo de la aplicacion
-            # de los distintos filtros
-# TODO: set sample type
 # TODO: generic Filter Object
+# TODO: implement a PCA function to avoid importing sklearn
