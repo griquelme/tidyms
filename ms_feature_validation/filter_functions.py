@@ -6,15 +6,18 @@ Functions to correct and filter data matrix from LC-MS Metabolomics data.
 import pandas as pd
 from scipy.interpolate import CubicSpline
 from statsmodels.nonparametric.smoothers_lowess import lowess
+from typing import List, Optional, Callable, Union
+PandasData = Union[pd.Series, pd.DataFrame]
 
 
-def input_na(df, classes, mode):
+def input_na(df: pd.DataFrame, classes: pd.Series, mode: str) -> pd.DataFrame:
     """
     Fill missing values.
     
     Parameters
     ----------
     df : pd.DataFrame
+    classes: ps.Series
     mode : {'zero', 'mean', 'min'}
     
     Returns
@@ -36,7 +39,22 @@ def input_na(df, classes, mode):
         raise ValueError(msg)
 
 
-def replicate_averager(data, sample_id, classes, process_classes):
+def replicate_averager(data: pd.DataFrame, sample_id: pd.Series,
+                       classes: pd.Series,
+                       process_classes: List[str]) -> pd.DataFrame:
+    """
+    Group samples by id and computes the average.
+
+    Parameters
+    ----------
+    data: pd.DataFrame
+    sample_id: pd.Series
+    classes: pd.Series
+    process_classes: list[str]
+    Returns
+    -------
+    pd.DataFrame
+    """
     include_samples = classes[classes.isin(process_classes)].index
     exclude_samples = classes[~classes.isin(process_classes)].index
     mapper = sample_id[include_samples].drop_duplicates()
@@ -50,22 +68,25 @@ def replicate_averager(data, sample_id, classes, process_classes):
     return result
 
 
-def blank_correction(data, classes, corrector_classes, process_classes,
-                     mode, blank_relation):
+def blank_correction(df: pd.DataFrame, classes: pd.Series,
+                     corrector_classes: List[str], process_classes: List[str],
+                     mode: str = "mean",
+                     func: Optional[Callable] = None) -> pd.DataFrame:
     """
     Correct samples using blanks.
 
     Parameters
     ----------
-    data : pandas.DataFrame
+    df: pandas.DataFrame
         Data to correct.
-    classes : pandas.Series
+    classes: pandas.Series
         Samples class labels.
-    corrector_classes : list[str]
+    corrector_classes: list[str]
         Classes to be used as blanks.
-    process_classes : list[str]
+    process_classes: list[str]
         Classes to be used as samples
-    mode : {'mean', 'max', 'lod', 'loq'}
+    mode: {'mean', 'max', 'lod', 'loq'}
+    func: function
 
     Returns
     -------
@@ -82,14 +103,16 @@ def blank_correction(data, classes, corrector_classes, process_classes,
     corrector = {"max": lambda x, relation: x.max(),
                  "mean": lambda x, rel: x.mean(),
                  "lod": lambda x, rel: x.mean() + 3 * x.std(),
-                 "loq": lambda x, rel: x.mean() + 10 * x.std(),}
-    samples = data[classes.isin(process_classes)]
-    blanks = data[classes.isin(corrector_classes)]
+                 "loq": lambda x, rel: x.mean() + 10 * x.std()}
+    if func is not None:
+        corrector = func
+    samples = df[classes.isin(process_classes)]
+    blanks = df[classes.isin(corrector_classes)]
     correction = corrector[mode](blanks)
     corrected = samples - correction
     corrected[corrected < 0] = 0
-    data[classes.isin(process_classes)] = corrected
-    return data
+    df[classes.isin(process_classes)] = corrected
+    return df
 
 
 def prevalence_filter(data, classes, process_classes,
@@ -209,32 +232,6 @@ def iqr(df):
     return res
 
 
-def d_ratio(qc_df, samples_df):
-    """
-    Computes the D-Ratio using sample variation and quality control
-    variaton [1].
-    
-    Parameters
-    ----------
-    qc_df : pd.DataFrame
-        DataFrame with quality control samples
-    samples_df : pd.DataFrame
-        DataFrame with biological samples
-    Returns
-    -------
-    dr : pd.Series:
-        D-Ratio for each feature
-    
-    
-    References
-    ----------
-    .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use of
-    system suitability and quality control samples in mass spectrometry assays
-    applied in untargeted clinical metabolomic studies", Metabolomics (2018)
-    14:72.    
-    """
-
-
 def variation(robust):
     if robust:
         return iqr
@@ -256,14 +253,15 @@ def loess_correction(x, y, xq, yq, **kwargs):
     return y_corrected
 
 
-def batch_correction(data, run_order, classes, corrector_classes,
-                     process_classes, mode, **kwargs):
+def batch_correction(df: pd.DataFrame, run_order: pd.Series, classes: pd.Series,
+                     corrector_classes: List[str], process_classes: List[str],
+                     mode: str, **kwargs) -> pd.DataFrame:
     """
     Correct instrument response drift using LOESS regression [1].
 
     Parameters
     ----------
-    data : pandas.DataFrame
+    df : pandas.DataFrame
     run_order : pandas.Series
         run order of samples
     classes : pandas.Series
@@ -292,29 +290,32 @@ def batch_correction(data, run_order, classes, corrector_classes,
     corrector_run = run_order[corrector_class_mask]
     sample_classes_mask = classes.isin(process_classes)
     sample_run = run_order[sample_classes_mask]
-    corrected = data.apply(lambda x: corrector(corrector_run,
-                                               x[corrector_class_mask],
-                                               sample_run,
-                                               x[sample_classes_mask],
-                                               **kwargs))
+    corrected = df.apply(lambda x: corrector(corrector_run,
+                                             x[corrector_class_mask],
+                                             sample_run,
+                                             x[sample_classes_mask],
+                                             **kwargs))
     return corrected
 
 
-def interbatch_correction(data, batch, run_order, classes, corrector_classes,
-                          process_classes, mode, **kwargs):
+def interbatch_correction(df: pd.DataFrame, batch: pd.Series,
+                          run_order: pd.Series, classes: pd.Series,
+                          corrector_classes: List[str],
+                          process_classes: List[str],
+                          mode: str, **kwargs) -> pd.DataFrame:
     """
     Apply batch correction to several batches. Interbatch correction is achieved
     using a scaling factor obtained from the mean values in corrector samples.
 
     Parameters
     ----------
-    data : pd.DataFrame
+    df : pd.DataFrame
     batch : pd.Series
         batch number for a given sample
     run_order : pd.Series
     classes : pd.Series
         Class labels for samples
-    corrector_classes : str
+    corrector_classes : list[str]
         class used to correct samples
     process_classes : list[str]
         class labels to correct.
@@ -326,16 +327,16 @@ def interbatch_correction(data, batch, run_order, classes, corrector_classes,
     corrected: pandas.DataFrame
     """
     corrector_samples_mask = classes.isin([corrector_classes])
-    scaling_factor = data[corrector_samples_mask].mean()
+    scaling_factor = df[corrector_samples_mask].mean()
 
-    def corrector_helper(x):
+    def corrector_helper(x: pd.DataFrame):
         corrected_batch = batch_correction(x, run_order.loc[x.index], classes,
                                            corrector_classes, process_classes,
                                            mode, **kwargs)
         corrected_batch = corrected_batch.divide(corrected_batch.mean())
         return corrected_batch
 
-    corrected = (data.groupby(batch)
+    corrected = (df.groupby(batch)
                  .apply(corrector_helper)
                  * scaling_factor)
     corrected.index = corrected.index.droplevel("batch")
@@ -345,3 +346,24 @@ def interbatch_correction(data, batch, run_order, classes, corrector_classes,
 class EmptyDataFrameException(ValueError):
     """Empty data error"""
     pass
+
+
+def get_outside_bounds_index(data: PandasData, lb: float,
+                             ub: float) -> pd.Index:
+    """
+    return index of columns with values outside bounds.
+    Parameters
+    ----------
+    data: pd
+    lb: float
+        lower bound
+    ub: float
+        upper bound
+    Returns
+    -------
+
+    """
+    result = ((data < lb) | (data > ub))
+    if isinstance(data, pd.DataFrame):
+        result = result.all()
+    return result.index

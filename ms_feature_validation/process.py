@@ -6,7 +6,6 @@ Complete with examples.
 """
 
 
-from . import filter_functions
 from . import utils
 from . import validation
 import numpy as np
@@ -24,6 +23,7 @@ _sample_id = "id"
 _sample_batch = "batch"
 _sample_order = "order"
 SAMPLE_TYPES = ["sample", "qc", "blank", "suitability", "zero"]
+
 
 class DataContainer(object):
     """
@@ -47,8 +47,11 @@ class DataContainer(object):
                           are required columns.
     data_path : str.
         Path to raw data directory.
-    mapping : dict.
-        maps a sample types to sample classes.
+    mapping : dict[str, list[str]].
+        maps a sample types to sample classes. valid samples types are `qc`,
+        `blank`, `sample` or`suitability`. values are list of sample classes.
+        Mapping is used by Filter objects to select which samples are going
+        to be used to perform corrections.
     """
 
     def __init__(self, data_matrix_df, feature_definitions_df,
@@ -85,9 +88,8 @@ class DataContainer(object):
         self._sample_mask = data_matrix_df.index
         self._feature_mask = data_matrix_df.columns
         self._original_data = data_matrix_df.copy()
-        self.metrics = Metrics(self)
+        self.metrics = _Metrics(self)
 
-    
     @property
     def data_path(self):
         """str : directory where raw data is stored."""
@@ -141,26 +143,12 @@ class DataContainer(object):
     
     @mapping.setter
     def mapping(self, mapping):
-        
-        
-        if (mapping is None) or (not mapping):
-            self._mapping = {"qc": None, "blank": None, "sample": None,
-                             "suitability": None, "zero": None}
-        else:
-            # check valid sample types
-            if not set(SAMPLE_TYPES).issuperset(set(mapping)):
-                msg = "keys should be one of the following: "
-                msg += str(SAMPLE_TYPES).strip("[]") + "."
-                raise ValueError(msg)
-            for k in SAMPLE_TYPES:
-                c = mapping.setdefault(k)
-                if (not self.is_valid_class_name(c)) and (c is not None):
-                    msg = "one of the following is an invalid class:"
-                    msg += str(c).strip("[]") + "."
-                    raise ValueError(msg)
-            self._mapping = mapping
+        self._mapping = _make_empty_mapping()
+        if mapping is not None:
+            valid_samples = self.classes.unique()
+            _validate_mapping(mapping, valid_samples)
+            self._mapping.update(mapping)
 
-    
     @property
     def id(self):
         """pd.Series[str] : name id of each sample."""
@@ -170,7 +158,6 @@ class DataContainer(object):
     def id(self, value):
         self.sample_information[_sample_id] = value
         
-    
     @property
     def classes(self):
         """pd.Series[str] : class of each sample."""
@@ -281,7 +268,6 @@ class DataContainer(object):
             msg = "axis must be `features` or `samples`."
             raise ValueError(msg)
             
-    
     def diagnose(self):
         """
         Check if DataContainer has information to perform several correction
@@ -298,12 +284,12 @@ class DataContainer(object):
         rep["qc"] = bool(self.mapping["qc"])
         rep["blank"] = bool(self.mapping["blank"])
         try:
-            rep["order"] = bool(self.order)
+            rep["order"] = self.order.any()
         except RunOrderError:
             rep["order"] = False
         
         try:
-            rep["batch"] = bool(self.batch)
+            rep["batch"] = self.batch.any()
         except BatchInformationError:
             rep["batch"] = False
         return rep
@@ -317,13 +303,13 @@ class DataContainer(object):
         self.data_matrix = self._original_data
     
 
-class Metrics:
+class _Metrics:
     """
-    Functions to get metrics from DataContainer
+    Functions to get metrics from a DataContainer
     """
     
     def __init__(self, data):
-        self.data = data
+        self.__data = data
     
     def cv(self, mode="intraclass", robust=False):
         """
@@ -345,13 +331,13 @@ class Metrics:
             cv_func = utils.cv
         
         if mode == "intraclass":
-            result = (self.data.data_matrix
-                      .groupby(self.data.classes)
+            result = (self.__data.data_matrix
+                      .groupby(self.__data.classes)
                       .apply(cv_func))
         elif mode == "global":
-            sample_class = self.data.mapping[_sample_class]
-            is_sample_class = self.data.classes.isin(sample_class)
-            result = cv_func(self.data.data_matrix[is_sample_class])
+            sample_class = self.__data.mapping[_sample_class]
+            is_sample_class = self.__data.classes.isin(sample_class)
+            result = cv_func(self.__data.data_matrix[is_sample_class])
         else:
             msg = "`mode` must be intraclass or global"
             raise ValueError(msg)
@@ -364,14 +350,15 @@ class Metrics:
         
         Parameters
         ----------
-        qc_df : pd.DataFrame
-            DataFrame with quality control samples
-        samples_df : pd.DataFrame
-            DataFrame with biological samples
+        robust: bool
+            If True, uses the relative MAD to compute the D-ratio. Else, uses t
+            he Coefficient of variation.
+
         Returns
         -------
         dr : pd.Series:
             D-Ratio for each feature
+
         References
         ----------
         .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use
@@ -384,14 +371,12 @@ class Metrics:
         else:
             cv_func = utils.cv
             
-        sample_class = self.data.mapping["sample"]
-        is_sample_class = self.data.classes.isin(sample_class)
-        qc_class = sample_class = self.data.mapping["qc"]
-        is_qc_class = self.data.classes.isin(qc_class)
-        sample_variation = cv_func(self.data.data_matrix[is_sample_class],
-                                   robust = robust)
-        qc_variation = cv_func(self.data.data_matrix[is_qc_class],
-                               robust=robust)
+        sample_class = self.__data.mapping["sample"]
+        is_sample_class = self.__data.classes.isin(sample_class)
+        qc_class = self.__data.mapping["qc"]
+        is_qc_class = self.__data.classes.isin(qc_class)
+        sample_variation = cv_func(self.__data.data_matrix[is_sample_class])
+        qc_variation = cv_func(self.__data.data_matrix[is_qc_class])
         dr = qc_variation / sample_variation
         dr = dr.fillna(np.inf)
         return dr
@@ -408,15 +393,18 @@ class Metrics:
         threshold: float
             Minimum value to consider a feature detected
         """
-        dr_func = lambda x: x[x > threshold].count() / x.count()
+        def dr_func(x):
+            """Auxiliar function to compute the detection rate."""
+            return x[x > threshold].count() / x.count()
+
         if mode == "intraclass":
-            results = (self.data.data_matrix
-                       .groupby(self.data.classes)
+            results = (self.__data.data_matrix
+                       .groupby(self.__data.classes)
                        .apply(dr_func))
         elif mode == "global":
-            sample_class = self.data.mapping["sample"]
-            is_sample_class = self.data.classes.isin(sample_class)
-            results = self.data.data_matrix[is_sample_class].apply()
+            sample_class = self.__data.mapping["sample"]
+            is_sample_class = self.__data.classes.isin(sample_class)
+            results = self.__data.data_matrix[is_sample_class].apply()
         else:
             msg = "`mode` must be intraclass or global"
             raise ValueError(msg)
@@ -439,24 +427,24 @@ class Metrics:
             Explained variance for each component.
         """
         pca = PCA(n_components=n_components)
-        scores = pca.fit_transform(self.data.data_matrix)
+        scores = pca.fit_transform(self.__data.data_matrix)
         loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
         variance = pca.explained_variance_
-        PC_str = ["PC" + x for x in range(1, n_components + 1)]
+        pc_str = ["PC" + str(x) for x in range(1, n_components + 1)]
         scores = pd.DataFrame(data=scores,
-                              index = self.data.data_matrix.index,
-                              columns=PC_str)
+                              index=self.__data.data_matrix.index,
+                              columns=pc_str)
         loadings = pd.DataFrame(data=loadings,
-                              index = self.data.data_matrix.columns,
-                              columns=PC_str)
-        variance = pd.Series(data=variance, index=PC_str)
+                                index=self.__data.data_matrix.columns,
+                                columns=pc_str)
+        variance = pd.Series(data=variance, index=pc_str)
         return scores, loadings, variance
 
 
-class Plotter:
+class _Plotter:
     """
     Functions to plot data from a DataContainer.
-    The methods return Bokeh figure objects
+    The methods return a bokeh figure object.
     """
     def __init__(self, data):
         self._data_container = data
@@ -474,7 +462,7 @@ class Plotter:
             Principal component number to plot along X axis.
         y: int
             Principal component number to plot along Y axis.
-        figure: bokeh.plotting.figure, optional
+        fig: bokeh.plotting.figure, optional
             Figure used to plot. If None returns a new figure
         kwargs: optional arguments to pass into figure
         
@@ -493,81 +481,10 @@ class Plotter:
         scores = ColumnDataSource(scores)
         scores.add(self._data_container.classes)
         classes = self._data_container.classes.unique()
-        figure.scatter(data=scores, x=x_name, y=y_name,
-                       color=factor_cmap('class', 'Category10_3', classes))
+        fig.scatter(data=scores, x=x_name, y=y_name,
+                    color=factor_cmap('class', 'Category10_3', classes))
         if return_fig:
-            return figure    
-
-
-class Reporter(object):
-    """
-    Abstract class with methods to report metrics.
-    """
-    def __init__(self):
-        self.metrics = dict()
-        self.params = dict()
-        self.name = None
-
-    def _record_metrics(self, dc, name):
-        metrics = dict()
-        metrics["cv"] = dc.get_mean_cv(self.params.get("process_classes"))
-        metrics["features"] = dc.get_n_features()
-        self.metrics[name] = metrics
-
-    def report(self):
-        removed_features = (self.metrics["before"]["features"]
-                            - self.metrics["after"]["features"])
-        cv_reduction = (self.metrics["before"]["cv"]
-                        - self.metrics["after"]["cv"]) * 100
-        msg = "Applying {}: {} features removed. Mean CV reduced by {:.2f} %."
-        print(msg.format(self.name, removed_features, cv_reduction))
-
-
-class Processor(Reporter):
-    """
-    Abstract class to process DataContainer Objects.
-    """
-    def __init__(self, mode=None, axis=None, verbose=None):
-        super(Processor, self).__init__()
-        self.mode = mode
-        self.axis = axis
-        self.verbose = verbose
-        self.remove = list()
-
-    def func(self, func):
-        raise NotImplementedError
-
-    def process(self, dc):
-        self._record_metrics(dc, "before")
-        if self.mode == "filter":
-            self.remove = self.func(dc)
-            dc.remove(self.remove, self.axis)
-        elif self.mode == "add":
-            self.func(dc)
-        elif self.mode == "correction":
-            self.func(dc)
-        self._record_metrics(dc, "after")
-        if self.verbose:
-            self.report()
-
-
-class Pipeline(Reporter):
-    """
-    Applies a series of Filters and Correctors to a DataContainer
-    """
-    def __init__(self, processors, verbose=False):
-        _validate_pipeline(processors)
-        super(Pipeline, self).__init__()
-        self.processors = list(processors)
-        self.verbose = verbose
-
-    def process(self, dc):
-        self._record_metrics(dc, "before")
-        for x in self.processors:
-            if self.verbose:
-                x.verbose = True
-            x.process(dc)
-        self._record_metrics(dc, "after")
+            return fig
 
 
 class BatchInformationError(Exception):
@@ -590,26 +507,35 @@ class InvalidClassName(Exception):
     """
     pass
 
+
 class EmptyDataContainerError(Exception):
     """
     Error class raised when remove leaves an empty DataContainer.
     """
     pass
 
-def _validate_pipeline(t):
-    if not isinstance(t, (list, tuple)):
-        t = [t]
-    for filt in t:
-        if not isinstance(filt, (Processor, Pipeline)):
-            msg = ("elements of the Pipeline must be",
-                   "instances of Filter, DataCorrector or another Pipeline.")
-            raise TypeError(msg)
+
+def _validate_mapping(mapping, valid_samples):
+    for sample_type, classes in mapping.items():
+        if sample_type not in SAMPLE_TYPES:
+            msg = "{} is not a valid sample type".format(sample_type)
+            raise ValueError(msg)
+        else:
+            for c in classes:
+                if c not in valid_samples:
+                    msg = "{} is not a valid sample class".format(c)
+                    raise ValueError(msg)
+
+
+def _make_empty_mapping():
+    empty_mapping = {x: None for x in SAMPLE_TYPES}
+    return empty_mapping
+
 
 # TODO: posible acortamiento de nombres: data_matrix: data,
 # TODO:  sample_information: sample, feature_definitions: features.
 # TODO: agregar una funcion de validacion luego de aplicar correccion (chequear
 # la igualdad de columnas y filas)
-# TODO: documentacion para Reporter, Processor y Pipeline.
 # TODO: crear subclasses para DataContainer de RMN y MS (agregar DI, LC)
 # TODO: generic Filter Object
 # TODO: implement a PCA function to avoid importing sklearn
