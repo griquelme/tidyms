@@ -8,21 +8,14 @@ Complete with examples.
 
 from . import utils
 from . import validation
+from ._names import *
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 from bokeh.plotting import figure
 from bokeh.models import ColumnDataSource
 from bokeh.transform import factor_cmap
-
-
-# variables used to name sample information columns
-_raw_path = "raw path"
-_sample_class = "class"
-_sample_id = "id"
-_sample_batch = "batch"
-_sample_order = "order"
-SAMPLE_TYPES = ["sample", "qc", "blank", "suitability", "zero"]
+from typing import List, Optional, Iterable
 
 
 class DataContainer(object):
@@ -40,9 +33,9 @@ class DataContainer(object):
     data_matrix : pd.DataFrame.
                   Feature values for each measured sample. Each row is a
                   sample and each column is a feature.                  
-    sample_information : pd.DataFrame.
+    sample_metadata : pd.DataFrame.
                          Metadata for each sample. class is a required column.
-    feature_definitions : pd.DataFrame.
+    feature_metadata : pd.DataFrame.
                           DataFrame with features names as indices. mz and rt
                           are required columns.
     data_path : str.
@@ -54,8 +47,10 @@ class DataContainer(object):
         to be used to perform corrections.
     """
 
-    def __init__(self, data_matrix_df, feature_definitions_df,
-                 sample_information_df, data_path=None, mapping=None):
+    def __init__(self, data_matrix: pd.DataFrame,
+                 feature_metadata: pd.DataFrame,
+                 sample_metadata: pd.DataFrame, data_path: Optional[str] = None,
+                 mapping: Optional[dict] = None):
         
         """
         Creates a DataContainer from feature values, features metadata and
@@ -76,61 +71,61 @@ class DataContainer(object):
         mapping : dict or None
             if dict, set each sample class to sample type.
         """
-        validation.validate_data_container(data_matrix_df,
-                                           feature_definitions_df,
-                                           sample_information_df,
+        validation.validate_data_container(data_matrix,
+                                           feature_metadata,
+                                           sample_metadata,
                                            data_path)
-        self.data_matrix = data_matrix_df
-        self.feature_definitions = feature_definitions_df
-        self.sample_information = sample_information_df
+        self.data_matrix = data_matrix
+        self.feature_metadata = feature_metadata
+        self.sample_metadata = sample_metadata
         self.data_path = data_path
         self.mapping = mapping
-        self._sample_mask = data_matrix_df.index
-        self._feature_mask = data_matrix_df.columns
-        self._original_data = data_matrix_df.copy()
+        self._sample_mask = data_matrix.index
+        self._feature_mask = data_matrix.columns
+        self._original_data = data_matrix.copy()
         self.metrics = _Metrics(self)
 
     @property
-    def data_path(self):
+    def data_path(self) -> pd.DataFrame:
         """str : directory where raw data is stored."""
         return self._data_path
     
     @data_path.setter
-    def data_path(self, path):
+    def data_path(self, path: str):
         """
         sets raw data path, search for available samples and adds them to
         sample information.
         """
         if path is not None:
             path_mapping = utils.sample_to_path(self.data_matrix.index, path)
-            self.sample_information[_raw_path] = \
-                self.sample_information.index.map(path_mapping)
+            self.sample_metadata[_raw_path] = \
+                self.sample_metadata.index.map(path_mapping)
             self._data_path = path
         else:
             self._data_path = None
     
     @property
-    def data_matrix(self):
+    def data_matrix(self) -> pd.DataFrame:
         return self._data_matrix.loc[self._sample_mask, self._feature_mask]
     
     @data_matrix.setter
-    def data_matrix(self, value):
+    def data_matrix(self, value: pd.DataFrame):
         self._data_matrix = value
         
     @property
-    def feature_definitions(self):
+    def feature_metadata(self) -> pd.DataFrame:
         return self._feature_definitions.loc[self._feature_mask, :]
     
-    @feature_definitions.setter
-    def feature_definitions(self, value):
+    @feature_metadata.setter
+    def feature_metadata(self, value: pd.DataFrame):
         self._feature_definitions = value
     
     @property
-    def sample_information(self):
+    def sample_metadata(self) -> pd.DataFrame:
         return self._sample_information.loc[self._sample_mask, :]
     
-    @sample_information.setter
-    def sample_information(self, value):
+    @sample_metadata.setter
+    def sample_metadata(self, value: pd.DataFrame):
         self._sample_information = value
                
     @property
@@ -142,7 +137,7 @@ class DataContainer(object):
         return self._mapping
     
     @mapping.setter
-    def mapping(self, mapping):
+    def mapping(self, mapping: dict):
         self._mapping = _make_empty_mapping()
         if mapping is not None:
             valid_samples = self.classes.unique()
@@ -150,25 +145,25 @@ class DataContainer(object):
             self._mapping.update(mapping)
 
     @property
-    def id(self):
+    def id(self) -> pd.Series:
         """pd.Series[str] : name id of each sample."""
-        return self.sample_information[_sample_id]
+        return self.sample_metadata[_sample_id]
 
     @id.setter
-    def id(self, value):
-        self.sample_information[_sample_id] = value
+    def id(self, value: pd.Series):
+        self.sample_metadata[_sample_id] = value
         
     @property
-    def classes(self):
+    def classes(self) -> pd.Series:
         """pd.Series[str] : class of each sample."""
         return self._sample_information[_sample_class]
     
     @classes.setter
-    def classes(self, value):
+    def classes(self, value: pd.Series):
         self._sample_information[_sample_class] = value
     
     @property
-    def batch(self):
+    def batch(self) -> pd.Series:
         """pd.Series[str] or pd.Series[int]. Batch identification"""
         try:
             return self._sample_information[_sample_batch]
@@ -176,11 +171,11 @@ class DataContainer(object):
             raise BatchInformationError("No batch information available.")
             
     @batch.setter
-    def batch(self, value):
+    def batch(self, value: pd.Series):
         self._sample_information[_sample_batch] = value
     
     @property
-    def order(self):
+    def order(self) -> pd.Series:
         """pd.Series[int] : order of analysis of samples"""
         try:
             return self._sample_information[_sample_order]
@@ -188,10 +183,10 @@ class DataContainer(object):
             raise RunOrderError("No run order information available")
     
     @order.setter
-    def order(self, value):
+    def order(self, value: pd.Series):
         self._sample_information[_sample_order] = value
 
-    def get_available_samples(self):
+    def get_available_samples(self) -> pd.Series:
         """
         Returns the absolute path for each raw data file present in
         data_path.
@@ -201,26 +196,24 @@ class DataContainer(object):
         available_samples : pd.Series
             Pandas series with absolute path for each available file.
         """
-        available_samples = self.sample_information[_raw_path].dropna()
+        available_samples = self.sample_metadata[_raw_path].dropna()
         return available_samples
 
-    def is_valid_class_name(self, class_name):
+    def is_valid_class_name(self, test_class: str) -> bool:
         """
         Check if at least one sample class is`class_name`.
         
         Atributes
         ---------
-        class_name : str or Iterable[str]
+        class_name : str
         
         Returns
         -------
         is_valid : bool
         """
-        valid_classes = np.isin(class_name, self.classes.unique())
-        is_valid = np.all(valid_classes)
-        return is_valid
+        return test_class in self.classes.unique()
 
-    def remove(self, remove, axis):
+    def remove(self, remove: Iterable[str], axis: str):
         """
         Remove selected features / samples
 
@@ -248,7 +241,7 @@ class DataContainer(object):
             msg = "axis should be `columns` or `features`"
             raise ValueError(msg)
         
-    def _is_valid(self, index, axis):
+    def _is_valid(self, index: Iterable[str], axis: str) -> bool:
         """
         Check if all samples/features are present in the DataContainer.
         
@@ -301,6 +294,20 @@ class DataContainer(object):
         self._sample_mask = self._original_data.index
         self._feature_mask = self._original_data.columns
         self.data_matrix = self._original_data
+
+    def get_process_classes(self):
+        """
+        return all classes assigned in the sample type mapping.
+
+        Returns
+        -------
+        process_classes: List[str]
+        """
+        process_classes = list()
+        for classes in self.mapping.values():
+            if classes is not None:
+                process_classes += classes
+        return process_classes
     
 
 class _Metrics:
@@ -531,11 +538,6 @@ def _make_empty_mapping():
     empty_mapping = {x: None for x in SAMPLE_TYPES}
     return empty_mapping
 
-
-# TODO: posible acortamiento de nombres: data_matrix: data,
-# TODO:  sample_information: sample, feature_definitions: features.
-# TODO: agregar una funcion de validacion luego de aplicar correccion (chequear
-# la igualdad de columnas y filas)
 # TODO: crear subclasses para DataContainer de RMN y MS (agregar DI, LC)
 # TODO: generic Filter Object
 # TODO: implement a PCA function to avoid importing sklearn

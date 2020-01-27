@@ -29,7 +29,7 @@ if __name__ == "__main__":
                            .apply(sample_id_get))
     sample_id = sample_id.drop(columns=["description"])
     sample_id = sample_id[~sample_id["sample"].isin(["zero", "SV MeOH H2O"])]
-    data.sample_information["id"] = sample_id["sample"]
+    data.sample_metadata["id"] = sample_id["sample"]
 
     duplicate_averager = mfv.process.DuplicateAverager(process_classes=["MC7", "MCC", "MCH"])
 
@@ -57,7 +57,7 @@ if __name__ == "__main__":
         res = mfv.peaks.make_empty_peaks()
         res["feature"] = np.array([])
         rt, chroms = dc.chromatograms[sample]
-        for groups, features in dc.feature_definitions.groupby("mz_cluster"):
+        for groups, features in dc.feature_metadata.groupby("mz_cluster"):
             peaks = mfv.peaks.pick(rt, chroms[groups, :], **kwargs)
             try:
                 peaks = assign_exp_rt(peaks, features["rt"], tolerance)

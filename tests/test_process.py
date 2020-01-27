@@ -156,12 +156,12 @@ def test_remove_correct_features(data_container_example):
 
 def test_equal_feature_index(data_container_example):
     data = data_container_example
-    assert data.feature_definitions.index.equals(data.data_matrix.columns)
+    assert data.feature_metadata.index.equals(data.data_matrix.columns)
 
 
 def test_equal_sample_index(data_container_example):
     data = data_container_example
-    assert data.data_matrix.index.equals(data.sample_information.index)
+    assert data.data_matrix.index.equals(data.sample_metadata.index)
 
 
 def test_remove_nonexistent_feature(data_container_example):

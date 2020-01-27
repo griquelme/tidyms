@@ -2,16 +2,165 @@
 Filter objects to curate data
 """
 
-import pandas as pd
-from .process import Processor
+
 from .process import DataContainer
-from .process import Pipeline
+from ._names import *
 from . import filter_functions
 from . import utils
 from . import fileio
 from . import validation
 import yaml
 import os.path
+import pandas as pd
+from typing import Optional, List, Union, Callable
+
+
+class Reporter(object):
+    """
+    Abstract class with methods to report metrics.
+
+    Attributes
+    ----------
+    metrics: dict
+        stores number of features, number of samples and mean coefficient of
+        variation before and after processing.
+    name: str
+    """
+    def __init__(self, name: Optional[str] = None):
+        self.metrics = dict()
+        self.name = name
+        self.results = None
+
+    def _record_metrics(self, dc: DataContainer, status: str):
+        """
+        record metrics of a DataContainer.
+
+        Parameters
+        ----------
+        dc: DataContainer
+        status: {"before", "after"}
+        """
+        metrics = dict()
+        metrics["cv"] = dc.metrics.cv(intraclass=False).mean()
+        n_samples, n_features = dc.data_matrix.shape
+        metrics["features"] = n_features
+        metrics["samples"] = n_samples
+        if status in ["before", "after"]:
+            self.metrics[status] = metrics
+        else:
+            msg = "status must be before or after."
+            raise ValueError(msg)
+
+    def _make_results(self):
+        """
+        Computes variation in the number of features, samples and CV.
+        """
+        if ("before" in self.metrics) and ("after" in self.metrics):
+            removed_features = (self.metrics["before"]["features"]
+                                - self.metrics["after"]["features"])
+            removed_samples = (self.metrics["before"]["samples"]
+                               - self.metrics["after"]["samples"])
+            cv_reduction = (self.metrics["before"]["cv"]
+                            - self.metrics["after"]["cv"]) * 100
+            results = dict()
+            results["features"] = removed_features
+            results["samples"] = removed_samples
+            results["cv"] = cv_reduction
+            self.results = results
+
+    def report(self):
+        if self.results:
+            msg = "Applying {}: {} features removed, " \
+                  "{} samples removed, " \
+                  "Mean CV reduced by {:.2f} %."
+            msg = msg.format(self.name, self.results["features"],
+                             self.results["samples"], self.results["cv"])
+            print(msg)
+
+
+class Processor(Reporter):
+    """
+    Abstract class to process DataContainer Objects. This class is intended to
+    be subclassed to generate specific filters. Filter implementation is done
+    overwriting the func method.
+
+    Attributes
+    ----------
+    mode: {"filter", "flag", "transform"}
+        filter removes feature/samples from a DataContainer. flag selects
+        features/samples to be inspected manually. Transform applies a
+        transformation on the DataContainer.
+    axis: {"samples", "features"}, optional
+        Axis to process. Only necessary when using mode "filter" or "flag".
+    verbose: bool
+    params: dict
+        parameter used by the filter function
+    default_process: str
+        default sample type used to apply filter
+    default_correct: str
+        default sample type to be corrected.
+    """
+    def __init__(self, mode: str, axis: Optional[str] = None,
+                 verbose: bool = False):
+        super(Processor, self).__init__()
+        self.mode = mode
+        self.axis = axis
+        self.verbose = verbose
+        self.remove = list()
+        self.params = dict()
+        self.default_process = None
+        self.default_correct = None
+
+    def func(self, func):
+        raise NotImplementedError
+
+    def set_default_sample_types(self, dc: DataContainer):
+        if self.params["process_class"] is None:
+            self.params["process_class"] = dc.mapping[self.default_process]
+        if self.params["correct_class"] is None:
+            self.params["correct_class"] = dc.mapping[self.default_correct]
+
+    def process(self, dc):
+        self._record_metrics(dc, "before")
+        if self.mode == "filter":
+            self.remove = self.func(dc)
+            dc.remove(self.remove, self.axis)
+        elif self.mode == "flag":
+            self.remove = self.func(dc)
+        elif self.mode == "transform":
+            self.func(dc)
+        else:
+            msg = "mode must be `filter`, `transform` or `flag`"
+            raise ValueError(msg)
+        self._record_metrics(dc, "after")
+        if self.verbose:
+            self.report()
+
+
+class Pipeline(Reporter):
+    """
+    Applies a series of Filters and Correctors to a DataContainer
+
+    Attributes
+    ----------
+    processors: list[Processors]
+        A list of processors to apply
+    verbose: bool
+    """
+    def __init__(self, processors: list, verbose: bool = False):
+        _validate_pipeline(processors)
+        super(Pipeline, self).__init__()
+        self.processors = list(processors)
+        self.verbose = verbose
+
+    def process(self, dc):
+        self._record_metrics(dc, "before")
+        for x in self.processors:
+            if self.verbose:
+                x.verbose = True
+            x.process(dc)
+        self._record_metrics(dc, "after")
+
 
 FILTERS = dict()
 
@@ -37,17 +186,18 @@ class DuplicateAverager(Processor):
     """
     A filter that averages duplicates
     """
-    def __init__(self, process_classes):
+    def __init__(self, process_classes: Optional[List[str]] = None):
         super(DuplicateAverager, self).__init__(axis=None, mode="correction")
         self.params["process_classes"] = process_classes
 
-    def func(self, dc):
-        dc.data_matrix = filter_functions.replicate_averager(dc.data_matrix,
-                                                             dc.get_id(),
-                                                             dc.classes,
-                                                             **self.params)
-        dc.sample_information = (dc.sample_information
-                                     .loc[dc.data_matrix.index, :])
+    def func(self, dc: DataContainer):
+        if self.params["process_classes"] is None:
+            self.params["process_classes"] = dc.mapping[_sample_type]
+        dc.data_matrix = \
+            filter_functions.replicate_averager(dc.data_matrix, dc.id,
+                                                dc.classes, **self.params)
+        dc.sample_metadata = (dc.sample_metadata
+                                 .loc[dc.data_matrix.index, :])
 
 
 @register
@@ -55,14 +205,17 @@ class ClassRemover(Processor):
     """
     A filter to remove samples of a given class
     """
-    def __init__(self, classes=None):
+    def __init__(self, classes: List[str]):
         super(ClassRemover, self).__init__(axis="samples", mode="filter")
-        self.params["classes"] = classes
+        if classes is None:
+            self.params["classes"] = list()
+        else:
+            self.params["classes"] = classes
 
     def func(self, dc):
-        remove_samples = dc.get_classes().isin(self.params["classes"])
-        remove_samples = remove_samples[remove_samples]
-        return remove_samples.index
+        remove_samples = dc.classes.isin(self.params["classes"])
+        remove_samples = remove_samples[remove_samples].index
+        return remove_samples
 
 
 @register
@@ -70,21 +223,37 @@ class BlankCorrector(Processor):
     """
     Corrects values using blank information
     """
-    def __init__(self, corrector_classes=None, process_classes=None,
-                 mode="mean", blank_relation=3, verbose=False):
+    def __init__(self, corrector_classes: Optional[List[str]] = None,
+                 process_classes: Optional[List[str]]= None,
+                 mode: Union[str, Callable] = "lod", verbose=False):
+        """
+        Correct sample values using blank samples.
+
+        Parameters
+        ----------
+        corrector_classes: list[str], optional
+            Classes used to generate the blank correction. If None, uses blank
+            samples defined on the DataContainer mapping attribute.
+        process_classes:  list[str], optional
+            Classes to be corrected. If None, uses all classes listed on the
+            DataContainer mapping attribute.
+        mode: {"mean", "max", "lod", "loq"}, function.
+            Function used to generate the blank correction.
+        verbose: bool
+        """
         super(BlankCorrector, self).__init__(axis=None, mode="correction",
                                              verbose=verbose)
         self.name = "Blank Correction"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
         self.params["mode"] = mode
-        self.params["blank_relation"] = blank_relation
 
     def func(self, dc):
+        self.set_default_sample_types(dc)
+        # TODO: view if there are side effects from modifying params
         dc.data_matrix = filter_functions.blank_correction(dc.data_matrix,
                                                            dc.get_classes(),
                                                            **self.params)
-
 
 @register
 class BatchCorrector(Processor):
@@ -101,10 +270,10 @@ class BatchCorrector(Processor):
         self.params = {**self.params, **kwargs}
         # TODO: chequear la linea de kwargs
 
-    def func(self, dc):
+    def func(self, dc: DataContainer):
         dc.data_matrix = filter_functions.batch_correction(dc.data_matrix,
-                                                           dc.get_run_order(),
-                                                           dc.get_classes(),
+                                                           dc.order,
+                                                           dc.classes,
                                                            **self.params)
 
 
@@ -197,8 +366,8 @@ def merge_data_containers(dcs):
     merged_dc : DataContainer
     """
     dms = [x.data_matrix for x in dcs]
-    sis = [x.sample_information for x in dcs]
-    fds = [x.feature_definitions for x in dcs]
+    sis = [x.sample_metadata for x in dcs]
+    fds = [x.feature_metadata for x in dcs]
     dm = pd.concat(dms)
     si = pd.concat(sis)
     fd = pd.concat(fds)
@@ -296,3 +465,13 @@ def sample_name_from_path(path):
     fname = os.path.split(path)[1]
     sample_name = os.path.splitext(fname)[0]
     return sample_name
+
+
+def _validate_pipeline(t):
+    if not isinstance(t, (list, tuple)):
+        t = [t]
+    for filt in t:
+        if not isinstance(filt, (Processor, Pipeline)):
+            msg = ("elements of the Pipeline must be",
+                   "instances of Filter, DataCorrector or another Pipeline.")
+            raise TypeError(msg)
