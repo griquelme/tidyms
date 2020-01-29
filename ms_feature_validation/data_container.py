@@ -2,7 +2,7 @@
 """
 Objects used for automatic curation and validation of LC-MS metabolomics data.
 
-Complete with examples.    
+TODO: add examples.
 """
 
 
@@ -23,7 +23,7 @@ class DataContainer(object):
     A container class for Metabolomics Data.
     
     Consists of three Pandas DataFrames with features values, feature metadata
-    and sammple metadata. Index are shared for features and samples
+    and sample metadata. Index are shared for features and samples
     respectively.
     
     Contains functions to remove samples or features.
@@ -49,7 +49,8 @@ class DataContainer(object):
 
     def __init__(self, data_matrix: pd.DataFrame,
                  feature_metadata: pd.DataFrame,
-                 sample_metadata: pd.DataFrame, data_path: Optional[str] = None,
+                 sample_metadata: pd.DataFrame,
+                 data_path: Optional[str] = None,
                  mapping: Optional[dict] = None):
         
         """
@@ -261,7 +262,7 @@ class DataContainer(object):
             msg = "axis must be `features` or `samples`."
             raise ValueError(msg)
             
-    def diagnose(self):
+    def diagnose(self) -> dict:
         """
         Check if DataContainer has information to perform several correction
         types
@@ -295,7 +296,7 @@ class DataContainer(object):
         self._feature_mask = self._original_data.columns
         self.data_matrix = self._original_data
 
-    def get_process_classes(self):
+    def get_process_classes(self) -> List[str]:
         """
         return all classes assigned in the sample type mapping.
 
@@ -318,36 +319,37 @@ class _Metrics:
     def __init__(self, data):
         self.__data = data
     
-    def cv(self, mode="intraclass", robust=False):
+    def cv(self, intraclass=True, robust=False):
         """
         Coefficient of variation.
         
         Parameters
         ----------
-        mode: {"intraclass", "global"}
-            if "intraclass", computes the coefficient of variation for each
-            class. if "global", computes the mean coefficient of variation
+        intraclass: True
+            if True computes the coefficient of variation for each
+            class. Else computes the mean coefficient of variation
             for all sample classes.
         robust: bool
             If True, computes the relative MAD. Else, computes the Coefficient
             of variation.
+
+        Returns
+        -------
+        result: pd.Series or pd.DataFrame
         """
         if robust:
             cv_func = utils.rmad
         else:
             cv_func = utils.cv
         
-        if mode == "intraclass":
+        if intraclass:
             result = (self.__data.data_matrix
                       .groupby(self.__data.classes)
                       .apply(cv_func))
-        elif mode == "global":
-            sample_class = self.__data.mapping[_sample_class]
+        else:
+            sample_class = self.__data.mapping[_sample_type]
             is_sample_class = self.__data.classes.isin(sample_class)
             result = cv_func(self.__data.data_matrix[is_sample_class])
-        else:
-            msg = "`mode` must be intraclass or global"
-            raise ValueError(msg)
         return result
     
     def dratio(self, robust=False):
@@ -388,15 +390,15 @@ class _Metrics:
         dr = dr.fillna(np.inf)
         return dr
     
-    def detection_rate(self, mode="intraclass", threshold=0):
+    def detection_rate(self, intraclass=True, threshold=0):
         """
         Computes the fraction of samples with intensity above a threshold
         
         Parameters
         ----------
-        mode: {"intraclass", "global"}
-            if intraclass, computes the detection rate for each class, if
-            global computes the mean detection rate
+        intraclass: bool
+            if True, computes the detection rate for each class, else
+            computes the mean detection rate
         threshold: float
             Minimum value to consider a feature detected
         """
@@ -404,17 +406,14 @@ class _Metrics:
             """Auxiliar function to compute the detection rate."""
             return x[x > threshold].count() / x.count()
 
-        if mode == "intraclass":
+        if intraclass:
             results = (self.__data.data_matrix
                        .groupby(self.__data.classes)
                        .apply(dr_func))
-        elif mode == "global":
+        else:
             sample_class = self.__data.mapping["sample"]
             is_sample_class = self.__data.classes.isin(sample_class)
             results = self.__data.data_matrix[is_sample_class].apply()
-        else:
-            msg = "`mode` must be intraclass or global"
-            raise ValueError(msg)
         return results
     
     def pca(self, n_components=2):
@@ -538,6 +537,6 @@ def _make_empty_mapping():
     empty_mapping = {x: None for x in SAMPLE_TYPES}
     return empty_mapping
 
-# TODO: crear subclasses para DataContainer de RMN y MS (agregar DI, LC)
-# TODO: generic Filter Object
+# TODO: subclass DataContainer into  NMRDataContainer and MSDataContainer
+#  (agregar DI, LC)
 # TODO: implement a PCA function to avoid importing sklearn

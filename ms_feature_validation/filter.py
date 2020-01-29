@@ -3,7 +3,7 @@ Filter objects to curate data
 """
 
 
-from .process import DataContainer
+from .data_container import DataContainer
 from ._names import *
 from . import filter_functions
 from . import utils
@@ -13,6 +13,7 @@ import yaml
 import os.path
 import pandas as pd
 from typing import Optional, List, Union, Callable
+Number = Union[float, int]
 
 
 class Reporter(object):
@@ -95,30 +96,41 @@ class Processor(Reporter):
     verbose: bool
     params: dict
         parameter used by the filter function
-    default_process: str
+    _default_process: str
         default sample type used to apply filter
-    default_correct: str
+    _default_correct: str
         default sample type to be corrected.
     """
     def __init__(self, mode: str, axis: Optional[str] = None,
-                 verbose: bool = False):
+                 verbose: bool = False, default_process=None,
+                 default_correct=None):
         super(Processor, self).__init__()
         self.mode = mode
         self.axis = axis
         self.verbose = verbose
         self.remove = list()
         self.params = dict()
-        self.default_process = None
-        self.default_correct = None
+        self._default_process = default_process
+        self._default_correct = default_correct
 
     def func(self, func):
         raise NotImplementedError
 
     def set_default_sample_types(self, dc: DataContainer):
-        if self.params["process_class"] is None:
-            self.params["process_class"] = dc.mapping[self.default_process]
-        if self.params["correct_class"] is None:
-            self.params["correct_class"] = dc.mapping[self.default_correct]
+
+        try:
+            name = "process_classes"
+            if self.params[name] is None:
+                self.params[name] = dc.mapping[self._default_process]
+        except KeyError:
+            pass
+
+        try:
+            name = "corrector_classes"
+            if self.params[name] is None:
+                self.params[name] = dc.mapping[self._default_correct]
+        except KeyError:
+            pass
 
     def process(self, dc):
         self._record_metrics(dc, "before")
@@ -133,6 +145,7 @@ class Processor(Reporter):
             msg = "mode must be `filter`, `transform` or `flag`"
             raise ValueError(msg)
         self._record_metrics(dc, "after")
+        self._make_results()
         if self.verbose:
             self.report()
 
@@ -187,7 +200,7 @@ class DuplicateAverager(Processor):
     A filter that averages duplicates
     """
     def __init__(self, process_classes: Optional[List[str]] = None):
-        super(DuplicateAverager, self).__init__(axis=None, mode="correction")
+        super(DuplicateAverager, self).__init__(axis=None, mode="transform")
         self.params["process_classes"] = process_classes
 
     def func(self, dc: DataContainer):
@@ -197,7 +210,7 @@ class DuplicateAverager(Processor):
             filter_functions.replicate_averager(dc.data_matrix, dc.id,
                                                 dc.classes, **self.params)
         dc.sample_metadata = (dc.sample_metadata
-                                 .loc[dc.data_matrix.index, :])
+                              .loc[dc.data_matrix.index, :])
 
 
 @register
@@ -224,7 +237,7 @@ class BlankCorrector(Processor):
     Corrects values using blank information
     """
     def __init__(self, corrector_classes: Optional[List[str]] = None,
-                 process_classes: Optional[List[str]]= None,
+                 process_classes: Optional[List[str]] = None,
                  mode: Union[str, Callable] = "lod", verbose=False):
         """
         Correct sample values using blank samples.
@@ -241,19 +254,22 @@ class BlankCorrector(Processor):
             Function used to generate the blank correction.
         verbose: bool
         """
-        super(BlankCorrector, self).__init__(axis=None, mode="correction",
+        super(BlankCorrector, self).__init__(axis=None, mode="transform",
                                              verbose=verbose)
         self.name = "Blank Correction"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
         self.params["mode"] = mode
+        self._default_process = _sample_type
+        self._default_correct = _blank_type
 
     def func(self, dc):
         self.set_default_sample_types(dc)
         # TODO: view if there are side effects from modifying params
         dc.data_matrix = filter_functions.blank_correction(dc.data_matrix,
-                                                           dc.get_classes(),
+                                                           dc.classes,
                                                            **self.params)
+
 
 @register
 class BatchCorrector(Processor):
@@ -280,10 +296,31 @@ class BatchCorrector(Processor):
 @register
 class PrevalenceFilter(Processor):
     """
-    Remove Features with a low number of occurrences.
+    Remove Features with a low number of occurrences. The prevalence is defined
+    as the fraction of samples where the signal is observed.
+
+    Parameters
+    ----------
+    process_classes: List[str], optional
+        Classes used to compute prevalence. If None, classes are obtained from
+        sample classes in the DataContainer mapping.
+    lb: float
+        Lower bound of prevalence.
+    ub: float
+        Upper bound of prevalence.
+    threshold: float
+        Minimum intensity to consider a feature as detected.
+    intraclass: bool
+        Whether to evaluate a global prevalence or a per class prevalence.
+        If intraclass is True, prevalence is computed for each class and
+        features in which the prevalence is outside the selected bounds for all
+        classes are removed.
+
     """
-    def __init__(self, process_classes=None, lb=0.5, ub=1,
-                 intraclass=True, verbose=False):
+    def __init__(self, process_classes: Optional[List[str]] = None,
+                 lb: Number = 0.5, ub: Number = 1,
+                 intraclass: bool = True, verbose: bool = False,
+                 threshold: Number = 0):
         super(PrevalenceFilter, self).__init__(axis="features", mode="filter",
                                                verbose=verbose)
         self.name = "Prevalence Filter"
@@ -291,11 +328,17 @@ class PrevalenceFilter(Processor):
         self.params["lb"] = lb
         self.params["ub"] = ub
         self.params["intraclass"] = intraclass
+        self.params["threshold"] = threshold
+        self._default_correct = _sample_type
+        self._default_process = _sample_type
 
     def func(self, dc):
-        return filter_functions.prevalence_filter(dc.data_matrix,
-                                                  dc.get_classes(),
-                                                  **self.params)
+        self.set_default_sample_types(dc)
+        dr = dc.metrics.detection_rate(intraclass=self.params["intraclass"],
+                                       threshold=self.params["threshold"])
+        lb = self.params["lb"]
+        ub = self.params["ub"]
+        return filter_functions.get_outside_bounds_index(dr, lb, ub)
 
 
 @register
@@ -313,11 +356,15 @@ class VariationFilter(Processor):
         self.params["process_classes"] = process_classes
         self.params["robust"] = robust
         self.params["intraclass"] = intraclass
+        self._default_process = _qc_type
 
-    def func(self, dc):
-        return filter_functions.variation_filter(dc.data_matrix,
-                                                 dc.get_classes(),
-                                                 **self.params)
+    def func(self, dc: DataContainer):
+        self.set_default_sample_types(dc)
+        lb = self.params["lb"]
+        ub = self.params["ub"]
+        variation = dc.metrics.cv(intraclass=self.params["intraclass"],
+                                  robust=self.params["robust"])
+        return filter_functions.get_outside_bounds_index(variation, lb, ub)
 
 
 @register
@@ -410,7 +457,7 @@ def read_progenesis(path):
     ft_def = df.iloc[:, 0:norm_index]
     data = df.iloc[:, raw_index:(2 * raw_index - norm_index)].T
     sample_info = df_header.iloc[:,
-                  (raw_index+1):(2 * raw_index - norm_index + 1)].T
+                  (raw_index + 1):(2 * raw_index - norm_index + 1)].T
     sample_info.set_index(sample_info.iloc[:, 1], inplace=True)
     sample_info.drop(labels=[1],  axis=1, inplace=True)
 

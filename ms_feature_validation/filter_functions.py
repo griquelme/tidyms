@@ -6,8 +6,7 @@ Functions to correct and filter data matrix from LC-MS Metabolomics data.
 import pandas as pd
 from scipy.interpolate import CubicSpline
 from statsmodels.nonparametric.smoothers_lowess import lowess
-from typing import List, Optional, Callable, Union
-PandasData = Union[pd.Series, pd.DataFrame]
+from typing import List, Callable, Union
 
 
 def input_na(df: pd.DataFrame, classes: pd.Series, mode: str) -> pd.DataFrame:
@@ -70,8 +69,7 @@ def replicate_averager(data: pd.DataFrame, sample_id: pd.Series,
 
 def blank_correction(df: pd.DataFrame, classes: pd.Series,
                      corrector_classes: List[str], process_classes: List[str],
-                     mode: str = "mean",
-                     func: Optional[Callable] = None) -> pd.DataFrame:
+                     mode: Union[str, Callable] = "mean") -> pd.DataFrame:
     """
     Correct samples using blanks.
 
@@ -85,8 +83,7 @@ def blank_correction(df: pd.DataFrame, classes: pd.Series,
         Classes to be used as blanks.
     process_classes: list[str]
         Classes to be used as samples
-    mode: {'mean', 'max', 'lod', 'loq'}
-    func: function
+    mode: {'mean', 'max', 'lod', 'loq'} or function
 
     Returns
     -------
@@ -100,143 +97,146 @@ def blank_correction(df: pd.DataFrame, classes: pd.Series,
 
     .. math:: X_{corrected} = X_{uncorrected} - blank_relation * mode(X_{blank})
     """
-    corrector = {"max": lambda x, relation: x.max(),
-                 "mean": lambda x, rel: x.mean(),
-                 "lod": lambda x, rel: x.mean() + 3 * x.std(),
-                 "loq": lambda x, rel: x.mean() + 10 * x.std()}
-    if func is not None:
-        corrector = func
+    corrector = {"max": lambda x: x.max(),
+                 "mean": lambda x: x.mean(),
+                 "lod": lambda x: x.mean() + 3 * x.std(),
+                 "loq": lambda x: x.mean() + 10 * x.std()}
+    if hasattr(mode, "__call__"):
+        corrector = mode
+    else:
+        corrector = corrector[mode]
     samples = df[classes.isin(process_classes)]
     blanks = df[classes.isin(corrector_classes)]
-    correction = corrector[mode](blanks)
+    correction = corrector(blanks)
     corrected = samples - correction
     corrected[corrected < 0] = 0
     df[classes.isin(process_classes)] = corrected
     return df
 
 
-def prevalence_filter(data, classes, process_classes,
-                      lb, ub, intraclass, threshold):
-    """
-    Return columns with relative counts outside the [lb, ub] interval.
-
-    Parameters
-    ----------
-    data : pandas.DataFrame
-    classes : pandas.Series
-        sample class labels
-    process_classes : list[str]
-        classes included in the filter
-    lb : float.
-        Relative lower bound of prevalence.
-    ub : float.
-        Relative upper bound of prevalence.
-    intraclass : bool
-        if True computes prevalence for each class separately and return columns
-        that are outside bounds in all of `include_classes`.
-    threshold : float
-        minimum value to define prevalence
-    Returns
-    -------
-    outside_bounds_columns: pandas.Index
-    """
-    # selects process_classes
-    classes = classes[classes.isin(process_classes)]
-    data = data.loc[classes.index, :]
-    # pipeline for prevalence filter
-    is_outside_bounds = ((data > threshold)
-                         .pipe(grouper(classes, intraclass))
-                         .sum()
-                         .pipe(normalizer(classes, intraclass))
-                         .pipe(bounds_checker(lb, ub, intraclass)))
-    outside_bounds_columns = is_outside_bounds[is_outside_bounds].index
-    return outside_bounds_columns
-
-
-def variation_filter(data, classes, process_classes, lb, ub,
-                     intraclass, robust):
-    """
-    Return columns with variation outside the [lb, ub] interval.
-
-    Parameters
-    ----------
-    data : pandas.DataFrame
-    classes : pandas.Series
-        class labels of samples.
-    process_classes : list[str]
-        classes included in the filter
-    lb : float
-        lower bound of variation
-    ub : float
-        upper bound of variation
-    intraclass : bool
-         if True computes prevalence for each class separately and return
-         columns that are outside bounds in all of `include_classes`.
-    robust : bool
-        if True uses iqr as a metric of variation. if False uses cv
-    Returns
-    -------
-    remove_features : pandas.Index
-    """
-    # selects process_classes
-    classes = classes[classes.isin(process_classes)]
-    data = data.loc[classes.index, :]
-    # pipeline for variation filter
-    is_outside_bound = (data.pipe(grouper(classes, intraclass))
-                        .pipe(variation(robust))
-                        .pipe(bounds_checker(lb, ub, intraclass)))
-    outside_bounds_columns = is_outside_bound[is_outside_bound].index
-    return outside_bounds_columns
-
-
-def normalizer(classes, intraclass):
-    """
-    function to normalize data using samples count or classes count.
-    
-    Parameters
-    ----------
-    classes : pd.Series
-        Class label of samples
-    intraclass : bool
-        wether to normalize using total number of samples, or class count.
-    
-    Returns
-    -------
-    normalizer : function
-    """
-    class_counts = classes.value_counts()
-    n = class_counts.sum()
-    return lambda x: x.divide(class_counts, axis=0) if intraclass else x / n
-
-
-def grouper(classes, intraclass):
-    return lambda x: x.groupby(classes) if intraclass else x
-
-
-def bounds_checker(lb, ub, intraclass):
-    if intraclass:
-        return lambda x: ((x < lb) | (x > ub)).all()
-    else:
-        return lambda x: ((x < lb) | (x > ub))
-
-
-def cv(df):
-    res = df.std() / df.mean()
-    res = res.fillna(0)
-    return res
-
-
-def iqr(df):
-    res = (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
-    res = res.fillna(0)
-    return res
-
-
-def variation(robust):
-    if robust:
-        return iqr
-    else:
-        return cv
+# def prevalence_filter(data, classes, process_classes,
+#                       lb, ub, intraclass, threshold):
+#     """
+#     Return columns with relative counts outside the [lb, ub] interval.
+#
+#     Parameters
+#     ----------
+#     data : pandas.DataFrame
+#     classes : pandas.Series
+#         sample class labels
+#     process_classes : list[str]
+#         classes included in the filter
+#     lb : float.
+#         Relative lower bound of prevalence.
+#     ub : float.
+#         Relative upper bound of prevalence.
+#     intraclass : bool
+#         if True computes prevalence for each class separately and return
+#         columns
+#         that are outside bounds in all of `include_classes`.
+#     threshold : float
+#         minimum value to define prevalence
+#     Returns
+#     -------
+#     outside_bounds_columns: pandas.Index
+#     """
+#     # selects process_classes
+#     classes = classes[classes.isin(process_classes)]
+#     data = data.loc[classes.index, :]
+#     # pipeline for prevalence filter
+#     is_outside_bounds = ((data > threshold)
+#                          .pipe(grouper(classes, intraclass))
+#                          .sum()
+#                          .pipe(normalizer(classes, intraclass))
+#                          .pipe(bounds_checker(lb, ub, intraclass)))
+#     outside_bounds_columns = is_outside_bounds[is_outside_bounds].index
+#     return outside_bounds_columns
+#
+#
+# def variation_filter(data, classes, process_classes, lb, ub,
+#                      intraclass, robust):
+#     """
+#     Return columns with variation outside the [lb, ub] interval.
+#
+#     Parameters
+#     ----------
+#     data : pandas.DataFrame
+#     classes : pandas.Series
+#         class labels of samples.
+#     process_classes : list[str]
+#         classes included in the filter
+#     lb : float
+#         lower bound of variation
+#     ub : float
+#         upper bound of variation
+#     intraclass : bool
+#          if True computes prevalence for each class separately and return
+#          columns that are outside bounds in all of `include_classes`.
+#     robust : bool
+#         if True uses iqr as a metric of variation. if False uses cv
+#     Returns
+#     -------
+#     remove_features : pandas.Index
+#     """
+#     # selects process_classes
+#     classes = classes[classes.isin(process_classes)]
+#     data = data.loc[classes.index, :]
+#     # pipeline for variation filter
+#     is_outside_bound = (data.pipe(grouper(classes, intraclass))
+#                         .pipe(variation(robust))
+#                         .pipe(bounds_checker(lb, ub, intraclass)))
+#     outside_bounds_columns = is_outside_bound[is_outside_bound].index
+#     return outside_bounds_columns
+#
+#
+# def normalizer(classes, intraclass):
+#     """
+#     function to normalize data using samples count or classes count.
+#
+#     Parameters
+#     ----------
+#     classes : pd.Series
+#         Class label of samples
+#     intraclass : bool
+#         wether to normalize using total number of samples, or class count.
+#
+#     Returns
+#     -------
+#     normalizer : function
+#     """
+#     class_counts = classes.value_counts()
+#     n = class_counts.sum()
+#     return lambda x: x.divide(class_counts, axis=0) if intraclass else x / n
+#
+#
+# def grouper(classes, intraclass):
+#     return lambda x: x.groupby(classes) if intraclass else x
+#
+#
+# def bounds_checker(lb, ub, intraclass):
+#     if intraclass:
+#         return lambda x: ((x < lb) | (x > ub)).all()
+#     else:
+#         return lambda x: ((x < lb) | (x > ub))
+#
+#
+# def cv(df):
+#     res = df.std() / df.mean()
+#     res = res.fillna(0)
+#     return res
+#
+#
+# def iqr(df):
+#     res = (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
+#     res = res.fillna(0)
+#     return res
+#
+#
+# def variation(robust):
+#     if robust:
+#         return iqr
+#     else:
+#         return cv
 
 
 def cspline_correction(x, y, xq, yq):
@@ -298,6 +298,9 @@ def batch_correction(df: pd.DataFrame, run_order: pd.Series, classes: pd.Series,
     return corrected
 
 
+def batch_correction_alt
+
+
 def interbatch_correction(df: pd.DataFrame, batch: pd.Series,
                           run_order: pd.Series, classes: pd.Series,
                           corrector_classes: List[str],
@@ -343,18 +346,13 @@ def interbatch_correction(df: pd.DataFrame, batch: pd.Series,
     return corrected
 
 
-class EmptyDataFrameException(ValueError):
-    """Empty data error"""
-    pass
-
-
-def get_outside_bounds_index(data: PandasData, lb: float,
+def get_outside_bounds_index(data: Union[pd.Seriees, pd.DataFrame], lb: float,
                              ub: float) -> pd.Index:
     """
     return index of columns with values outside bounds.
     Parameters
     ----------
-    data: pd
+    data: pd.Series or pd.DataFrame
     lb: float
         lower bound
     ub: float
@@ -366,4 +364,7 @@ def get_outside_bounds_index(data: PandasData, lb: float,
     result = ((data < lb) | (data > ub))
     if isinstance(data, pd.DataFrame):
         result = result.all()
-    return result.index
+    if result.empty:
+        return pd.Index([])
+    else:
+        return result[result].index

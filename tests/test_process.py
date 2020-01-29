@@ -1,37 +1,7 @@
-from ms_feature_validation import process
+from ms_feature_validation import data_container
 import numpy as np
 import pandas as pd
 import pytest
-
-
-# simulated data used for tests
-ft_names = ["FT{:02d}".format(x) for x in range(1, 7)]
-sample_names = ["sample{:2d}".format(x) for x in range(1, 9)]
-classes = ["SV", "SV", "disease", "disease", "healthy",
-           "healthy", "healthy", "SV"]
-n_features = len(ft_names)
-n_samples = len(sample_names)
-batch = [1, 1, 1, 1, 2, 2, 2, 2]
-order = [1, 2, 3, 4, 5, 6, 7, 8]
-dm_data = np.random.normal(loc=10, size=(n_samples, n_features))
-ft_data = np.random.normal(loc=200, scale=30, size=(n_features, 2))
-
-
-@pytest.fixture
-def data_container_example():   
-    dm = pd.DataFrame(data=dm_data, columns=ft_names, index=sample_names)
-    sample_information = pd.DataFrame(data=classes,
-                                      index=sample_names,
-                                      columns=["class"])    
-    feature_definitions = pd.DataFrame(data=ft_data,
-                                       columns=["mz", "rt"],
-                                       index=ft_names)
-    data = process.DataContainer(dm,
-                                 feature_definitions,
-                                 sample_information)
-    data.batch = batch
-    data.order = order
-    return data
 
 
 def test_data_path_setter_unexistent_path(data_container_example):
@@ -42,13 +12,13 @@ def test_data_path_setter_unexistent_path(data_container_example):
 
 def test_class_getter(data_container_example):
     data = data_container_example
-    class_series = pd.Series(data=classes, index=sample_names)
+    class_series = pd.Series(data=data.classes, index=data.classes.index)
     assert data.classes.equals(class_series)
 
 
 def test_class_setter(data_container_example):
     data = data_container_example
-    class_series = pd.Series(data=classes, index=sample_names)
+    class_series = pd.Series(data=data.classes, index=data.classes.index)
     #set classes to an arbitrary value
     data.classes = 4
     data.classes = class_series
@@ -57,14 +27,14 @@ def test_class_setter(data_container_example):
 
 def test_batch_getter(data_container_example):
     data = data_container_example
-    batch_series = pd.Series(data=batch, index=sample_names)
+    batch_series = pd.Series(data=data.batch, index=data.batch.index)
     print(data.batch)
     assert data.batch.equals(batch_series)
 
 
 def test_batch_setter(data_container_example):
     data = data_container_example
-    batch_series = pd.Series(data=batch, index=sample_names)
+    batch_series = pd.Series(data=data.batch, index=data.batch.index)
     #set classes to an arbitrary value
     data.batch = 4
     data.batch = batch_series
@@ -73,13 +43,13 @@ def test_batch_setter(data_container_example):
 
 def test_order_getter(data_container_example):
     data = data_container_example
-    order_series = pd.Series(data=order, index=sample_names)
+    order_series = pd.Series(data=data.order, index=data.order.index)
     assert data.order.equals(order_series)
 
 
 def test_order_setter(data_container_example):
     data = data_container_example
-    order_series = pd.Series(data=order, index=sample_names)
+    order_series = pd.Series(data=data.order, index=data.order.index)
     #set classes to an arbitrary value
     data.order = 4
     data.order = order_series
@@ -89,13 +59,11 @@ def test_order_setter(data_container_example):
 def test_is_valid_class_name_with_valid_names(data_container_example):
     data = data_container_example
     assert data.is_valid_class_name("healthy")
-    assert data.is_valid_class_name(["healthy", "disease"])
 
 
 def test_is_valid_class_name_with_invalid_names(data_container_example):
     data = data_container_example
     assert not data.is_valid_class_name("invalid_name")
-    assert not data.is_valid_class_name(["healthy", "invalid_name"])
 
 
 def test_mapping_setter(data_container_example):

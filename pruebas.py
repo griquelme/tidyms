@@ -8,7 +8,7 @@ import numpy as np
 if __name__ == "__main__":
 
     #las muestras estan por duplicado, este codigo las agrupa y promedia
-    data = mfv.process.read_progenesis("examples/MC.csv")
+    data = mfv.data_container.read_progenesis("examples/MC.csv")
     data.data_path = "examples/raw/"
     #d = pd.read_pickle("examples/dif.pickle")
     #data = data.select(d, "features")
@@ -31,7 +31,7 @@ if __name__ == "__main__":
     sample_id = sample_id[~sample_id["sample"].isin(["zero", "SV MeOH H2O"])]
     data.sample_metadata["id"] = sample_id["sample"]
 
-    duplicate_averager = mfv.process.DuplicateAverager(process_classes=["MC7", "MCC", "MCH"])
+    duplicate_averager = mfv.data_container.DuplicateAverager(process_classes=["MC7", "MCC", "MCH"])
 
     bc_params = {"corrector_classes": ["SV"],
                  "process_classes": ["MCH", "MC7"]}
@@ -44,13 +44,13 @@ if __name__ == "__main__":
                   "ub": 1,
                   "intraclass": False}
 
-    blank_correction = mfv.process.BlankCorrector(**bc_params)
-    prevalence_filter = mfv.process.PrevalenceFilter(**pf_params)
+    blank_correction = mfv.data_container.BlankCorrector(**bc_params)
+    prevalence_filter = mfv.data_container.PrevalenceFilter(**pf_params)
     blank_correction.process(data)
     duplicate_averager.process(data)
     data.data_matrix[data.data_matrix <= 5] = 0
     prevalence_filter.process(data)
-    cmaker = mfv.process.ChromatogramMaker(verbose=True)
+    cmaker = mfv.data_container.ChromatogramMaker(verbose=True)
     cmaker.process(data)
 
     def assign_rt(dc, sample, tolerance, **kwargs):
