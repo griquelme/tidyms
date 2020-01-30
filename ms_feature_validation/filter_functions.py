@@ -2,11 +2,11 @@
 Functions to correct and filter data matrix from LC-MS Metabolomics data.
 """
 
-
+import numpy as np
 import pandas as pd
 from scipy.interpolate import CubicSpline
 from statsmodels.nonparametric.smoothers_lowess import lowess
-from typing import List, Callable, Union
+from typing import List, Callable, Union, Optional
 
 
 def input_na(df: pd.DataFrame, classes: pd.Series, mode: str) -> pd.DataFrame:
@@ -298,7 +298,162 @@ def batch_correction(df: pd.DataFrame, run_order: pd.Series, classes: pd.Series,
     return corrected
 
 
-def batch_correction_alt
+def _remove_invalid_features(corrector_df: pd.DataFrame,
+                             process_df: pd.DataFrame,
+                             n_min_samples: Optional[int] = 4) -> pd.Index:
+    """
+    Remove features that can't be corrected in a batch correction. Features that
+    can't be corrected are those that have samples with an order that  cannot
+    be interpolated using the corrector samples.
+
+    Parameters
+    ----------
+    corrector_order: pd.Series
+        Run order of corrector samples
+    corrector_df: pd.DataFrame
+        Data matrix of corrector samples
+    process_order: pd.Series
+        run order of process samples
+    process_df: pd.DataFrame
+        Data matrix of corrector samples.
+    n_min_samples: int
+        Mininum number of samples detected in corrector. Features with a lower
+        number of samples are removed.
+
+    Returns
+    -------
+    Index with valid features.
+    """
+
+    min_corr = corrector_df.idxmin()
+    max_corr = corrector_df.idxmax()
+    min_process = process_df.idxmin()
+    max_process = process_df.idxmax()
+    n_samples = (process_df > 0).count()
+    valid_order = ((min_corr < min_process) &
+                   (max_corr > max_process) &
+                   (n_samples >= n_min_samples))
+    valid_order = valid_order.index
+    return valid_order
+
+
+def coov_loess(x_order: pd.Series, x: pd.Series,
+               frac: Optional[float] = None) -> tuple:
+    """
+    Helper function for batch_correction. Computes loess correction with LOOCV.
+
+    Parameters
+    ----------
+    x_order: pd.Series
+        Run order
+    x: pd.Series
+        Feature intensities
+    frac: float, optional
+        fraction of sample to use in LOESS correction. If None, determines the
+        best value using LOOCV.
+    Returns
+    -------
+    frac: float.
+        Best frac found by LOOCV
+    corrected: pd.Series
+        LOESS corrected data
+    """
+    if frac is None:
+        # valid frac values, from 4/N to 1 samples.
+        frac_list = [x / x_order.size for x in range(4, x_order.size + 1)]
+        rms = np.inf
+        best_frac = 0
+        for frac in frac_list:
+            curr_rms = 0
+            for x_loocv in x_order.index[1:-1]:
+                y_temp = x.drop(x_loocv)
+                x_temp = x_order.drop(x_loocv)
+                y_loess = lowess(y_temp, x_temp, return_sorted=False, frac=frac)
+                interp = CubicSpline(x_temp, y_loess)
+                curr_rms += (x_order[x_loocv] - interp(x_loocv)) ** 2
+            if rms > curr_rms:
+                best_frac = frac
+                rms = curr_rms
+        frac = best_frac
+
+    return  frac, lowess(x, x_order, return_sorted=False, frac=frac)
+
+
+def batch_correction2(df: pd.DataFrame, run_order: pd.Series,
+                      classes: pd.Series, corrector_classes: List[str],
+                      process_classes: List[str],
+                      mode: str, **kwargs) -> pd.DataFrame:
+    """
+    Correct instrument response drift using LOESS regression [1, 2].
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+    run_order : pandas.Series
+        run order of samples
+    classes : pandas.Series
+        class label for samples
+    corrector_classes : str
+        label of corrector class
+    process_classes: list[str]
+        samples to correct
+    mode: {'loess', 'splines'}
+    kwargs: optional arguments to pass to loess corrector.
+
+    Returns
+    -------
+    corrected: pandas.DataFrame
+
+    References.
+    -----
+    .. [1] W B Dunn *et al*, "Procedures for large-scale metabolic profiling of
+    serum and plasma using gas chromatography and liquid chromatography coupled
+    to mass spectrometry", Nature Protocols volume 6, pages 1060–1083 (2011).
+    .. [2] D Broadhurst *et al*, "Guidelines and considerations for the use of
+    system suitability and quality control samples in mass spectrometry assays
+    applied in untargeted clinical metabolomic studies.", Metabolomics,
+    2018;14(6):72. doi: 10.1007/s11306-018-1367-3
+
+    Notes
+    -----
+    The correction is applied as described by Broadhurst in [2]. Using QC
+    samples a correction is generated for each feature in the following way:
+    The signal of a Quality control can be described in terms of three
+    components: a mean value, a systematic bias f and error.
+
+    .. math::
+        m_{i} = \bar{m_{i}} + f(t) + \epsilon
+
+    f(t) is estimated after mean substraction using Locally weighted scatterplot
+    smoothing (LOESS). The optimal fraction of samples for each local
+    regression is found using LOOCV.
+    """
+
+    # splitting data into corrector and process
+    df = df.sort_values(run_order).set_index(run_order)
+    corrector_df = df[classes.isin(corrector_classes)]
+    # corrector_order = run_order[classes.isin(corrector_classes)]
+    process_df = df[classes.isin(process_classes)]
+    # process_order = run_order[classes.isin(process_classes)]
+
+    # removing features that cannot be interpolated
+    valid_samples = _remove_invalid_features(corrector_df, process_df)
+    corrector_df = corrector_df.loc[:, valid_samples]
+    process_df = process_df.loc[:, valid_samples]
+
+    # LOESS correction for corrector samples
+    loess_func = lambda x: coov_loess(corrector_order, x)
+    corrector_df -= corrector_df.mean()
+    corrector_df =  corrector_df.apply(loess_func).set_index(corrector_order)
+
+    # interpolation of f(t) to correct process samples
+    f = pd.DataFrame(data=(np.ones_like(process_df.values) * np.nan),
+                     index=process_order)
+    f = f.fillna()
+
+
+    # if mode == "loess":
+        # corrector_df.apply(lambda x: lowess(order))
 
 
 def interbatch_correction(df: pd.DataFrame, batch: pd.Series,
@@ -346,7 +501,7 @@ def interbatch_correction(df: pd.DataFrame, batch: pd.Series,
     return corrected
 
 
-def get_outside_bounds_index(data: Union[pd.Seriees, pd.DataFrame], lb: float,
+def get_outside_bounds_index(data: Union[pd.Series, pd.DataFrame], lb: float,
                              ub: float) -> pd.Index:
     """
     return index of columns with values outside bounds.

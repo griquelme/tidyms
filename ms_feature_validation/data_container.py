@@ -204,9 +204,9 @@ class DataContainer(object):
         """
         Check if at least one sample class is`class_name`.
         
-        Atributes
-        ---------
-        class_name : str
+        Parameters
+        ----------
+        test_class : str
         
         Returns
         -------
