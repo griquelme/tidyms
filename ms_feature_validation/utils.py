@@ -2,6 +2,10 @@ from scipy.signal import find_peaks
 import numpy as np
 import pandas as pd
 import os.path
+from typing import Tuple, List, Optional, Union
+import pyopenms
+from collections import namedtuple
+msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
 
 
 def find_experimental_rt(rt, chromatogram, rt_guess, width, tolerance):
@@ -281,3 +285,247 @@ def d_ratio(qc_df, samples_df):
     applied in untargeted clinical metabolomic studies", Metabolomics (2018)
     14:72.    
     """
+
+
+Roi = namedtuple("Roi", ("mz", "spint", "index"))
+
+Roi.__doc__ = \
+    """
+    Region of interest of a MS experiment
+
+    Fields
+    ------
+    mz: np.ndarray
+        mz values for each point
+    spint: np.ndarray
+        intensity values for each point
+    index: int
+        scan number when roi starts.
+    """
+
+
+def _list_to_roi(mz_list: List[np.ndarray], sp_list: List[np.ndarray],
+                 index: int) -> List[Roi]:
+    """
+    Convert a list of mz and sp to a list of Roi
+
+    Parameters
+    ----------
+    mz_list: List[np.ndarray]
+    sp_list: List[np.ndarray]
+    index: int
+
+    Returns
+    -------
+    roi_list: List[Roi]
+    """
+    if len(mz_list) > 0:
+        roi_list = [Roi(mz, sp, index) for mz, sp in zip(mz_list, sp_list)]
+    else:
+        roi_list = list()
+    return roi_list
+
+
+def match_mz(mz1: np.ndarray, mz2: np.ndarray,
+             tol: float
+             ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Helper function to make_roi. Find matching indices for two MS scans.
+
+    Parameters
+    ----------
+    mz1: np.ndarray
+    mz2: np.ndarray
+    tol: float
+
+    Returns
+    -------
+    mz1_match: np.ndarray
+        matched index for mz1
+    mz1_unmatch: np.ndarray
+        unmatched index for mz1
+    mz2_match: np.ndarray
+        matched index for mz2
+    mz2_unmatch: np.ndarray
+        unmatched index for mz2
+
+    """
+    sorted_index = np.searchsorted(mz1, mz2)
+    # search match index in mz1
+    # negative index are converted to 0 ,index equal to mz1 size are converted
+    # mz1.size - 1
+    mz1_match = np.vstack((sorted_index - 1, sorted_index))
+    mz1_match = np.where(mz1_match >= mz1.size, mz1.size - 1, mz1_match)
+    mz1_match = np.where(mz1_match < 0, 0, mz1_match)
+    # selecting indices within tolerance
+    delta_mz = np.abs(mz1[mz1_match] - mz2)
+    min_mz_index = np.argmin(delta_mz, axis=0)
+    tmp = np.arange(min_mz_index.size)
+    delta_mz = delta_mz[min_mz_index, tmp]
+
+    mz1_match = mz1_match[min_mz_index, tmp]
+    mz1_match = mz1_match[delta_mz < tol]
+    mz1_match, ind = np.unique(mz1_match, return_index=True)
+
+    # search non matched indices in mz1
+    mz1_non_match = np.setdiff1d(np.arange(mz1.size), mz1_match)
+
+    # search match index in mz2
+    mz2_match = np.where(delta_mz < tol)[0]
+
+    # mz2_match = np.unique(mz2_match)
+    mz2_match = mz2_match[ind]
+
+    # search non matched indices in mz2
+    mz2_non_match = np.setdiff1d(np.arange(mz2.size), mz2_match)
+
+    return mz1_match, mz1_non_match, mz2_match, mz2_non_match
+
+
+def make_rois(msexp: msexperiment, pmin: int, pmax: int, max_gap: int,
+             min_int: float,  tolerance: float,  start: Optional[int] = None,
+              end: Optional[int] = None) -> List[Roi]:
+
+    if start is None:
+        start = 0
+
+    if end is None:
+        end = msexp.getNrSpectra()
+
+    rois = list()
+    roi_maker_list = list()
+
+    # roi_maker_list_initialization
+    mz, spint = msexp.getSpectrum(start).get_peaks()
+    roi_maker_tmp = RoiMaker(mz, spint, start, pmin, pmax,
+                         max_gap, min_int)
+    roi_maker_list.append(roi_maker_tmp)
+
+    for k_scan in range(start + 1, end):
+        completed = list()  # completed roi
+        mz, spint = msexp.getSpectrum(k_scan).get_peaks()
+
+        for k, roi_maker in enumerate(roi_maker_list):
+            mz1_match, mz1_nomatch, mz2_match, mz2_nomatch = \
+                match_mz(roi_maker.mz_mean, mz, tolerance)
+            # mz1 = np.ones_like(roi_maker.mz_mean) * np.nan
+            mz1 = np.zeros_like(roi_maker.mz_mean)
+            mz1[mz1_match] = mz[mz2_match]
+            sp1 = np.zeros_like(roi_maker.mz_mean)
+            # sp1 = np.ones_like(roi_maker.mz_mean) * np.nan
+            sp1[mz1_match] = spint[mz2_match]
+            mz = mz[mz2_nomatch]
+            spint = spint[mz2_nomatch]
+            roi_maker.add(mz1, sp1)
+            rois.extend(roi_maker.make_roi())
+            if roi_maker.completed:
+                completed.append(k)
+
+        if mz.size > 0:
+            roi_maker_tmp = RoiMaker(mz, spint, k_scan, pmin, pmax,
+                                     max_gap, min_int)
+            roi_maker_list.append(roi_maker_tmp)
+
+        while completed:
+            del roi_maker_list[completed.pop()]
+    return rois
+
+
+
+class RoiMaker:
+    """
+    Class used to make ROI from an MS Data in centroid mode.
+
+    Attributes
+    ----------
+    mz: np.ndarray
+        mz array used to initialize ROI
+    spint: np.ndarray
+        intensities array used to initialize ROI
+    pmin: int
+        Minimum number of points in the ROI
+    start: int
+        scan when roi in initialized
+    pmax: int
+        Maximum number of points in the ROI
+    max_gap: int
+        Maximum number of missing points
+    min_int: float
+        Minimum intensity value in a ROI.
+    """
+
+    def __init__(self, mz: np.ndarray, spint: np.ndarray, start: int,
+                 pmin: int, pmax: int, max_gap: int, min_int: float):
+        self.pmin = pmin
+        self.pmax = pmax
+        self.max_gap = max_gap
+        self.min_int = min_int
+        self.gap = np.zeros(shape=mz.size, dtype=int)
+        # self.mz = np.ones((pmax, mz.size)) * np.nan
+        # self.spint = np.ones((pmax, mz.size)) * np.nan
+        self.mz = np.zeros((pmax, mz.size))
+        self.spint = np.zeros((pmax, mz.size))
+        self.index = 0
+        self.add(mz, spint)
+        self.start = start
+        self.mz_mean = mz
+        self.completed = False
+    def add(self, mz: np.ndarray, spint: np.ndarray):
+        """
+        Add mz and spint values.
+        """
+        if self.index < self.pmax:
+            self.mz[self.index, :] = mz
+            self.spint[self.index, :] = spint
+            # missing = np.isnan(self.mz[self.index, :])
+            missing = (self.mz[self.index, :] == 0)
+            # self.gap = np.where(missing, self.gap + 1, 0)
+            self.gap += missing
+            self.index += 1
+            # self.mz_mean = np.nanmean(self.mz[:self.index, ], axis=0)
+            self.mz_mean = self.mz[:self.index, ].sum(axis=0) / (self.index - self.gap)
+
+    def make_roi(self):
+        """Make a list of completed ROI and clean non extended ROI"""
+        mz_list = list()
+        spint_list = list()
+        gap_mask = self.gap <= self.max_gap
+        spint_mask = self.spint[:self.index, :].max(axis=0) > self.min_int
+        n_completed = 0
+
+        # find completed roi
+        if self.index > self.pmin:
+            completed_mask = (~gap_mask) & spint_mask
+            n_completed = completed_mask.sum()
+        elif self.index >= self.pmax:
+            completed_mask = spint_mask
+            self.completed = True
+            n_completed = completed_mask.sum()
+
+        # extract completed roi to a list
+        if n_completed > 1:
+            mz_tmp = list(self.mz[:self.index, completed_mask].T)
+            spint_tmp = list(self.spint[:self.index, completed_mask].T)
+            mz_list.extend(mz_tmp)
+            spint_list.extend(spint_tmp)
+            print(mz_tmp)
+        elif n_completed == 1:
+            mz_tmp = self.mz[:self.index, completed_mask].flatten()
+            spint_tmp = self.spint[:self.index, completed_mask].flatten()
+            mz_list.append(mz_tmp)
+            spint_list.append(spint_tmp)
+        roi = _list_to_roi(mz_list, spint_list, self.start)
+
+        # remove invalid roi
+        self.mz = self.mz[:, gap_mask]
+        self.spint = self.spint[:, gap_mask]
+        self.gap = self.gap[gap_mask]
+        self.mz_mean = self.mz_mean[gap_mask]
+
+        if self.mz_mean.size == 0:
+            self.completed = True
+        # TODO: check long roi
+        return roi
+
+            # list of mz and int, index convert to a named tuple of ROI
+

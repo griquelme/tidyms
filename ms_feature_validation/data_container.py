@@ -115,19 +115,19 @@ class DataContainer(object):
         
     @property
     def feature_metadata(self) -> pd.DataFrame:
-        return self._feature_definitions.loc[self._feature_mask, :]
+        return self._feature_metadata.loc[self._feature_mask, :]
     
     @feature_metadata.setter
     def feature_metadata(self, value: pd.DataFrame):
-        self._feature_definitions = value
+        self._feature_metadata = value
     
     @property
     def sample_metadata(self) -> pd.DataFrame:
-        return self._sample_information.loc[self._sample_mask, :]
+        return self._sample_metadata.loc[self._sample_mask, :]
     
     @sample_metadata.setter
     def sample_metadata(self, value: pd.DataFrame):
-        self._sample_information = value
+        self._sample_metadata = value
                
     @property
     def mapping(self):
@@ -157,35 +157,39 @@ class DataContainer(object):
     @property
     def classes(self) -> pd.Series:
         """pd.Series[str] : class of each sample."""
-        return self._sample_information[_sample_class]
+        return self._sample_metadata.loc[self._sample_mask, _sample_class]
     
     @classes.setter
     def classes(self, value: pd.Series):
-        self._sample_information[_sample_class] = value
+        self._sample_metadata.loc[self._sample_mask, _sample_class] = value
     
     @property
     def batch(self) -> pd.Series:
         """pd.Series[str] or pd.Series[int]. Batch identification"""
         try:
-            return self._sample_information[_sample_batch]
+            return self._sample_metadata.loc[self._sample_mask, _sample_batch]
         except KeyError:
             raise BatchInformationError("No batch information available.")
             
     @batch.setter
     def batch(self, value: pd.Series):
-        self._sample_information[_sample_batch] = value
+        try:
+            _validate_batch_order(value, self.order)
+        except RunOrderError:
+            pass
+        self._sample_metadata.loc[self._sample_mask, _sample_batch] = value
     
     @property
     def order(self) -> pd.Series:
         """pd.Series[int] : order of analysis of samples"""
         try:
-            return self._sample_information[_sample_order]
+            return self._sample_metadata.loc[self._sample_mask, _sample_order]
         except KeyError:
             raise RunOrderError("No run order information available")
     
     @order.setter
     def order(self, value: pd.Series):
-        self._sample_information[_sample_order] = value
+        self._sample_metadata.loc[self._sample_mask, _sample_order] = value
 
     def get_available_samples(self) -> pd.Series:
         """
@@ -347,9 +351,12 @@ class _Metrics:
                       .groupby(self.__data.classes)
                       .apply(cv_func))
         else:
-            sample_class = self.__data.mapping[_sample_type]
-            is_sample_class = self.__data.classes.isin(sample_class)
-            result = cv_func(self.__data.data_matrix[is_sample_class])
+            if self.__data.mapping[_sample_type] is None:
+                result = cv_func(self.__data.data_matrix)
+            else:
+                sample_class = self.__data.mapping[_sample_type]
+                is_sample_class = self.__data.classes.isin(sample_class)
+                result = cv_func(self.__data.data_matrix[is_sample_class])
         return result
     
     def dratio(self, robust=False):
@@ -536,6 +543,21 @@ def _validate_mapping(mapping, valid_samples):
 def _make_empty_mapping():
     empty_mapping = {x: None for x in SAMPLE_TYPES}
     return empty_mapping
+
+def _validate_batch_order(batch: pd.Series, order: pd.Series):
+    if batch.dtype != int:
+        msg = "batch must be of integer dtype"
+        raise BatchInformationError(msg)
+    if order.dtype != int:
+        msg = "order must be of integer dtype"
+        raise RunOrderError(msg)
+
+    grouped = order.groupby(batch)
+    for _, batch_order in grouped:
+        if not np.array_equal(batch_order, batch_order.unique()):
+            msg = "order value must be unique for each batch"
+            raise RunOrderError(msg)
+
 
 # TODO: subclass DataContainer into  NMRDataContainer and MSDataContainer
 #  (agregar DI, LC)

@@ -207,7 +207,7 @@ class DuplicateAverager(Processor):
         if self.params["process_classes"] is None:
             self.params["process_classes"] = dc.mapping[_sample_type]
         dc.data_matrix = \
-            filter_functions.replicate_averager(dc.data_matrix, dc.id,
+            filter_functions.average_replicates(dc.data_matrix, dc.id,
                                                 dc.classes, **self.params)
         dc.sample_metadata = (dc.sample_metadata
                               .loc[dc.data_matrix.index, :])
@@ -266,9 +266,9 @@ class BlankCorrector(Processor):
     def func(self, dc):
         self.set_default_sample_types(dc)
         # TODO: view if there are side effects from modifying params
-        dc.data_matrix = filter_functions.blank_correction(dc.data_matrix,
-                                                           dc.classes,
-                                                           **self.params)
+        dc.data_matrix = filter_functions.correct_blanks(dc.data_matrix,
+                                                         dc.classes,
+                                                         **self.params)
 
 
 @register
@@ -391,7 +391,7 @@ class ChromatogramMaker(Processor):
                 msg = "Computing EICs for {} ({}/{})"
                 msg = msg.format(sample, k + 1, len(samples))
                 print(msg)
-            reader = fileio.read(sample)
+            reader = fileio.reader(sample)
             c = fileio.chromatogram(reader,
                                     mean_mz_cluster,
                                     tolerance=self.params["tolerance"])
