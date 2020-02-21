@@ -350,6 +350,7 @@ def match_mz(mz1: np.ndarray, mz2: np.ndarray,
         unmatched index for mz2
 
     """
+
     sorted_index = np.searchsorted(mz1, mz2)
     # search match index in mz1
     # negative index are converted to 0 ,index equal to mz1 size are converted
@@ -382,7 +383,7 @@ def match_mz(mz1: np.ndarray, mz2: np.ndarray,
     return mz1_match, mz1_non_match, mz2_match, mz2_non_match
 
 
-def make_rois(msexp: msexperiment, pmin: int, pmax: int, max_gap: int,
+def make_rois(msexp: msexperiment, pmin: int, max_gap: int,
              min_int: float,  tolerance: float,  start: Optional[int] = None,
               end: Optional[int] = None) -> List[Roi]:
 
@@ -397,13 +398,19 @@ def make_rois(msexp: msexperiment, pmin: int, pmax: int, max_gap: int,
 
     # roi_maker_list_initialization
     mz, spint = msexp.getSpectrum(start).get_peaks()
-    roi_maker_tmp = RoiMaker(mz, spint, start, pmin, pmax,
-                         max_gap, min_int)
-    roi_maker_list.append(roi_maker_tmp)
+    _, unique_index = np.unique(mz, return_index=True)
+    mz = mz[unique_index]
+    spint = spint[unique_index]
+    roi_maker = RoiMaker(mz, spint, start, end, pmin, max_gap, min_int)
+    roi_maker_list.append(roi_maker)
 
     for k_scan in range(start + 1, end):
         completed = list()  # completed roi
         mz, spint = msexp.getSpectrum(k_scan).get_peaks()
+        # remove duplicates, bug in proteowizard
+        _, unique_index = np.unique(mz, return_index=True)
+        mz = mz[unique_index]
+        spint = spint[unique_index]
 
         for k, roi_maker in enumerate(roi_maker_list):
             mz1_match, mz1_nomatch, mz2_match, mz2_nomatch = \
@@ -422,7 +429,7 @@ def make_rois(msexp: msexperiment, pmin: int, pmax: int, max_gap: int,
                 completed.append(k)
 
         if mz.size > 0:
-            roi_maker_tmp = RoiMaker(mz, spint, k_scan, pmin, pmax,
+            roi_maker_tmp = RoiMaker(mz, spint, k_scan, end, pmin,
                                      max_gap, min_int)
             roi_maker_list.append(roi_maker_tmp)
 
@@ -454,36 +461,36 @@ class RoiMaker:
         Minimum intensity value in a ROI.
     """
 
-    def __init__(self, mz: np.ndarray, spint: np.ndarray, start: int,
-                 pmin: int, pmax: int, max_gap: int, min_int: float):
+    def __init__(self, mz: np.ndarray, spint: np.ndarray, start: int, end: int,
+                 pmin: int, max_gap: int, min_int: float):
         self.pmin = pmin
-        self.pmax = pmax
+        self.pmax = end - start
         self.max_gap = max_gap
         self.min_int = min_int
         self.gap = np.zeros(shape=mz.size, dtype=int)
         # self.mz = np.ones((pmax, mz.size)) * np.nan
         # self.spint = np.ones((pmax, mz.size)) * np.nan
-        self.mz = np.zeros((pmax, mz.size))
-        self.spint = np.zeros((pmax, mz.size))
+        self.mz = np.zeros((self.pmax, mz.size))
+        self.spint = np.zeros((self.pmax, mz.size))
         self.index = 0
         self.add(mz, spint)
         self.start = start
         self.mz_mean = mz
         self.completed = False
+        self.end = end
+
     def add(self, mz: np.ndarray, spint: np.ndarray):
         """
         Add mz and spint values.
         """
-        if self.index < self.pmax:
-            self.mz[self.index, :] = mz
-            self.spint[self.index, :] = spint
-            # missing = np.isnan(self.mz[self.index, :])
-            missing = (self.mz[self.index, :] == 0)
-            # self.gap = np.where(missing, self.gap + 1, 0)
-            self.gap += missing
-            self.index += 1
-            # self.mz_mean = np.nanmean(self.mz[:self.index, ], axis=0)
-            self.mz_mean = self.mz[:self.index, ].sum(axis=0) / (self.index - self.gap)
+        self.mz[self.index, :] = mz
+        self.spint[self.index, :] = spint
+        missing = (self.mz[self.index, :] == 0)
+        self.gap = np.where(missing, self.gap + 1, 0)
+        self.index += 1
+        # mean ignoring zeros
+        count = (self.mz[:self.index, ] > 0).sum(axis=0)
+        self.mz_mean = self.mz[:self.index, ].sum(axis=0) / count
 
     def make_roi(self):
         """Make a list of completed ROI and clean non extended ROI"""
@@ -494,7 +501,7 @@ class RoiMaker:
         n_completed = 0
 
         # find completed roi
-        if self.index > self.pmin:
+        if (self.index > self.pmin) and (self.index < self.pmax):
             completed_mask = (~gap_mask) & spint_mask
             n_completed = completed_mask.sum()
         elif self.index >= self.pmax:
@@ -508,7 +515,6 @@ class RoiMaker:
             spint_tmp = list(self.spint[:self.index, completed_mask].T)
             mz_list.extend(mz_tmp)
             spint_list.extend(spint_tmp)
-            print(mz_tmp)
         elif n_completed == 1:
             mz_tmp = self.mz[:self.index, completed_mask].flatten()
             spint_tmp = self.spint[:self.index, completed_mask].flatten()

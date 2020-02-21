@@ -295,11 +295,48 @@ class MSData:
         dmz = np.diff(mz)
         return dmz.min() > 0.008
 
-    def find_roi(self, pmin: int, pmax: int, min_int: float, max_gap: int,
-                  tolerance: float, start: Optional[int] = None,
-                  end: Optional[int] = None) -> List[utils.Roi]:
+    def find_roi(self, pmin: int, min_int: float, max_gap: int,
+                 tolerance: float, start: Optional[int] = None,
+                 end: Optional[int] = None) -> List[utils.Roi]:
         """
-        Find region of interests in the data.
+        Find region of interests (ROI) in the data.
+        A ROI is built finding close mz values in consecutive scans.
+
+        Parameters
+        ----------
+        pmin: int
+            Minimum lenght of a ROI.
+        min_int: float
+            Minimum intensity of the maximum in the ROI.
+        max_gap: int
+            Maximum number of consecutive points in a ROI where no peak
+            was found.
+        tolerance: float
+            maximum distance to add a point to a ROI.
+        start: int, optional
+            First scan used to search ROI. If None, starts from the first scan.
+        end: int, optional
+            Last scan used to search ROI. If None, end is set to the last scan.
+
+        Notes
+        -----
+
+        The algorithm used to build the ROI is described in [1].
+
+        [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive feature
+        detection for high resolution LC/MS. BMC Bioinformatics 9, 504 (2008).
+        https://doi.org/10.1186/1471-2105-9-504
         """
-        return utils.make_rois(self.reader, pmin, pmax, max_gap, min_int,
+        return utils.make_rois(self.reader, pmin, max_gap, min_int,
                                tolerance, start=start, end=end)
+    def get_rt(self):
+        """
+        Retention time vector for the experiment.
+
+        Returns
+        -------
+        rt: np.ndarray
+        """
+        nsp = self.reader.getNrSpectra()
+        rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
+        return rt

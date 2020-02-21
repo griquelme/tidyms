@@ -12,9 +12,11 @@ from ._names import *
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
-from bokeh.plotting import figure
+import bokeh.plotting
+from bokeh.palettes import Spectral
 from bokeh.models import ColumnDataSource
 from bokeh.transform import factor_cmap
+from bokeh.models import LabelSet
 from typing import List, Optional, Iterable
 
 
@@ -85,6 +87,7 @@ class DataContainer(object):
         self._feature_mask = data_matrix.columns
         self._original_data = data_matrix.copy()
         self.metrics = _Metrics(self)
+        self.plot = _Plotter(self)
 
     @property
     def data_path(self) -> pd.DataFrame:
@@ -459,22 +462,26 @@ class _Plotter:
     Functions to plot data from a DataContainer.
     The methods return a bokeh figure object.
     """
-    def __init__(self, data):
+    def __init__(self, data: DataContainer):
         self._data_container = data
-        self.data = None
-        self.chromographic_data = None
-        self.ms_data = None
+
     
-    def pca_scores(self, x=1, y=2, fig=None, **kwargs):
+    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, color: str = "class",
+                   fig: Optional[bokeh.plotting.Figure] = None,
+                   show_order: bool = False, **kwargs):
         """
         plots PCA scores
         
         Parameters
         ----------
-        x: int
+        x_pc: int
             Principal component number to plot along X axis.
-        y: int
+        y_pc: int
             Principal component number to plot along Y axis.
+        color: {"class", "sample_type", "batch"}
+            How to color samples. "class" color points according to sample
+            class, "sample_type" color points according to the sample type
+            assigned on the mapping and "batch" uses batch information.
         fig: bokeh.plotting.figure, optional
             Figure used to plot. If None returns a new figure
         kwargs: optional arguments to pass into figure
@@ -483,19 +490,53 @@ class _Plotter:
         -------
         If no figure is specified returns a new figure. Else returns None.
         """
-        return_fig = False
         if fig is None:
             return_fig = True
-            fig = figure(**kwargs)
-        x_name = "PC" + str(x)
-        y_name = "PC" + str(y)
-        n = max(x, y)
-        scores, _, _ = self._data_container.metrics.pca(n_components=n)
-        scores = ColumnDataSource(scores)
-        scores.add(self._data_container.classes)
-        classes = self._data_container.classes.unique()
-        fig.scatter(data=scores, x=x_name, y=y_name,
-                    color=factor_cmap('class', 'Category10_3', classes))
+            TOOLTIPS = [("class", "@class"), ("order", "@order"),
+                        ("batch", "@batch"), ("id", "@id")]
+            fig = bokeh.plotting.figure(tooltips=TOOLTIPS, **kwargs)
+        else:
+            return_fig = False
+
+
+        x_name = "PC" + str(x_pc)
+        y_name = "PC" + str(y_pc)
+        n_comps = max(x_pc, y_pc)
+        score, _, variance = self._data_container.metrics.pca(n_components=n_comps)
+        score = score.join(self._data_container.sample_metadata)
+
+        if color == "sample_type":
+            rev_map = _reverse_mapping(self._data_container.mapping)
+            score["sample_type"] = score["class"].apply(lambda x: rev_map.get(x))
+
+        # setup the colors
+        unique_values = score[color].unique().astype(str)
+        print(unique_values)
+        score = ColumnDataSource(score)
+        palette = Spectral[11] * (int(unique_values.size / len(Spectral[11])) + 1)
+        palette = palette[:unique_values.size]
+        # TODO: Category10_3 should be in a parameter file
+
+        fig.scatter(source=score, x=x_name, y=y_name,
+                    color=factor_cmap(color, palette, unique_values),
+                    legend_group=color)
+
+        # set axis label names
+        total_var = self._data_container.data_matrix.var().sum()
+        x_label = x_name + " ({:.1f} %)"
+        x_label = x_label.format(variance[x_pc - 1] * 100/ total_var)
+        y_label = y_name + " ({:.1f} %)"
+        y_label = y_label.format(variance[y_pc - 1] * 100/ total_var)
+        fig.xaxis.axis_label = x_label
+        fig.yaxis.axis_label = y_label
+
+
+        if show_order:
+            labels = LabelSet(x=x_name, y=y_name, text='order', level='glyph',
+                              x_offset=3, y_offset=3, source=score,
+                              render_mode='canvas', text_font_size="8pt")
+            fig.add_layout(labels)
+
         if return_fig:
             return fig
 
@@ -544,6 +585,7 @@ def _make_empty_mapping():
     empty_mapping = {x: None for x in SAMPLE_TYPES}
     return empty_mapping
 
+
 def _validate_batch_order(batch: pd.Series, order: pd.Series):
     if batch.dtype != int:
         msg = "batch must be of integer dtype"
@@ -557,6 +599,15 @@ def _validate_batch_order(batch: pd.Series, order: pd.Series):
         if not np.array_equal(batch_order, batch_order.unique()):
             msg = "order value must be unique for each batch"
             raise RunOrderError(msg)
+
+
+def _reverse_mapping(mapping):
+    rev_map = dict()
+    for k, v in mapping.items():
+        if v is not None:
+            for class_value in v:
+                rev_map[class_value] = k
+    return rev_map
 
 
 # TODO: subclass DataContainer into  NMRDataContainer and MSDataContainer
