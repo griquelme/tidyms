@@ -5,10 +5,55 @@ chromatograms and accumulate spectra.
 
 import pyopenms
 import numpy as np
+import pandas as pd
 from scipy.interpolate import interp1d
 from typing import Optional, Iterable, Tuple, Union, List
 from . import utils
+from .data_container import DataContainer
+from . import validation
 msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
+
+
+def read_progenesis(path):
+    """
+    Read a progenesis file into a DataContainer
+
+    Parameters
+    ----------
+    path : path to an Progenesis csv output
+
+    Returns
+    -------
+    dc = DataContainer
+    """
+    df = pd.read_csv(path, skiprows=2, index_col="Compound")
+    df_header = pd.read_csv(path, nrows=2)
+    df_header = df_header.fillna(axis=1, method="ffill")
+    norm_index = df_header.columns.get_loc("Normalised abundance") - 1
+    raw_index = df_header.columns.get_loc("Raw abundance") - 1
+    ft_def = df.iloc[:, 0:norm_index]
+    data = df.iloc[:, raw_index:(2 * raw_index - norm_index)].T
+    sample_info = df_header.iloc[:,
+                  (raw_index + 1):(2 * raw_index - norm_index + 1)].T
+    sample_info.set_index(sample_info.iloc[:, 1], inplace=True)
+    sample_info.drop(labels=[1],  axis=1, inplace=True)
+
+    # rename sample info
+    sample_info.index.rename("sample", inplace=True)
+    sample_info.rename({sample_info.columns[0]: "class"},
+                       axis="columns", inplace=True)
+    # rename data matrix
+    data.index = sample_info.index
+    data.columns.rename("feature", inplace=True)
+    # rename features def
+    ft_def.index.rename("feature", inplace=True)
+    ft_def.rename({"m/z": "mz", "Retention time (min)": "rt"},
+                  axis="columns",
+                  inplace=True)
+    ft_def["rt"] = ft_def["rt"] * 60
+    validation.validate_data_container(data, ft_def, sample_info, None)
+    dc = DataContainer(data, ft_def, sample_info)
+    return dc
 
 
 def reader(path: str, on_disc: bool = True):
@@ -17,11 +62,14 @@ def reader(path: str, on_disc: bool = True):
     the file.
     Parameters
     ----------
-    path
+    path: str
+        path to read mzML file from.
+    on_disc:
+        if True doesn't load the whole file on memory.
 
     Returns
     -------
-
+    pyopenms.OnDiskMSExperiment or pyopenms.MSExperiment
     """
     if on_disc:
         try:
@@ -155,20 +203,20 @@ def accumulate_spectra(msexp: msexperiment, start: int,
     return accum_mz, accum_int
 
 
-def _get_mz_roi(msexp, scans):
+def _get_mz_roi(ms_experiment, scans):
     """
     make an mz array with regions of interest in the selected scans.
 
     Parameters
     ----------
-    msexp: pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
+    ms_experiment: pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
     scans : tuple[int] : start, end
 
     Returns
     -------
     mz_ref = numpy.array
     """
-    mz_0, _ = msexp.getSpectrum(scans[0]).get_peaks()
+    mz_0, _ = ms_experiment.getSpectrum(scans[0]).get_peaks()
     mz_min = mz_0.min()
     mz_max = mz_0.max()
     mz_res = np.diff(mz_0).min()
@@ -176,7 +224,7 @@ def _get_mz_roi(msexp, scans):
     roi = np.zeros(mz_ref.size + 1)
     # +1 used to prevent error due to mz values bigger than mz_max
     for k in range(*scans):
-        curr_mz, _ = msexp.getSpectrum(k).get_peaks()
+        curr_mz, _ = ms_experiment.getSpectrum(k).get_peaks()
         roi_index = np.searchsorted(mz_ref, curr_mz)
         roi[roi_index] += 1
     roi = roi.astype(bool)

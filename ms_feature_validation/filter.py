@@ -437,49 +437,6 @@ def data_container_from_excel(excel_file):
     return data_container
 
 
-def read_progenesis(path):
-    """
-    Read a progenesis file into a DataContainer
-
-    Parameters
-    ----------
-    path : path to an Progenesis csv output
-
-    Returns
-    -------
-    dc = DataContainer
-    """
-    df = pd.read_csv(path, skiprows=2, index_col="Compound")
-    df_header = pd.read_csv(path, nrows=2)
-    df_header = df_header.fillna(axis=1, method="ffill")
-    norm_index = df_header.columns.get_loc("Normalised abundance") - 1
-    raw_index = df_header.columns.get_loc("Raw abundance") - 1
-    ft_def = df.iloc[:, 0:norm_index]
-    data = df.iloc[:, raw_index:(2 * raw_index - norm_index)].T
-    sample_info = df_header.iloc[:,
-                  (raw_index + 1):(2 * raw_index - norm_index + 1)].T
-    sample_info.set_index(sample_info.iloc[:, 1], inplace=True)
-    sample_info.drop(labels=[1],  axis=1, inplace=True)
-
-    # rename sample info
-    sample_info.index.rename("sample", inplace=True)
-    sample_info.rename({sample_info.columns[0]: "class"},
-                       axis="columns", inplace=True)
-    # rename data matrix
-    data.index = sample_info.index
-    data.columns.rename("feature", inplace=True)
-    # rename features def
-    ft_def.index.rename("feature", inplace=True)
-    ft_def.rename({"m/z": "mz", "Retention time (min)": "rt"},
-                  axis="columns",
-                  inplace=True)
-    ft_def["rt"] = ft_def["rt"] * 60
-    validation.validate_data_container(data, ft_def, sample_info, None)
-    dc = DataContainer(data, ft_def, sample_info)
-
-    return dc
-
-
 def read_config(path):
     with open(path) as fin:
         config = yaml.load(fin, Loader=yaml.UnsafeLoader)

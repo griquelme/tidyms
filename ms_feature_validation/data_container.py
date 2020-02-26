@@ -5,19 +5,18 @@ Objects used for automatic curation and validation of LC-MS metabolomics data.
 TODO: add examples.
 """
 
-
 from . import utils
 from . import validation
 from ._names import *
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
+from typing import List, Optional, Iterable
 import bokeh.plotting
 from bokeh.palettes import Spectral
 from bokeh.models import ColumnDataSource
 from bokeh.transform import factor_cmap
 from bokeh.models import LabelSet
-from typing import List, Optional, Iterable
 
 
 class DataContainer(object):
@@ -151,11 +150,11 @@ class DataContainer(object):
     @property
     def id(self) -> pd.Series:
         """pd.Series[str] : name id of each sample."""
-        return self.sample_metadata[_sample_id]
+        return self._sample_metadata.loc[self._sample_mask, _sample_id]
 
     @id.setter
     def id(self, value: pd.Series):
-        self.sample_metadata[_sample_id] = value
+        self._sample_metadata.loc[self._sample_mask, _sample_id] = value
         
     @property
     def classes(self) -> pd.Series:
@@ -316,6 +315,30 @@ class DataContainer(object):
             if classes is not None:
                 process_classes += classes
         return process_classes
+
+    def select_features(self, mz: float, rt: float, mz_tol: float = 0.01,
+                        rt_tol: float = 5):
+        """
+        Find feature names within the defined tolerance
+
+        Parameters
+        ----------
+        mz: float
+            mz v
+        rt: float
+        mz_tol: float
+        rt_tol: float
+
+        Returns
+        -------
+        pandas.Index
+        """
+        mz_match = (self.feature_metadata["mz"] - mz).abs() < mz_tol
+        rt_match = (self.feature_metadata["rt"] - rt).abs() < rt_tol
+        mz_match_ft = mz_match[mz_match].index
+        rt_match_ft = rt_match[rt_match].index
+        result = mz_match_ft.intersection(rt_match_ft)
+        return result
     
 
 class _Metrics:
@@ -465,10 +488,9 @@ class _Plotter:
     def __init__(self, data: DataContainer):
         self._data_container = data
 
-    
     def pca_scores(self, x_pc: int = 1, y_pc: int = 2, color: str = "class",
-                   fig: Optional[bokeh.plotting.Figure] = None,
-                   show_order: bool = False, **kwargs):
+                   draw: bool = True, show_order: bool = False,
+                   **kwargs) -> bokeh.plotting.Figure:
         """
         plots PCA scores
         
@@ -478,42 +500,44 @@ class _Plotter:
             Principal component number to plot along X axis.
         y_pc: int
             Principal component number to plot along Y axis.
-        color: {"class", "sample_type", "batch"}
+        color: {"class", "type", "batch"}
             How to color samples. "class" color points according to sample
-            class, "sample_type" color points according to the sample type
-            assigned on the mapping and "batch" uses batch information.
-        fig: bokeh.plotting.figure, optional
-            Figure used to plot. If None returns a new figure
+            class, "type" color points according to the sample type
+            assigned on the mapping and "batch" uses batch information. Samples
+            classes without a mapping are not shown in the plot
+        show_order: bool
+            add a label with the run order.
+        draw: bool
+            If True calls bokeh.plotting.show on fig.
         kwargs: optional arguments to pass into figure
         
         Returns
         -------
-        If no figure is specified returns a new figure. Else returns None.
+        bokeh.plotting.Figure.
         """
-        if fig is None:
-            return_fig = True
-            TOOLTIPS = [("class", "@class"), ("order", "@order"),
-                        ("batch", "@batch"), ("id", "@id")]
-            fig = bokeh.plotting.figure(tooltips=TOOLTIPS, **kwargs)
-        else:
-            return_fig = False
-
+        tooltips = [("class", "@class"), ("order", "@order"),
+                    ("batch", "@batch"), ("id", "@id")]
+        fig = bokeh.plotting.figure(tooltips=tooltips, **kwargs)
 
         x_name = "PC" + str(x_pc)
         y_name = "PC" + str(y_pc)
         n_comps = max(x_pc, y_pc)
-        score, _, variance = self._data_container.metrics.pca(n_components=n_comps)
+        score, _, variance = \
+            self._data_container.metrics.pca(n_components=n_comps)
         score = score.join(self._data_container.sample_metadata)
 
-        if color == "sample_type":
+        if color == "type":
             rev_map = _reverse_mapping(self._data_container.mapping)
-            score["sample_type"] = score["class"].apply(lambda x: rev_map.get(x))
+            score["type"] = score["class"].apply(lambda x: rev_map.get(x))
+            score = score[~pd.isna(score["type"])]
+        elif color == "batch":
+            score["batch"] = score["batch"].astype(str)
 
         # setup the colors
         unique_values = score[color].unique().astype(str)
-        print(unique_values)
         score = ColumnDataSource(score)
-        palette = Spectral[11] * (int(unique_values.size / len(Spectral[11])) + 1)
+        cmap = Spectral[11]
+        palette = cmap * (int(unique_values.size / len(cmap)) + 1)
         palette = palette[:unique_values.size]
         # TODO: Category10_3 should be in a parameter file
 
@@ -524,12 +548,11 @@ class _Plotter:
         # set axis label names
         total_var = self._data_container.data_matrix.var().sum()
         x_label = x_name + " ({:.1f} %)"
-        x_label = x_label.format(variance[x_pc - 1] * 100/ total_var)
+        x_label = x_label.format(variance[x_pc - 1] * 100 / total_var)
         y_label = y_name + " ({:.1f} %)"
-        y_label = y_label.format(variance[y_pc - 1] * 100/ total_var)
+        y_label = y_label.format(variance[y_pc - 1] * 100 / total_var)
         fig.xaxis.axis_label = x_label
         fig.yaxis.axis_label = y_label
-
 
         if show_order:
             labels = LabelSet(x=x_name, y=y_name, text='order', level='glyph',
@@ -537,8 +560,108 @@ class _Plotter:
                               render_mode='canvas', text_font_size="8pt")
             fig.add_layout(labels)
 
-        if return_fig:
-            return fig
+        if draw:
+            bokeh.plotting.show(fig)
+        return fig
+
+    def pca_loadings(self, x_pc=1, y_pc=2, draw: bool = True, **kwargs):
+        """
+        plots PCA loadings.
+
+        Parameters
+        ----------
+        x_pc: int
+            Principal component number to plot along X axis.
+        y_pc: int
+            Principal component number to plot along Y axis.
+        draw: bool
+            If True, calls bokeh.plotting.show on figure
+        kwargs: optional arguments to pass into bokeh.plotting.figure.
+
+        Returns
+        -------
+        If no figure is specified returns a new figure. Else returns None.
+        """
+        tooltips = [("id", "@feature"), ("m/z", "@mz"),
+                    ("rt", "@rt"), ("charge", "@charge")]
+        fig = bokeh.plotting.figure(tooltips=tooltips, **kwargs)
+
+        x_name = "PC" + str(x_pc)
+        y_name = "PC" + str(y_pc)
+        n_comps = max(x_pc, y_pc)
+        _, loadings, variance = \
+            self._data_container.metrics.pca(n_components=n_comps)
+        loadings = loadings.join(self._data_container.feature_metadata)
+        loadings = ColumnDataSource(loadings)
+
+        fig.scatter(source=loadings, x=x_name, y=y_name)
+
+        # set axis label names with % variance
+        total_var = self._data_container.data_matrix.var().sum()
+        x_label = x_name + " ({:.1f} %)"
+        x_label = x_label.format(variance[x_pc - 1] * 100 / total_var)
+        y_label = y_name + " ({:.1f} %)"
+        y_label = y_label.format(variance[y_pc - 1] * 100 / total_var)
+        fig.xaxis.axis_label = x_label
+        fig.yaxis.axis_label = y_label
+
+        if draw:
+            bokeh.plotting.show(fig)
+        return fig
+
+    def feature(self, ft: str, color_by: str = "class", draw: bool = True,
+                fig_params: Optional[dict] = None,
+                scatter_params: Optional[dict] = None) -> bokeh.plotting.Figure:
+        """
+        plots a feature intensity as a function of the run order.
+
+        Parameters
+        ----------
+        ft: str
+            Feature to plot. Index of feature in `feature_metadata`
+        color_by: {"class", "type"}
+        draw: bool
+            If True calls bokeh.plotting.show on figure.
+        fig_params: dict
+            key-value parameters to pass to bokeh figure
+        scatter_params: dict
+            key-value parameters to pass to bokeh circle
+
+        Returns
+        -------
+        bokeh.plotting.Figure
+        """
+
+        if fig_params is None:
+            fig_params = dict()
+        if scatter_params is None:
+            scatter_params = dict()
+
+        source = (self._data_container.sample_metadata
+                  .join(self._data_container.data_matrix[ft]))
+
+        if color_by == "type":
+            rev_map = _reverse_mapping(self._data_container.mapping)
+            source["type"] = (self._data_container.classes
+                              .apply(lambda x: rev_map.get(x)))
+
+        # setup the colors
+        unique_values = source[color_by].unique().astype(str)
+        cmap = Spectral[11]
+        palette = cmap * (int(unique_values.size / len(cmap)) + 1)
+        palette = palette[:unique_values.size]
+
+        source = ColumnDataSource(source)
+
+        tooltips = [("class", "@class"), ("order", "@order"),
+                    ("batch", "@batch"), ("id", "@id")]
+        fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
+        cmap_factor = factor_cmap(color_by, palette, unique_values)
+        fig.scatter(source=source, x="order", y=ft, color=cmap_factor,
+                    legend_group=color_by, **scatter_params)
+        if draw:
+            bokeh.plotting.show(fig)
+        return fig
 
 
 class BatchInformationError(Exception):
@@ -611,5 +734,5 @@ def _reverse_mapping(mapping):
 
 
 # TODO: subclass DataContainer into  NMRDataContainer and MSDataContainer
-#  (agregar DI, LC)
+#  (add DI, LC)
 # TODO: implement a PCA function to avoid importing sklearn
