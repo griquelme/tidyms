@@ -488,9 +488,11 @@ class _Plotter:
     def __init__(self, data: DataContainer):
         self._data_container = data
 
-    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, color: str = "class",
+    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, color_by: str = "class",
                    draw: bool = True, show_order: bool = False,
-                   **kwargs) -> bokeh.plotting.Figure:
+                   fig_params: Optional[dict] = None,
+                   scatter_params: Optional[dict] = None
+                   ) -> bokeh.plotting.Figure:
         """
         plots PCA scores
         
@@ -500,7 +502,7 @@ class _Plotter:
             Principal component number to plot along X axis.
         y_pc: int
             Principal component number to plot along Y axis.
-        color: {"class", "type", "batch"}
+        color_by: {"class", "type", "batch"}
             How to color samples. "class" color points according to sample
             class, "type" color points according to the sample type
             assigned on the mapping and "batch" uses batch information. Samples
@@ -509,15 +511,24 @@ class _Plotter:
             add a label with the run order.
         draw: bool
             If True calls bokeh.plotting.show on fig.
-        kwargs: optional arguments to pass into figure
+        fig_params: dict, optional
+            Optional parameters to pass into bokeh figure
+        scatter_params: dict, optional
+            Optional parameters to pass into bokeh scatter plot.
         
         Returns
         -------
         bokeh.plotting.Figure.
         """
+        if fig_params is None:
+            fig_params = dict()
+
+        if scatter_params is None:
+            scatter_params = dict()
+
         tooltips = [("class", "@class"), ("order", "@order"),
                     ("batch", "@batch"), ("id", "@id")]
-        fig = bokeh.plotting.figure(tooltips=tooltips, **kwargs)
+        fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
 
         x_name = "PC" + str(x_pc)
         y_name = "PC" + str(y_pc)
@@ -526,15 +537,15 @@ class _Plotter:
             self._data_container.metrics.pca(n_components=n_comps)
         score = score.join(self._data_container.sample_metadata)
 
-        if color == "type":
+        if color_by == "type":
             rev_map = _reverse_mapping(self._data_container.mapping)
             score["type"] = score["class"].apply(lambda x: rev_map.get(x))
             score = score[~pd.isna(score["type"])]
-        elif color == "batch":
+        elif color_by == "batch":
             score["batch"] = score["batch"].astype(str)
 
         # setup the colors
-        unique_values = score[color].unique().astype(str)
+        unique_values = score[color_by].unique().astype(str)
         score = ColumnDataSource(score)
         cmap = Spectral[11]
         palette = cmap * (int(unique_values.size / len(cmap)) + 1)
@@ -542,8 +553,8 @@ class _Plotter:
         # TODO: Category10_3 should be in a parameter file
 
         fig.scatter(source=score, x=x_name, y=y_name,
-                    color=factor_cmap(color, palette, unique_values),
-                    legend_group=color)
+                    color=factor_cmap(color_by, palette, unique_values),
+                    legend_group=color_by, **scatter_params)
 
         # set axis label names
         total_var = self._data_container.data_matrix.var().sum()
@@ -564,7 +575,10 @@ class _Plotter:
             bokeh.plotting.show(fig)
         return fig
 
-    def pca_loadings(self, x_pc=1, y_pc=2, draw: bool = True, **kwargs):
+    def pca_loadings(self, x_pc=1, y_pc=2, draw: bool = True,
+                     fig_params: Optional[dict] = None,
+                     scatter_params: Optional[dict] = None
+                     ) -> bokeh.plotting.Figure:
         """
         plots PCA loadings.
 
@@ -576,15 +590,25 @@ class _Plotter:
             Principal component number to plot along Y axis.
         draw: bool
             If True, calls bokeh.plotting.show on figure
-        kwargs: optional arguments to pass into bokeh.plotting.figure.
+        fig_params: dict, optional
+            Optional parameters to pass into bokeh figure
+        scatter_params: dict, optional
+            Optional parameters to pass into bokeh scatter plot.
+
 
         Returns
         -------
-        If no figure is specified returns a new figure. Else returns None.
+        bokeh.plotting.Figure.
         """
+        if fig_params is None:
+            fig_params = dict()
+
+        if scatter_params is None:
+            scatter_params = dict()
+
         tooltips = [("id", "@feature"), ("m/z", "@mz"),
                     ("rt", "@rt"), ("charge", "@charge")]
-        fig = bokeh.plotting.figure(tooltips=tooltips, **kwargs)
+        fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
 
         x_name = "PC" + str(x_pc)
         y_name = "PC" + str(y_pc)
@@ -594,7 +618,7 @@ class _Plotter:
         loadings = loadings.join(self._data_container.feature_metadata)
         loadings = ColumnDataSource(loadings)
 
-        fig.scatter(source=loadings, x=x_name, y=y_name)
+        fig.scatter(source=loadings, x=x_name, y=y_name, **scatter_params)
 
         # set axis label names with % variance
         total_var = self._data_container.data_matrix.var().sum()

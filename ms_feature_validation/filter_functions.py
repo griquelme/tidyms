@@ -370,6 +370,7 @@ def _coov_loess(x: pd.Series,
                 best_frac = frac
                 rms = curr_rms
         frac = best_frac
+        print(best_frac)
     return lowess(x.values, x.index, return_sorted=False, frac=frac)
 
 
@@ -393,12 +394,11 @@ def _generate_batches(df: pd.DataFrame, run_order: pd.Series, batch: pd.Series,
         yield corrector_df, process_df, batch_order
 
 
-def batch_correction2(df: pd.DataFrame, run_order: pd.Series, batch: pd.Series,
-                      classes: pd.Series, corrector_classes: List[str],
-                      process_classes: List[str],
-                      min_prevalence: Union[float, int] = 1,
-                      frac: Optional[float] = None
-                      ) -> Tuple[pd.Series, pd.DataFrame]:
+def batch_correction(df: pd.DataFrame, run_order: pd.Series, batch: pd.Series,
+                     classes: pd.Series, corrector_classes: List[str],
+                     process_classes: List[str], frac: Optional[float] = None,
+                     interpolator: str = "spline"
+                     ) -> Tuple[pd.Series, pd.DataFrame]:
     """
     Correct instrument response drift using LOESS regression [1, 2].
 
@@ -463,10 +463,14 @@ def batch_correction2(df: pd.DataFrame, run_order: pd.Series, batch: pd.Series,
                                 corrector_classes, process_classes)
     n_batch = 0
     corrected = df.copy()
+    invalid_features = pd.Index([])
     for corrector_df, process_df, batch_order in batches:
         n_batch += 1
         n_corrector_samples += corrector_df.shape[0]
         valid_features = _select_valid_features(corrector_df, process_df)
+        valid_features = valid_features.difference(invalid_features)
+        invalid_features = invalid_features.union(
+            process_df.columns.difference(valid_features))
         batch_prevalence[valid_features] += 1
         corrector_df = corrector_df.loc[:, valid_features]
 
