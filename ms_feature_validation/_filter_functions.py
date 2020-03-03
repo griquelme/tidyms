@@ -460,4 +460,5 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     global_mean = corrected.mean()
     corrected = corrected.groupby(batch).apply(lambda x: x - x.mean())
     corrected = corrected + global_mean
+    corrected[corrected < 0] = 0
     return corrected

@@ -339,7 +339,30 @@ class DataContainer(object):
         rt_match_ft = rt_match[rt_match].index
         result = mz_match_ft.intersection(rt_match_ft)
         return result
-    
+
+    def sort(self, field: str, axis: str):
+        """
+        Sort samples/features
+
+        Parameters
+        ----------
+        field: str
+            field to sort by. Must be a field of sample_metadata or
+            feature_metadata
+        axis: {"samples", "features"}
+        """
+        if axis == "samples":
+            sorted_index = self.sample_metadata.sort_values(field).index
+            self.sample_metadata = self.sample_metadata.loc[sorted_index, :]
+            self.data_matrix = self.data_matrix.loc[sorted_index, :]
+        elif axis == "features":
+            sorted_index = self.feature_metadata.sort_values(field).index
+            self.feature_metadata = self.feature_metadata.loc[sorted_index, :]
+            self.data_matrix = self.data_matrix.loc[:, sorted_index]
+        else:
+            msg = "axis must be `samples` or `features`"
+            raise ValueError(msg)
+
 
 class _Metrics:
     """

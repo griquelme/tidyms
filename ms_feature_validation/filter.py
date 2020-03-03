@@ -386,7 +386,9 @@ class BatchSchemeChecker(Processor):
         self._default_process = _sample_type
         self._default_correct = _qc_type
 
-    def func(self, dc):
+    def func(self, dc: DataContainer):
+
+        dc.sort(_sample_order, "samples")
 
         def invalid_batch_aux(x):
             n_min = self.params["n_min"]
@@ -497,6 +499,7 @@ class BatchCorrectorProcessor(Processor):
                                   dc.classes, **self.params)
 
 
+@register
 class BatchCorrector(Pipeline):
     """
     Correct systematic bias along samples due to variation in instrumental
@@ -547,7 +550,7 @@ def merge_data_containers(dcs):
     return DataContainer(dm, fd, si)
 
 
-def data_container_from_excel(excel_file):
+def data_container_from_excel(excel_file: str) -> DataContainer:
     data_matrix = pd.read_excel(excel_file,
                                 sheet_name="data_matrix",
                                 index_col="sample")
