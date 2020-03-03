@@ -17,7 +17,8 @@ dm_data = np.vstack((np.random.normal(loc=3, size=(3, n_features)),
                      np.random.normal(loc=10, size=(n_samples - 3, n_features)))
                     )
 ft_data = np.random.normal(loc=200, scale=30, size=(n_features, 2))
-mapping = {"sample": ["healthy", "disease"], "blank": ["SV"],
+mapping = {"sample": ["healthy", "disease"],
+           "blank": ["SV"],
            "qc": ["QC"]}
 
 

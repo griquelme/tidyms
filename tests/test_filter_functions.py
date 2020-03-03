@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from ms_feature_validation import filter_functions
+from ms_feature_validation import _filter_functions
 import pandas as pd
 import numpy as np
 import pytest
@@ -71,7 +71,7 @@ def test_normalizer_global(sample_data):
     # test normalizer function with intraclass set to False
     data, metadata = sample_data
     intraclass = False
-    normalizer = filter_functions.normalizer(metadata["class"], intraclass)
+    normalizer = _filter_functions.normalizer(metadata["class"], intraclass)
     assert (data / data.shape[0]).equals(normalizer(data))
 
 
@@ -79,7 +79,7 @@ def test_normalizer_intraclass(sample_data):
     # test normalizer function with intraclass set to True
     data, metadata = sample_data
     intraclass = True
-    normalizer = filter_functions.normalizer(metadata["class"], intraclass)
+    normalizer = _filter_functions.normalizer(metadata["class"], intraclass)
     class_counts = metadata["class"].value_counts()
     print(data / class_counts)
     assert data.divide(class_counts, axis=0).equals(normalizer(data))
@@ -89,7 +89,7 @@ def test_grouper_global(sample_data):
     # test grouper with intraclass set to False
     data, metadata = sample_data
     intraclass = False
-    grouper = filter_functions.grouper(metadata["class"], intraclass)
+    grouper = _filter_functions.grouper(metadata["class"], intraclass)
     assert data.equals(grouper(data))
 
 
@@ -97,7 +97,7 @@ def test_grouper_intraclass(sample_data):
     # test grouper with intraclass set to True
     data, metadata = sample_data
     intraclass = True
-    grouper = filter_functions.grouper(metadata["class"], intraclass)
+    grouper = _filter_functions.grouper(metadata["class"], intraclass)
     grouped_data = grouper(data)
     # check if there is a better way to check for equality
     for class_name in metadata["class"].unique():
@@ -116,7 +116,7 @@ def test_bound_checker_intraclass(lb, ub, expected):
     data = pd.Series(data=data, index=ft_names)
     expected = pd.Series(data=expected, index=ft_names)
     intraclass = False
-    bounds_checker = filter_functions.bounds_checker(lb, ub, intraclass)
+    bounds_checker = _filter_functions.bounds_checker(lb, ub, intraclass)
     print(bounds_checker(data))
     assert bounds_checker(data).equals(expected)
     

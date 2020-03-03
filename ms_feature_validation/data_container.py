@@ -80,11 +80,11 @@ class DataContainer(object):
         self.data_matrix = data_matrix
         self.feature_metadata = feature_metadata
         self.sample_metadata = sample_metadata
-        self.data_path = data_path
-        self.mapping = mapping
         self._sample_mask = data_matrix.index
         self._feature_mask = data_matrix.columns
         self._original_data = data_matrix.copy()
+        self.data_path = data_path
+        self.mapping = mapping
         self.metrics = _Metrics(self)
         self.plot = _Plotter(self)
 

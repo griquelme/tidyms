@@ -34,10 +34,9 @@ def test_batch_getter(data_container_example):
 
 def test_batch_setter(data_container_example):
     data = data_container_example
-    batch_series = pd.Series(data=data.batch, index=data.batch.index)
-    #set classes to an arbitrary value
-    data.batch = 4
-    data.batch = batch_series
+    b = np.arange(data.data_matrix.shape[0])
+    batch_series = pd.Series(data=b, index=data.batch.index)
+    data.batch = b
     assert data.batch.equals(batch_series)
 
 

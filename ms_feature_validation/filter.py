@@ -5,9 +5,7 @@ Filter objects to curate data
 
 from .data_container import DataContainer
 from ._names import *
-from . import filter_functions
-from . import utils
-from . import fileio
+from ._filter_functions import *
 import yaml
 import os.path
 import pandas as pd
@@ -205,9 +203,8 @@ class DuplicateAverager(Processor):
     def func(self, dc: DataContainer):
         if self.params["process_classes"] is None:
             self.params["process_classes"] = dc.mapping[_sample_type]
-        dc.data_matrix = \
-            filter_functions.average_replicates(dc.data_matrix, dc.id,
-                                                dc.classes, **self.params)
+        dc.data_matrix = average_replicates(dc.data_matrix, dc.id,
+                                            dc.classes, **self.params)
         dc.sample_metadata = (dc.sample_metadata
                               .loc[dc.data_matrix.index, :])
 
@@ -219,6 +216,7 @@ class ClassRemover(Processor):
     """
     def __init__(self, classes: List[str]):
         super(ClassRemover, self).__init__(axis="samples", mode="filter")
+        self.name = "Class Remover"
         if classes is None:
             self.params["classes"] = list()
         else:
@@ -265,38 +263,8 @@ class BlankCorrector(Processor):
     def func(self, dc):
         self.set_default_sample_types(dc)
         # TODO: view if there are side effects from modifying params
-        dc.data_matrix = filter_functions.correct_blanks(dc.data_matrix,
-                                                         dc.classes,
-                                                         **self.params)
-
-
-@register
-class BatchCorrector(Processor):
-    """
-    Corrects instrumental drift between in a batch.
-    """
-    def __init__(self, corrector_classes=None, process_classes=None,
-                 interpolator="splines", verbose=False, **kwargs):
-        super(BatchCorrector, self).__init__(axis=None, mode="transform",
-                                             verbose=verbose)
-        self.name = "Batch Corrector"
-
-        self.params["corrector_classes"] = corrector_classes
-        self.params["process_classes"] = process_classes
-        self.params["interpolator"] = interpolator
-        self.params = {**self.params, **kwargs}
-        self._default_process = _sample_type
-        self._default_correct = _qc_type
-        # TODO: chequear la linea de kwargs
-
-    def func(self, dc: DataContainer):
-        self.set_default_sample_types(dc)
-        print(self.params)
-        dc.data_matrix = filter_functions.batch_correction(dc.data_matrix,
-                                                           dc.order,
-                                                           dc.batch,
-                                                           dc.classes,
-                                                           **self.params)
+        dc.data_matrix = correct_blanks(dc.data_matrix, dc.classes,
+                                        **self.params)
 
 
 @register
@@ -344,7 +312,7 @@ class PrevalenceFilter(Processor):
                                        threshold=self.params["threshold"])
         lb = self.params["lb"]
         ub = self.params["ub"]
-        return filter_functions.get_outside_bounds_index(dr, lb, ub)
+        return get_outside_bounds_index(dr, lb, ub)
 
 
 @register
@@ -371,40 +339,7 @@ class VariationFilter(Processor):
         variation = dc.metrics.cv(intraclass=self.params["intraclass"],
                                   robust=self.params["robust"])
         variation = variation.loc[self.params["process_classes"], :]
-        return filter_functions.get_outside_bounds_index(variation, lb, ub)
-
-
-# @register
-# class ChromatogramMaker(Processor):
-#     """
-#     Computes chromatograms for all samples using available raw data.
-#     """
-#     def __init__(self, tolerance=0.005, cluster_tolerance=0.0002,
-#                  verbose=False):
-#         super(ChromatogramMaker, self).__init__("add")
-#         self.name = "Chromatogram Maker"
-#         self.params["tolerance"] = tolerance
-#         self.params["cluster_tolerance"] = cluster_tolerance
-#         self.verbose = verbose
-#
-#     def func(self, dc):
-#         dc.cluster_mz(self.params["cluster_tolerance"])
-#         mean_mz_cluster = utils.mean_cluster_value(dc.get_mz(),
-#                                                    dc.get_mz_cluster())
-#         chromatogram_dict = dict()
-#         samples = dc.get_available_samples()
-#         for k, sample in enumerate(samples):
-#             if self.verbose:
-#                 msg = "Computing EICs for {} ({}/{})"
-#                 msg = msg.format(sample, k + 1, len(samples))
-#                 print(msg)
-#             reader = fileio.reader(sample)
-#             c = fileio.chromatogram(reader,
-#                                     mean_mz_cluster,
-#                                     tolerance=self.params["tolerance"])
-#             sample_name = sample_name_from_path(sample)
-#             chromatogram_dict[sample_name] = c
-#         dc.chromatograms = chromatogram_dict
+        return get_outside_bounds_index(variation, lb, ub)
 
 
 class BatchSchemeChecker(Processor):
@@ -464,18 +399,14 @@ class BatchSchemeChecker(Processor):
                         .apply(invalid_batch_aux))
         low_qc_batch = low_qc_batch[low_qc_batch].index
 
-        min_corr_order = _get_ext_per_batch(dc.order, dc.batch, dc.classes,
-                                            self.params["corrector_classes"],
-                                            "min")
-        max_corr_order = _get_ext_per_batch(dc.order, dc.batch, dc.classes,
-                                            self.params["corrector_classes"],
-                                            "max")
-        min_proc_order = _get_ext_per_batch(dc.order, dc.batch, dc.classes,
-                                            self.params["process_classes"],
-                                            "min")
-        max_proc_order = _get_ext_per_batch(dc.order, dc.batch, dc.classes,
-                                            self.params["process_classes"],
-                                            "max")
+        min_corr_order = batch_ext(dc.order, dc.batch, dc.classes,
+                                   self.params["corrector_classes"], "min")
+        max_corr_order = batch_ext(dc.order, dc.batch, dc.classes,
+                                   self.params["corrector_classes"], "max")
+        min_proc_order = batch_ext(dc.order, dc.batch, dc.classes,
+                                   self.params["process_classes"], "min")
+        max_proc_order = batch_ext(dc.order, dc.batch, dc.classes,
+                                   self.params["process_classes"], "max")
 
         invalid_batches = ((min_corr_order > min_proc_order)
                            | (max_corr_order < max_proc_order))
@@ -497,7 +428,6 @@ class BatchPrevalenceChecker(Processor):
     middle block: features must be detected in at least n_min - 2 samples
     end block: features must be detected in at least one sample on the
     ending block.
-
 
     Parameters
     ----------
@@ -529,11 +459,71 @@ class BatchPrevalenceChecker(Processor):
 
     def func(self, dc: DataContainer):
         self.set_default_sample_types(dc)
-        return check_qc_prevalence(dc.data_matrix, dc.order, dc.batch,
-                                   dc.classes, self.params["corrector_classes"],
-                                   self.params["process_classes"],
-                                   threshold=self.params["threshold"],
-                                   min_n_qc=self.params["n_min"])
+        res = check_qc_prevalence(dc.data_matrix, dc.order, dc.batch,
+                                  dc.classes, self.params["corrector_classes"],
+                                  self.params["process_classes"],
+                                  threshold=self.params["threshold"],
+                                  min_n_qc=self.params["n_min"])
+        return res
+
+
+class BatchCorrectorProcessor(Processor):
+    """
+    Corrects instrumental drift between in a batch. Part of the batch
+    corrector pipeline
+    """
+    def __init__(self, corrector_classes: Optional[List[str]] = None,
+                 process_classes: Optional[List[str]] = None,
+                 frac: Optional[float] = None,
+                 interpolator: str = "splines",
+                 verbose: bool = False, **kwargs):
+        super(BatchCorrectorProcessor, self).__init__(axis=None,
+                                                      mode="transform",
+                                                      verbose=verbose)
+        self.name = "Batch Corrector"
+        self.params["corrector_classes"] = corrector_classes
+        self.params["process_classes"] = process_classes
+        self.params["interpolator"] = interpolator
+        self.params["frac"] = frac
+        self.params = {**self.params, **kwargs}
+        self._default_process = _sample_type
+        self._default_correct = _qc_type
+        # TODO: chequear la linea de kwargs
+
+    def func(self, dc: DataContainer):
+        self.set_default_sample_types(dc)
+        dc.data_matrix = \
+            interbatch_correction(dc.data_matrix, dc.order, dc.batch,
+                                  dc.classes, **self.params)
+
+
+class BatchCorrector(Pipeline):
+    """
+    Correct systematic bias along samples due to variation in instrumental
+    response [1, 2].
+
+    Attributes
+    ----------
+    """
+    def __init__(self, corrector_classes: Optional[List[str]] = None,
+                 process_classes: Optional[List[str]] = None,
+                 n_min: int = 6, frac: Optional[float] = None,
+                 interpolator: str = "splines", threshold: float = 0,
+                 verbose: bool = False):
+        checker = BatchSchemeChecker(n_min=n_min, verbose=verbose,
+                                     process_classes=process_classes,
+                                     corrector_classes=corrector_classes)
+        prevalence = BatchPrevalenceChecker(n_min=n_min, verbose=verbose,
+                                            process_classes=process_classes,
+                                            corrector_classes=corrector_classes,
+                                            threshold=threshold)
+        corrector = BatchCorrectorProcessor(corrector_classes=corrector_classes,
+                                            process_classes=process_classes,
+                                            frac=frac,
+                                            interpolator=interpolator,
+                                            verbose=verbose)
+        pipeline = [checker, prevalence, corrector]
+        super(BatchCorrector, self).__init__(pipeline, verbose=verbose)
 
 
 def merge_data_containers(dcs):
@@ -579,9 +569,9 @@ def read_config(path):
     return config
 
 
-def pipeline_from_list(l, verbose=False):
+def pipeline_from_list(param_list: list, verbose=False):
     procs = list()
-    for d in l:
+    for d in param_list:
         procs.append(filter_from_dictionary(d))
     pipeline = Pipeline(procs, verbose)
     return pipeline
@@ -615,117 +605,3 @@ def _validate_pipeline(t):
             msg = ("elements of the Pipeline must be",
                    "instances of Filter, DataCorrector or another Pipeline.")
             raise TypeError(msg)
-
-
-def _get_ext_per_batch(order: pd.Series, batch: pd.Series, classes: pd.Series,
-                       class_list: List[str], ext: str):
-    """
-    get minimum/maximum order of samples of classes in class_list. Auxiliar
-    function to be used with BatchChecker / FeatureCheckerBatchCorrection
-    Parameters
-    ----------
-    order: pandas.Series
-        run order
-    batch: pandas.Series
-        batch number
-    classes: pandas.Series
-        sample classes
-    class_list: list[str]
-        classes to be considererd
-    ext: {"min", "max"}
-        Search for the min/max order in each batch.
-
-    Returns
-    -------
-    pd.Series with the corresponding min/max order with batch as index.
-    """
-    func = {"min": lambda x: x.min(), "max": lambda x: x.max()}
-    func = func[ext]
-
-    ext_order = (order
-                 .groupby([classes, batch])
-                 .apply(func)
-                 .reset_index()
-                 .groupby(classes.name)
-                 .filter(lambda x: x.name in class_list)
-                 .groupby(batch.name)
-                 .apply(func)[order.name])
-
-    # ext_order = (order[mask]
-    #              .groupby([classes[mask], batch[mask]])
-    #              .pipe(func)
-    #              .reset_index()
-    #              .pivot(index=classes.name, columns=batch.name,
-    #                     values=order.name)
-    #              .min()     # min used to convert to pandas Series.
-    #              .astype(int))
-    return ext_order
-
-
-def check_qc_prevalence(data_matrix, order, batch, classes, qc_classes,
-                        sample_classes,
-                        threshold=0, min_n_qc=4):
-    min_qc_order = _get_ext_per_batch(order, batch, classes, qc_classes, "min")
-    min_sample_order = _get_ext_per_batch(order, batch, classes,
-                                          sample_classes, "min")
-    max_qc_order = _get_ext_per_batch(order, batch, classes, qc_classes, "max")
-    max_sample_order = _get_ext_per_batch(order, batch, classes,
-                                          sample_classes, "max")
-    batches = batch[classes.isin(qc_classes)].unique()
-    valid_features = data_matrix.columns
-
-    for k_batch in batches:
-        # feature check is done for each batch in three parts:
-        # | start block | middle block      | end block |
-        #   q   q         ssss q ssss q ssss  q  q
-        #  where q is a qc sample and s is a biological sample
-        # in the start block, a feature is valid if is detected
-        # in at least one sample of the block
-        # in the middle block, a feature is valid if the number
-        # of qc samples where the feature was detected is greater
-        # than the total number of qc samples in the block minus the
-        # n_missing parameter
-        # in the end block the same strategy applied in the start
-        # block is used.
-        # A feature is considered valid only if is valid in the totallity
-        # of the batches.
-
-        # start block check
-        start_block_qc_samples = (order[(order >= min_qc_order[k_batch])
-                                        & (order < min_sample_order[k_batch])
-                                        & classes.isin(qc_classes)]
-                                  .index)
-        start_block_valid_features = \
-            (data_matrix.loc[start_block_qc_samples] > threshold).any()
-        start_block_valid_features = \
-            start_block_valid_features[start_block_valid_features].index
-        valid_features = valid_features.intersection(start_block_valid_features)
-
-        # middle block check
-        middle_block_qc_samples = (order[(order > min_sample_order[k_batch])
-                                         & (order < max_sample_order[k_batch])
-                                         & classes.isin(qc_classes)]
-                                   .index)
-        middle_block_valid_features = ((data_matrix
-                                        .loc[middle_block_qc_samples] > threshold)
-                                       .sum() >= min_n_qc)
-        middle_block_valid_features = \
-            middle_block_valid_features[middle_block_valid_features].index
-
-        valid_features = valid_features.intersection(
-            middle_block_valid_features)
-
-        print(valid_features)
-        # end block check
-        end_block_qc_samples = (order[(order > max_sample_order[k_batch])
-                                      & (order <= max_qc_order[k_batch])
-                                      & classes.isin(qc_classes)]
-                                .index)
-        end_block_valid_features = \
-            (data_matrix.loc[end_block_qc_samples] > threshold).any()
-        end_block_valid_features = end_block_valid_features[
-            end_block_valid_features].index
-        valid_features = valid_features.intersection(end_block_valid_features)
-
-    invalid_features = data_matrix.columns.difference(valid_features)
-    return invalid_features
