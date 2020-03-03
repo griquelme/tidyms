@@ -396,6 +396,9 @@ class BatchSchemeChecker(Processor):
             return x.isin(qc_classes).sum() < n_min
 
         self.set_default_sample_types(dc)
+        ps = self.params["process_classes"]
+        ps = [x for x in ps if x not in self.params["corrector_classes"]]
+        self.params["process_classes"] = ps
         low_qc_batch = (dc.classes
                         .groupby(dc.batch)
                         .apply(invalid_batch_aux))
@@ -461,6 +464,9 @@ class BatchPrevalenceChecker(Processor):
 
     def func(self, dc: DataContainer):
         self.set_default_sample_types(dc)
+        ps = self.params["process_classes"]
+        ps = [x for x in ps if x not in self.params["corrector_classes"]]
+        self.params["process_classes"] = ps
         res = check_qc_prevalence(dc.data_matrix, dc.order, dc.batch,
                                   dc.classes, self.params["corrector_classes"],
                                   self.params["process_classes"],
