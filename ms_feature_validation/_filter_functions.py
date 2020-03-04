@@ -342,10 +342,11 @@ def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
     -------
     pd.Series
     """
-    qc_loess = _coov_loess(order[qc_index], ft_data[qc_index], interpolator,
-                           frac=frac)
+    qc_loess = _coov_loess(order[qc_index],
+                           ft_data[qc_index] - ft_data[qc_index].median(),
+                           interpolator, frac=frac)
     interp = interpolator(order[qc_index], qc_loess)
-    ft_data[sample_index] = interp(order[sample_index])
+    ft_data[sample_index] -= interp(order[sample_index])
     return ft_data
 
 
@@ -457,8 +458,13 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     # intra batch correction
     corrected = df.groupby(batch).apply(corrector_helper)
     # inter batch mean alignment
-    global_mean = corrected.mean()
-    corrected = corrected.groupby(batch).apply(lambda x: x - x.mean())
-    corrected = corrected + global_mean
+    global_mean = df[classes.isin(corrector_classes)].mean()
+    def batch_mean_func(df_group):
+        batch_mean = (df_group[classes[df_group.index].isin(corrector_classes)]
+                      .mean())
+        return df_group - batch_mean
     corrected[corrected < 0] = 0
+    corrected = corrected.groupby(batch).apply(batch_mean_func)
+    corrected = corrected + global_mean
+
     return corrected
