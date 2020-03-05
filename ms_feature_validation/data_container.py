@@ -472,7 +472,8 @@ class _Metrics:
             results = self.__data.data_matrix[is_sample_class].apply()
         return results
     
-    def pca(self, n_components=2):
+    def pca(self, n_components: Optional[int] = 2, centering: bool = True,
+            autoscaling: bool = False):
         """
         Computes PCA score, loadings and variance of each component.
         
@@ -480,6 +481,10 @@ class _Metrics:
         ----------
         n_components: int
             Number of Principal components to compute.
+        centering: bool
+            Mean center data
+        autoscaling: bool
+            mean center and scale data to unitary variance.
         
         Returns
         -------
@@ -487,9 +492,20 @@ class _Metrics:
         loadings: np.array
         variance: np.array
             Explained variance for each component.
+        total_variance: float
+            Total variance of the scaled data.
         """
+        if autoscaling:
+            centering = True
+
+        data = self.__data.data_matrix
+        if centering:
+            data -= data.mean()
+        if autoscaling:
+            data /= data.std()
+
         pca = PCA(n_components=n_components)
-        scores = pca.fit_transform(self.__data.data_matrix)
+        scores = pca.fit_transform(data)
         loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
         variance = pca.explained_variance_
         pc_str = ["PC" + str(x) for x in range(1, n_components + 1)]
@@ -500,7 +516,8 @@ class _Metrics:
                                 index=self.__data.data_matrix.columns,
                                 columns=pc_str)
         variance = pd.Series(data=variance, index=pc_str)
-        return scores, loadings, variance
+        total_variance = data.var().sum()
+        return scores, loadings, variance, total_variance
 
 
 class _Plotter:
@@ -513,6 +530,7 @@ class _Plotter:
 
     def pca_scores(self, x_pc: int = 1, y_pc: int = 2, color_by: str = "class",
                    draw: bool = True, show_order: bool = False,
+                   centering: bool = True, autoscaling: bool = False,
                    fig_params: Optional[dict] = None,
                    scatter_params: Optional[dict] = None
                    ) -> bokeh.plotting.Figure:
@@ -532,6 +550,10 @@ class _Plotter:
             classes without a mapping are not shown in the plot
         show_order: bool
             add a label with the run order.
+        centering: bool
+            Mean center data
+        autoscaling: bool
+            mean center and scale data to unitary variance.
         draw: bool
             If True calls bokeh.plotting.show on fig.
         fig_params: dict, optional
@@ -556,8 +578,10 @@ class _Plotter:
         x_name = "PC" + str(x_pc)
         y_name = "PC" + str(y_pc)
         n_comps = max(x_pc, y_pc)
-        score, _, variance = \
-            self._data_container.metrics.pca(n_components=n_comps)
+        score, _, variance, total_var = \
+            self._data_container.metrics.pca(n_components=n_comps,
+                                             centering=centering,
+                                             autoscaling=autoscaling)
         score = score.join(self._data_container.sample_metadata)
 
         if color_by == "type":
@@ -580,7 +604,10 @@ class _Plotter:
                     legend_group=color_by, **scatter_params)
 
         # set axis label names
-        total_var = self._data_container.data_matrix.var().sum()
+        # if autoscaling:
+        #     total_var = self._data_container.data_matrix.shape[1]
+        # else:
+        #     total_var = self._data_container.data_matrix.var().sum()
         x_label = x_name + " ({:.1f} %)"
         x_label = x_label.format(variance[x_pc - 1] * 100 / total_var)
         y_label = y_name + " ({:.1f} %)"
@@ -598,7 +625,8 @@ class _Plotter:
             bokeh.plotting.show(fig)
         return fig
 
-    def pca_loadings(self, x_pc=1, y_pc=2, draw: bool = True,
+    def pca_loadings(self, x_pc=1, y_pc=2, centering: bool = True,
+                     autoscaling: bool = False, draw: bool = True,
                      fig_params: Optional[dict] = None,
                      scatter_params: Optional[dict] = None
                      ) -> bokeh.plotting.Figure:
@@ -611,6 +639,10 @@ class _Plotter:
             Principal component number to plot along X axis.
         y_pc: int
             Principal component number to plot along Y axis.
+        centering: bool
+            Mean center data
+        autoscaling: bool
+            mean center and scale data to unitary variance.
         draw: bool
             If True, calls bokeh.plotting.show on figure
         fig_params: dict, optional
@@ -636,15 +668,16 @@ class _Plotter:
         x_name = "PC" + str(x_pc)
         y_name = "PC" + str(y_pc)
         n_comps = max(x_pc, y_pc)
-        _, loadings, variance = \
-            self._data_container.metrics.pca(n_components=n_comps)
+        _, loadings, variance, total_var = \
+            self._data_container.metrics.pca(n_components=n_comps,
+                                             centering=centering,
+                                             autoscaling=autoscaling)
         loadings = loadings.join(self._data_container.feature_metadata)
         loadings = ColumnDataSource(loadings)
 
         fig.scatter(source=loadings, x=x_name, y=y_name, **scatter_params)
 
         # set axis label names with % variance
-        total_var = self._data_container.data_matrix.var().sum()
         x_label = x_name + " ({:.1f} %)"
         x_label = x_label.format(variance[x_pc - 1] * 100 / total_var)
         y_label = y_name + " ({:.1f} %)"
@@ -710,6 +743,19 @@ class _Plotter:
             bokeh.plotting.show(fig)
         return fig
 
+
+class _Preprocessor:
+    """
+    Scale, normalize and transform methods for DataContainer
+    """
+
+    def __init__(self, dc: DataContainer):
+        self.__data = dc
+
+    def normalize(self, method: str, inplace: bool = True):
+        if method == "sum":
+            # self.__data.data_matrix =
+            pass
 
 class BatchInformationError(Exception):
     """
