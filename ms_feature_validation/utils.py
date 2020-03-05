@@ -185,6 +185,91 @@ def recommend_samples(df: pd.DataFrame, q: float,
     return recommended_samples
 
 
+def normalize(df: pd.DataFrame, method: str) -> pd.DataFrame:
+    """
+    Normalize samples using different methods.
+
+    Parameters
+    ----------
+    df: pandas.DataFrame
+    method: {"sum", "max", "euclidean"}
+        Normalization method. `sum` normalizes using the sum along each row,
+        `max` normalizes using the maximum of each row. `euclidean` normalizes
+        using the euclidean norm of the row.
+
+    Returns
+    -------
+    normalized: pandas.DataFrame
+
+    """
+    if method == "sum":
+        normalized = df.divide(df.sum(axis=1), axis=0)
+    elif method == "max":
+        normalized = df.divide(df.max(axis=1), axis=0)
+    elif method == "euclidean":
+        normalized = df.apply(lambda x: x / np.linalg.norm(x), axis=1)
+    else:
+        msg = "method must be `sum`, `max`, `euclidean`"
+        raise ValueError(msg)
+
+    return normalized
+
+
+def scale(df: pd.DataFrame, method: str) -> pd.DataFrame:
+    """
+    scales features using different methods.
+
+    Parameters
+    ----------
+    df: pandas.DataFrame
+    method: {"autoscaling", "rescaling", "pareto"}
+        Scaling method. `autoscaling` performs mean centering scaling of
+        features to unitary variance. `rescaling` scales data to a 0-1 range.
+        `pareto` performs mean centering and scaling using the square root of
+        the standard deviation
+
+    Returns
+    -------
+    scaled: pandas.DataFrame
+    """
+    if method == "autoscaling":
+        scaled = (df - df.mean()) / df.std()
+    elif method == "rescaling":
+        scaled = (df - df.min()) / (df.max() - df.min())
+    elif method == "pareto":
+        scaled = (df - df.mean()) / df.std().apply(np.sqrt)
+    else:
+        msg = "Available methods are `autoscaling`, `rescaling` and `pareto`."
+        raise ValueError(msg)
+    return scaled
+
+
+def transform(df: pd.DataFrame, method: str,
+              center: bool = True) -> pd.DataFrame:
+    """
+    perform common data transformations.
+
+    Parameters
+    ----------
+    df: pandas.DataFrame
+    method: {"log", "power"}
+        transform method. `log` applies the base 10 logarithm on the data.
+        `power`
+
+    Returns
+    -------
+    transformed: pandas.DataFrame
+    """
+    if method == "log":
+        transformed = df.apply(np.log10)
+    elif method == "power":
+        transformed = df.apply(np.sqrt)
+    else:
+        msg = "Available methods are `log` and `power`"
+        raise ValueError(msg)
+    return transformed
+
+
 def sample_to_path(samples, path):
     """
     map sample names to raw path if available.
