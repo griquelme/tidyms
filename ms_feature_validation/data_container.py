@@ -85,8 +85,11 @@ class DataContainer(object):
         self._original_data = data_matrix.copy()
         self.data_path = data_path
         self.mapping = mapping
+
+        # adding methods
         self.metrics = _Metrics(self)
         self.plot = _Plotter(self)
+        self.preprocess = _Preprocessor(self)
 
     @property
     def data_path(self) -> pd.DataFrame:
@@ -369,7 +372,7 @@ class _Metrics:
     Functions to get metrics from a DataContainer
     """
     
-    def __init__(self, data):
+    def __init__(self, data: DataContainer):
         self.__data = data
     
     def cv(self, intraclass=True, robust=False):
@@ -472,8 +475,9 @@ class _Metrics:
             results = self.__data.data_matrix[is_sample_class].apply()
         return results
     
-    def pca(self, n_components: Optional[int] = 2, centering: bool = True,
-            autoscaling: bool = False):
+    def pca(self, n_components: Optional[int] = 2,
+            normalizing: Optional[str] = None,
+            scaling: Optional[str] = None):
         """
         Computes PCA score, loadings and variance of each component.
         
@@ -481,10 +485,10 @@ class _Metrics:
         ----------
         n_components: int
             Number of Principal components to compute.
-        centering: bool
-            Mean center data
-        autoscaling: bool
-            mean center and scale data to unitary variance.
+        scaling: {`autoscaling`, `rescaling`, `pareto`}, optional
+            scaling method.
+        normalizing: {`sum`, `max`, `euclidean`}, optional
+            normalizing method
         
         Returns
         -------
@@ -495,14 +499,13 @@ class _Metrics:
         total_variance: float
             Total variance of the scaled data.
         """
-        if autoscaling:
-            centering = True
-
         data = self.__data.data_matrix
-        if centering:
-            data -= data.mean()
-        if autoscaling:
-            data /= data.std()
+
+        if normalizing:
+            data = utils.normalize(data, normalizing)
+
+        if scaling:
+            data = utils.scale(data, scaling)
 
         pca = PCA(n_components=n_components)
         scores = pca.fit_transform(data)
@@ -530,7 +533,8 @@ class _Plotter:
 
     def pca_scores(self, x_pc: int = 1, y_pc: int = 2, color_by: str = "class",
                    draw: bool = True, show_order: bool = False,
-                   centering: bool = True, autoscaling: bool = False,
+                   scaling: Optional[str] = None,
+                   normalizing: Optional[str] = None,
                    fig_params: Optional[dict] = None,
                    scatter_params: Optional[dict] = None
                    ) -> bokeh.plotting.Figure:
@@ -550,10 +554,10 @@ class _Plotter:
             classes without a mapping are not shown in the plot
         show_order: bool
             add a label with the run order.
-        centering: bool
-            Mean center data
-        autoscaling: bool
-            mean center and scale data to unitary variance.
+        scaling: {`autoscaling`, `rescaling`, `pareto`}, optional
+            scaling method.
+        normalizing: {`sum`, `max`, `euclidean`}, optional
+            normalizing method
         draw: bool
             If True calls bokeh.plotting.show on fig.
         fig_params: dict, optional
@@ -580,8 +584,8 @@ class _Plotter:
         n_comps = max(x_pc, y_pc)
         score, _, variance, total_var = \
             self._data_container.metrics.pca(n_components=n_comps,
-                                             centering=centering,
-                                             autoscaling=autoscaling)
+                                             normalizing=normalizing,
+                                             scaling=scaling)
         score = score.join(self._data_container.sample_metadata)
 
         if color_by == "type":
@@ -603,11 +607,6 @@ class _Plotter:
                     color=factor_cmap(color_by, palette, unique_values),
                     legend_group=color_by, **scatter_params)
 
-        # set axis label names
-        # if autoscaling:
-        #     total_var = self._data_container.data_matrix.shape[1]
-        # else:
-        #     total_var = self._data_container.data_matrix.var().sum()
         x_label = x_name + " ({:.1f} %)"
         x_label = x_label.format(variance[x_pc - 1] * 100 / total_var)
         y_label = y_name + " ({:.1f} %)"
@@ -625,8 +624,8 @@ class _Plotter:
             bokeh.plotting.show(fig)
         return fig
 
-    def pca_loadings(self, x_pc=1, y_pc=2, centering: bool = True,
-                     autoscaling: bool = False, draw: bool = True,
+    def pca_loadings(self, x_pc=1, y_pc=2, scaling: Optional[str] = None,
+                   normalizing: Optional[str] = None, draw: bool = True,
                      fig_params: Optional[dict] = None,
                      scatter_params: Optional[dict] = None
                      ) -> bokeh.plotting.Figure:
@@ -639,10 +638,10 @@ class _Plotter:
             Principal component number to plot along X axis.
         y_pc: int
             Principal component number to plot along Y axis.
-        centering: bool
-            Mean center data
-        autoscaling: bool
-            mean center and scale data to unitary variance.
+        scaling: {`autoscaling`, `rescaling`, `pareto`}, optional
+            scaling method.
+        normalizing: {`sum`, `max`, `euclidean`}, optional
+            normalizing method
         draw: bool
             If True, calls bokeh.plotting.show on figure
         fig_params: dict, optional
@@ -670,8 +669,8 @@ class _Plotter:
         n_comps = max(x_pc, y_pc)
         _, loadings, variance, total_var = \
             self._data_container.metrics.pca(n_components=n_comps,
-                                             centering=centering,
-                                             autoscaling=autoscaling)
+                                             normalizing=normalizing,
+                                             scaling=scaling)
         loadings = loadings.join(self._data_container.feature_metadata)
         loadings = ColumnDataSource(loadings)
 
@@ -752,10 +751,81 @@ class _Preprocessor:
     def __init__(self, dc: DataContainer):
         self.__data = dc
 
-    def normalize(self, method: str, inplace: bool = True):
-        if method == "sum":
-            # self.__data.data_matrix =
-            pass
+    def normalize(self, method: str,
+                  inplace: bool = True) -> Optional[pd.DataFrame]:
+        """
+        Normalize samples.
+
+        Parameters
+        ----------
+        method: {"sum", "max", "euclidean"}
+            Normalization method. `sum` normalizes using the sum along each row,
+            `max` normalizes using the maximum of each row. `euclidean`
+            normalizes using the euclidean norm of the row.
+        inplace: bool
+            if True modifies in place the DataContainer. Else, returns a
+            normalized data matrix.
+
+        Returns
+        -------
+        normalized: pandas.DataFrame
+        """
+        normalized = utils.normalize(self.__data.data_matrix, method)
+        if inplace:
+            self.__data.data_matrix = normalized
+        else:
+            return normalized
+
+    def scale(self, method: str,
+              inplace: bool = True) -> Optional[pd.DataFrame]:
+        """
+        scales features using different methods.
+
+        Parameters
+        ----------
+        method: {"autoscaling", "rescaling", "pareto"}
+            Scaling method. `autoscaling` performs mean centering scaling of
+            features to unitary variance. `rescaling` scales data to a 0-1
+            range. `pareto` performs mean centering and scaling using the
+            quare root of the standard deviation
+        inplace: bool
+            if True modifies in place the DataContainer. Else, returns a
+            normalized data matrix.
+
+        Returns
+        -------
+        scaled: pandas.DataFrame
+        """
+        scaled = utils.scale(self.__data.data_matrix, method)
+        if inplace:
+            self.__data.data_matrix = scaled
+        else:
+            return scaled
+
+    def transform(self, method: str,
+                  inplace: bool = True) -> Optional[pd.DataFrame]:
+        """
+        perform common data transformations.
+
+        Parameters
+        ----------
+        method: {"log", "power"}
+            transform method. `log` applies the base 10 logarithm on the data.
+            `power`
+        inplace: bool
+            if True modifies in place the DataContainer. Else, returns a
+            normalized data matrix.
+
+        Returns
+        -------
+        transformed: pandas.DataFrame
+        """
+        transformed = utils.transform(self.__data.data_matrix, method)
+        if inplace:
+            self.__data.data_matrix = transformed
+        else:
+            return transformed
+
 
 class BatchInformationError(Exception):
     """

@@ -459,10 +459,12 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     corrected = df.groupby(batch).apply(corrector_helper)
     # inter batch mean alignment
     global_mean = df[classes.isin(corrector_classes)].mean()
+
     def batch_mean_func(df_group):
         batch_mean = (df_group[classes[df_group.index].isin(corrector_classes)]
                       .mean())
         return df_group - batch_mean
+
     corrected[corrected < 0] = 0
     corrected = corrected.groupby(batch).apply(batch_mean_func)
     corrected = corrected + global_mean
@@ -470,75 +472,3 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     return corrected
 
 
-def normalize(df: pd.DataFrame, method: str) -> pd.DataFrame:
-    """
-    Normalize samples using different methods.
-
-    Parameters
-    ----------
-    df: pandas.DataFrame
-    method: {"sum", "max", "euclidean"}
-        Normalization method. `sum` normalizes using the sum along each row,
-        `max` normalizes using the maximum of each row. `euclidean` normalizes
-        using the euclidean norm of the row.
-
-    Returns
-    -------
-    normalized: pandas.DataFrame
-
-    """
-    if method == "sum":
-        normalized = df / df.sum(axis=1)
-    elif method == "max":
-        normalized = df / df.max(axis=1)
-    elif method == "euclidean":
-        normalized = df.apply(lambda x: x / np.linalg.norm(x), axis=1)
-    else:
-        msg = "method must be `sum`, `max`, `euclidean`"
-        raise ValueError(msg)
-
-    return normalized
-
-
-def scale(df: pd.DataFrame, method: str) -> pd.DataFrame:
-    """
-    scales features using different methods.
-
-    Parameters
-    ----------
-    df: pandas.DataFrame
-    method: {"autoscaling", "rescaling", "pareto"}
-        Scaling method. `autoscaling` performs mean centering scaling of
-        features to unitary variance. `rescaling` scales data to a 0-1 range.
-        `pareto` performs mean centering and scaling using the square root of
-        the standard deviation
-
-    Returns
-    -------
-    scaled: pandas.DataFrame
-    """
-    if method == "autoscaling":
-        scaled = (df - df.mean()) / df.std()
-    elif method == "rescaling":
-        scaled = (df - df.min()) / (df.max() - df.min())
-    elif method == "pareto":
-        scaled = (df - df.mean()) / df.std().apply(np.sqrt)
-    return scaled
-
-def transform(df: pd.DataFrame, method: str,
-              center: bool = True) -> pd.DataFrame:
-    """
-    perform common data transformations.
-
-    Parameters
-    ----------
-    df: pandas.DataFrame
-    method: {"log", "power"}
-        transform method. `log` applies the base 10 logarithm on the data.
-        `power`
-
-
-    Returns
-    -------
-
-    """
