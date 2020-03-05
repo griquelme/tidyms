@@ -459,12 +459,16 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     corrected = df.groupby(batch).apply(corrector_helper)
     # inter batch mean alignment
     global_mean = df[classes.isin(corrector_classes)].mean()
+
     def batch_mean_func(df_group):
         batch_mean = (df_group[classes[df_group.index].isin(corrector_classes)]
                       .mean())
         return df_group - batch_mean
+
     corrected[corrected < 0] = 0
     corrected = corrected.groupby(batch).apply(batch_mean_func)
     corrected = corrected + global_mean
 
     return corrected
+
+
