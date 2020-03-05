@@ -317,6 +317,42 @@ class PrevalenceFilter(Processor):
 
 
 @register
+class DRatioFilter(Processor):
+    """
+    Remove Features with a D-ratio value higher than a predefined threshold.
+
+    Parameters
+    ----------
+    process_classes: List[str], optional
+        Classes used to compute prevalence. If None, classes are obtained from
+        sample classes in the DataContainer mapping.
+    lb: float
+        Lower bound of D-ratio. Should be zero
+    ub: float
+        Upper bound of D-ratio. Usually 50% or lower, the lower the better.
+    """
+
+    def __init__(self, lb=0, ub=0.5, process_classes=None, robust=False,
+                 verbose=False):
+        super(DRatioFilter, self).__init__(axis="features", mode="filter",
+                                           verbose=verbose)
+        self.name = "D-ratio Filter"
+        self.params["lb"] = lb
+        self.params["ub"] = ub
+        self.params["process_classes"] = process_classes
+        self.params["robust"] = robust
+        self._default_process = _qc_type
+
+    def func(self, dc: DataContainer):
+        self.set_default_sample_types(dc)
+        lb = self.params["lb"]
+        ub = self.params["ub"]
+        drat = dc.metrics.dratio(robust=self.params["robust"])
+        #drat = drat.loc[self.params["process_classes"], :]
+        return get_outside_bounds_index(drat, lb, ub)
+
+
+@register
 class VariationFilter(Processor):
     """
     Remove samples with high coefficient of variation.
@@ -339,7 +375,9 @@ class VariationFilter(Processor):
         ub = self.params["ub"]
         variation = dc.metrics.cv(intraclass=self.params["intraclass"],
                                   robust=self.params["robust"])
-        variation = variation.loc[self.params["process_classes"], :]
+        if self.params["intraclass"]:
+            variation = variation.loc[self.params["process_classes"], :]
+
         return get_outside_bounds_index(variation, lb, ub)
 
 

@@ -1,9 +1,9 @@
+import pyopenms
 from scipy.signal import find_peaks
 import numpy as np
 import pandas as pd
 import os.path
 from typing import Tuple, List, Optional, Union
-import pyopenms
 from collections import namedtuple
 msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
 
@@ -249,6 +249,10 @@ def cv(df):
     res = res.fillna(0)
     return res
 
+def sd(df):
+    res = df.std()
+    res = res.fillna(0)
+    return res
 
 def iqr(df):
     res = (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
@@ -260,6 +264,10 @@ def rmad(df):
     res = res.fillna(0)
     return res
 
+def mad(df):
+    res = df.mad()
+    res = res.fillna(0)
+    return res
 
 def d_ratio(qc_df, samples_df):
     """

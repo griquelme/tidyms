@@ -408,7 +408,9 @@ class _Metrics:
                 result = cv_func(self.__data.data_matrix[is_sample_class])
         return result
     
-    def dratio(self, robust=False):
+    def dratio(self, robust=False,
+               sample_classes: Optional[List[str]] = None,
+               qc_classes: Optional[List[str]] = None) -> pd.Series:
         """
         Computes the D-Ratio using sample variation and quality control
         variaton [1].
@@ -416,8 +418,8 @@ class _Metrics:
         Parameters
         ----------
         robust: bool
-            If True, uses the relative MAD to compute the D-ratio. Else, uses t
-            he Coefficient of variation.
+            If True, uses MAD to compute the D-ratio. Else, uses standard deviation.
+
 
         Returns
         -------
@@ -432,19 +434,23 @@ class _Metrics:
         Metabolomics (2018) 14:72.
         """
         if robust:
-            cv_func = utils.rmad
+            cv_func = utils.mad
         else:
-            cv_func = utils.cv
-            
-        sample_class = self.__data.mapping["sample"]
+            cv_func = utils.sd
+
+        if sample_classes is None:
+            sample_class = self.__data.mapping[_sample_type]
+
+        if qc_classes is None:
+            qc_class = self.__data.mapping[_qc_type]
+
         is_sample_class = self.__data.classes.isin(sample_class)
-        qc_class = self.__data.mapping["qc"]
         is_qc_class = self.__data.classes.isin(qc_class)
         sample_variation = cv_func(self.__data.data_matrix[is_sample_class])
         qc_variation = cv_func(self.__data.data_matrix[is_qc_class])
-        dr = qc_variation / sample_variation
-        dr = dr.fillna(np.inf)
-        return dr
+        dratio = qc_variation / sample_variation
+        dratio = dratio.fillna(np.inf)
+        return dratio
     
     def detection_rate(self, intraclass=True, threshold=0):
         """
