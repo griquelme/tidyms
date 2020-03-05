@@ -310,6 +310,7 @@ class PrevalenceFilter(Processor):
         self.set_default_sample_types(dc)
         dr = dc.metrics.detection_rate(intraclass=self.params["intraclass"],
                                        threshold=self.params["threshold"])
+        dr = dr.loc[self.params["process_classes"], :]
         lb = self.params["lb"]
         ub = self.params["ub"]
         return get_outside_bounds_index(dr, lb, ub)
