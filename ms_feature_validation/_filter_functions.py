@@ -69,6 +69,7 @@ def average_replicates(data: pd.DataFrame, sample_id: pd.Series,
 
 def correct_blanks(df: pd.DataFrame, classes: pd.Series,
                    corrector_classes: List[str], process_classes: List[str],
+                   factor: float == 1,
                    mode: Union[str, Callable] = "mean") -> pd.DataFrame:
     """
     Correct samples using blanks.
@@ -83,6 +84,8 @@ def correct_blanks(df: pd.DataFrame, classes: pd.Series,
         Classes to be used as blanks.
     process_classes: list[str]
         Classes to be used as samples
+    factor: float
+        factor used to convert low values to zero (see notes)
     mode: {'mean', 'max', 'lod', 'loq'} or function
 
     Returns
@@ -95,7 +98,7 @@ def correct_blanks(df: pd.DataFrame, classes: pd.Series,
 
     Blank correction is applied for each feature in the following way:
 
-    .. math:: X_{corrected} = X_{uncorrected} - blank_relation * mode(X_{blank})
+    .. math:: X_{corrected} = X_{uncorrected} - factor * mode(X_{blank})
     """
     corrector = {"max": lambda x: x.max(),
                  "mean": lambda x: x.mean(),
@@ -107,9 +110,10 @@ def correct_blanks(df: pd.DataFrame, classes: pd.Series,
         corrector = corrector[mode]
     samples = df[classes.isin(process_classes)]
     blanks = df[classes.isin(corrector_classes)]
+
     correction = corrector(blanks)
     corrected = samples - correction
-    corrected[corrected < 0] = 0
+    corrected[(samples - factor * correction) < 0] = 0
     df[classes.isin(process_classes)] = corrected
     return df
 

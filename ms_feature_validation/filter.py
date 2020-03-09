@@ -235,7 +235,8 @@ class BlankCorrector(Processor):
     """
     def __init__(self, corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
-                 mode: Union[str, Callable] = "lod", verbose=False):
+                 mode: Union[str, Callable] = "lod", factor: float = 1,
+                 verbose=False):
         """
         Correct sample values using blank samples.
 
@@ -247,9 +248,19 @@ class BlankCorrector(Processor):
         process_classes:  list[str], optional
             Classes to be corrected. If None, uses all classes listed on the
             DataContainer mapping attribute.
+        factor: float
+            factor used to convert values to zero (see notes)
         mode: {"mean", "max", "lod", "loq"}, function.
             Function used to generate the blank correction.
         verbose: bool
+
+        Notes
+        -----
+
+        Blank correction is applied for each feature in the following way:
+
+        .. math:: X_{corrected} = 0 if X < factor * mode(X_{blank})
+        .. math:: X_{corrected} = X - mode(X_{blank}) else
         """
         super(BlankCorrector, self).__init__(axis=None, mode="transform",
                                              verbose=verbose)
@@ -257,6 +268,7 @@ class BlankCorrector(Processor):
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
         self.params["mode"] = mode
+        self.params["factor"] = factor
         self._default_process = _sample_type
         self._default_correct = _blank_type
 
