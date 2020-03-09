@@ -13,7 +13,7 @@ from typing import Tuple, List, Optional
 from collections import namedtuple
 
 
-PeakLocation = namedtuple("PeakLocation", ("loc", "scale", "start", "end"))
+PeakLocation = namedtuple("PeakLocation", ("loc", "scale", "start", "end", "snr", "baseline"))
 
 
 def make_widths(x: np.ndarray, max_width: float,
@@ -40,7 +40,8 @@ def make_widths(x: np.ndarray, max_width: float,
     return widths
 
 
-def process_ridge_lines(cwt_array: np.ndarray,
+def process_ridge_lines(y: np.ndarray,
+                        cwt_array: np.ndarray,
                         ridge_lines: List[Tuple[np.ndarray, np.ndarray]],
                         min_width: int,
                         max_width: int,
@@ -77,6 +78,7 @@ def process_ridge_lines(cwt_array: np.ndarray,
 
     for row_ind, col_ind in ridge_lines:
         # min_length check
+        peaks_ridge_line = list()
         if len(row_ind) < min_length:
             continue
 
@@ -88,16 +90,49 @@ def process_ridge_lines(cwt_array: np.ndarray,
             scale_index, peak_index = row_ind[ind], col_ind[ind]
             extension = _find_peak_extension(cwt_array, scale_index, peak_index)
 
-            width_check = ((extension[0] >= min_width)
-                           and (extension[1] <= max_width))
-            snr = line[ind] / line[0]
+            peak_width = extension[1] - extension[0]
+            width_check = ((peak_width >= min_width)
+                           and (peak_width <= max_width))
+            #snr = line[ind] / np.abs(cwt_array[0, peak_index])
+            baseline, snr =  snr_calculation(y, peak_index, extension)
             snr_check = snr >= min_snr
             if snr_check and width_check:
                 temp_peak = PeakLocation(peak_index, scale_index,
-                                         extension[0], extension[1])
-                peaks.append(temp_peak)
+                                         extension[0], extension[1],
+                                         snr, baseline)
+                peaks_ridge_line.append(temp_peak)
+                print(temp_peak.scale)
+                print(temp_peak.loc)
+
+        # find the peak in the ridge line with the biggest intensity
+
+        peaks_int = np.array([cwt_array[x.scale, x.loc] for x in peaks_ridge_line])
+        print(peaks_int)
+        if peaks_int.size > 0:
+            best_peak_index = np.argmax(peaks_int)
+            peaks.append(peaks_ridge_line[best_peak_index])
+
     return peaks
 
+
+def snr_calculation(y: np.ndarray,
+                    peak_index: int,
+                    extension: Tuple[int, int]):
+    # prevents to use negative indices or indices greater than size of y
+    half_width = (extension[1] - extension[0]) // 2
+    start = max(0, extension[0] - half_width)
+    end = min(y.size, extension[1] + half_width)
+    peak_values = y[start:end]
+
+    peak_values_sorted = np.sort(peak_values)
+    peak_values_ten_percet_int = peak_values_sorted[0:int(np.ceil(np.size(peak_values_sorted) / 10))]
+    baseline = np.mean(peak_values_ten_percet_int)
+    noise = np.std(peak_values_ten_percet_int)
+    if noise == 0:
+        snr = 0
+    else:
+        snr = (y[peak_index] - baseline) / noise
+    return baseline, snr
 
 def _find_peak_extension(cwt_array: np.ndarray, scale_index: int,
                          peak_index: int) -> Tuple[int, int]:
@@ -166,14 +201,15 @@ def pick_cwt(x: np.ndarray, y: np.ndarray, snr: float = 3,
 
     # Setting max_distance
     if max_distance is None:
-        max_distance = widths / 4
+        #max_distance = widths / 4
+        max_distance = np.ones_like(widths) * 3
     else:
         max_distance = np.ones_like(widths) * max_distance
 
     w = cwt(yu, ricker, widths)
     ridge_lines = _peak_finding._identify_ridge_lines(w, max_distance,
                                                       gap_thresh)
-    peaks = process_ridge_lines(w, ridge_lines, min_width, max_width,
+    peaks = process_ridge_lines(yu,w, ridge_lines, min_width, max_width,
                                 min_length=min_length, min_snr=snr)
     return peaks
 
