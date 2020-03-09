@@ -11,7 +11,25 @@ from typing import Optional, Iterable, Tuple, Union, List
 from . import utils
 from .data_container import DataContainer
 from . import validation
+import pickle
 msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
+
+def read_pickle(path: str) -> DataContainer:
+    """
+    read a DataContainer stored as a pickle
+
+    Parameters
+    ----------
+    path: str
+        path to read DataContainer
+
+    Returns
+    -------
+    DataContainer
+    """
+    with open(path, "rb") as fin:
+        result = pickle.load(fin)
+    return result
 
 
 def read_progenesis(path):

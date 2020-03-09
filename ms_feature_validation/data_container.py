@@ -13,6 +13,8 @@ import pandas as pd
 from sklearn.decomposition import PCA
 from typing import List, Optional, Iterable
 import bokeh.plotting
+import pickle
+import os.path
 from bokeh.palettes import Spectral
 from bokeh.models import ColumnDataSource
 from bokeh.transform import factor_cmap
@@ -31,12 +33,12 @@ class DataContainer(object):
 
     Attributes
     ---------
-    data_matrix : pd.DataFrame.
+    data_matrix : pandas.DataFrame.
                   Feature values for each measured sample. Each row is a
                   sample and each column is a feature.                  
-    sample_metadata : pd.DataFrame.
+    sample_metadata : pandas.DataFrame.
                          Metadata for each sample. class is a required column.
-    feature_metadata : pd.DataFrame.
+    feature_metadata : pandas.DataFrame.
                           DataFrame with features names as indices. mz and rt
                           are required columns.
     data_path : str.
@@ -58,14 +60,14 @@ class DataContainer(object):
         Creates a DataContainer from feature values, features metadata and
         sample metadata.
         
-        Atributes
-        ---------
-        data_matrix_df : pd.DataFrame.
+        Parameters
+        ----------
+        data_matrix_df : pandas.DataFrame.
             Feature values for each measured sample. Each row is a sample and
             each column is a feature.                  
-        sample_information_df : pd.DataFrame.
+        sample_information_df : pandas.DataFrame.
             Metadata for each sample. class is a required column.
-        feature_definitions_df : pd.DataFrame.
+        feature_definitions_df : pandas.DataFrame.
             DataFrame with features names as indices. mz and rt are required
             columns.
         data_path : str.
@@ -366,6 +368,22 @@ class DataContainer(object):
             msg = "axis must be `samples` or `features`"
             raise ValueError(msg)
 
+    def save(self, filename: str) -> None:
+        """
+        Save DataContainer into a pickle
+
+        Parameters
+        ----------
+        filename: str
+            name used to save the file.
+        """
+        if os.path.isfile(filename):
+            msg = "File already exists."
+            raise FileExistsError(msg)
+
+        with open(filename, "wb") as fin:
+            pickle.dump(self, fin)
+
 
 class _Metrics:
     """
@@ -631,7 +649,7 @@ class _Plotter:
         return fig
 
     def pca_loadings(self, x_pc=1, y_pc=2, scaling: Optional[str] = None,
-                   normalizing: Optional[str] = None, draw: bool = True,
+                     normalizing: Optional[str] = None, draw: bool = True,
                      fig_params: Optional[dict] = None,
                      scatter_params: Optional[dict] = None
                      ) -> bokeh.plotting.Figure:
