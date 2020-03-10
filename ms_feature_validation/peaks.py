@@ -32,11 +32,12 @@ def make_widths(x: np.ndarray, max_width: float,
     -------
     widths: numpy.ndarray
     """
-    mean_x_distance = np.diff(x).mean()
-    if n is None:
-        n = int((max_width - mean_x_distance) / mean_x_distance)
+    min_x_distance = np.diff(x).min()
+    n = (max_width - min_x_distance) / min_x_distance
+    first_half = np.linspace(min_x_distance, 10 * min_x_distance, 40)
+    second_half = np.linspace(11 * min_x_distance, max_width, n - 10)
+    widths =np.hstack((first_half, second_half))
 
-    widths = np.linspace(mean_x_distance, max_width, n)
     return widths
 
 
@@ -101,13 +102,12 @@ def process_ridge_lines(y: np.ndarray,
                                          extension[0], extension[1],
                                          snr, baseline)
                 peaks_ridge_line.append(temp_peak)
-                print(temp_peak.scale)
-                print(temp_peak.loc)
+                # print(temp_peak.scale)
+                # print(temp_peak.loc)
 
         # find the peak in the ridge line with the biggest intensity
-
         peaks_int = np.array([cwt_array[x.scale, x.loc] for x in peaks_ridge_line])
-        print(peaks_int)
+        # print(peaks_int)
         if peaks_int.size > 0:
             best_peak_index = np.argmax(peaks_int)
             peaks.append(peaks_ridge_line[best_peak_index])
@@ -125,14 +125,18 @@ def snr_calculation(y: np.ndarray,
     peak_values = y[start:end]
 
     peak_values_sorted = np.sort(peak_values)
-    peak_values_ten_percet_int = peak_values_sorted[0:int(np.ceil(np.size(peak_values_sorted) / 10))]
-    baseline = np.mean(peak_values_ten_percet_int)
-    noise = np.std(peak_values_ten_percet_int)
+    # peak_values_ten_percent_int = peak_values_sorted[0:int(np.ceil(np.size(peak_values_sorted) / 10))]
+    cropped_int = peak_values_sorted[:int(0.2 * (end - start))]
+    # baseline = np.mean(peak_values_ten_percent_int)
+    # noise = np.std(peak_values_ten_percent_int)
+    baseline = cropped_int.mean()
+    noise = cropped_int.std()
     if noise == 0:
         snr = 0
     else:
         snr = (y[peak_index] - baseline) / noise
     return baseline, snr
+
 
 def _find_peak_extension(cwt_array: np.ndarray, scale_index: int,
                          peak_index: int) -> Tuple[int, int]:
@@ -211,7 +215,12 @@ def pick_cwt(x: np.ndarray, y: np.ndarray, snr: float = 3,
                                                       gap_thresh)
     peaks = process_ridge_lines(yu,w, ridge_lines, min_width, max_width,
                                 min_length=min_length, min_snr=snr)
-    return peaks
+
+    # convert back from uniform sampling to original x scale
+
+
+
+    return peaks, w, ridge_lines
 
 
 # def get_peak_params2(cwt_array: np.ndarray, spint: np.ndarray, max_width: int,
