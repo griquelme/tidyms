@@ -377,10 +377,6 @@ class DataContainer(object):
         filename: str
             name used to save the file.
         """
-        if os.path.isfile(filename):
-            msg = "File already exists."
-            raise FileExistsError(msg)
-
         with open(filename, "wb") as fin:
             pickle.dump(self, fin)
 
