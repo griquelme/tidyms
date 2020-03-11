@@ -10,11 +10,8 @@ from scipy.integrate import trapz
 from scipy.interpolate import interp1d
 # from scipy.optimize import curve_fit
 from typing import Tuple, List, Optional
-# from collections import namedtuple
-from .utils import  find_closest_sorted
+from .utils import find_closest_sorted
 
-
-# PeakLocation = namedtuple("PeakLocation", ("loc", "scale", "start", "end", "snr", "baseline"))
 
 class PeakLocation:
     """
@@ -50,11 +47,45 @@ class PeakLocation:
         -------
         PeakLocation
         """
-        start, loc, end = find_closest_sorted(new_scale,
-                                              old_scale[[self.start, self.loc,
-                                                          self.end]])
+        old_points = old_scale[[self.start, self.loc, self.end]]
+        start, loc, end = find_closest_sorted(new_scale, old_points)
         return PeakLocation(loc, self.scale, start, end, self.snr,
                             self.baseline)
+
+    def get_peak_params(self, y: np.ndarray, x: Optional[np.ndarray] = None,
+                        subtract_bl: bool = True) -> dict:
+        """
+        compute peak parameters based on x and y.
+
+        Parameters
+        ----------
+        y: numpy.ndarray
+        x: numpy.ndarray, optional
+            if None computes parameters using index values.
+        subtract_bl: bool
+            If True subtract baseline to peak intensity and area
+
+        Returns
+        -------
+
+        """
+
+        if x is None:
+            width = self.end - self.start
+            area = trapz(y)
+            location = self.loc
+        else:
+            width = x[self.end] - x[self.start]
+            area = trapz(y, x)
+            location = x[self.loc]
+
+        if subtract_bl:
+            intensity = y[self.loc] - self.baseline
+            area -= width * self.baseline
+
+        peak_params = {"location": location, "intensity": intensity,
+                       "width": width, "area": area}
+        return  peak_params
 
 
 def make_widths(x: np.ndarray, max_width: float) -> np.ndarray:
@@ -71,7 +102,7 @@ def make_widths(x: np.ndarray, max_width: float) -> np.ndarray:
     widths: numpy.ndarray
     """
     min_x_distance = np.diff(x).min()
-    n = (max_width - min_x_distance) / min_x_distance
+    n = int((max_width - min_x_distance) / min_x_distance)
     first_half = np.linspace(min_x_distance, 10 * min_x_distance, 40)
     second_half = np.linspace(11 * min_x_distance, max_width, n - 10)
     widths = np.hstack((first_half, second_half))
@@ -92,6 +123,8 @@ def process_ridge_lines(y: np.ndarray,
 
     Parameters
     ----------
+    y: np.ndarray
+        intensity vector used estimate baseline and noise
     cwt_array: numpy.ndarray
         CWT using y and widths, obtained using scipy.signal.wavelets.cwt
     ridge_lines: list[(numpy.ndarray, numpy.ndarray)]
@@ -102,6 +135,8 @@ def process_ridge_lines(y: np.ndarray,
     min_length: int
         minimum length of a ridge line
     min_snr: float
+    min_bl_ratio: float
+        minimum ratio between the intensity and the baseline
 
     Returns
     -------
@@ -109,16 +144,15 @@ def process_ridge_lines(y: np.ndarray,
     """
 
     if min_length is None:
-        min_length = np.ceil(cwt_array.shape[0] / 4)
-    # if window_size is None:
-    #     window_size = np.ceil(num_points / 20)
-    # hf_window = window_size / 2
+        min_length = np.ceil(cwt_array.shape[0] / 8)
+
 
     peaks = list()
 
     for row_ind, col_ind in ridge_lines:
+        rl_peaks = list()   # peaks in the current ridge line
+
         # min_length check
-        peaks_ridge_line = list()
         if len(row_ind) < min_length:
             continue
 
@@ -133,24 +167,19 @@ def process_ridge_lines(y: np.ndarray,
             peak_width = extension[1] - extension[0]
             width_check = ((peak_width >= min_width)
                            and (peak_width <= max_width))
-            baseline, snr =  snr_calculation(y, peak_index, extension)
+            baseline, snr = snr_calculation(y, peak_index, extension)
             snr_check = snr >= min_snr
-            bl_ratio_check = (y[peak_index] / baseline) > min_bl_ratio
+            bl_ratio_check = y[peak_index] > min_bl_ratio * baseline
             if snr_check and width_check and bl_ratio_check:
                 temp_peak = PeakLocation(peak_index, scale_index,
                                          extension[0], extension[1],
                                          snr, baseline)
-                peaks_ridge_line.append(temp_peak)
-                # print(temp_peak.scale)
-                # print(temp_peak.loc)
+                rl_peaks.append(temp_peak)
 
-        # find the peak in the ridge line with the biggest intensity
-        peaks_int = np.array([cwt_array[x.scale, x.loc] for x in peaks_ridge_line])
-        # print(peaks_int)
-        if peaks_int.size > 0:
-            best_peak_index = np.argmax(peaks_int)
-            peaks.append(peaks_ridge_line[best_peak_index])
-
+        if len(rl_peaks) > 0:
+            best_peak = max(rl_peaks,
+                            key=lambda x: cwt_array[x.scale, x.loc])
+            peaks.append(best_peak)
     return peaks
 
 
@@ -172,27 +201,27 @@ def snr_calculation(y: np.ndarray,
 
     left_25_lower = np.sort(y[left:extension[0]])
     left_25_lower = left_25_lower[:(left_25_lower.size // 4)]
-    left_bl = left_25_lower.mean()
-    left_noise = left_25_lower.std()
+    if left_25_lower.size > 0:
+        left_bl = left_25_lower.mean()
+        left_noise = left_25_lower.std()
+    else:
+        left_bl, left_noise = 0, 0
     right_25_lower = np.sort(y[extension[1]:right])
     right_25_lower = right_25_lower[:(right_25_lower.size // 4)]
-    right_bl = right_25_lower.mean()
-    right_noise = right_25_lower.std()
+    if right_25_lower.size > 0:
+        right_bl = right_25_lower.mean()
+        right_noise = right_25_lower.std()
+    else:
+        right_bl = 0
+        right_noise = 0
 
     baseline = min(left_bl, right_bl)
     noise = max(left_noise, right_noise)
 
-    # peak_values_sorted = np.sort(peak_values)
-    # peak_values_ten_percent_int = peak_values_sorted[0:int(np.ceil(np.size(peak_values_sorted) / 10))]
-    # cropped_int = peak_values_sorted[:int(0.2 * (end - start))]
-    # baseline = np.mean(peak_values_ten_percent_int)
-    # noise = np.std(peak_values_ten_percent_int)
-    # baseline = cropped_int.mean()
-    # noise = cropped_int.std()
-    if noise == 0:
-        snr = 0
-    else:
+    if noise:
         snr = (y[peak_index] - baseline) / noise
+    else:
+        snr = 0
     return baseline, snr
 
 
@@ -256,7 +285,7 @@ def convert_to_original_scale(x_orig: np.ndarray, x_rescaled: np.ndarray,
     return PeakLocation(loc, peak.scale, start, end, peak.snr, peak.baseline)
 
 
-def pick_cwt(x: np.ndarray, y: np.ndarray, snr: float = 3,
+def pick_cwt(x: np.ndarray, y: np.ndarray, snr: float = 3, bl_ratio: float = 2,
              min_width: Optional[float] = 5, max_width: Optional[float] = 60,
              max_distance: Optional[int] = None,
              min_length: Optional[int] = None, gap_thresh: int = 1):
@@ -272,27 +301,27 @@ def pick_cwt(x: np.ndarray, y: np.ndarray, snr: float = 3,
 
     # Setting max_distance
     if max_distance is None:
-        #max_distance = widths / 4
         max_distance = np.ones_like(widths) * 3
     else:
+        max_distance = int(max_distance / (xu[1] - xu[0])) + 1
         max_distance = np.ones_like(widths) * max_distance
 
     w = cwt(yu, ricker, widths)
     ridge_lines = _peak_finding._identify_ridge_lines(w, max_distance,
                                                       gap_thresh)
-    peaks = process_ridge_lines(yu,w, ridge_lines, min_width, max_width,
-                                min_length=min_length, min_snr=snr)
+    peaks = process_ridge_lines(yu, w, ridge_lines, min_width, max_width,
+                                min_length=min_length, min_snr=snr,
+                                min_bl_ratio=bl_ratio)
     # convert back from uniform sampling to original x scale
-    peaks = [x.rescale(xu, x) for x in peaks]
+    peaks = [p.rescale(xu, x) for p in peaks]
     # sort peaks based on loc
     peaks.sort(key=lambda x: x.loc)
     # correct overlap between consecutive peaks:
-
     for k in range(len(peaks) - 1):
         left, right = peaks[k], peaks[k + 1]
         if left.end > right.start:
             right.start = left.end
-    return peaks, w, ridge_lines
+    return peaks
 
 
 # def get_peak_params2(cwt_array: np.ndarray, spint: np.ndarray, max_width: int,

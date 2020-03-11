@@ -11,6 +11,7 @@ from typing import Optional, Iterable, Tuple, Union, List
 from . import utils
 from .data_container import DataContainer
 from . import validation
+from . import peaks
 msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
 
 
@@ -388,3 +389,32 @@ class MSData:
         nsp = self.reader.getNrSpectra()
         rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
         return rt
+
+
+class Chromatogram:
+    """
+    Manages chromatograms plotting and peak picking
+
+    Attributes
+    ----------
+    spint: numpy.ndarray
+        intensity in each scan
+    mz: numpy.ndarray or float
+        mz value for each scan. Used to estimate mean and deviation of the
+        mz in the chromatogram
+    index: int
+        scan number where chromatogram starts
+    """
+
+    def __init__(self, spint: np.ndarray, rt: np.ndarray,
+                 mz: Union[np.ndarray, float], index: int = 0):
+        self.spint = spint
+        self.mz = mz
+        self.index = index
+        self.peaks = None
+
+    def find_peaks(self, snr: float = 3, bl_ratio: float = 2,
+                   min_width: float = 5, max_width: float = 60,
+                   max_distance: Optional[float] = None,
+                   min_length: Optional[int] = None):
+        peak_list = peaks.pick_cwt(self.rt)
