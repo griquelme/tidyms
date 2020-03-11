@@ -5,6 +5,7 @@ import os.path
 from typing import Tuple, List, Optional, Union
 import pyopenms
 from collections import namedtuple
+from scipy.interpolate import  interp1d
 msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
 
 
@@ -319,10 +320,21 @@ def _list_to_roi(mz_list: List[np.ndarray], sp_list: List[np.ndarray],
     -------
     roi_list: List[Roi]
     """
-    if len(mz_list) > 0:
-        roi_list = [Roi(mz, sp, index) for mz, sp in zip(mz_list, sp_list)]
-    else:
-        roi_list = list()
+    # if len(mz_list) > 0:
+    #     roi_list = [Roi(mz, sp, index) for mz, sp in zip(mz_list, sp_list)]
+    # else:
+    #     roi_list = list()
+    # return roi_list
+    roi_list = list()
+    for mz, sp in zip(mz_list, sp_list):
+        has_int = sp > 0
+        # interpolate missing values
+        ind = np.arange(sp_list.size)
+        interpolator = interp1d(ind[has_int], sp[has_int])
+        sp[~has_int] = interpolator(ind[~has_int])
+        # fill missing mz to mean
+        mz[~has_int] = mz[has_int].mean()
+        roi_list.append(Roi(mz, sp, index))
     return roi_list
 
 
@@ -535,3 +547,26 @@ class RoiMaker:
 
             # list of mz and int, index convert to a named tuple of ROI
 
+def find_closest_sorted(x:np.ndarray, xq: Union[float, np.ndarray]):
+    """
+    Find the closest index between two sorted arrays.
+
+    Parameters
+    ----------
+    x: numpy.ndarray
+        sorted array used to search
+    xq: float or numpy.ndarray
+        query points
+
+    Returns
+    -------
+    closest_index: np.ndarray
+    """
+    sorted_index = np.searchsorted(x, xq)
+    sorted_index = np.vstack((sorted_index, sorted_index - 1))
+    sorted_index = np.where(sorted_index >= x.size, x.size - 1, sorted_index)
+    sorted_index = np.where(sorted_index < 0, 0, sorted_index)
+    res = np.abs(xq - x[sorted_index])
+    closest_index = sorted_index[
+        np.argmin(res, axis=0), np.arange(sorted_index.shape[1])]
+    return closest_index
