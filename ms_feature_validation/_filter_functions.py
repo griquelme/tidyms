@@ -118,8 +118,8 @@ def correct_blanks(df: pd.DataFrame, classes: pd.Series,
     return df
 
 
-def _coov_loess(x: pd.Series, y: pd.Series, interpolator: Callable,
-                frac: Optional[float] = None) -> tuple:
+def _loocv_loess(x: pd.Series, y: pd.Series, interpolator: Callable,
+                 frac: Optional[float] = None) -> tuple:
     """
     Helper function for batch_correction. Computes loess correction with LOOCV.
 
@@ -327,7 +327,8 @@ def check_qc_prevalence(data_matrix: pd.DataFrame, order: pd.Series,
 
 
 def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
-                 sample_index: pd.Index, frac: float, interpolator: Callable):
+                 sample_index: pd.Index, frac: float, interpolator: Callable,
+                 n_qc: Optional[int] = None):
     """
     Applies LOESS-correction interpolation on a feature. Auxilliary function of
     batch_corrector_func
@@ -341,14 +342,20 @@ def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
     sample_index: pd.Index
     frac: float
     interpolator: Callable
+    n_qc: int, optional
+    Number of QCs involved in mean calculation. If None, all QCs are involved.
 
     Returns
     -------
     pd.Series
     """
-    qc_loess = _coov_loess(order[qc_index],
-                           ft_data[qc_index] - ft_data[qc_index].median(),
-                           interpolator, frac=frac)
+    if n_qc is None:
+        n_qc = qc_index.size
+    print(n_qc)
+    qc_median = ft_data[qc_index[:n_qc]].median()
+    qc_loess = _loocv_loess(order[qc_index],
+                            ft_data[qc_index] - qc_median,
+                            interpolator, frac=frac)
     interp = interpolator(order[qc_index], qc_loess)
     ft_data[sample_index] -= interp(order[sample_index])
     return ft_data
@@ -357,7 +364,8 @@ def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
 def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
                          classes: pd.Series, frac: float,
                          interpolator: Callable, qc_classes: List[str],
-                         sample_classes: List[str]) -> pd.DataFrame:
+                         sample_classes: List[str],
+                         n_qc: Optional[int] = None) -> pd.DataFrame:
     """
     Applies LOESS correction - interpolation on a single batch. Auxilliary
     function of interbatch_correction.
@@ -371,6 +379,8 @@ def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
     interpolator: Callable
     qc_classes: list[str]
     sample_classes: list[str]
+    n_qc: int, optional
+    Number of QCs involved in mean calculation. If None, all QCs are involved.
 
     Returns
     -------
@@ -382,7 +392,7 @@ def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
     sample_index = sample_index[sample_index].index
     df_batch.loc[sample_index, :] = \
         (df_batch.apply(lambda x: loess_interp(x, order, qc_index, sample_index,
-                                               frac, interpolator)))
+                                               frac, interpolator, n_qc)))
     return df_batch
 
 
@@ -390,7 +400,8 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
                           classes: pd.Series, corrector_classes: List[str],
                           process_classes: List[str],
                           frac: Optional[float] = None,
-                          interpolator: Optional[str] = "splines"
+                          interpolator: Optional[str] = "splines",
+                          n_qc: Optional[int] = None
                           ) -> pd.DataFrame:
     """
     Correct instrument response drift using LOESS regression [1, 2]
@@ -414,6 +425,9 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
        best value using LOOCV.
     interpolator: {"linear", "splines"}
         Type of interpolator to use.
+    n_qc: int, optional
+    Number of QCs involved in mean calculation. If None, all QCs are involved.
+
 
     Returns
     -------
@@ -457,7 +471,7 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
         return batch_corrector_func(df_group, order[df_group.index],
                                     classes[df_group.index], frac,
                                     interp_func, corrector_classes,
-                                    process_classes)
+                                    process_classes, n_qc = n_qc)
 
     # intra batch correction
     corrected = df.groupby(batch).apply(corrector_helper)
