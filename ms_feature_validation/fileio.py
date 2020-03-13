@@ -3,16 +3,13 @@ Functions to read Raw LC-MS data using pyopenms and functions to create
 chromatograms and accumulate spectra.
 """
 
-import pyopenms
 import numpy as np
 import pandas as pd
-from scipy.interpolate import interp1d
 from typing import Optional, Iterable, Tuple, Union, List
-from . import utils
 from .data_container import DataContainer
+from . import lcms
+from . import utils
 from . import validation
-from . import peaks
-msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
 
 
 def read_progenesis(path):
@@ -57,181 +54,6 @@ def read_progenesis(path):
     return dc
 
 
-def reader(path: str, on_disc: bool = True):
-    """
-    Load `path` file into an OnDiskExperiment. If the file is not indexed, load
-    the file.
-    Parameters
-    ----------
-    path: str
-        path to read mzML file from.
-    on_disc:
-        if True doesn't load the whole file on memory.
-
-    Returns
-    -------
-    pyopenms.OnDiskMSExperiment or pyopenms.MSExperiment
-    """
-    if on_disc:
-        try:
-            exp_reader = pyopenms.OnDiscMSExperiment()
-            exp_reader.openFile(path)
-        except RuntimeError:
-            msg = "{} is not an indexed mzML file, switching to MSExperiment"
-            print(msg.format(path))
-            exp_reader = pyopenms.MSExperiment()
-            pyopenms.MzMLFile().load(path, exp_reader)
-    else:
-        exp_reader = pyopenms.MSExperiment()
-        pyopenms.MzMLFile().load(path, exp_reader)
-    return exp_reader
-
-
-def chromatogram(msexp: msexperiment, mz: Iterable[float],
-                 tolerance: float = 0.005, start: Optional[int] = None,
-                 end: Optional[int] = None,
-                 accumulator: str = "sum") -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Calculates the EIC for the msexperiment
-    Parameters
-    ----------
-    msexp: MSExp or OnDiskMSExp.
-    mz: iterable[float]
-        mz values used to build the EICs.
-    start: int, optional
-        first scan to build the chromatogram
-    end: int, optional
-        last scan to build the chromatogram.
-    tolerance: float.
-               Tolerance to build the EICs.
-    accumulator: {"sum", "mean"}
-        "mean" divides the intensity in the EIC using the number of points in
-        the window.
-    Returns
-    -------
-    rt, chromatograms: tuple
-        rt is an array of retention times. chromatograms is an array with rows
-        of EICs.
-    """
-    if not isinstance(mz, np.ndarray):
-        mz = np.array(mz)
-    mz_intervals = (np.vstack((mz - tolerance, mz + tolerance))
-                    .T.reshape(mz.size * 2))
-    nsp = msexp.getNrSpectra()
-
-    if start is None:
-        start = 0
-
-    if end is None:
-        end = nsp
-
-    chromatograms = np.zeros((mz.size, end - start))
-    rt = np.zeros(end - start)
-    for ksp in range(start, end):
-        sp = msexp.getSpectrum(ksp)
-        rt[ksp] = sp.getRT()
-        mz_sp, int_sp = sp.get_peaks()
-        ind_sp = np.searchsorted(mz_sp, mz_intervals)
-        # elements added at the end of mz_sp raise IndexError
-        ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
-        chromatograms[:, ksp] = np.add.reduceat(int_sp, ind_sp)[::2]
-        if accumulator == "mean":
-            norm = ind_sp[1::2] - ind_sp[::2]
-            norm[norm == 0] = 1
-            chromatograms[:, ksp] = chromatograms[:, ksp] / norm
-        elif accumulator == "sum":
-            pass
-        else:
-            msg = "accumulator possible values are `mean` and `sum`."
-            raise ValueError(msg)
-    return rt, chromatograms
-
-
-def accumulate_spectra(msexp: msexperiment, start: int,
-                       end: int, subtract: Optional[Tuple[int, int]] = None,
-                       kind: str = "linear",
-                       accumulator: str = "sum"
-                       ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    accumulates a spectra into a single spectrum.
-
-    Parameters
-    ----------
-    msexp : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
-    start: int
-        start slice for scan accumulation
-    end: int
-        end slice for scan accumulation.
-    kind: str
-        kind of interpolator to use with scipy interp1d.
-    subtract : None or Tuple[int], left, right
-        Scans regions to substract. `left` must be smaller than `start` and
-        `right` greater than `end`.
-    accumulator : {"sum", "mean"}
-
-    Returns
-    -------
-    accum_mz, accum_int : tuple[np.array]
-    """
-    accumulator_functions = {"sum": np.sum, "mean": np.mean}
-    accumulator = accumulator_functions[accumulator]
-
-    if subtract is not None:
-        if (subtract[0] > start) or (subtract[-1] < end):
-            raise ValueError("subtract region outside scan region.")
-    else:
-        subtract = (start, end)
-
-    # interpolate accumulate and substract regions
-    rows = subtract[1] - subtract[0]
-    mz_ref = _get_mz_roi(msexp, subtract)
-    interp_int = np.zeros((rows, mz_ref.size))
-    for krow, scan in zip(range(rows), range(*subtract)):
-        mz_scan, int_scan = msexp.getSpectrum(scan).get_peaks()
-        interpolator = interp1d(mz_scan, int_scan, kind=kind)
-        interp_int[krow, :] = interpolator(mz_ref)
-
-    # subtract indices to match interp_int rows
-    start = start - subtract[0]
-    end = end - subtract[0]
-    subtract = 0, subtract[1] - subtract[0]
-
-    accum_int = (accumulator(interp_int[start:end], axis=0)
-                 - accumulator(interp_int[subtract[0]:start], axis=0)
-                 - accumulator(interp_int[end:subtract[1]], axis=0))
-    accum_mz = mz_ref
-
-    return accum_mz, accum_int
-
-
-def _get_mz_roi(ms_experiment, scans):
-    """
-    make an mz array with regions of interest in the selected scans.
-
-    Parameters
-    ----------
-    ms_experiment: pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
-    scans : tuple[int] : start, end
-
-    Returns
-    -------
-    mz_ref = numpy.array
-    """
-    mz_0, _ = ms_experiment.getSpectrum(scans[0]).get_peaks()
-    mz_min = mz_0.min()
-    mz_max = mz_0.max()
-    mz_res = np.diff(mz_0).min()
-    mz_ref = np.arange(mz_min, mz_max, mz_res)
-    roi = np.zeros(mz_ref.size + 1)
-    # +1 used to prevent error due to mz values bigger than mz_max
-    for k in range(*scans):
-        curr_mz, _ = ms_experiment.getSpectrum(k).get_peaks()
-        roi_index = np.searchsorted(mz_ref, curr_mz)
-        roi[roi_index] += 1
-    roi = roi.astype(bool)
-    return mz_ref[roi[:-1]]
-
-
 class MSData:
     """
     Reads mzML files and perform common operations on MS Data.
@@ -246,8 +68,10 @@ class MSData:
 
     def __init__(self, path: str, mode: Optional[str] = None,
                  on_disc: bool = True):
-        self.reader = reader(path, on_disc=on_disc)
+        self.reader = lcms.reader(path, on_disc=on_disc)
         self.mode = mode
+        self.chromatograms = None
+        self.features = None
 
     @property
     def mode(self) -> str:
@@ -266,9 +90,10 @@ class MSData:
             msg = "mode must be `centroid` or `profile`"
             raise ValueError(msg)
 
-    def get_eic(self, mz: Iterable[float], tolerance: float = 0.05,
-                start: Optional[int] = None, end: Optional[int] = None,
-                accumulator: str = "sum",) -> Tuple[np.ndarray, np.ndarray]:
+    def make_chromatograms(self, mz: List[float], tolerance: float = 0.05,
+                           start: Optional[int] = None,
+                           end: Optional[int] = None,
+                           accumulator: str = "sum"):
         """
         Computes the Extracted Ion Chromatogram for a list mass-to-charge
         values.
@@ -297,8 +122,14 @@ class MSData:
             Extracted Ion Chromatogram for each mz value. Each column is a mz
             and each row is a scan.
         """
-        return chromatogram(self.reader, mz, tolerance=tolerance, start=start,
-                            end=end, accumulator=accumulator)
+        rt, spint = lcms.chromatogram(self.reader, mz, tolerance=tolerance,
+                                      start=start, end=end,
+                                      accumulator=accumulator)
+        chromatograms = list()
+        for row in range(spint.shape[0]):
+            tmp = lcms.Chromatogram(spint[row, :], rt, mz[row], index=start)
+            chromatograms.append(tmp)
+        self.chromatograms = chromatograms
 
     def accumulate_spectra(self, start: Optional[int], end: Optional[int],
                            subtract: Optional[Tuple[int, int]] = None,
@@ -327,9 +158,10 @@ class MSData:
         accum_int: numpy.ndarray
             array of accumulated intensities.
         """
-        accum_mz, accum_int = accumulate_spectra(self.reader, start, end,
-                                                 subtract=subtract, kind=kind,
-                                                 accumulator=accumulator)
+        accum_mz, accum_int = lcms.accumulate_spectra(self.reader, start, end,
+                                                      subtract=subtract,
+                                                      kind=kind,
+                                                      accumulator=accumulator)
         return accum_mz, accum_int
 
     def _is_centroided(self) -> bool:
@@ -372,12 +204,13 @@ class MSData:
 
         The algorithm used to build the ROI is described in [1].
 
-        [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive feature
-        detection for high resolution LC/MS. BMC Bioinformatics 9, 504 (2008).
-        https://doi.org/10.1186/1471-2105-9-504
+        ..[1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+        504 (2008). https://doi.org/10.1186/1471-2105-9-504
         """
         return utils.make_rois(self.reader, pmin, max_gap, min_int,
                                tolerance, start=start, end=end)
+
     def get_rt(self):
         """
         Retention time vector for the experiment.
@@ -390,31 +223,54 @@ class MSData:
         rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
         return rt
 
+    def detect_features(self, snr: float = 10, bl_ratio: float = 2,
+                        min_width: float = 5, max_width: float = 30,
+                        max_distance: Optional[float] = None,
+                        min_length: Optional[int] = None,
+                        gap_thresh: int = 1, subtract_bl: bool = True) -> None:
+        """
+        Find peaks in all chromatograms using the CentWave algorithm [1].
+        Peaks are added to the peaks attribute of the Chromatogram object.
 
-class Chromatogram:
-    """
-    Manages chromatograms plotting and peak picking
+        Parameters
+        ----------
+        snr: float
+            Minimum signal-to-noise ratio of the peaks
+        bl_ratio: float
+            minimum signal / baseline ratio
+        min_width: float
+            min width of the peaks, in rt units.
+        max_width: float
+            max width of the peaks, in rt units.
+        max_distance: float
+            maximum distance between peaks used to build ridgelines.
+        min_length: int
+            minimum number of points in a ridgeline
+        gap_thresh: int
+            maximum number of missing points in a ridgeline
+        subtract_bl: bool
+            If True subtracts the estimated baseline from the intensity and
+            area.
 
-    Attributes
-    ----------
-    spint: numpy.ndarray
-        intensity in each scan
-    mz: numpy.ndarray or float
-        mz value for each scan. Used to estimate mean and deviation of the
-        mz in the chromatogram
-    index: int
-        scan number where chromatogram starts
-    """
+        References
+        ----------
+        ..[1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+        504 (2008). https://doi.org/10.1186/1471-2105-9-504
+        """
+        features = list()
+        for chrom in self.chromatograms:
+            chrom.find_peaks(snr=snr, bl_ratio=bl_ratio,
+                             min_width=min_width, max_width=max_width,
+                             max_distance=max_distance, min_length=min_length,
+                             gap_thresh=gap_thresh)
+            features.append(chrom.get_peak_params(subtract_bl=subtract_bl))
 
-    def __init__(self, spint: np.ndarray, rt: np.ndarray,
-                 mz: Union[np.ndarray, float], index: int = 0):
-        self.spint = spint
-        self.mz = mz
-        self.index = index
-        self.peaks = None
-
-    def find_peaks(self, snr: float = 3, bl_ratio: float = 2,
-                   min_width: float = 5, max_width: float = 60,
-                   max_distance: Optional[float] = None,
-                   min_length: Optional[int] = None):
-        peak_list = peaks.pick_cwt(self.rt)
+        # organize features into a DataFrame
+        roi_ind = [np.ones(y.shape[0]) * x for x, y in enumerate(features)]
+        roi_ind = np.hstack(roi_ind)
+        features = pd.concat(features)
+        features["roi"] = roi_ind.astype(int)
+        features = features.reset_index()
+        features.rename(columns={"index": "peak"}, inplace=True)
+        self.features = features

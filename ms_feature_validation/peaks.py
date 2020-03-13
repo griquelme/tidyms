@@ -72,15 +72,18 @@ class PeakLocation:
 
         if x is None:
             width = self.end - self.start
-            area = trapz(y)
+            area = trapz(y[self.start:(self.end + 1)])
             location = self.loc
         else:
             width = x[self.end] - x[self.start]
-            area = trapz(y, x)
+            area = trapz(y[self.start:(self.end + 1)],
+                         x[self.start:(self.end + 1)])
             location = x[self.loc]
 
+        intensity = y[self.loc]
+
         if subtract_bl:
-            intensity = y[self.loc] - self.baseline
+            intensity -= self.baseline
             area -= width * self.baseline
 
         peak_params = {"location": location, "intensity": intensity,
@@ -200,14 +203,16 @@ def snr_calculation(y: np.ndarray,
     right = min(y.size, extension[1] + width)
 
     left_25_lower = np.sort(y[left:extension[0]])
-    left_25_lower = left_25_lower[:(left_25_lower.size // 4)]
+    # left_25_lower = left_25_lower[:(left_25_lower.size // 4)]
+    left_25_lower = left_25_lower[int(5 * left_25_lower.size / 100):int(95 * left_25_lower.size / 100)]
     if left_25_lower.size > 0:
         left_bl = left_25_lower.mean()
         left_noise = left_25_lower.std()
     else:
         left_bl, left_noise = 0, 0
     right_25_lower = np.sort(y[extension[1]:right])
-    right_25_lower = right_25_lower[:(right_25_lower.size // 4)]
+    # right_25_lower = right_25_lower[:(right_25_lower.size // 4)]
+    right_25_lower = right_25_lower[int(5 * right_25_lower.size / 100):int(95 * right_25_lower.size / 100)]
     if right_25_lower.size > 0:
         right_bl = right_25_lower.mean()
         right_noise = right_25_lower.std()
@@ -216,7 +221,7 @@ def snr_calculation(y: np.ndarray,
         right_noise = 0
 
     baseline = min(left_bl, right_bl)
-    noise = max(left_noise, right_noise)
+    noise = min(left_noise, right_noise)
 
     if noise:
         snr = (y[peak_index] - baseline) / noise
@@ -285,10 +290,12 @@ def convert_to_original_scale(x_orig: np.ndarray, x_rescaled: np.ndarray,
     return PeakLocation(loc, peak.scale, start, end, peak.snr, peak.baseline)
 
 
-def pick_cwt(x: np.ndarray, y: np.ndarray, snr: float = 3, bl_ratio: float = 2,
-             min_width: Optional[float] = 5, max_width: Optional[float] = 60,
+def pick_cwt(x: np.ndarray, y: np.ndarray, widths: np.ndarray, snr: float = 3,
+             bl_ratio: float = 2, min_width: Optional[float] = 5,
+             max_width: Optional[float] = 60,
              max_distance: Optional[int] = None,
-             min_length: Optional[int] = None, gap_thresh: int = 1):
+             min_length: Optional[int] = None,
+             gap_thresh: int = 1) -> List[PeakLocation]:
 
     # Convert to uniform sampling
     xu, yu = resample_data(x, y)    # x uniform, y uniform
@@ -297,7 +304,7 @@ def pick_cwt(x: np.ndarray, y: np.ndarray, snr: float = 3, bl_ratio: float = 2,
     min_width = int(min_width / (xu[1] - xu[0])) + 1
     max_width = int(max_width / (xu[1] - xu[0])) + 1
 
-    widths = make_widths(xu, max_width=max_width)
+    # widths = make_widths(xu, max_width=max_width)
 
     # Setting max_distance
     if max_distance is None:
@@ -312,15 +319,30 @@ def pick_cwt(x: np.ndarray, y: np.ndarray, snr: float = 3, bl_ratio: float = 2,
     peaks = process_ridge_lines(yu, w, ridge_lines, min_width, max_width,
                                 min_length=min_length, min_snr=snr,
                                 min_bl_ratio=bl_ratio)
+
     # convert back from uniform sampling to original x scale
     peaks = [p.rescale(xu, x) for p in peaks]
     # sort peaks based on loc
+
     peaks.sort(key=lambda x: x.loc)
     # correct overlap between consecutive peaks:
+
+    remove = list()
     for k in range(len(peaks) - 1):
         left, right = peaks[k], peaks[k + 1]
         if left.end > right.start:
             right.start = left.end
+        if right.start > right.end:
+            remove.append(k+1)
+
+    for ind in reversed(remove):
+        del peaks[ind]
+
+    for p in peaks:
+        if p.start > p.end:
+            print(p.end - p.start)
+
+
     return peaks
 
 
