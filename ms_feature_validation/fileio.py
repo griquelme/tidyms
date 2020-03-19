@@ -127,7 +127,7 @@ class MSData:
                                       accumulator=accumulator)
         chromatograms = list()
         for row in range(spint.shape[0]):
-            tmp = lcms.Chromatogram(spint[row, :], rt, mz[row], index=start)
+            tmp = lcms.Chromatogram(spint[row, :], rt, mz[row], start=start)
             chromatograms.append(tmp)
         self.chromatograms = chromatograms
 
@@ -223,48 +223,47 @@ class MSData:
         rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
         return rt
 
-    def detect_features(self, snr: float = 10, bl_ratio: float = 2,
-                        min_width: float = 5, max_width: float = 30,
-                        max_distance: Optional[float] = None,
-                        min_length: Optional[int] = None,
-                        gap_thresh: int = 1, subtract_bl: bool = True) -> None:
+    def detect_features(self, mode: str = "uplc", subtract_bl: bool = True,
+                        rt_estimation: str = "weighted",
+                        **cwt_params) -> None:
         """
-        Find peaks in all chromatograms using the CentWave algorithm [1].
-        Peaks are added to the peaks attribute of the Chromatogram object.
+        Find peaks with the modified version of the cwt algorithm described in
+        the CentWave algorithm [1]. Peaks are added to the peaks
+        attribute of the Chromatogram object.
 
         Parameters
         ----------
-        snr: float
-            Minimum signal-to-noise ratio of the peaks
-        bl_ratio: float
-            minimum signal / baseline ratio
-        min_width: float
-            min width of the peaks, in rt units.
-        max_width: float
-            max width of the peaks, in rt units.
-        max_distance: float
-            maximum distance between peaks used to build ridgelines.
-        min_length: int
-            minimum number of points in a ridgeline
-        gap_thresh: int
-            maximum number of missing points in a ridgeline
+        mode: {"hplc", "uplc"}
+            Set peak picking parameters assuming HPLC or UPLC experimental
+            conditions. HPLC assumes longer columns with particle size greater
+            than 3 micron (min_width is set to 10 seconds and `max_width` is set
+             to 90 seconds). UPLC is for data acquired with short columns with
+            particle size lower than 3 micron (min_width is set to 5 seconds and
+            `max_width` is set to 60 seconds). In both cases snr is set to 10.
         subtract_bl: bool
             If True subtracts the estimated baseline from the intensity and
             area.
+        rt_estimation: {"weighted", "apex"}
+            if "weighted", the peak retention time is computed as the weighted
+            mean of rt in the extension of the peak. If "apex", rt is
+            simply the value obtained after peak picking.
+        cwt_params:
+            key-value parameters to overwrite the defaults in the pick_cwt
+            function from the peak module.
 
         References
         ----------
-        ..[1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+        .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
         feature detection for high resolution LC/MS. BMC Bioinformatics 9,
         504 (2008). https://doi.org/10.1186/1471-2105-9-504
         """
+
         features = list()
         for chrom in self.chromatograms:
-            chrom.find_peaks(snr=snr, bl_ratio=bl_ratio,
-                             min_width=min_width, max_width=max_width,
-                             max_distance=max_distance, min_length=min_length,
-                             gap_thresh=gap_thresh)
-            features.append(chrom.get_peak_params(subtract_bl=subtract_bl))
+            chrom.find_peaks(mode, **cwt_params)
+            peaks_params = chrom.get_peak_params(subtract_bl=subtract_bl,
+                                                 rt_estimation=rt_estimation)
+            features.append(peaks_params)
 
         # organize features into a DataFrame
         roi_ind = [np.ones(y.shape[0]) * x for x, y in enumerate(features)]

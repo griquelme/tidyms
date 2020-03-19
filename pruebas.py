@@ -1,37 +1,22 @@
 import ms_feature_validation as mfv
-import pandas as pd
-# import numpy as np
+import pickle
+import numpy as np
+
+with open("notebooks/sp_data.pickle", "rb") as fin:
+    d = pickle.load(fin)
+
+with open("notebooks/sp.pickle", "rb") as fin:
+    sp = pickle.load(fin)
+
+ms = d["mz"]
+spint = d["spint"]
 
 
-fname = "notebooks/progenesis_data_matrix_20190918.csv"
-data = mfv.filter.read_progenesis(fname)
-# adding order and batch information
-temp = pd.Series(data=data.sample_metadata.index.str.split("_"),
-                 index=data.sample_metadata.index)
-order = temp.apply(lambda x: x[1]).astype(int)
-dates = temp.apply(lambda x: x[0])
-dates_to_batch = dict(zip(dates.unique(), range(1, dates.size + 1)))
-batch = (temp.apply(lambda x: dates_to_batch[x[0]])).astype(int)
 
-def convert_to_global_run_order(order, batch):
-    max_order = order.groupby(batch).max()
-    max_order[0] = 0
-    global_run_order = order + batch.apply(lambda x: max_order[x - 1])
-    return global_run_order
+widths = mfv.lcms.make_widths_ms(0.01, 0.1)
+peaks = mfv.peaks.pick_cwt(ms, spint, widths, min_width=0.01, max_width=0.1,
+                           max_distance=0.005, min_length=5)
 
-data.order = convert_to_global_run_order(order, batch)
-data.batch = batch
-data.id = data.sample_metadata.index
-
-# setup sample types
-sample_mapping = {"qc": ["QC d2 v1", "QC d2 v2", "QC d1 v1", "QC d1 v2"],
-                 "suitability": ["standards mixture"],
-                 "blank": ["solvent blank", "Solvent"],
-                 "zero": ["Zero"]}
-data.mapping = sample_mapping
-trp = data.select_features(203.082, 128)
-data.plot.feature(trp)
-
-
-# if __name__ == "__main__":
-#     main()
+plist = sp.get_peak_params()
+mz = plist["mz"].values
+a = mfv.lcms.find_isotopic_distribution(mz, 596.732, 3, 10, 0.005)

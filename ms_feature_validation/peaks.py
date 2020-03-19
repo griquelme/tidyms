@@ -53,7 +53,8 @@ class PeakLocation:
                             self.baseline)
 
     def get_peak_params(self, y: np.ndarray, x: Optional[np.ndarray] = None,
-                        subtract_bl: bool = True) -> dict:
+                        subtract_bl: bool = True,
+                        center_estimation: str = "weighted") -> dict:
         """
         compute peak parameters based on x and y.
 
@@ -64,10 +65,15 @@ class PeakLocation:
             if None computes parameters using index values.
         subtract_bl: bool
             If True subtract baseline to peak intensity and area
+        center_estimation: {"weighted", "apex"}
+            Only used when x is provided. if "weighted", the location of the
+            peak is computed as the weighted mean of x in the extension of the
+            peak, using y as weights. If "apex", the location is simply the
+            location obtained after peak picking.
 
         Returns
         -------
-
+        dict
         """
 
         if x is None:
@@ -78,7 +84,14 @@ class PeakLocation:
             width = x[self.end] - x[self.start]
             area = trapz(y[self.start:(self.end + 1)],
                          x[self.start:(self.end + 1)])
-            location = x[self.loc]
+            if center_estimation == "weighted":
+                location = np.average(x[self.start:self.end],
+                                      weights=y[self.start:self.end])
+            elif center_estimation == "apex":
+                location = x[self.loc]
+            else:
+                msg = "center_estimation must be `weighted` or `apex`"
+                raise ValueError(msg)
 
         intensity = y[self.loc]
 
@@ -88,7 +101,7 @@ class PeakLocation:
 
         peak_params = {"location": location, "intensity": intensity,
                        "width": width, "area": area}
-        return  peak_params
+        return peak_params
 
 
 def make_widths(x: np.ndarray, max_width: float) -> np.ndarray:
@@ -149,7 +162,6 @@ def process_ridge_lines(y: np.ndarray,
     if min_length is None:
         min_length = np.ceil(cwt_array.shape[0] / 8)
 
-
     peaks = list()
 
     for row_ind, col_ind in ridge_lines:
@@ -204,7 +216,9 @@ def snr_calculation(y: np.ndarray,
 
     left_25_lower = np.sort(y[left:extension[0]])
     # left_25_lower = left_25_lower[:(left_25_lower.size // 4)]
-    left_25_lower = left_25_lower[int(5 * left_25_lower.size / 100):int(95 * left_25_lower.size / 100)]
+    lperc_5 = int(5 * left_25_lower.size / 100)
+    lperc_95 = int(95 * left_25_lower.size / 100)
+    left_25_lower = left_25_lower[lperc_5:lperc_95]
     if left_25_lower.size > 0:
         left_bl = left_25_lower.mean()
         left_noise = left_25_lower.std()
@@ -212,7 +226,9 @@ def snr_calculation(y: np.ndarray,
         left_bl, left_noise = 0, 0
     right_25_lower = np.sort(y[extension[1]:right])
     # right_25_lower = right_25_lower[:(right_25_lower.size // 4)]
-    right_25_lower = right_25_lower[int(5 * right_25_lower.size / 100):int(95 * right_25_lower.size / 100)]
+    rperc_5 = int(5 * right_25_lower.size / 100)
+    rperc_95 = int(95 * right_25_lower.size / 100)
+    right_25_lower = right_25_lower[rperc_5:rperc_95]
     if right_25_lower.size > 0:
         right_bl = right_25_lower.mean()
         right_noise = right_25_lower.std()
@@ -305,6 +321,7 @@ def pick_cwt(x: np.ndarray, y: np.ndarray, widths: np.ndarray, snr: float = 3,
     max_width = int(max_width / (xu[1] - xu[0])) + 1
 
     # widths = make_widths(xu, max_width=max_width)
+    widths = widths / (xu[1] - xu[0])
 
     # Setting max_distance
     if max_distance is None:

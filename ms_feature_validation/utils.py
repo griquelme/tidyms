@@ -570,3 +570,51 @@ def find_closest_sorted(x:np.ndarray, xq: Union[float, np.ndarray]):
     closest_index = sorted_index[
         np.argmin(res, axis=0), np.arange(sorted_index.shape[1])]
     return closest_index
+
+
+def find_closest(x: np.ndarray,
+                 xq: Union[np.ndarray, float, int]) -> np.ndarray:
+    """
+    Find the index in x closest to each xq element. Assumes that x is sorted.
+
+    Parameters
+    ----------
+    x: numpy.ndarray
+        Sorted vector
+    xq: numpy.ndarray
+        search vector
+
+    Returns
+    -------
+    ind: numpy.ndarray
+        array with the same size as xq with indices closest to x.
+
+    Raises
+    ------
+    ValueError: when x or xq are empty.
+    """
+
+    if isinstance(xq, (float, int)):
+        xq = np.array(xq)
+
+    if (x.size == 0) or (xq.size == 0):
+        msg = "`x` and `xq` must be non empty arrays"
+        raise ValueError(msg)
+
+    ind = np.searchsorted(x, xq)
+
+    if ind.size == 1:
+        if ind == 0:
+            return ind
+        elif ind == x.size:
+            return ind - 1
+        else:
+            return ind - ((xq - x[ind - 1]) < (x[ind] - xq))
+
+    else:
+        # cases where the index is between 1 and x.size - 1
+        mask = (ind > 0) & (ind < x.size)
+        ind[mask] -= (xq[mask] - x[ind[mask] - 1]) < (x[ind[mask]] - xq[mask])
+        # when the index is x.size, then the closest index is x.size -1
+        ind[ind == x.size] = x.size - 1
+        return ind
