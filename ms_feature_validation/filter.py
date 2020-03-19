@@ -235,7 +235,8 @@ class BlankCorrector(Processor):
     """
     def __init__(self, corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
-                 mode: Union[str, Callable] = "lod", verbose=False):
+                 mode: Union[str, Callable] = "lod", factor: float = 1,
+                 verbose=False):
         """
         Correct sample values using blank samples.
 
@@ -247,9 +248,19 @@ class BlankCorrector(Processor):
         process_classes:  list[str], optional
             Classes to be corrected. If None, uses all classes listed on the
             DataContainer mapping attribute.
+        factor: float
+            factor used to convert values to zero (see notes)
         mode: {"mean", "max", "lod", "loq"}, function.
             Function used to generate the blank correction.
         verbose: bool
+
+        Notes
+        -----
+
+        Blank correction is applied for each feature in the following way:
+
+        .. math:: X_{corrected} = 0 if X < factor * mode(X_{blank})
+        .. math:: X_{corrected} = X - mode(X_{blank}) else
         """
         super(BlankCorrector, self).__init__(axis=None, mode="transform",
                                              verbose=verbose)
@@ -257,6 +268,7 @@ class BlankCorrector(Processor):
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
         self.params["mode"] = mode
+        self.params["factor"] = factor
         self._default_process = _sample_type
         self._default_correct = _blank_type
 
@@ -310,9 +322,46 @@ class PrevalenceFilter(Processor):
         self.set_default_sample_types(dc)
         dr = dc.metrics.detection_rate(intraclass=self.params["intraclass"],
                                        threshold=self.params["threshold"])
+        dr = dr.loc[self.params["process_classes"], :]
         lb = self.params["lb"]
         ub = self.params["ub"]
         return get_outside_bounds_index(dr, lb, ub)
+
+
+@register
+class DRatioFilter(Processor):
+    """
+    Remove Features with a D-ratio value higher than a predefined threshold.
+
+    Parameters
+    ----------
+    process_classes: List[str], optional
+        Classes used to compute prevalence. If None, classes are obtained from
+        sample classes in the DataContainer mapping.
+    lb: float
+        Lower bound of D-ratio. Should be zero
+    ub: float
+        Upper bound of D-ratio. Usually 50% or lower, the lower the better.
+    """
+
+    def __init__(self, lb=0, ub=0.5, process_classes=None, robust=False,
+                 verbose=False):
+        super(DRatioFilter, self).__init__(axis="features", mode="filter",
+                                           verbose=verbose)
+        self.name = "D-ratio Filter"
+        self.params["lb"] = lb
+        self.params["ub"] = ub
+        self.params["process_classes"] = process_classes
+        self.params["robust"] = robust
+        self._default_process = _qc_type
+
+    def func(self, dc: DataContainer):
+        self.set_default_sample_types(dc)
+        lb = self.params["lb"]
+        ub = self.params["ub"]
+        drat = dc.metrics.dratio(robust=self.params["robust"])
+        #drat = drat.loc[self.params["process_classes"], :]
+        return get_outside_bounds_index(drat, lb, ub)
 
 
 @register
@@ -338,7 +387,9 @@ class VariationFilter(Processor):
         ub = self.params["ub"]
         variation = dc.metrics.cv(intraclass=self.params["intraclass"],
                                   robust=self.params["robust"])
-        variation = variation.loc[self.params["process_classes"], :]
+        if self.params["intraclass"]:
+            variation = variation.loc[self.params["process_classes"], :]
+
         return get_outside_bounds_index(variation, lb, ub)
 
 
