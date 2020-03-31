@@ -4,8 +4,11 @@ Filter objects to curate data
 
 
 from .data_container import DataContainer
+from . import data_container
 from ._names import *
 from ._filter_functions import *
+from . import validation
+from .exceptions import *
 import yaml
 import os.path
 import pandas as pd
@@ -97,10 +100,15 @@ class Processor(Reporter):
         default sample type used to apply filter
     _default_correct: str
         default sample type to be corrected.
+    _requirements: dict
+        dictionary with the same keys as the obtained from the diagnose method
+        from a DataContainer. If any value is different compared to the values
+        from diagnose an error is raised.
     """
     def __init__(self, mode: str, axis: Optional[str] = None,
-                 verbose: bool = False, default_process=None,
-                 default_correct=None):
+                 verbose: bool = False, default_process: Optional[str] = None,
+                 default_correct: Optional[str] = None,
+                 requirements: Optional[dict] = None):
         super(Processor, self).__init__()
         self.mode = mode
         self.axis = axis
@@ -109,9 +117,42 @@ class Processor(Reporter):
         self.params = dict()
         self._default_process = default_process
         self._default_correct = default_correct
+        if requirements is None:
+            self._requirements = dict()
+        else:
+            self._requirements = requirements
 
     def func(self, func):
         raise NotImplementedError
+
+    def check_requirements(self, dc: DataContainer):
+        dc_status = dc.diagnose()
+
+        # check process and corrector classes in the processor agains values in
+        # the DataContainer
+        class_types = ["process_classes", "corrector_classes"]
+        for class_type in class_types:
+            if class_type in self.params:
+                class_list = self.params[class_type]
+                if class_type == "process_classes":
+                    default = self._default_process
+                else:
+                    default = self._default_correct
+                has_mapping = dc_status[default]
+                if (class_list is None) and (not has_mapping):
+                    msg = "no classes where assigned to {} sample type in " \
+                        "the sampling mapping"
+                    msg = msg.format(default)
+                    raise MissingMappingInformation(msg)
+                elif not dc.is_valid_class_name(class_list):
+                    msg = "classes listed in {} aren't present " \
+                          "in the DataContainer"
+                    msg = msg.format(class_type)
+                    raise data_container.InvalidClassName(msg)
+
+        for requirement in self._requirements:
+            if self._requirements[requirement] != dc_status[requirement]:
+                raise _requirements_error[requirement]
 
     def set_default_sample_types(self, dc: DataContainer):
 
@@ -131,6 +172,8 @@ class Processor(Reporter):
 
     def process(self, dc):
         self._record_metrics(dc, "before")
+        self.set_default_sample_types(dc)
+        self.check_requirements(dc)
         if self.mode == "filter":
             self.remove = self.func(dc)
             dc.remove(self.remove, self.axis)
@@ -225,6 +268,14 @@ class ClassRemover(Processor):
     def func(self, dc):
         remove_samples = dc.classes.isin(self.params["classes"])
         remove_samples = remove_samples[remove_samples].index
+        # remove classes from mapping
+        for c in self.params["classes"]:
+            for sample_type in dc.mapping:
+                try:
+                    idx = dc.mapping[sample_type].index(c)
+                    del dc.mapping[sample_type][idx]
+                except:
+                    pass
         return remove_samples
 
 
@@ -263,7 +314,9 @@ class BlankCorrector(Processor):
         .. math:: X_{corrected} = X - mode(X_{blank}) else
         """
         super(BlankCorrector, self).__init__(axis=None, mode="transform",
-                                             verbose=verbose)
+                                             verbose=verbose,
+                                             requirements={"empty": False,
+                                                           "missing": False})
         self.name = "Blank Corrector"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
@@ -272,9 +325,9 @@ class BlankCorrector(Processor):
         self._default_process = _sample_type
         self._default_correct = _blank_type
 
+        validation.validate(self.params, validation.blankCorrectorValidator)
+
     def func(self, dc):
-        self.set_default_sample_types(dc)
-        # TODO: view if there are side effects from modifying params
         dc.data_matrix = correct_blanks(dc.data_matrix, dc.classes,
                                         **self.params)
 
@@ -308,7 +361,9 @@ class PrevalenceFilter(Processor):
                  intraclass: bool = True, verbose: bool = False,
                  threshold: Number = 0):
         super(PrevalenceFilter, self).__init__(axis="features", mode="filter",
-                                               verbose=verbose)
+                                               verbose=verbose,
+                                               requirements={"empty": False,
+                                                             "missing": False})
         self.name = "Prevalence Filter"
         self.params["process_classes"] = process_classes
         self.params["lb"] = lb
@@ -317,9 +372,9 @@ class PrevalenceFilter(Processor):
         self.params["threshold"] = threshold
         self._default_correct = _sample_type
         self._default_process = _sample_type
+        validation.validate(self.params, validation.prevalenceFilterValidator)
 
     def func(self, dc):
-        self.set_default_sample_types(dc)
         dr = dc.metrics.detection_rate(intraclass=self.params["intraclass"],
                                        threshold=self.params["threshold"])
         dr = dr.loc[self.params["process_classes"], :]
@@ -347,11 +402,17 @@ class DRatioFilter(Processor):
     def __init__(self, lb=0, ub=0.5, robust=False,
                  verbose=False):
         super(DRatioFilter, self).__init__(axis="features", mode="filter",
-                                           verbose=verbose)
+                                           verbose=verbose,
+                                           requirements={"empty": False,
+                                                         "missing": False,
+                                                         _qc_type: True,
+                                                         _sample_type: True}
+                                           )
         self.name = "D-ratio Filter"
         self.params["lb"] = lb
         self.params["ub"] = ub
         self.params["robust"] = robust
+        validation.validate(self.params, validation.dRatioFilterValidator)
 
     def func(self, dc: DataContainer):
         lb = self.params["lb"]
@@ -368,7 +429,10 @@ class VariationFilter(Processor):
     def __init__(self, lb=0, ub=0.25, process_classes=None, robust=False,
                  intraclass=True, verbose=False):
         super(VariationFilter, self).__init__(axis="features", mode="filter",
-                                              verbose=verbose)
+                                              verbose=verbose,
+                                              requirements={"empty": False,
+                                                            "missing": False}
+                                              )
         self.name = "Variation Filter"
         self.params["lb"] = lb
         self.params["ub"] = ub
@@ -376,9 +440,9 @@ class VariationFilter(Processor):
         self.params["robust"] = robust
         self.params["intraclass"] = intraclass
         self._default_process = _qc_type
+        validation.validate(self.params, validation.variationFilterValidator)
 
     def func(self, dc: DataContainer):
-        self.set_default_sample_types(dc)
         lb = self.params["lb"]
         ub = self.params["ub"]
         variation = dc.metrics.cv(intraclass=self.params["intraclass"],
@@ -425,13 +489,19 @@ class BatchSchemeChecker(Processor):
                  corrector_classes: Optional[List[str]] = None):
         super(BatchSchemeChecker, self).__init__(axis="samples",
                                                  mode="filter",
-                                                 verbose=verbose)
+                                                 verbose=verbose,
+                                                 requirements={"empty": False,
+                                                               "missing": False,
+                                                               "order": True,
+                                                               "batch": True}
+                                                 )
         self.name = "Batch Scheme Checker"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
         self.params["n_min"] = n_min
         self._default_process = _sample_type
         self._default_correct = _qc_type
+        validation.validate(self.params, validation.batchCorrectorValidator)
 
     def func(self, dc: DataContainer):
 
@@ -442,7 +512,6 @@ class BatchSchemeChecker(Processor):
             qc_classes = self.params["corrector_classes"]
             return x.isin(qc_classes).sum() < n_min
 
-        self.set_default_sample_types(dc)
         ps = self.params["process_classes"]
         ps = [x for x in ps if x not in self.params["corrector_classes"]]
         self.params["process_classes"] = ps
@@ -500,7 +569,13 @@ class BatchPrevalenceChecker(Processor):
                  threshold: float = 0.0):
         super(BatchPrevalenceChecker, self).__init__(axis="features",
                                                      mode="filter",
-                                                     verbose=verbose)
+                                                     verbose=verbose,
+                                                     requirements={
+                                                         "empty": False,
+                                                         "missing": False,
+                                                         "order": True,
+                                                         "batch": True}
+                                                     )
         self.name = "Batch Prevalence Checker"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
@@ -508,9 +583,9 @@ class BatchPrevalenceChecker(Processor):
         self.params["threshold"] = threshold
         self._default_process = _sample_type
         self._default_correct = _qc_type
+        validation.validate(self.params, validation.batchCorrectorValidator)
 
     def func(self, dc: DataContainer):
-        self.set_default_sample_types(dc)
         ps = self.params["process_classes"]
         ps = [x for x in ps if x not in self.params["corrector_classes"]]
         self.params["process_classes"] = ps
@@ -531,22 +606,26 @@ class BatchCorrectorProcessor(Processor):
                  process_classes: Optional[List[str]] = None,
                  frac: Optional[float] = None,
                  interpolator: str = "splines",
-                 verbose: bool = False, **kwargs):
+                 verbose: bool = False):
         super(BatchCorrectorProcessor, self).__init__(axis=None,
                                                       mode="transform",
-                                                      verbose=verbose)
+                                                      verbose=verbose,
+                                                      requirements={
+                                                          "empty": False,
+                                                          "missing": False,
+                                                          "order": True,
+                                                          "batch": True}
+                                                      )
         self.name = "Batch Corrector"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
         self.params["interpolator"] = interpolator
         self.params["frac"] = frac
-        self.params = {**self.params, **kwargs}
         self._default_process = _sample_type
         self._default_correct = _qc_type
-        # TODO: chequear la linea de kwargs
+        validation.validate(self.params, validation.batchCorrectorValidator)
 
     def func(self, dc: DataContainer):
-        self.set_default_sample_types(dc)
         dc.data_matrix = \
             interbatch_correction(dc.data_matrix, dc.order, dc.batch,
                                   dc.classes, **self.params)
@@ -607,16 +686,14 @@ def data_container_from_excel(excel_file: str) -> DataContainer:
     data_matrix = pd.read_excel(excel_file,
                                 sheet_name="data_matrix",
                                 index_col="sample")
-    sample_information = pd.read_excel(excel_file,
-                                       sheet_name="sample_information",
-                                       index_col="sample")
-    feature_definitions = pd.read_excel(excel_file,
-                                        sheet_name="feature_definitions",
-                                        index_col="feature")
-    data_container = DataContainer(data_matrix,
-                                   feature_definitions,
-                                   sample_information)
-    return data_container
+    sample_metadata = pd.read_excel(excel_file,
+                                    sheet_name="sample_metadata",
+                                    index_col="sample")
+    feature_metadata = pd.read_excel(excel_file,
+                                     sheet_name="feature_metadata",
+                                     index_col="feature")
+    dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
+    return dc
 
 
 def read_config(path):
@@ -661,3 +738,11 @@ def _validate_pipeline(t):
             msg = ("elements of the Pipeline must be",
                    "instances of Filter, DataCorrector or another Pipeline.")
             raise TypeError(msg)
+
+
+_requirements_error = {"empty": data_container.EmptyDataContainerError,
+                       "missing": MissingValueError,
+                       _qc_type: MissingMappingInformation,
+                       _blank_type: MissingMappingInformation,
+                       "batch": data_container.BatchInformationError,
+                       "order": data_container.RunOrderError}
