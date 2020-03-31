@@ -49,7 +49,7 @@ def read_progenesis(path: Union[str, TextIO]):
     """
     # df = pd.read_csv(path, skiprows=2, index_col="Compound")
     # df_header = pd.read_csv(path, nrows=2)
-    df_header = pd.read_csv(path)
+    df_header = pd.read_csv(path, low_memory=False)
     df = df_header.iloc[2:].copy()
     col_names = df_header.iloc[1].values
     df.columns = col_names
