@@ -106,7 +106,7 @@ class DataContainer(object):
         """
         if path is not None:
             path_mapping = utils.sample_to_path(self.data_matrix.index, path)
-            self.sample_metadata[_raw_path] = \
+            self._sample_metadata.loc[self._sample_mask, _raw_path] = \
                 self.sample_metadata.index.map(path_mapping)
             self._data_path = path
         else:
