@@ -11,10 +11,9 @@ from ._names import *
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
-from typing import List, Optional, Iterable
+from typing import List, Optional, Iterable, Union
 import bokeh.plotting
 import pickle
-import os.path
 from bokeh.palettes import Spectral
 from bokeh.models import ColumnDataSource
 from bokeh.transform import factor_cmap
@@ -62,12 +61,12 @@ class DataContainer(object):
         
         Parameters
         ----------
-        data_matrix_df : pandas.DataFrame.
+        data_matrix : pandas.DataFrame.
             Feature values for each measured sample. Each row is a sample and
             each column is a feature.                  
-        sample_information_df : pandas.DataFrame.
+        sample_metadata : pandas.DataFrame.
             Metadata for each sample. class is a required column.
-        feature_definitions_df : pandas.DataFrame.
+        feature_metadata : pandas.DataFrame.
             DataFrame with features names as indices. mz and rt are required
             columns.
         data_path : str.
@@ -211,7 +210,7 @@ class DataContainer(object):
         available_samples = self.sample_metadata[_raw_path].dropna()
         return available_samples
 
-    def is_valid_class_name(self, test_class: str) -> bool:
+    def is_valid_class_name(self, test_class: Union[str, List[str]]) -> bool:
         """
         Check if at least one sample class is`class_name`.
         
@@ -223,7 +222,14 @@ class DataContainer(object):
         -------
         is_valid : bool
         """
-        return test_class in self.classes.unique()
+        valid_classes = self.classes.unique()
+        if isinstance(test_class, str):
+            return test_class in valid_classes
+        else:
+            for c in test_class:
+                if not (c in valid_classes):
+                    return False
+            return True
 
     def remove(self, remove: Iterable[str], axis: str):
         """
@@ -286,8 +292,9 @@ class DataContainer(object):
         rep = dict()
         rep["empty"] = self.data_matrix.empty
         rep["missing"] = self.data_matrix.isna().any().any()
-        rep["qc"] = bool(self.mapping["qc"])
-        rep["blank"] = bool(self.mapping["blank"])
+        rep[_qc_type] = bool(self.mapping[_qc_type])
+        rep[_blank_type] = bool(self.mapping[_blank_type])
+        rep[_sample_type] = bool(self.mapping[_sample_type])
         try:
             rep["order"] = self.order.any()
         except RunOrderError:
@@ -434,8 +441,15 @@ class _Metrics:
         
         Parameters
         ----------
+        sample_classes: list[str], optional
+            classes used to estimate biological variation. If None, uses
+            values from sample_type in sample mapping
+        qc_classes: list[str], optional
+            classes used to estimate technical variation. If None, uses
+            values from qc_type in sample mapping
         robust: bool
-            If True, uses MAD to compute the D-ratio. Else, uses standard deviation.
+            If True, uses MAD to compute the D-ratio. Else, uses standard
+            deviation.
 
 
         Returns
@@ -456,13 +470,13 @@ class _Metrics:
             cv_func = utils.sd
 
         if sample_classes is None:
-            sample_class = self.__data.mapping[_sample_type]
+            sample_classes = self.__data.mapping[_sample_type]
 
         if qc_classes is None:
-            qc_class = self.__data.mapping[_qc_type]
+            qc_classes = self.__data.mapping[_qc_type]
 
-        is_sample_class = self.__data.classes.isin(sample_class)
-        is_qc_class = self.__data.classes.isin(qc_class)
+        is_sample_class = self.__data.classes.isin(sample_classes)
+        is_qc_class = self.__data.classes.isin(qc_classes)
         sample_variation = cv_func(self.__data.data_matrix[is_sample_class])
         qc_variation = cv_func(self.__data.data_matrix[is_qc_class])
         dratio = qc_variation / sample_variation
