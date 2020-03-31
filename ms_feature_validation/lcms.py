@@ -286,8 +286,8 @@ def get_ms_cwt_params(mode: str) -> dict:
                   "max_distance": None, "gap_thresh": 1}
 
     if mode == "qtof":
-        cwt_params["min_width"] = 0.005
-        cwt_params["max_width"] = 0.05
+        cwt_params["min_width"] = 0.01
+        cwt_params["max_width"] = 0.2
     elif mode == "orbitrap":
         cwt_params["min_width"] = 0.0005
         cwt_params["max_width"] = 0.005
@@ -324,9 +324,10 @@ def find_isotopic_distribution_aux(mz: np.ndarray, mz_mono: float,
         array of indices for the isotopic distribution.
     """
     dm = 1.003355
-    mz_theoric = mz_mono + np.arange(n_isotopes) * dm / q
-    closest_ind = find_closest(mz, mz_theoric)
-    match_ind = np.where(np.abs(mz - mz_theoric[closest_ind]) <= tol)[0]
+    mz_theoretic = mz_mono + np.arange(n_isotopes) * dm / q
+    closest_ind = find_closest(mz, mz_theoretic)
+    match_ind = np.where(np.abs(mz[closest_ind] - mz_theoretic) <= tol)[0]
+    match_ind = closest_ind[match_ind]
     return match_ind
 
 
@@ -402,7 +403,8 @@ class Chromatogram:
         if end is None:
             self.end = rt.size
 
-    def find_peaks(self, mode: str = "uplc", **cwt_params) -> None:
+    def find_peaks(self, mode: str = "uplc",
+                   cwt_params: Optional[dict] = None) -> None:
         """
         Find peaks with the modified version of the cwt algorithm described in
         the CentWave algorithm [1]. Peaks are added to the peaks
@@ -480,7 +482,10 @@ class Chromatogram:
             else:
                 tmp["mz mean"] = self.mz
             peak_params.append(tmp)
-        return pd.DataFrame(data=peak_params)
+        peak_params = pd.DataFrame(data=peak_params)
+        if not peak_params.empty:
+            peak_params = peak_params.sort_values("rt").reset_index(drop=True)
+        return peak_params
 
     def plot(self, subtract_bl: bool = True, draw: bool = True,
              fig_params: Optional[dict] = None,
@@ -538,7 +543,7 @@ class MSSpectrum:
         self.spint = spint
         self.peaks = None
 
-    def find_peaks(self, mode, **cwt_params):
+    def find_peaks(self, mode, cwt_params: Optional[dict] = None):
         """
         Find peaks with the modified version of the cwt algorithm described in
         the CentWave algorithm [1]. Peaks are added to the attribute.
@@ -598,6 +603,8 @@ class MSSpectrum:
                        for x in self.peaks]
         peak_params = pd.DataFrame(data=peak_params)
         peak_params.rename(columns={"location": "mz"}, inplace=True)
+        if not peak_params.empty:
+            peak_params = peak_params.sort_values("mz").reset_index(drop=True)
         return peak_params
 
     def plot(self, subtract_bl: bool = True, draw: bool = True,

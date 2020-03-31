@@ -85,8 +85,10 @@ class PeakLocation:
             area = trapz(y[self.start:(self.end + 1)],
                          x[self.start:(self.end + 1)])
             if center_estimation == "weighted":
-                location = np.average(x[self.start:self.end],
-                                      weights=y[self.start:self.end])
+                # weighted mean
+                y_sum = y[self.start:self.end].sum()
+                location = (x[self.start:self.end]
+                            * y[self.start:self.end] / y_sum).sum()
             elif center_estimation == "apex":
                 location = x[self.loc]
             else:
@@ -158,7 +160,7 @@ def process_ridge_lines(y: np.ndarray,
     -------
 
     """
-
+    # TODO: add BL estimator
     if min_length is None:
         min_length = np.ceil(cwt_array.shape[0] / 8)
 
