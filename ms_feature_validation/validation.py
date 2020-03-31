@@ -225,6 +225,7 @@ variation_filter_schema = copy.deepcopy(dratio_filter_schema)
 variation_filter_schema["process_classes"] = \
     prevalence_filter_schema["process_classes"]
 variation_filter_schema["intraclass"] = prevalence_filter_schema["intraclass"]
+variationFilterValidator = ValidatorWithLowerThan(variation_filter_schema)
 
 batch_corrector_schema = {"n_min": {"type": "integer",
                                     "min": 4},
