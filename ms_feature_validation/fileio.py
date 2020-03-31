@@ -5,33 +5,37 @@ chromatograms and accumulate spectra.
 
 import numpy as np
 import pandas as pd
-from typing import Optional, Iterable, Tuple, Union, List
+from typing import Optional, Iterable, Tuple, Union, List, BinaryIO, TextIO
 from .data_container import DataContainer
 from . import lcms
 from . import utils
 from . import validation
 import pickle
-msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
 
-def read_pickle(path: str) -> DataContainer:
+
+def read_pickle(path: Union[str, BinaryIO]) -> DataContainer:
     """
     read a DataContainer stored as a pickle
 
     Parameters
     ----------
-    path: str
+    path: str or filelike
         path to read DataContainer
 
     Returns
     -------
     DataContainer
     """
-    with open(path, "rb") as fin:
-        result = pickle.load(fin)
+    if hasattr(path, "read"):
+        with path as fin:
+            result = pickle.load(fin)
+    else:
+        with open(path, "rb") as fin:
+            result = pickle.load(fin)
     return result
 
 
-def read_progenesis(path):
+def read_progenesis(path: Union[str, TextIO]):
     """
     Read a progenesis file into a DataContainer
 
@@ -43,34 +47,71 @@ def read_progenesis(path):
     -------
     dc = DataContainer
     """
-    df = pd.read_csv(path, skiprows=2, index_col="Compound")
-    df_header = pd.read_csv(path, nrows=2)
+    # df = pd.read_csv(path, skiprows=2, index_col="Compound")
+    # df_header = pd.read_csv(path, nrows=2)
+    df_header = pd.read_csv(path)
+    df = df_header.iloc[2:].copy()
+    col_names = df_header.iloc[1].values
+    df.columns = col_names
+    df = df.set_index("Compound")
+    df_header = df_header.iloc[:1].copy()
+    #------------------
     df_header = df_header.fillna(axis=1, method="ffill")
     norm_index = df_header.columns.get_loc("Normalised abundance") - 1
     raw_index = df_header.columns.get_loc("Raw abundance") - 1
-    ft_def = df.iloc[:, 0:norm_index]
+    ft_def = df.iloc[:, 0:norm_index].copy()
     data = df.iloc[:, raw_index:(2 * raw_index - norm_index)].T
     sample_info = df_header.iloc[:,
                   (raw_index + 1):(2 * raw_index - norm_index + 1)].T
-    sample_info.set_index(sample_info.iloc[:, 1], inplace=True)
-    sample_info.drop(labels=[1],  axis=1, inplace=True)
+    # sample_info.set_index(sample_info.iloc[:, 1], inplace=True)
+    # sample_info.drop(labels=[1],  axis=1, inplace=True)
 
     # rename sample info
-    sample_info.index.rename("sample", inplace=True)
+    # sample_info.index.rename("sample", inplace=True)
+    # sample_info.rename({sample_info.columns[0]: "class"},
+    #                    axis="columns", inplace=True)
+    # rename data matrix
+    # data.index = sample_info.index
+    data.index.rename("sample", inplace=True)
+    data.columns.rename("feature", inplace=True)
+    data = data.astype(float)
+    # rename sample info
+    sample_info.index = data.index
     sample_info.rename({sample_info.columns[0]: "class"},
                        axis="columns", inplace=True)
-    # rename data matrix
-    data.index = sample_info.index
-    data.columns.rename("feature", inplace=True)
     # rename features def
     ft_def.index.rename("feature", inplace=True)
     ft_def.rename({"m/z": "mz", "Retention time (min)": "rt"},
                   axis="columns",
                   inplace=True)
+    ft_def = ft_def.astype({"rt": float, "mz": float})
     ft_def["rt"] = ft_def["rt"] * 60
     validation.validate_data_container(data, ft_def, sample_info, None)
     dc = DataContainer(data, ft_def, sample_info)
     return dc
+
+
+def read_data_matrix(path: Union[str, TextIO, BinaryIO],
+                     format: str) -> DataContainer:
+    """
+    Read different Data Matrix formats into a DataContainer
+    Parameters
+    ----------
+    path: str
+        path to the data matrix file.
+    format: {"progenesis", "pickle"}
+
+    Returns
+    -------
+    DataContainer
+    """
+    if format == "progenesis":
+        return read_progenesis(path)
+    elif format == "pickle":
+        return read_pickle(path)
+    else:
+        msg = "Invalid Format"
+        raise ValueError(msg)
 
 
 class MSData:
