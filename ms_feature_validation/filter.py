@@ -606,7 +606,9 @@ class BatchCorrectorProcessor(Processor):
                  process_classes: Optional[List[str]] = None,
                  frac: Optional[float] = None,
                  interpolator: str = "splines",
+                 n_qc: Optional[int] = None,
                  verbose: bool = False):
+
         super(BatchCorrectorProcessor, self).__init__(axis=None,
                                                       mode="transform",
                                                       verbose=verbose,
@@ -620,6 +622,7 @@ class BatchCorrectorProcessor(Processor):
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
         self.params["interpolator"] = interpolator
+        self.params["n_qc"] = n_qc
         self.params["frac"] = frac
         self._default_process = _sample_type
         self._default_correct = _qc_type
@@ -644,7 +647,8 @@ class BatchCorrector(Pipeline):
                  process_classes: Optional[List[str]] = None,
                  n_min: int = 6, frac: Optional[float] = None,
                  interpolator: str = "splines", threshold: float = 0,
-                 verbose: bool = False):
+                 verbose: bool = False,
+                 n_qc: Optional[int] = None):
         checker = BatchSchemeChecker(n_min=n_min, verbose=verbose,
                                      process_classes=process_classes,
                                      corrector_classes=corrector_classes)
@@ -656,7 +660,8 @@ class BatchCorrector(Pipeline):
                                             process_classes=process_classes,
                                             frac=frac,
                                             interpolator=interpolator,
-                                            verbose=verbose)
+                                            verbose=verbose,
+                                            n_qc=n_qc)
         pipeline = [checker, prevalence, corrector]
         super(BatchCorrector, self).__init__(pipeline, verbose=verbose)
 
