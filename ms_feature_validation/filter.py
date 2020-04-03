@@ -408,7 +408,7 @@ class DRatioFilter(Processor):
                                                          _qc_type: True,
                                                          _sample_type: True}
                                            )
-        self.name = "D-ratio Filter"
+        self.name = "D-Ratio Filter"
         self.params["lb"] = lb
         self.params["ub"] = ub
         self.params["robust"] = robust
