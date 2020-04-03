@@ -3,36 +3,39 @@ Functions to read Raw LC-MS data using pyopenms and functions to create
 chromatograms and accumulate spectra.
 """
 
-import pyopenms
 import numpy as np
 import pandas as pd
-from scipy.interpolate import interp1d
-from typing import Optional, Iterable, Tuple, Union, List
-from . import utils
+from typing import Optional, Iterable, Tuple, Union, List, BinaryIO, TextIO
 from .data_container import DataContainer
+from . import lcms
+from . import utils
 from . import validation
 import pickle
-msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
 
-def read_pickle(path: str) -> DataContainer:
+
+def read_pickle(path: Union[str, BinaryIO]) -> DataContainer:
     """
     read a DataContainer stored as a pickle
 
     Parameters
     ----------
-    path: str
+    path: str or filelike
         path to read DataContainer
 
     Returns
     -------
     DataContainer
     """
-    with open(path, "rb") as fin:
-        result = pickle.load(fin)
+    if hasattr(path, "read"):
+        with path as fin:
+            result = pickle.load(fin)
+    else:
+        with open(path, "rb") as fin:
+            result = pickle.load(fin)
     return result
 
 
-def read_progenesis(path):
+def read_progenesis(path: Union[str, TextIO]):
     """
     Read a progenesis file into a DataContainer
 
@@ -44,209 +47,71 @@ def read_progenesis(path):
     -------
     dc = DataContainer
     """
-    df = pd.read_csv(path, skiprows=2, index_col="Compound")
-    df_header = pd.read_csv(path, nrows=2)
+    # df = pd.read_csv(path, skiprows=2, index_col="Compound")
+    # df_header = pd.read_csv(path, nrows=2)
+    df_header = pd.read_csv(path, low_memory=False)
+    df = df_header.iloc[2:].copy()
+    col_names = df_header.iloc[1].values
+    df.columns = col_names
+    df = df.set_index("Compound")
+    df_header = df_header.iloc[:1].copy()
+    #------------------
     df_header = df_header.fillna(axis=1, method="ffill")
     norm_index = df_header.columns.get_loc("Normalised abundance") - 1
     raw_index = df_header.columns.get_loc("Raw abundance") - 1
-    ft_def = df.iloc[:, 0:norm_index]
+    ft_def = df.iloc[:, 0:norm_index].copy()
     data = df.iloc[:, raw_index:(2 * raw_index - norm_index)].T
     sample_info = df_header.iloc[:,
                   (raw_index + 1):(2 * raw_index - norm_index + 1)].T
-    sample_info.set_index(sample_info.iloc[:, 1], inplace=True)
-    sample_info.drop(labels=[1],  axis=1, inplace=True)
+    # sample_info.set_index(sample_info.iloc[:, 1], inplace=True)
+    # sample_info.drop(labels=[1],  axis=1, inplace=True)
 
     # rename sample info
-    sample_info.index.rename("sample", inplace=True)
+    # sample_info.index.rename("sample", inplace=True)
+    # sample_info.rename({sample_info.columns[0]: "class"},
+    #                    axis="columns", inplace=True)
+    # rename data matrix
+    # data.index = sample_info.index
+    data.index.rename("sample", inplace=True)
+    data.columns.rename("feature", inplace=True)
+    data = data.astype(float)
+    # rename sample info
+    sample_info.index = data.index
     sample_info.rename({sample_info.columns[0]: "class"},
                        axis="columns", inplace=True)
-    # rename data matrix
-    data.index = sample_info.index
-    data.columns.rename("feature", inplace=True)
     # rename features def
     ft_def.index.rename("feature", inplace=True)
     ft_def.rename({"m/z": "mz", "Retention time (min)": "rt"},
                   axis="columns",
                   inplace=True)
+    ft_def = ft_def.astype({"rt": float, "mz": float})
     ft_def["rt"] = ft_def["rt"] * 60
     validation.validate_data_container(data, ft_def, sample_info, None)
     dc = DataContainer(data, ft_def, sample_info)
     return dc
 
 
-def reader(path: str, on_disc: bool = True):
+def read_data_matrix(path: Union[str, TextIO, BinaryIO],
+                     format: str) -> DataContainer:
     """
-    Load `path` file into an OnDiskExperiment. If the file is not indexed, load
-    the file.
+    Read different Data Matrix formats into a DataContainer
     Parameters
     ----------
     path: str
-        path to read mzML file from.
-    on_disc:
-        if True doesn't load the whole file on memory.
+        path to the data matrix file.
+    format: {"progenesis", "pickle"}
 
     Returns
     -------
-    pyopenms.OnDiskMSExperiment or pyopenms.MSExperiment
+    DataContainer
     """
-    if on_disc:
-        try:
-            exp_reader = pyopenms.OnDiscMSExperiment()
-            exp_reader.openFile(path)
-        except RuntimeError:
-            msg = "{} is not an indexed mzML file, switching to MSExperiment"
-            print(msg.format(path))
-            exp_reader = pyopenms.MSExperiment()
-            pyopenms.MzMLFile().load(path, exp_reader)
+    if format == "progenesis":
+        return read_progenesis(path)
+    elif format == "pickle":
+        return read_pickle(path)
     else:
-        exp_reader = pyopenms.MSExperiment()
-        pyopenms.MzMLFile().load(path, exp_reader)
-    return exp_reader
-
-
-def chromatogram(msexp: msexperiment, mz: Iterable[float],
-                 tolerance: float = 0.005, start: Optional[int] = None,
-                 end: Optional[int] = None,
-                 accumulator: str = "sum") -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Calculates the EIC for the msexperiment
-    Parameters
-    ----------
-    msexp: MSExp or OnDiskMSExp.
-    mz: iterable[float]
-        mz values used to build the EICs.
-    start: int, optional
-        first scan to build the chromatogram
-    end: int, optional
-        last scan to build the chromatogram.
-    tolerance: float.
-               Tolerance to build the EICs.
-    accumulator: {"sum", "mean"}
-        "mean" divides the intensity in the EIC using the number of points in
-        the window.
-    Returns
-    -------
-    rt, chromatograms: tuple
-        rt is an array of retention times. chromatograms is an array with rows
-        of EICs.
-    """
-    if not isinstance(mz, np.ndarray):
-        mz = np.array(mz)
-    mz_intervals = (np.vstack((mz - tolerance, mz + tolerance))
-                    .T.reshape(mz.size * 2))
-    nsp = msexp.getNrSpectra()
-
-    if start is None:
-        start = 0
-
-    if end is None:
-        end = nsp
-
-    chromatograms = np.zeros((mz.size, end - start))
-    rt = np.zeros(end - start)
-    for ksp in range(start, end):
-        sp = msexp.getSpectrum(ksp)
-        rt[ksp] = sp.getRT()
-        mz_sp, int_sp = sp.get_peaks()
-        ind_sp = np.searchsorted(mz_sp, mz_intervals)
-        # elements added at the end of mz_sp raise IndexError
-        ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
-        chromatograms[:, ksp] = np.add.reduceat(int_sp, ind_sp)[::2]
-        if accumulator == "mean":
-            norm = ind_sp[1::2] - ind_sp[::2]
-            norm[norm == 0] = 1
-            chromatograms[:, ksp] = chromatograms[:, ksp] / norm
-        elif accumulator == "sum":
-            pass
-        else:
-            msg = "accumulator possible values are `mean` and `sum`."
-            raise ValueError(msg)
-    return rt, chromatograms
-
-
-def accumulate_spectra(msexp: msexperiment, start: int,
-                       end: int, subtract: Optional[Tuple[int, int]] = None,
-                       kind: str = "linear",
-                       accumulator: str = "sum"
-                       ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    accumulates a spectra into a single spectrum.
-
-    Parameters
-    ----------
-    msexp : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
-    start: int
-        start slice for scan accumulation
-    end: int
-        end slice for scan accumulation.
-    kind: str
-        kind of interpolator to use with scipy interp1d.
-    subtract : None or Tuple[int], left, right
-        Scans regions to substract. `left` must be smaller than `start` and
-        `right` greater than `end`.
-    accumulator : {"sum", "mean"}
-
-    Returns
-    -------
-    accum_mz, accum_int : tuple[np.array]
-    """
-    accumulator_functions = {"sum": np.sum, "mean": np.mean}
-    accumulator = accumulator_functions[accumulator]
-
-    if subtract is not None:
-        if (subtract[0] > start) or (subtract[-1] < end):
-            raise ValueError("subtract region outside scan region.")
-    else:
-        subtract = (start, end)
-
-    # interpolate accumulate and substract regions
-    rows = subtract[1] - subtract[0]
-    mz_ref = _get_mz_roi(msexp, subtract)
-    interp_int = np.zeros((rows, mz_ref.size))
-    for krow, scan in zip(range(rows), range(*subtract)):
-        mz_scan, int_scan = msexp.getSpectrum(scan).get_peaks()
-        interpolator = interp1d(mz_scan, int_scan, kind=kind)
-        interp_int[krow, :] = interpolator(mz_ref)
-
-    # subtract indices to match interp_int rows
-    start = start - subtract[0]
-    end = end - subtract[0]
-    subtract = 0, subtract[1] - subtract[0]
-
-    accum_int = (accumulator(interp_int[start:end], axis=0)
-                 - accumulator(interp_int[subtract[0]:start], axis=0)
-                 - accumulator(interp_int[end:subtract[1]], axis=0))
-    accum_mz = mz_ref
-
-    return accum_mz, accum_int
-
-
-def _get_mz_roi(ms_experiment, scans):
-    """
-    make an mz array with regions of interest in the selected scans.
-
-    Parameters
-    ----------
-    ms_experiment: pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
-    scans : tuple[int] : start, end
-
-    Returns
-    -------
-    mz_ref = numpy.array
-    """
-    mz_0, _ = ms_experiment.getSpectrum(scans[0]).get_peaks()
-    mz_min = mz_0.min()
-    mz_max = mz_0.max()
-    mz_res = np.diff(mz_0).min()
-    mz_ref = np.arange(mz_min, mz_max, mz_res)
-    roi = np.zeros(mz_ref.size + 1)
-    # +1 used to prevent error due to mz values bigger than mz_max
-    for k in range(*scans):
-        curr_mz, _ = ms_experiment.getSpectrum(k).get_peaks()
-        roi_index = np.searchsorted(mz_ref, curr_mz)
-        roi[roi_index] += 1
-    roi = roi.astype(bool)
-    return mz_ref[roi[:-1]]
+        msg = "Invalid Format"
+        raise ValueError(msg)
 
 
 class MSData:
@@ -263,8 +128,10 @@ class MSData:
 
     def __init__(self, path: str, mode: Optional[str] = None,
                  on_disc: bool = True):
-        self.reader = reader(path, on_disc=on_disc)
+        self.reader = lcms.reader(path, on_disc=on_disc)
         self.mode = mode
+        self.chromatograms = None
+        self.features = None
 
     @property
     def mode(self) -> str:
@@ -283,9 +150,10 @@ class MSData:
             msg = "mode must be `centroid` or `profile`"
             raise ValueError(msg)
 
-    def get_eic(self, mz: Iterable[float], tolerance: float = 0.05,
-                start: Optional[int] = None, end: Optional[int] = None,
-                accumulator: str = "sum",) -> Tuple[np.ndarray, np.ndarray]:
+    def make_chromatograms(self, mz: List[float], tolerance: float = 0.05,
+                           start: Optional[int] = None,
+                           end: Optional[int] = None,
+                           accumulator: str = "sum"):
         """
         Computes the Extracted Ion Chromatogram for a list mass-to-charge
         values.
@@ -314,8 +182,14 @@ class MSData:
             Extracted Ion Chromatogram for each mz value. Each column is a mz
             and each row is a scan.
         """
-        return chromatogram(self.reader, mz, tolerance=tolerance, start=start,
-                            end=end, accumulator=accumulator)
+        rt, spint = lcms.chromatogram(self.reader, mz, tolerance=tolerance,
+                                      start=start, end=end,
+                                      accumulator=accumulator)
+        chromatograms = list()
+        for row in range(spint.shape[0]):
+            tmp = lcms.Chromatogram(spint[row, :], rt, mz[row], start=start)
+            chromatograms.append(tmp)
+        self.chromatograms = chromatograms
 
     def accumulate_spectra(self, start: Optional[int], end: Optional[int],
                            subtract: Optional[Tuple[int, int]] = None,
@@ -344,9 +218,10 @@ class MSData:
         accum_int: numpy.ndarray
             array of accumulated intensities.
         """
-        accum_mz, accum_int = accumulate_spectra(self.reader, start, end,
-                                                 subtract=subtract, kind=kind,
-                                                 accumulator=accumulator)
+        accum_mz, accum_int = lcms.accumulate_spectra(self.reader, start, end,
+                                                      subtract=subtract,
+                                                      kind=kind,
+                                                      accumulator=accumulator)
         return accum_mz, accum_int
 
     def _is_centroided(self) -> bool:
@@ -389,12 +264,13 @@ class MSData:
 
         The algorithm used to build the ROI is described in [1].
 
-        [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive feature
-        detection for high resolution LC/MS. BMC Bioinformatics 9, 504 (2008).
-        https://doi.org/10.1186/1471-2105-9-504
+        ..[1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+        504 (2008). https://doi.org/10.1186/1471-2105-9-504
         """
         return utils.make_rois(self.reader, pmin, max_gap, min_int,
                                tolerance, start=start, end=end)
+
     def get_rt(self):
         """
         Retention time vector for the experiment.
@@ -406,3 +282,54 @@ class MSData:
         nsp = self.reader.getNrSpectra()
         rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
         return rt
+
+    def detect_features(self, mode: str = "uplc", subtract_bl: bool = True,
+                        rt_estimation: str = "weighted",
+                        **cwt_params) -> None:
+        """
+        Find peaks with the modified version of the cwt algorithm described in
+        the CentWave algorithm [1]. Peaks are added to the peaks
+        attribute of the Chromatogram object.
+
+        Parameters
+        ----------
+        mode: {"hplc", "uplc"}
+            Set peak picking parameters assuming HPLC or UPLC experimental
+            conditions. HPLC assumes longer columns with particle size greater
+            than 3 micron (min_width is set to 10 seconds and `max_width` is set
+             to 90 seconds). UPLC is for data acquired with short columns with
+            particle size lower than 3 micron (min_width is set to 5 seconds and
+            `max_width` is set to 60 seconds). In both cases snr is set to 10.
+        subtract_bl: bool
+            If True subtracts the estimated baseline from the intensity and
+            area.
+        rt_estimation: {"weighted", "apex"}
+            if "weighted", the peak retention time is computed as the weighted
+            mean of rt in the extension of the peak. If "apex", rt is
+            simply the value obtained after peak picking.
+        cwt_params:
+            key-value parameters to overwrite the defaults in the pick_cwt
+            function from the peak module.
+
+        References
+        ----------
+        .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+        504 (2008). https://doi.org/10.1186/1471-2105-9-504
+        """
+
+        features = list()
+        for chrom in self.chromatograms:
+            chrom.find_peaks(mode, **cwt_params)
+            peaks_params = chrom.get_peak_params(subtract_bl=subtract_bl,
+                                                 rt_estimation=rt_estimation)
+            features.append(peaks_params)
+
+        # organize features into a DataFrame
+        roi_ind = [np.ones(y.shape[0]) * x for x, y in enumerate(features)]
+        roi_ind = np.hstack(roi_ind)
+        features = pd.concat(features)
+        features["roi"] = roi_ind.astype(int)
+        features = features.reset_index()
+        features.rename(columns={"index": "peak"}, inplace=True)
+        self.features = features
