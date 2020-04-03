@@ -351,7 +351,6 @@ def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
     """
     if n_qc is None:
         n_qc = qc_index.size
-    print(n_qc)
     qc_median = ft_data[qc_index[:n_qc]].median()
     qc_loess = _loocv_loess(order[qc_index],
                             ft_data[qc_index] - qc_median,
@@ -485,10 +484,10 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
         return df_group
 
 
-    global_mean = df[classes.isin(corrector_classes)].mean()
+    global_median = corrected[classes.isin(corrector_classes)].median()
     corrected = corrected.groupby(batch).apply(batch_mean_func)
     corrected.loc[classes.isin(process_classes), :] = \
-        corrected.loc[classes.isin(process_classes), :] + global_mean
+        corrected.loc[classes.isin(process_classes), :] + global_median
     corrected[corrected < 0] = 0
 
     return corrected
