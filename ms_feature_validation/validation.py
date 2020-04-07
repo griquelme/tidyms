@@ -10,6 +10,7 @@ from os.path import join
 import cerberus
 import copy
 
+
 # functions used by check_with
 def is_callable(field, value, error):
     if not hasattr(value, "__call__"):
@@ -56,6 +57,19 @@ class ValidatorWithLowerThan(cerberus.Validator):
             return False
         if value >= self.document[other]:
             msg = "{}, must be lower than {}".format(field, other)
+            self._error(field, msg)
+
+    def _validate_lower_or_equal(self, other, field, value):
+        """
+        Tests if a value is lower than the value of other field.
+
+        The rule's arguments are validated against this schema:
+        {"type": "string"}
+        """
+        if (other not in self.document) or (self.document[other] is None):
+            return False
+        if value > self.document[other]:
+            msg = "{}, must be lower or equal than {}".format(field, other)
             self._error(field, msg)
 
     def _validate_is_positive(self, is_positive, field, value):
@@ -175,7 +189,7 @@ blankCorrectorValidator = ValidatorWithLowerThan(blank_corrector_schema)
 prevalence_filter_schema = {"lb": {"type": "number",
                                    "min": 0,
                                    "max": 1,
-                                   "lower_than": "ub"},
+                                   "lower_or_equal": "ub"},
                             "ub": {"type": "number",
                                    "min": 0,
                                    "max": 1},
