@@ -352,6 +352,17 @@ class DataContainer(object):
         result = mz_match_ft.intersection(rt_match_ft)
         return result
 
+    def set_default_order(self):
+        """
+        set the order of the samples, assuming that de data is already sorted.
+        """
+        order_data = np.arange(1, self.sample_metadata.shape[0] + 1)
+        ind = self.data_matrix.index
+        order = pd.Series(data=order_data, index=ind, dtype=int)
+        batch = pd.Series(data=1, index=ind, dtype=int)
+        self.order = order
+        self.batch = batch
+
     def sort(self, field: str, axis: str):
         """
         Sort samples/features
@@ -757,6 +768,7 @@ class _Plotter:
             rev_map = _reverse_mapping(self._data_container.mapping)
             source["type"] = (self._data_container.classes
                               .apply(lambda x: rev_map.get(x)))
+        source = source[~source["type"].isna()]
 
         # setup the colors
         unique_values = source[color_by].unique().astype(str)
@@ -899,6 +911,7 @@ def _validate_mapping(mapping, valid_samples):
                 if c not in valid_samples:
                     msg = "{} is not a valid sample class".format(c)
                     raise ValueError(msg)
+# TODO: move _validate_mapping to validation module
 
 
 def _make_empty_mapping():
