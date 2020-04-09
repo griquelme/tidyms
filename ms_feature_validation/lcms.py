@@ -49,7 +49,7 @@ def reader(path: str, on_disc: bool = True):
 
 
 def chromatogram(msexp: msexperiment, mz: Iterable[float],
-                 tolerance: float = 0.005, start: Optional[int] = None,
+                 window: float = 0.005, start: Optional[int] = None,
                  end: Optional[int] = None,
                  accumulator: str = "sum") -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -63,7 +63,7 @@ def chromatogram(msexp: msexperiment, mz: Iterable[float],
         first scan to build the chromatogram
     end: int, optional
         last scan to build the chromatogram.
-    tolerance: float.
+    window: float.
                Tolerance to build the EICs.
     accumulator: {"sum", "mean"}
         "mean" divides the intensity in the EIC using the number of points in
@@ -76,7 +76,7 @@ def chromatogram(msexp: msexperiment, mz: Iterable[float],
     """
     if not isinstance(mz, np.ndarray):
         mz = np.array(mz)
-    mz_intervals = (np.vstack((mz - tolerance, mz + tolerance))
+    mz_intervals = (np.vstack((mz - window, mz + window))
                     .T.reshape(mz.size * 2))
     nsp = msexp.getNrSpectra()
 
