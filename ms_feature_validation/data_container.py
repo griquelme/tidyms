@@ -579,7 +579,7 @@ class _Plotter:
     def pca_scores(self, x_pc: int = 1, y_pc: int = 2, color_by: str = "class",
                    draw: bool = True, show_order: bool = False,
                    scaling: Optional[str] = None,
-                   normalizing: Optional[str] = None,
+                   normalization: Optional[str] = None,
                    fig_params: Optional[dict] = None,
                    scatter_params: Optional[dict] = None
                    ) -> bokeh.plotting.Figure:
@@ -601,7 +601,7 @@ class _Plotter:
             add a label with the run order.
         scaling: {`autoscaling`, `rescaling`, `pareto`}, optional
             scaling method.
-        normalizing: {`sum`, `max`, `euclidean`}, optional
+        normalization: {`sum`, `max`, `euclidean`}, optional
             normalizing method
         draw: bool
             If True calls bokeh.plotting.show on fig.
@@ -629,7 +629,7 @@ class _Plotter:
         n_comps = max(x_pc, y_pc)
         score, _, variance, total_var = \
             self._data_container.metrics.pca(n_components=n_comps,
-                                             normalizing=normalizing,
+                                             normalizing=normalization,
                                              scaling=scaling)
         score = score.join(self._data_container.sample_metadata)
 
@@ -670,7 +670,7 @@ class _Plotter:
         return fig
 
     def pca_loadings(self, x_pc=1, y_pc=2, scaling: Optional[str] = None,
-                     normalizing: Optional[str] = None, draw: bool = True,
+                     normalization: Optional[str] = None, draw: bool = True,
                      fig_params: Optional[dict] = None,
                      scatter_params: Optional[dict] = None
                      ) -> bokeh.plotting.Figure:
@@ -685,7 +685,7 @@ class _Plotter:
             Principal component number to plot along Y axis.
         scaling: {`autoscaling`, `rescaling`, `pareto`}, optional
             scaling method.
-        normalizing: {`sum`, `max`, `euclidean`}, optional
+        normalization: {`sum`, `max`, `euclidean`}, optional
             normalizing method
         draw: bool
             If True, calls bokeh.plotting.show on figure
@@ -714,7 +714,7 @@ class _Plotter:
         n_comps = max(x_pc, y_pc)
         _, loadings, variance, total_var = \
             self._data_container.metrics.pca(n_components=n_comps,
-                                             normalizing=normalizing,
+                                             normalizing=normalization,
                                              scaling=scaling)
         loadings = loadings.join(self._data_container.feature_metadata)
         loadings = ColumnDataSource(loadings)
@@ -768,7 +768,7 @@ class _Plotter:
             rev_map = _reverse_mapping(self._data_container.mapping)
             source["type"] = (self._data_container.classes
                               .apply(lambda x: rev_map.get(x)))
-        source = source[~source["type"].isna()]
+            source = source[~source["type"].isna()]
 
         # setup the colors
         unique_values = source[color_by].unique().astype(str)
