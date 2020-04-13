@@ -193,45 +193,67 @@ def _get_mz_roi(ms_experiment, scans):
     return mz_ref[roi[:-1]]
 
 
-def make_widths_lc(x: np.ndarray, max_width: float) -> np.ndarray:
+def make_widths_lc(mode: str) -> np.ndarray:
     """
     Create an array of widths to use in CWT peak picking of LC data.
 
     Parameters
     ----------
-    x: numpy.ndarray
-        vector of x axis. It's assumed that x is sorted.
-    max_width: float
+    mode: {"hplc", "uplc"
     Returns
     -------
     widths: numpy.ndarray
     """
-    min_x_distance = np.diff(x).min()
-    n = int((max_width - min_x_distance) / min_x_distance)
-    first_half = np.linspace(min_x_distance, 10 * min_x_distance, 40)
-    second_half = np.linspace(11 * min_x_distance, max_width, n - 10)
-    widths = np.hstack((first_half, second_half))
+    if mode == "uplc":
+        min_width = 1
+        middle = 15
+        max_width = 60
+    elif mode == "hplc":
+        min_width = 1
+        middle = 30
+        max_width = 90
+    else:
+        msg = "Valid modes are `hplc` or `uplc`."
+        raise ValueError(msg)
+
+    # [:-1] prevents repeated value
+    widths = np.hstack((np.linspace(min_width, middle, 20)[:-1],
+                        np.linspace(middle, max_width, 20)))
+    # min_x_distance = np.diff(x).min()
+    # n = int((max_width - min_x_distance) / min_x_distance)
+    # first_half = np.linspace(min_x_distance, 10 * min_x_distance, 40)
+    # second_half = np.linspace(11 * min_x_distance, max_width, n - 10)
+    # widths = np.hstack((first_half, second_half))
 
     return widths
 
 
-def make_widths_ms(min_width: float, max_width: float) -> np.ndarray:
+def make_widths_ms(mode: str) -> np.ndarray:
     """
     Create an array of widths to use in CWT peak picking of MS data.
 
     Parameters
     ----------
-    min_width: float
-        Minimum expected width
-    max_width: float
-        Maximum expected width
+    mode: {"qtof", "orbitrap"}
 
     Returns
     -------
     widths: numpy.ndarray
     """
-    n = int((max_width - min_width) / min_width)
-    widths = np.linspace(min_width, max_width, n)
+    if mode == "qtof":
+        min_width = 0.005
+        middle = 0.1
+        max_width = 0.2
+    elif mode == "qtof":
+        min_width = 0.0005
+        middle = 0.001
+        max_width = 0.005
+    else:
+        msg = "mode must be `orbitrap` or `qtof`"
+        raise ValueError(msg)
+    # [:-1] prevents repeated value
+    widths = np.hstack((np.linspace(min_width, middle, 20)[:-1],
+                        np.linspace(middle, max_width, 10)))
     return widths
 
 
@@ -433,8 +455,7 @@ class Chromatogram:
         if cwt_params:
             default_params.update(cwt_params)
 
-        widths = make_widths_lc(self.rt[self.start:self.end],
-                                default_params["max_width"])
+        widths = make_widths_lc(mode)
         peak_list = peaks.pick_cwt(self.rt[self.start:self.end],
                                    self.spint[self.start:self.end],
                                    widths, **default_params)
@@ -567,8 +588,7 @@ class MSSpectrum:
         if cwt_params:
             default_params.update(cwt_params)
 
-        widths = make_widths_ms(default_params["min_width"],
-                                default_params["max_width"])
+        widths = make_widths_ms(mode)
         peak_list = peaks.pick_cwt(self.mz, self.spint, widths,
                                    **default_params)
         self.peaks = peak_list
