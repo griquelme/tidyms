@@ -98,7 +98,6 @@ class PeakLocation:
         intensity = y[self.loc]
 
         if subtract_bl:
-            intensity -= self.baseline
             area -= width * self.baseline
 
         peak_params = {"location": location, "intensity": intensity,
