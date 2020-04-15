@@ -319,7 +319,7 @@ def get_ms_cwt_params(mode: str) -> dict:
     return cwt_params
 
 
-def find_isotopic_distribution_aux(mz: np.ndarray, mz_mono: float,
+def find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
                                    q: int, n_isotopes: int,
                                    tol: float):
     """
@@ -332,7 +332,7 @@ def find_isotopic_distribution_aux(mz: np.ndarray, mz_mono: float,
     ----------
     mz: numpy.ndarray
         List of peaks
-    mz_mono: float
+    mz_ft: float
         Monoisotopic mass
     q: charge state of the ion
     n_isotopes: int
@@ -345,11 +345,16 @@ def find_isotopic_distribution_aux(mz: np.ndarray, mz_mono: float,
     match_ind: np.ndarray
         array of indices for the isotopic distribution.
     """
-    dm = 1.003355
-    mz_theoretic = mz_mono + np.arange(n_isotopes) * dm / q
-    closest_ind = find_closest(mz, mz_theoretic)
-    match_ind = np.where(np.abs(mz[closest_ind] - mz_theoretic) <= tol)[0]
-    match_ind = closest_ind[match_ind]
+    mono_index = find_closest(mz, mz_ft)
+    mz_mono = mz[mono_index]
+    if abs(mz_mono - mz_ft) > tol:
+        match_ind = np.array([])
+    else:
+        dm = 1.003355
+        mz_theoretic = mz_mono + np.arange(n_isotopes) * dm / q
+        closest_ind = find_closest(mz, mz_theoretic)
+        match_ind = np.where(np.abs(mz[closest_ind] - mz_theoretic) <= tol)[0]
+        match_ind = closest_ind[match_ind]
     return match_ind
 
 
@@ -379,19 +384,15 @@ def find_isotopic_distribution(mz: np.ndarray, mz_mono: float,
     Returns
     -------
     best_peaks: numpy.ndarray
+
     """
-    best_peaks = None
+    best_peaks = np.array([], dtype=int)
     n_peaks = 0
     for q in range(1, q_max + 1):
         tmp = find_isotopic_distribution_aux(mz, mz_mono, q,
                                              n_isotopes, tol)
         if tmp.size > n_peaks:
             best_peaks = tmp
-
-    # check if the monoisotopic peak is in the distribution
-    mz_mono_ind = find_closest(mz, mz_mono)
-    if abs(mz[mz_mono_ind] - mz_mono) > tol:
-        best_peaks = np. array([])
     return best_peaks
 
 
