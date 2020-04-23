@@ -93,9 +93,13 @@ def chromatogram(msexp: msexperiment, mz: Iterable[float],
         rt[ksp] = sp.getRT()
         mz_sp, int_sp = sp.get_peaks()
         ind_sp = np.searchsorted(mz_sp, mz_intervals)
+        # check if the slices aren't empty
+        has_mz = (ind_sp[1::2] - ind_sp[::2]) > 0
         # elements added at the end of mz_sp raise IndexError
         ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
-        chromatograms[:, ksp] = np.add.reduceat(int_sp, ind_sp)[::2]
+        chromatograms[:, ksp] = np.where(has_mz,
+                                         np.add.reduceat(int_sp, ind_sp)[::2],
+                                         0)
         if accumulator == "mean":
             norm = ind_sp[1::2] - ind_sp[::2]
             norm[norm == 0] = 1
@@ -952,7 +956,7 @@ def _make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
         mz_seed, _ = msexp.getSpectrum(start).get_peaks()
         targeted_mode = False
     else:
-        mz_seed = targeted_mz
+        mz_seed = targeted_mz.copy()
         targeted_mode = True
 
     roi_processor_list = list()
