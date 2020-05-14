@@ -12,6 +12,7 @@ import bokeh.plotting
 from bokeh.palettes import Set3
 from bokeh.models import ColumnDataSource
 from bokeh.models import HoverTool
+from collections import namedtuple
 
 from .utils import find_closest
 
@@ -501,8 +502,11 @@ class Chromatogram:
                                        center_estimation=rt_estimation)
             tmp["rt"] = tmp.pop("location")
             if isinstance(self.mz, np.ndarray):
-                mz_mean = np.average(self.mz, weights=self.spint)
-                mz_std = self.mz.std()
+                missing = np.isnan(self.mz[peak.start:peak.end])
+                mz_not_missing = self.mz[peak.start:peak.end][~missing]
+                sp_not_missing = self.spint[peak.start:peak.end][~missing]
+                mz_mean = np.average(mz_not_missing, weights=sp_not_missing)
+                mz_std = mz_not_missing.std()
                 tmp["mz mean"] = mz_mean
                 tmp["mz std"] = mz_std
             else:
@@ -678,26 +682,102 @@ class MSSpectrum:
         return fig
 
 
+TempRoi = namedtuple("TempRoi", ["mz", "sp", "scan"])
+
+
+def make_empty_temp_roi():
+    return TempRoi(mz=list(), sp=list(), scan=list())
+
+
+class Roi(Chromatogram):
+    """
+    Region of interest for detecting features. Region of a mz trace where
+    the intensity is non zero.
+    """
+    def __init__(self, spint: np.ndarray, mz: np.ndarray, rt: np.ndarray,
+                 first_scan: int):
+        super(Roi, self).__init__(spint, rt, mz)
+        self.first_scan = first_scan
+
+    def fill_nan(self):
+        """
+        fill missing intensity values using linear interpolation.
+        """
+        missing = np.isnan(self.spint)
+        interpolator = interp1d(self.rt[~missing], self.spint[~missing])
+        self.spint[missing] = interpolator(self.rt[missing])
+
+    def get_mean_mz(self):
+        missing = np.isnan(self.mz)
+        return np.average(self.mz[~missing], weights=self.spint[~missing])
+
+    def get_peak_params(self, subtract_bl: bool = True,
+                        rt_estimation: str = "weighted") -> pd.DataFrame:
+        """
+        Compute peak parameters using retention time and mass-to-charge ratio
+
+        Parameters
+        ----------
+        subtract_bl: bool
+            If True subtracts the estimated baseline from the intensity and
+            area.
+        rt_estimation: {"weighted", "apex"}
+            if "weighted", the peak retention time is computed as the weighted
+            mean of rt in the extension of the peak. If "apex", rt is
+            simply the value obtained after peak picking.
+
+        Returns
+        -------
+        peak_params: pandas.DataFrame
+        """
+        if self.peaks is None:
+            msg = "`pick_cwt` method must be runned before using this method"
+            raise ValueError(msg)
+
+        peak_params = {"rt": list(), "intensity": list(), "width": list(),
+                       "area": list(), "mz": list(), "mz std": list()}
+        for peak in self.peaks:
+            tmp = peak.get_peak_params(self.spint, x=self.rt,
+                                       subtract_bl=subtract_bl,
+                                       center_estimation=rt_estimation)
+            tmp["rt"] = tmp.pop("location")
+            for k in peak_params:
+                if k not in ["mz", "mz std"]:
+                    peak_params[k].append(tmp[k])
+
+            # set mz mean and mz std
+            missing = np.isnan(self.mz[peak.start:peak.end])
+            if ~missing.all():
+                mz_not_missing = self.mz[peak.start:peak.end][~missing]
+                sp_not_missing = self.spint[peak.start:peak.end][~missing]
+                mz_mean = np.average(mz_not_missing, weights=sp_not_missing)
+                mz_std = mz_not_missing.std()
+            else:
+                mz_mean = np.nan
+                mz_std = np.nan
+            peak_params["mz"].append(mz_mean)
+            peak_params["mz std"].append(mz_std)
+        return peak_params
+
+
 class _RoiProcessor:
     """
     Class used by cent-wave algorithm to generate roi
 
     Attributes
     ----------
-    _mz_mean: numpy.ndarray
+    mz_mean: numpy.ndarray
         mean value of mz for a given row in mz_array. Used to add new values
         based on a tolerance. its updated after adding a new column
-    _missing: numpy.ndarray
+    n_missing: numpy.ndarray
         number of consecutive missing values. Used to detect finished rois
-    _mz: numpy.ndarray
-    _sp: numpy.ndarray
     roi: list
     """
 
-    def __init__(self, mz_seed: np.ndarray, size: int,
-                 max_missing: int = 1, min_length: int = 5,
+    def __init__(self, mz_seed: np.ndarray, max_missing: int = 1,
+                 min_length: int = 5, min_intensity: float = 0,
                  tolerance: float = 0.005, multiple_match: str = "closest",
-                 first_scan: int = 0, mz_reduce: Union[str, Callable] = "mean",
+                 mz_reduce: Union[str, Callable] = "mean",
                  sp_reduce: Union[str, Callable] = "sum"):
         """
 
@@ -705,34 +785,34 @@ class _RoiProcessor:
         ----------
         mz_seed: numpy.ndarray
             initial values to build rois
-        size: int
-            number of rows in mz_array and spint_array.
         max_missing: int
-            maximum number of missing consecutive values. when a row surpases
-            this number the roi is considered as finished. and is added to roi
-            list
+            maximum number of missing consecutive values. when a row surpass
+            this number the roi is flagged as finished.
         min_length: int
-            The minimum length of a roi to be considered valid before adding it
-            to roi list.
+            The minimum length of a finished roi to be considered valid before
+            being added to the roi list.
+        min_intensity: float
         tolerance: float
-            mz tolerance to connect values
+            mz tolerance used to connect values.
         multiple_match: {"closest", "reduce"}
             how to match peaks when there is more than one match. If mode is
             `closest`, then the closest peak is assigned as a match and the
             others are assigned to no match. If mode is `reduce`, then a unique
             mz and intensity value is generated using the reduce function in
             `mz_reduce` and `spint_reduce` respectively.
-        first_scan: int
-            scan number where the roi was created, used to create slices of
-            rt.
         mz_reduce: str or callable
             function used to reduce mz values. Can be a function accepting
             numpy arrays and returning numbers. Only used when `multiple_match`
-            is reduce.
+            is reduce. See the following prototype:
+
+            def mz_reduce(mz_match: np.ndarray) -> float:
+                pass
+
         sp_reduce: str or callable
             function used to reduce spint values. Can be a function accepting
             numpy arrays and returning numbers. Only used when `multiple_match`
-            is reduce.
+            is reduce. To use custom functions see the prototype shown on
+            `mz_reduce`.
         """
         if len(mz_seed.shape) != 1:
             msg = "array must be a vector"
@@ -754,72 +834,131 @@ class _RoiProcessor:
         else:
             self._spint_reduce = sp_reduce
 
-        self._first_scan = first_scan
-        self._mz_mean = mz_seed
-        self._mz = np.zeros((mz_seed.size, size))
-        self._sp = np.zeros((mz_seed.size, size))
-        self._counter = np.ones_like(mz_seed)
-        self._missing = np.zeros_like(mz_seed, dtype=int)
-        self._index = 0
-        self._start = np.zeros_like(self._missing)
+        self.mz_mean = mz_seed.copy()
+        self.roi_index = np.arange(mz_seed.size)
+        self.n_missing = np.zeros_like(mz_seed, dtype=int)
+        self.max_intensity = np.zeros_like(mz_seed)
+        self.length = np.zeros_like(mz_seed, dtype=int)
+        self.index = 0
+        self.temp_roi_dict = {x: make_empty_temp_roi() for x in self.roi_index}
         self.roi = list()
+        self.min_intensity = min_intensity
         self.max_missing = max_missing
         self.min_length = min_length
         self.tolerance = tolerance
         self.multiple_match = multiple_match
 
-    def add(self, mz: np.ndarray, sp: np.ndarray):
+    def add(self, mz: np.ndarray, sp: np.ndarray, targeted: bool = False):
         """
-        Adds new mz and spint values. Returns a tuple with values that doesn't
-        match.
+        Adds new mz and spint values to temporal roi.
         """
 
         # find matching values
         match_index, mz_match, sp_match, mz_no_match, sp_no_match = \
-            _match_mz(self._mz_mean, mz, sp, self.tolerance,
+            _match_mz(self.mz_mean, mz, sp, self.tolerance,
                       self.multiple_match, self._mz_reduce, self._spint_reduce)
 
-        self._mz[match_index, self._index] = mz_match
-        self._sp[match_index, self._index] = sp_match
+        for k, k_mz, k_sp in zip(match_index, mz_match, sp_match):
+            k_temp_roi = self.temp_roi_dict[self.roi_index[k]]
+            k_temp_roi.mz.append(k_mz)
+            k_temp_roi.sp.append(k_sp)
+            k_temp_roi.scan.append(self.index)
 
         # update mz_mean and missings
-        updated_mean = ((self._mz_mean[match_index] * self._counter[match_index]
-                         + mz_match) / (self._counter[match_index] + 1))
-        self._counter[match_index] += 1
-        self._mz_mean[match_index] = updated_mean
+        updated_mean = ((self.mz_mean[match_index] * self.length[match_index]
+                         + mz_match) / (self.length[match_index] + 1))
 
-        self._missing += 1
-        self._missing[match_index] = 0
+        self.length[match_index] += 1
+        self.n_missing += 1
+        self.n_missing[match_index] = 0
+        self.max_intensity[match_index] = \
+            np.maximum(self.max_intensity[match_index], sp_match)
+        if not targeted:
+            self.mz_mean[match_index] = updated_mean
+            self.extend(mz_no_match, sp_no_match)
+        self.index += 1
 
-        self._index += 1
-
-        return mz_no_match, sp_no_match
-
-    def append_to_roi(self, rt: np.ndarray):
+    def append_to_roi(self, rt: np.ndarray, targeted: bool = False):
+        """
+        Remove completed ROI. Valid ROI are appended toi roi attribute.
+        """
 
         # check completed rois
-        is_completed = self._missing > self.max_missing
+        is_completed = self.n_missing > self.max_missing
 
         # the most common case are short rois that must be discarded
-        is_valid_roi = (self._index - self._start) >= self.min_length
+        is_valid_roi = ((self.length >= self.min_length) &
+                        (self.max_intensity >= self.min_intensity))
 
         # add completed roi
-        completed_index = np.where(is_completed & is_valid_roi)[0]
-        for row in completed_index:
-            start = self._start[row]
-            end = self._index
-            rt_start = self._first_scan + start
-            rt_end = self._first_scan + end
-            chrom = Chromatogram(self._sp[row, start:end],
-                                 rt[rt_start:rt_end],
-                                 self._mz[row, start:end])
-            self.roi.append(chrom)
-        self._missing[is_completed] = 0
-        self._start[is_completed] = self._index
+        completed_index = np.where(is_completed)[0]
+        for ind in completed_index:
+            roi_ind = self.roi_index[ind]
+            finished_roi = self.temp_roi_dict.pop(roi_ind)
+            if is_valid_roi[ind]:
+                roi = tmp_roi_to_roi(finished_roi, rt)
+                self.roi.append(roi)
+        if targeted:
+            self.n_missing[is_completed] = 0
+            self.length[is_completed] = 0
+            self.max_intensity[is_completed] = 0
+            max_roi_ind = self.roi_index.max()
+            n_completed = is_completed.sum()
+            new_indices = np.arange(max_roi_ind + 1,
+                                    max_roi_ind + 1 + n_completed)
+            self.roi_index[is_completed] = new_indices
+            new_tmp_roi = {k: make_empty_temp_roi() for k in new_indices}
+            self.temp_roi_dict.update(new_tmp_roi)
+        else:
+            self.mz_mean = self.mz_mean[~is_completed]
+            self.n_missing = self.n_missing[~is_completed]
+            self.length = self.length[~is_completed]
+            self.roi_index = self.roi_index[~is_completed]
+            self.max_intensity = self.max_intensity[~is_completed]
+
+    def extend(self, mz: np.ndarray, sp: np.ndarray):
+        """adds new mz values to mz_mean"""
+        max_index = self.roi_index.max()
+        new_indices = np.arange(mz.size) + max_index + 1
+        mz_mean_tmp = np.hstack((self.mz_mean, mz))
+        roi_index_tmp = np.hstack((self.roi_index, new_indices))
+        sorted_index = np.argsort(mz_mean_tmp)
+        n_missing_tmp = np.zeros_like(new_indices, dtype=int)
+        n_missing_tmp = np.hstack((self.n_missing, n_missing_tmp))
+        length_tmp = np.ones_like(new_indices, dtype=int)
+        length_tmp = np.hstack((self.length, length_tmp))
+        max_int_tmp = np.zeros_like(new_indices, dtype=float)
+        max_int_tmp = np.hstack((self.max_intensity, max_int_tmp))
+
+        for k_index, k_mz, k_sp in zip(new_indices, mz, sp):
+            new_roi = TempRoi(mz=[k_mz], sp=[k_sp], scan=[self.index])
+            self.temp_roi_dict[k_index] = new_roi
+        self.mz_mean = mz_mean_tmp[sorted_index]
+        self.roi_index = roi_index_tmp[sorted_index]
+        self.n_missing = n_missing_tmp[sorted_index]
+        self.length = length_tmp[sorted_index]
+        self.max_intensity = max_int_tmp[sorted_index]
 
     def flag_as_completed(self):
-        self._missing[:] = self.max_missing + 1
+        self.n_missing[:] = self.max_missing + 1
 
+
+def _compare_max(old: np.ndarray, new: np.ndarray) -> np.ndarray:
+    """
+    returns the element-wise maximum between old and new
+
+    Parameters
+    ----------
+    old: numpy.ndarray
+    new: numpy.ndarray
+        can have nan
+
+    Returns
+    -------
+    numpy.ndarray
+    """
+    new[np.isnan(new)] = 0
+    return np.maximum(old, new)
 
 def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
               tolerance: float, mode: str, mz_reduce: Callable,
@@ -874,28 +1013,33 @@ def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
     # compute matches for duplicates
     multiple_match_mask = count_index > 1
     first_index = first_index[multiple_match_mask]
-    count_index = count_index[multiple_match_mask]
     if first_index.size > 0:
+        first_index_index = np.where(count_index > 1)[0]
+        count_index = count_index[multiple_match_mask]
+        iterator = zip(first_index_index, first_index, count_index)
         if mode == "closest":
             rm_index = list()   # list of duplicate index to remove
             mz_replace = list()
             spint_replace = list()
-            for index, count in zip(first_index, count_index):
+            for first_ind, index, count in iterator:
                 # check which of the duplicate is closest, the rest are removed
-                closest = np.argmin(dmz[index:(index + count)]) + index
-                mz_replace.append(mz2[closest])
-                spint_replace.append(sp2[closest])
+                closest = \
+                    np.argmin(dmz[match_mask][index:(index + count)]) + index
+                mz_replace.append(mz2[match_mask][closest])
+                spint_replace.append(sp2[match_mask][closest])
                 remove = np.arange(index, index + count)
                 remove = np.setdiff1d(remove, closest)
                 rm_index.extend(remove)
             no_match_mask[rm_index] = True
-            mz_match[first_index] = mz_replace
-            sp_match[first_index] = spint_replace
+            mz_match[first_index_index] = mz_replace
+            sp_match[first_index_index] = spint_replace
         elif mode == "reduce":
-            for index, count in zip(first_index, count_index):
+            for first_ind, index, count in iterator:
                 # check which of the duplicate is closest
-                mz_match[index] = mz_reduce(mz2[index:(index + count)])
-                sp_match[index] = sp_reduce(sp2[index:(index + count)])
+                mz_multiple_match = mz2[match_mask][index:(index + count)]
+                sp_multiple_match = sp2[match_mask][index:(index + count)]
+                mz_match[first_ind] = mz_reduce(mz_multiple_match)
+                sp_match[first_ind] = sp_reduce(sp_multiple_match)
         else:
             msg = "mode must be `closest` or `merge`"
             raise ValueError(msg)
@@ -905,8 +1049,22 @@ def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
     return match_index, mz_match, sp_match, mz_no_match, sp_no_match
 
 
+def tmp_roi_to_roi(tmp_roi: TempRoi, rt: np.ndarray) -> Roi:
+    first_scan = tmp_roi.scan[0]
+    last_scan = tmp_roi.scan[-1]
+    size = last_scan + 1 - first_scan
+    mz_tmp = np.ones(size) * np.nan
+    spint_tmp = mz_tmp.copy()
+    tmp_index = np.array(tmp_roi.scan) - tmp_roi.scan[0]
+    rt_tmp = rt[first_scan:(last_scan + 1)]
+    mz_tmp[tmp_index] = tmp_roi.mz
+    spint_tmp[tmp_index] = tmp_roi.sp
+    roi = Roi(spint_tmp, mz_tmp, rt_tmp, first_scan)
+    return roi
+
+
 def _make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
-              min_length: int, multiple_match,
+              min_length: int, min_intensity: float,  multiple_match,
               targeted_mz: Optional[np.ndarray] = None,
               start: Optional[int] = None, end: Optional[int] = None,
               mz_reduce: Union[str, Callable] = "mean",
@@ -954,49 +1112,57 @@ def _make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
 
     if targeted_mz is None:
         mz_seed, _ = msexp.getSpectrum(start).get_peaks()
-        targeted_mode = False
+        targeted = False
     else:
-        mz_seed = targeted_mz.copy()
-        targeted_mode = True
+        mz_seed = targeted_mz
+        targeted = True
 
-    roi_processor_list = list()
     size = end - start
     rt = np.zeros(size)
-    tmp_processor = _RoiProcessor(mz_seed, size=size, max_missing=max_missing,
-                                  min_length=min_length, tolerance=tolerance,
-                                  multiple_match=multiple_match,
-                                  mz_reduce=mz_reduce,
-                                  sp_reduce=sp_reduce)
-    roi_processor_list.append(tmp_processor)
-
+    processor = _RoiProcessor(mz_seed, max_missing=max_missing,
+                              min_length=min_length,
+                              min_intensity=min_intensity, tolerance=tolerance,
+                              multiple_match=multiple_match,
+                              mz_reduce=mz_reduce, sp_reduce=sp_reduce)
     for k_scan in range(start, end):
         sp = msexp.getSpectrum(k_scan)
         rt[k_scan - start] = sp.getRT()
         mz, spint = sp.get_peaks()
-        for processor in roi_processor_list:
-            if mz.size:
-                mz, spint = processor.add(mz, spint)
-                processor.append_to_roi(rt)
-            else:
-                break
-        if mz.size and not targeted_mode:
-            tmp_processor = _RoiProcessor(mz, size=(end - k_scan),
-                                          max_missing=max_missing,
-                                          min_length=min_length,
-                                          tolerance=tolerance,
-                                          multiple_match=multiple_match,
-                                          first_scan=(k_scan - start),
-                                          mz_reduce=mz_reduce,
-                                          sp_reduce=sp_reduce)
-            tmp_processor.add(mz, spint)
-            tmp_processor.append_to_roi(rt)
-            roi_processor_list.append(tmp_processor)
+        processor.add(mz, spint, targeted=targeted)
+        processor.append_to_roi(rt, targeted=targeted)
+        assert (np.diff(processor.mz_mean) >= 0).all()
+    # add roi not completed during last scan
+    processor.flag_as_completed()
+    processor.append_to_roi(rt)
+    return processor.roi
 
-    # add roi not completed during last scan and merge each processor roi
-    roi = list()
-    for processor in roi_processor_list:
-        processor.flag_as_completed()
-        processor.append_to_roi(rt)
-        if len(processor.roi):
-            roi.extend(processor.roi)
-    return roi
+def _detect_roi_peaks(roi: List[Roi],
+                     cwt_params: Optional[dict] = None) -> pd.DataFrame:
+    if cwt_params is None:
+        cwt_params = dict()
+
+    peak_params = {"rt": list(), "intensity": list(), "width": list(),
+                   "area": list(), "mz": list(), "mz std": list(),
+                   "roi index": list(), "peak index": list()}
+
+    for roi_index, k_roi in enumerate(roi):
+        k_roi.fill_nan()
+        k_roi.find_peaks(cwt_params=cwt_params)
+        temp_params = k_roi.get_peak_params()
+        temp_params["roi index"] = [roi_index] * len(temp_params["rt"])
+        peak_index = np.arange(len(k_roi.peaks))
+        temp_params["peak index"] = peak_index
+        for k in peak_params:
+            peak_params[k].extend(temp_params[k])
+    n_features = len(peak_params["rt"])
+    max_ft_str_length = len(str(n_features))
+
+    def ft_formatter(x):
+        return "FT" + str(x + 1).rjust(max_ft_str_length, "0")
+
+    index = [ft_formatter(x) for x in range(n_features)]
+    peak_params = pd.DataFrame(data=peak_params, index=index)
+    return peak_params
+
+# TODO: feature detection should be implemented using a general function
+# called detect_features, and accept modes, such as uplc, hplc, di, etc...
