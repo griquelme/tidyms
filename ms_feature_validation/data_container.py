@@ -1,8 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-Objects used for automatic curation and validation of LC-MS metabolomics data.
+The object used to store metabolomics data
 
-TODO: add examples.
+Objects
+-------
+
+- DataContainer: Stores metabolomics data.
+
+Exceptions
+----------
+
+- BatchInformationError
+- RunOrderError
+- ClassNameError
+- EmptyDataContainerError
+
+Usage
+-----
+
+DataContainers can be created in two different ways other than using the
+constructor:
+
+- Using the functions in the fileio module to read data processed with a third
+  party software (XCMS, MZMine2, etc...)
+- Performing Feature correspondence algorithm on features detected from raw
+  data (not implemented yet...)
 """
 
 from . import utils
@@ -20,33 +42,65 @@ from bokeh.transform import factor_cmap
 from bokeh.models import LabelSet
 
 
+# TODO: remove data_path attribute. check with webapp example.
+
 class DataContainer(object):
     """
-    A container class for Metabolomics Data.
-    
-    Consists of three Pandas DataFrames with features values, feature metadata
-    and sample metadata. Index are shared for features and samples
-    respectively.
-    
-    Contains functions to remove samples or features.
+    A container object to store Metabolomics Data.
+
+    The data is separated in three attributes: data_matrix, sample_metadata and
+    feature_metadata. Each one is a pandas DataFrame.
 
     Attributes
     ---------
-    data_matrix : pandas.DataFrame.
-                  Feature values for each measured sample. Each row is a
-                  sample and each column is a feature.                  
-    sample_metadata : pandas.DataFrame.
-                         Metadata for each sample. class is a required column.
-    feature_metadata : pandas.DataFrame.
-                          DataFrame with features names as indices. mz and rt
-                          are required columns.
-    data_path : str.
-        Path to raw data directory.
-    mapping : dict[str, list[str]].
+    data_matrix : DataFrame.
+        feature values for each sample. Data is organized in a "tidy" way:
+        each row is an observation, each column is a feature. dtype must
+        be float and all values should be non negative, but NANs are fine.
+    sample_metadata : DataFrame.
+        Metadata associated to each sample (eg: sample class). Has the same
+        index as the data_matrix. "class" (standing for sample class) is a
+        required column.
+    feature_metadata : DataFrame.
+        Metadata associated to each feature (eg: mass to charge ratio (mz),
+        retention time (rt), etc...). The index is equal to the `data_matrix`
+        column. "mz" and "rt" are required columns.
+    mapping : dictionary of sample types to a list of sample classes.
         maps a sample types to sample classes. valid samples types are `qc`,
-        `blank`, `sample` or`suitability`. values are list of sample classes.
-        Mapping is used by Filter objects to select which samples are going
-        to be used to perform corrections.
+        `blank`, `sample` or `suitability`. values are list of sample classes.
+        Mapping is used by Processor objects to define a default behaviour. For
+        example, when using a BlankCorrector, the blank contribution to each
+        feature is estimated using the sample classes that are values of the
+        `blank` sample type.
+    data_path
+    id
+    batch
+    order
+
+    Methods
+    -------
+    metrics : methods to compute common metrics
+    plot : methods to plot features
+    preprocess: methods to perform common preprocessing tasks.
+    remove(remove, axis) : Remove samples/features from the DataContainer.
+    reset(reset_mapping=True) : Reset the DataContainer, ie: recover removed
+    samples/features, transformed values.
+    is_valid_class_name(value) : checks if a class is present in the
+    DataContainer
+    diagnose() : creates a dictionary with information about the information in
+    the DataContainer. Used by Processor objects as a validity check.
+    select_features(mz, rt, mz_tol=0.01, rt_tol=5) : Search features within
+    a m/z and rt tolerance.
+    set_default_order() : Assigns a default run order of the samples assuming
+    that the data matrix is sorted by run order already.
+    sort(field, axis) : sort features/samples using metadata information.
+    save(filename) : save the DataContainer as a pickle.
+
+    See Also
+    --------
+    read_pickle: loads a DataContainer created with save method
+    read_progenesis: read a Progenesis csv file into a DataContainer.
+
     """
 
     def __init__(self, data_matrix: pd.DataFrame,
@@ -56,8 +110,7 @@ class DataContainer(object):
                  mapping: Optional[dict] = None):
         
         """
-        Creates a DataContainer from feature values, features metadata and
-        sample metadata.
+        See help(DataContainer) for more details
         
         Parameters
         ----------
@@ -74,10 +127,8 @@ class DataContainer(object):
         mapping : dict or None
             if dict, set each sample class to sample type.
         """
-        validation.validate_data_container(data_matrix,
-                                           feature_metadata,
-                                           sample_metadata,
-                                           data_path)
+        validation.validate_data_container(data_matrix, feature_metadata,
+                                           sample_metadata, data_path)
         self.data_matrix = data_matrix
         self.feature_metadata = feature_metadata
         self.sample_metadata = sample_metadata
@@ -86,15 +137,16 @@ class DataContainer(object):
         self._original_data = data_matrix.copy()
         self.data_path = data_path
         self.mapping = mapping
+        self.id = data_matrix.index
 
         # adding methods
-        self.metrics = _Metrics(self)
-        self.plot = _Plotter(self)
-        self.preprocess = _Preprocessor(self)
+        self.metrics = _MetricMethods(self)
+        self.plot = _PlotMethods(self)
+        self.preprocess = _PreprocessMethods(self)
 
     @property
     def data_path(self) -> pd.DataFrame:
-        """str : directory where raw data is stored."""
+        """str : path where raw data is stored."""
         return self._data_path
     
     @data_path.setter
@@ -137,10 +189,6 @@ class DataContainer(object):
                
     @property
     def mapping(self):
-        """
-        dict : Set the sample type of a sample_classes. keys must be one of
-        the following: {'qc', 'blank', 'zero', 'sample', 'suitability'}
-        """
         return self._mapping
     
     @mapping.setter
@@ -171,7 +219,7 @@ class DataContainer(object):
     
     @property
     def batch(self) -> pd.Series:
-        """pd.Series[str] or pd.Series[int]. Batch identification"""
+        """pd.Series[str] or pd.Series[int]. Batch number"""
         try:
             return self._sample_metadata.loc[self._sample_mask, _sample_batch]
         except KeyError:
@@ -216,8 +264,8 @@ class DataContainer(object):
         
         Parameters
         ----------
-        test_class : str
-        
+        test_class : str or list[str]
+            classes to search in the DataContainer.
         Returns
         -------
         is_valid : bool
@@ -237,10 +285,9 @@ class DataContainer(object):
 
         Parameters
         ----------
-        remove : list[str]
-                   Feature / Sample names to remove.
-        axis : str
-               "features", "samples". axis to remove from
+        remove : Iterable[str]
+            List of sample/feature names to remove.
+        axis : {"features", "samples"}
         """
         
         if not self._is_valid(remove, axis):
@@ -248,12 +295,8 @@ class DataContainer(object):
             raise ValueError(msg)
         
         if axis == "features":
-            # self.data_matrix.drop(columns=remove, inplace=True)
-            # self.feature_definitions.drop(index=remove, inplace=True)
             self._feature_mask = self._feature_mask.difference(remove)
         elif axis == "samples":
-            # self.data_matrix.drop(index=remove, inplace=True)
-            # self.sample_information.drop(index=remove, inplace=True)
             self._sample_mask = self._sample_mask.difference(remove)
         else:
             msg = "axis should be `columns` or `features`"
@@ -266,9 +309,8 @@ class DataContainer(object):
         Parameters
         ----------
         index: list[str]
-            Features / Samples name to check.
-        axis: {"sample", "feature"}
-            axis to check.
+            List of feature/sample names to check.
+        axis: {"samples", "features"}
         """
         ind = pd.Index(index)
         if axis == "features":
@@ -286,41 +328,53 @@ class DataContainer(object):
         
         Returns
         -------
-        rep : dict
+        diagnostic : dict
+            Each value is a bool indicating the status. `empty` is True if the
+            size in at least one dimension of the data matrix is zero; "missing"
+            is True if there are NANs in the data matrix;  "order" is True
+            if there is run order information for the samples; "batch" is True
+            if there is batch number information associated to the samples.
         """
         
-        rep = dict()
-        rep["empty"] = self.data_matrix.empty
-        rep["missing"] = self.data_matrix.isna().any().any()
-        rep[_qc_type] = bool(self.mapping[_qc_type])
-        rep[_blank_type] = bool(self.mapping[_blank_type])
-        rep[_sample_type] = bool(self.mapping[_sample_type])
+        diagnostic = dict()
+        diagnostic["empty"] = self.data_matrix.empty
+        diagnostic["missing"] = self.data_matrix.isna().any().any()
+        diagnostic[_qc_type] = bool(self.mapping[_qc_type])
+        diagnostic[_blank_type] = bool(self.mapping[_blank_type])
+        diagnostic[_sample_type] = bool(self.mapping[_sample_type])
         try:
-            rep["order"] = self.order.any()
+            diagnostic["order"] = self.order.any()
         except RunOrderError:
-            rep["order"] = False
+            diagnostic["order"] = False
         
         try:
-            rep["batch"] = self.batch.any()
+            diagnostic["batch"] = self.batch.any()
         except BatchInformationError:
-            rep["batch"] = False
-        return rep
+            diagnostic["batch"] = False
+        return diagnostic
    
-    def reset(self):
+    def reset(self, reset_mapping: bool = True):
         """
-        Reset applied filters/corrections.
+        Reloads the original data matrix.
+
+        Parameters
+        ----------
+        reset_mapping: bool
+            If True, clears sample classes from the mapping.
         """
         self._sample_mask = self._original_data.index
         self._feature_mask = self._original_data.columns
         self.data_matrix = self._original_data
+        if reset_mapping:
+            self.mapping = None
 
-    def get_process_classes(self) -> List[str]:
+    def get_mapped_classes(self) -> List[str]:
         """
         return all classes assigned in the sample type mapping.
 
         Returns
         -------
-        process_classes: List[str]
+        process_classes: list of mapped classes.
         """
         process_classes = list()
         for classes in self.mapping.values():
@@ -328,25 +382,29 @@ class DataContainer(object):
                 process_classes += classes
         return process_classes
 
-    def select_features(self, mz: float, rt: float, mz_tol: float = 0.01,
-                        rt_tol: float = 5):
+    def select_features(self, mzq: float, rtq: float, mz_tol: float = 0.01,
+                        rt_tol: float = 5) -> pd.Index:
         """
-        Find feature names within the defined tolerance
+        Find feature names within the defined mass-to-charge and retention time
+        tolerance.
 
         Parameters
         ----------
-        mz: float
-            mz v
-        rt: float
-        mz_tol: float
-        rt_tol: float
+        mzq: positive number
+            Mass-to-charge value to search
+        rtq: positive number
+            Retention time value to search
+        mz_tol: positive number
+            Mass-to-charge tolerance used in the search.
+        rt_tol: positive number
+            Retention time tolerance used in the search.
 
         Returns
         -------
-        pandas.Index
+        Index
         """
-        mz_match = (self.feature_metadata["mz"] - mz).abs() < mz_tol
-        rt_match = (self.feature_metadata["rt"] - rt).abs() < rt_tol
+        mz_match = (self.feature_metadata["mz"] - mzq).abs() < mz_tol
+        rt_match = (self.feature_metadata["rt"] - rtq).abs() < rt_tol
         mz_match_ft = mz_match[mz_match].index
         rt_match_ft = rt_match[rt_match].index
         result = mz_match_ft.intersection(rt_match_ft)
@@ -365,13 +423,13 @@ class DataContainer(object):
 
     def sort(self, field: str, axis: str):
         """
-        Sort samples/features
+        Sort samples/features using metadata values.
 
         Parameters
         ----------
         field: str
-            field to sort by. Must be a field of sample_metadata or
-            feature_metadata
+            field to sort by. Must be a column of `sample_metadata` or
+            `feature_metadata`.
         axis: {"samples", "features"}
         """
         if axis == "samples":
@@ -399,9 +457,28 @@ class DataContainer(object):
             pickle.dump(self, fin)
 
 
-class _Metrics:
+class _MetricMethods:
     """
-    Functions to get metrics from a DataContainer
+    Methods to compute feature metrics from a DataContainer
+
+    Methods
+    -------
+    cv(intraclass=True, robust=False): Computes the coefficient of variation for
+    each feature.
+    dratio(robust=False, sample_classes=None, qc_classes=None): Computes the
+    D-Ratio of features, a metric used to compare technical to biological
+    variation [1].
+    detection_rate(intraclass=True, threshold=0): Computes the ratio of samples
+    where a features was detected.
+    pca(n_components=2, normalization=None, scaling=None): Computes the PCA
+    scores, loadings and  PC variance.
+
+    References
+    ----------
+    .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use
+    of system suitability and quality control samples in mass spectrometry
+    assays applied in untargeted clinical metabolomic studies",
+    Metabolomics (2018) 14:72.
     """
     
     def __init__(self, data: DataContainer):
@@ -409,7 +486,8 @@ class _Metrics:
     
     def cv(self, intraclass=True, robust=False):
         """
-        Coefficient of variation.
+        Computes the Coefficient of variation defined as the ratio between the
+        standard deviation and the mean of each feature.
         
         Parameters
         ----------
@@ -426,7 +504,7 @@ class _Metrics:
         result: pd.Series or pd.DataFrame
         """
         if robust:
-            cv_func = utils.rmad
+            cv_func = utils.robust_cv
         else:
             cv_func = utils.cv
         
@@ -434,6 +512,8 @@ class _Metrics:
             result = (self.__data.data_matrix
                       .groupby(self.__data.classes)
                       .apply(cv_func))
+        # TODO: check where this is used, maybe its to compute the cv for the
+        #  whole data_matrix here...
         else:
             if self.__data.mapping[_sample_type] is None:
                 result = cv_func(self.__data.data_matrix)
@@ -448,7 +528,8 @@ class _Metrics:
                qc_classes: Optional[List[str]] = None) -> pd.Series:
         """
         Computes the D-Ratio using sample variation and quality control
-        variaton [1].
+        variation [1]. This metric is useful to compare technical to biological
+        variation.
         
         Parameters
         ----------
@@ -461,7 +542,6 @@ class _Metrics:
         robust: bool
             If True, uses MAD to compute the D-ratio. Else, uses standard
             deviation.
-
 
         Returns
         -------
@@ -496,7 +576,7 @@ class _Metrics:
     
     def detection_rate(self, intraclass=True, threshold=0):
         """
-        Computes the fraction of samples with intensity above a threshold
+        Computes the fraction of samples where a feature was detected.
         
         Parameters
         ----------
@@ -515,16 +595,17 @@ class _Metrics:
                        .groupby(self.__data.classes)
                        .apply(dr_func))
         else:
+            # TODO: same as CV. check if its better to return a global DR.
             sample_class = self.__data.mapping["sample"]
             is_sample_class = self.__data.classes.isin(sample_class)
             results = self.__data.data_matrix[is_sample_class].apply()
         return results
     
     def pca(self, n_components: Optional[int] = 2,
-            normalizing: Optional[str] = None,
+            normalization: Optional[str] = None,
             scaling: Optional[str] = None):
         """
-        Computes PCA score, loadings and variance of each component.
+        Computes PCA score, loadings and  PC variance of each component.
         
         Parameters
         ----------
@@ -532,7 +613,7 @@ class _Metrics:
             Number of Principal components to compute.
         scaling: {`autoscaling`, `rescaling`, `pareto`}, optional
             scaling method.
-        normalizing: {`sum`, `max`, `euclidean`}, optional
+        normalization: {`sum`, `max`, `euclidean`}, optional
             normalizing method
         
         Returns
@@ -546,8 +627,8 @@ class _Metrics:
         """
         data = self.__data.data_matrix
 
-        if normalizing:
-            data = utils.normalize(data, normalizing)
+        if normalization:
+            data = utils.normalize(data, normalization)
 
         if scaling:
             data = utils.scale(data, scaling)
@@ -568,18 +649,22 @@ class _Metrics:
         return scores, loadings, variance, total_variance
 
 
-class _Plotter:
+class _PlotMethods:
     """
-    Functions to plot data from a DataContainer.
-    The methods return a bokeh figure object.
+    Methods to plot data from a DataContainer. Generates Bokeh Figures.
+
+    Methods
+    -------
+    pca_scores()
+    pca_loadings()
+    feature()
     """
     def __init__(self, data: DataContainer):
         self._data_container = data
 
-    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, color_by: str = "class",
-                   draw: bool = True, show_order: bool = False,
-                   scaling: Optional[str] = None,
-                   normalization: Optional[str] = None,
+    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = "class",
+                   show_order: bool = False, scaling: Optional[str] = None,
+                   normalization: Optional[str] = None, draw: bool = True,
                    fig_params: Optional[dict] = None,
                    scatter_params: Optional[dict] = None
                    ) -> bokeh.plotting.Figure:
@@ -592,23 +677,23 @@ class _Plotter:
             Principal component number to plot along X axis.
         y_pc: int
             Principal component number to plot along Y axis.
-        color_by: {"class", "type", "batch"}
+        hue: {"class", "type", "batch"}
             How to color samples. "class" color points according to sample
             class, "type" color points according to the sample type
-            assigned on the mapping and "batch" uses batch information. Samples
+            assigned in the mapping and "batch" uses batch information. Samples
             classes without a mapping are not shown in the plot
         show_order: bool
             add a label with the run order.
         scaling: {`autoscaling`, `rescaling`, `pareto`}, optional
             scaling method.
         normalization: {`sum`, `max`, `euclidean`}, optional
-            normalizing method
+            normalization method
         draw: bool
             If True calls bokeh.plotting.show on fig.
         fig_params: dict, optional
-            Optional parameters to pass into bokeh figure
+            Optional parameters to pass to bokeh figure
         scatter_params: dict, optional
-            Optional parameters to pass into bokeh scatter plot.
+            Optional parameters to pass to bokeh scatter plot.
         
         Returns
         -------
@@ -629,19 +714,19 @@ class _Plotter:
         n_comps = max(x_pc, y_pc)
         score, _, variance, total_var = \
             self._data_container.metrics.pca(n_components=n_comps,
-                                             normalizing=normalization,
+                                             normalization=normalization,
                                              scaling=scaling)
         score = score.join(self._data_container.sample_metadata)
 
-        if color_by == "type":
+        if hue == "type":
             rev_map = _reverse_mapping(self._data_container.mapping)
             score["type"] = score["class"].apply(lambda x: rev_map.get(x))
             score = score[~pd.isna(score["type"])]
-        elif color_by == "batch":
+        elif hue == "batch":
             score["batch"] = score["batch"].astype(str)
 
         # setup the colors
-        unique_values = score[color_by].unique().astype(str)
+        unique_values = score[hue].unique().astype(str)
         score = ColumnDataSource(score)
         cmap = Spectral[11]
         palette = cmap * (int(unique_values.size / len(cmap)) + 1)
@@ -649,8 +734,8 @@ class _Plotter:
         # TODO: Category10_3 should be in a parameter file
 
         fig.scatter(source=score, x=x_name, y=y_name,
-                    color=factor_cmap(color_by, palette, unique_values),
-                    legend_group=color_by, **scatter_params)
+                    color=factor_cmap(hue, palette, unique_values),
+                    legend_group=hue, **scatter_params)
 
         x_label = x_name + " ({:.1f} %)"
         x_label = x_label.format(variance[x_pc - 1] * 100 / total_var)
@@ -714,7 +799,7 @@ class _Plotter:
         n_comps = max(x_pc, y_pc)
         _, loadings, variance, total_var = \
             self._data_container.metrics.pca(n_components=n_comps,
-                                             normalizing=normalization,
+                                             normalization=normalization,
                                              scaling=scaling)
         loadings = loadings.join(self._data_container.feature_metadata)
         loadings = ColumnDataSource(loadings)
@@ -789,16 +874,22 @@ class _Plotter:
         return fig
 
 
-class _Preprocessor:
+class _PreprocessMethods:
     """
-    Scale, normalize and transform methods for DataContainer
+    Common Preprocessing operations.
+
+    Methods
+    -------
+    normalize(method, inplace=True): Adjust sample values.
+    scale(method, inplace=True): Adjust feature distribution values.
+    transform(method, inplace=True): element-wise transformations of data.
     """
 
     def __init__(self, dc: DataContainer):
         self.__data = dc
 
-    def normalize(self, method: str,
-                  inplace: bool = True) -> Optional[pd.DataFrame]:
+    def normalize(self, method: str, inplace: bool = True,
+                  feature: Optional[str] = None) -> Optional[pd.DataFrame]:
         """
         Normalize samples.
 
@@ -811,12 +902,15 @@ class _Preprocessor:
         inplace: bool
             if True modifies in place the DataContainer. Else, returns a
             normalized data matrix.
+        feature: str, optional
+            Feature used for normalization in `feature` mode.
 
         Returns
         -------
         normalized: pandas.DataFrame
         """
-        normalized = utils.normalize(self.__data.data_matrix, method)
+        normalized = utils.normalize(self.__data.data_matrix, method,
+                                     feature=feature)
         if inplace:
             self.__data.data_matrix = normalized
         else:
@@ -833,7 +927,7 @@ class _Preprocessor:
             Scaling method. `autoscaling` performs mean centering scaling of
             features to unitary variance. `rescaling` scales data to a 0-1
             range. `pareto` performs mean centering and scaling using the
-            quare root of the standard deviation
+            square root of the standard deviation
         inplace: bool
             if True modifies in place the DataContainer. Else, returns a
             normalized data matrix.
@@ -851,7 +945,7 @@ class _Preprocessor:
     def transform(self, method: str,
                   inplace: bool = True) -> Optional[pd.DataFrame]:
         """
-        perform common data transformations.
+        Perform element-wise data transformations.
 
         Parameters
         ----------
@@ -887,7 +981,7 @@ class RunOrderError(Exception):
     pass
 
 
-class InvalidClassName(Exception):
+class ClassNameError(Exception):
     """
     Error class raised when using invalid class names
     """
