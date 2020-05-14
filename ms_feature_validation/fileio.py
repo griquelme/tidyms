@@ -238,6 +238,37 @@ class MSData:
             msg = "mode must be `centroid` or `profile`"
             raise ValueError(msg)
 
+    def make_tic(self, mode: str = "tic") -> lcms.Chromatogram:
+        """
+        Make a total ion chromatogram.
+
+        Parameters
+        ----------
+        mode: {"tic", "bpi"}
+
+        Returns
+        -------
+        rt: np.ndarray
+        tic: np.ndarray
+        """
+        if mode == "tic":
+            reduce = np.sum
+        elif mode == "bpi":
+            reduce = np.max
+        else:
+            msg = "valid modes are tic or bpi"
+            raise ValueError(msg)
+
+        n_scan = self.reader.getNrSpectra()
+        rt = np.zeros(n_scan)
+        tic = np.zeros(n_scan)
+        for k_scan in range(n_scan):
+            sp = self.reader.getSpectrum(k_scan)
+            rt[k_scan] = sp.getRT()
+            _, spint = sp.get_peaks()
+            tic[k_scan] = reduce(spint)
+        return lcms.Chromatogram(tic, rt, None)
+
     def make_chromatograms(self, mz: List[float], window: float = 0.05,
                            start: Optional[int] = None,
                            end: Optional[int] = None,
