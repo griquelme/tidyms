@@ -1,6 +1,27 @@
 """
-Functions to read Raw LC-MS data using pyopenms and functions to create
-chromatograms and accumulate spectra.
+Functions and objects to work with mzML data and tabular data obtained from
+third party software used to process Mass Spectrometry data.
+
+Objects
+-------
+MSData: reads raw MS data in the mzML format. Manages Chromatograms and
+MSSpectrum creation. Performs feature detection on centroided data.
+
+Functions
+---------
+read_pickle(path): Reads a DataContainer stored as a pickle.
+read_progenesis(path): Reads data matrix in a csv file generated with
+Progenesis software.
+read_data_matrix(path, mode): Reads data matrix in several formats. Calls other
+read functions.
+functions.
+
+See Also
+--------
+Chromatogram
+MSSpectrum
+DataContainer
+Roi
 """
 
 import numpy as np
@@ -8,7 +29,6 @@ import pandas as pd
 from typing import Optional, Iterable, Tuple, Union, List, BinaryIO, TextIO
 from .data_container import DataContainer
 from . import lcms
-from . import utils
 from . import validation
 import pickle
 
@@ -19,7 +39,7 @@ def read_pickle(path: Union[str, BinaryIO]) -> DataContainer:
 
     Parameters
     ----------
-    path: str or filelike
+    path: str or file
         path to read DataContainer
 
     Returns
@@ -41,44 +61,37 @@ def read_progenesis(path: Union[str, TextIO]):
 
     Parameters
     ----------
-    path : path to an Progenesis csv output
+    path : str or file
+        path to an Progenesis csv output or file object
 
     Returns
     -------
     dc = DataContainer
     """
-    # df = pd.read_csv(path, skiprows=2, index_col="Compound")
-    # df_header = pd.read_csv(path, nrows=2)
     df_header = pd.read_csv(path, low_memory=False)
     df = df_header.iloc[2:].copy()
     col_names = df_header.iloc[1].values
     df.columns = col_names
     df = df.set_index("Compound")
     df_header = df_header.iloc[:1].copy()
-    #------------------
     df_header = df_header.fillna(axis=1, method="ffill")
     norm_index = df_header.columns.get_loc("Normalised abundance") - 1
     raw_index = df_header.columns.get_loc("Raw abundance") - 1
     ft_def = df.iloc[:, 0:norm_index].copy()
     data = df.iloc[:, raw_index:(2 * raw_index - norm_index)].T
-    sample_info = df_header.iloc[:,
-                  (raw_index + 1):(2 * raw_index - norm_index + 1)].T
-    # sample_info.set_index(sample_info.iloc[:, 1], inplace=True)
-    # sample_info.drop(labels=[1],  axis=1, inplace=True)
+    sample_info = \
+        df_header.iloc[:, (raw_index + 1):(2 * raw_index - norm_index + 1)].T
 
-    # rename sample info
-    # sample_info.index.rename("sample", inplace=True)
-    # sample_info.rename({sample_info.columns[0]: "class"},
-    #                    axis="columns", inplace=True)
     # rename data matrix
-    # data.index = sample_info.index
     data.index.rename("sample", inplace=True)
     data.columns.rename("feature", inplace=True)
     data = data.astype(float)
+
     # rename sample info
     sample_info.index = data.index
     sample_info.rename({sample_info.columns[0]: "class"},
                        axis="columns", inplace=True)
+
     # rename features def
     ft_def.index.rename("feature", inplace=True)
     ft_def.rename({"m/z": "mz", "Retention time (min)": "rt"},
@@ -91,8 +104,8 @@ def read_progenesis(path: Union[str, TextIO]):
     return dc
 
 
-def _convert_to_intebatch_order(order: pd.Series,
-                               batch: pd.Series) -> pd.Series:
+def _convert_to_interbatch_order(order: pd.Series,
+                                 batch: pd.Series) -> pd.Series:
     """
     Convert the order values from a per-batch order to a interbatch order.
 
@@ -113,9 +126,9 @@ def _convert_to_intebatch_order(order: pd.Series,
 
     Examples
     --------
-    order = pd.Series([1, 2, 3, 1, 2, 3])
-    batch = pd.Series([1, 1, 1, 2, 2, 2])
-    convert_to_interbatch_order(order, batch)
+    >>>order = pd.Series([1, 2, 3, 1, 2, 3])
+    >>>batch = pd.Series([1, 1, 1, 2, 2, 2])
+    >>>_convert_to_interbatch_order(order, batch)
     pd.Series([1, 2, 3, 4, 5, 6])
     """
 
@@ -147,6 +160,7 @@ def add_order_from_csv(dc: DataContainer, path: Union[str, TextIO],
 
     Parameters
     ----------
+    dc: DataContainer
     path: str
         path to the file with order data. Data format is inferred from the
         file extension.
@@ -171,7 +185,7 @@ def add_order_from_csv(dc: DataContainer, path: Union[str, TextIO],
 
     if interbatch_order:
         try:
-            order = _convert_to_intebatch_order(order, batch)
+            order = _convert_to_interbatch_order(order, batch)
         except ValueError:
             # order is already unique
             pass
@@ -180,22 +194,22 @@ def add_order_from_csv(dc: DataContainer, path: Union[str, TextIO],
 
 
 def read_data_matrix(path: Union[str, TextIO, BinaryIO],
-                     format: str) -> DataContainer:
+                     data_matrix_format: str) -> DataContainer:
     """
     Read different Data Matrix formats into a DataContainer
     Parameters
     ----------
     path: str
         path to the data matrix file.
-    format: {"progenesis", "pickle"}
+    data_matrix_format: {"progenesis", "pickle"}
 
     Returns
     -------
     DataContainer
     """
-    if format == "progenesis":
+    if data_matrix_format == "progenesis":
         return read_progenesis(path)
-    elif format == "pickle":
+    elif data_matrix_format == "pickle":
         return read_pickle(path)
     else:
         msg = "Invalid Format"
@@ -282,8 +296,8 @@ class MSData:
         mz: Iterable[float]
             Mass-to-charge values to build EICs.
         window: float
-            Mass window in absolute units TODO: merge with functions from
-            formula generator.
+            Mass window in absolute units
+            TODO: add tolerance in different units (Da, ppm).
         start: int, optional
             first scan used to build the chromatogram.
             If None, uses the first scan.
@@ -306,7 +320,7 @@ class MSData:
                   "start": start, "end": end}
         validation.validate(params,
                             validation.make_make_chromatogram_validator(self))
-        #----------------------
+
         rt, spint = lcms.chromatogram(self.reader, mz, window=window,
                                       start=start, end=end,
                                       accumulator=accumulator)
@@ -319,39 +333,36 @@ class MSData:
     def accumulate_spectra(self, start: Optional[int], end: Optional[int],
                            subtract: Optional[Tuple[int, int]] = None,
                            kind: str = "linear", accumulator: str = "sum"
-                           ) -> Tuple[np.ndarray, np.ndarray]:
+                           ) -> lcms.MSSpectrum:
         """
         accumulates a spectra into a single spectrum.
 
         Parameters
         ----------
         start: int
-            start slice for scan accumulation
+            First scan number to accumulate
         end: int
-            end slice for scan accumulation.
+            Last scan number to accumulate.
         kind: str
             kind of interpolator to use with scipy interp1d.
         subtract : None or Tuple[int], left, right
-            Scans regions to substract. `left` must be smaller than `start` and
+            Scans regions to subtract. `left` must be smaller than `start` and
             `right` greater than `end`.
         accumulator : {"sum", "mean"}
 
         Returns
         -------
-        accum_mz: numpy.ndarray
-            array of accumulated mz
-        accum_int: numpy.ndarray
-            array of accumulated intensities.
+        MSSpectrum
         """
-        accum_mz, accum_int = lcms.accumulate_spectra(self.reader, start, end,
-                                                      subtract=subtract,
-                                                      kind=kind,
-                                                      accumulator=accumulator)
-        return accum_mz, accum_int
+        accum_mz, accum_int = \
+            lcms.accumulate_spectra(self.reader, start, end, subtract=subtract,
+                                    kind=kind, accumulator=accumulator)
+        sp = lcms.MSSpectrum(accum_mz, accum_int)
+        return sp
 
     def _is_centroided(self) -> bool:
         """
-        Hack to guess if data is centroided.
+        Hack to guess if the data is centroided.
 
         Returns
         -------
@@ -359,42 +370,8 @@ class MSData:
         """
         mz, spint = self.reader.getSpectrum(0).get_peaks()
         dmz = np.diff(mz)
+        # if the data is in profile mode, mz values are going to be closer.
         return dmz.min() > 0.008
-
-    def find_roi(self, pmin: int, min_int: float, max_gap: int,
-                 tolerance: float, start: Optional[int] = None,
-                 end: Optional[int] = None) -> List[utils.Roi]:
-        """
-        Find region of interests (ROI) in the data.
-        A ROI is built finding close mz values in consecutive scans.
-
-        Parameters
-        ----------
-        pmin: int
-            Minimum lenght of a ROI.
-        min_int: float
-            Minimum intensity of the maximum in the ROI.
-        max_gap: int
-            Maximum number of consecutive points in a ROI where no peak
-            was found.
-        tolerance: float
-            maximum distance to add a point to a ROI.
-        start: int, optional
-            First scan used to search ROI. If None, starts from the first scan.
-        end: int, optional
-            Last scan used to search ROI. If None, end is set to the last scan.
-
-        Notes
-        -----
-
-        The algorithm used to build the ROI is described in [1].
-
-        ..[1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-        504 (2008). https://doi.org/10.1186/1471-2105-9-504
-        """
-        return utils.make_rois(self.reader, pmin, max_gap, min_int,
-                               tolerance, start=start, end=end)
 
     def get_rt(self):
         """
@@ -408,33 +385,85 @@ class MSData:
         rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
         return rt
 
-    def detect_features(self, mode: str = "uplc", subtract_bl: bool = True,
+    def detect_features(self, mode: str = "uplc", ms_mode: str = "qtof",
+                        subtract_bl: bool = True,
                         rt_estimation: str = "weighted",
-                        **cwt_params) -> None:
+                        make_roi_params: Optional[dict] = None,
+                        find_peaks_params: Optional[dict] = None
+                        ) -> Tuple[List[lcms.Roi], pd.DataFrame]:
         """
-        Find peaks with the modified version of the cwt algorithm described in
-        the CentWave algorithm [1]. Peaks are added to the peaks
-        attribute of the Chromatogram object.
+        Find features (mz, rt pairs) in the data using the algorithm described
+        in [1]. MS data must be in centroid mode.
+
+        Feature detection is done in three steps:
+
+            1. Region of interest (ROI) are detected in the data. Each ROI
+            consists in m/z traces where a chromatographic peak may be found.
+            It has the detected mz and intensity associated to each scan and the
+            time where it was detected. This step is done with the make_roi
+            function.
+            2. For each ROI, chromatographic peaks are searched. Each
+            chromatographic peak is a feature. Several descriptors associated to
+            each feature are computed: m/z mean, m/z std, rt, chromatographic
+            peak width, peak intensity and peak area. This step is done with the
+            Roi method find_peaks.
+            3. Features are organized in a DataFrame, where each row is a
+            feature and each column is a feature descriptor.
 
         Parameters
         ----------
-        mode: {"hplc", "uplc"}
-            Set peak picking parameters assuming HPLC or UPLC experimental
-            conditions. HPLC assumes longer columns with particle size greater
-            than 3 micron (min_width is set to 10 seconds and `max_width` is set
-             to 90 seconds). UPLC is for data acquired with short columns with
-            particle size lower than 3 micron (min_width is set to 5 seconds and
-            `max_width` is set to 60 seconds). In both cases snr is set to 10.
-        subtract_bl: bool
+        mode : {"hplc", "uplc"}
+            HPLC assumes longer columns with particle size greater than 3 micron
+            (min_width is set to 10 seconds and `max_width` is set to 90
+            seconds). UPLC is for data acquired with short columns with particle
+            size lower than 3 micron (min_width is set to 5 seconds and
+            `max_width` is set to 60 seconds). Used to generate default
+            `make_roi_params` and `find_peak_params`.
+        ms_mode : {"qtof", "orbitrap"}
+            MS instrument used to generate de data. Used to set mass tolerance
+            params in make_roi_params.
+        subtract_bl : bool
             If True subtracts the estimated baseline from the intensity and
             area.
-        rt_estimation: {"weighted", "apex"}
+        rt_estimation : {"weighted", "apex"}
             if "weighted", the peak retention time is computed as the weighted
             mean of rt in the extension of the peak. If "apex", rt is
             simply the value obtained after peak picking.
-        cwt_params:
-            key-value parameters to overwrite the defaults in the pick_cwt
-            function from the peak module.
+        make_roi_params : dict, optional
+            Parameters to pass to the make_roi_function. Overwrites default
+            parameters. See function function documentation for a detailed
+            description of each parameter.
+        find_peaks_params : dict, optional
+            Parameters to pass to the find_peaks_function. Overwrites default
+            parameters. See function function documentation for a detailed
+            description of each parameter.
+
+        Returns
+        -------
+        roi_list : list[Roi]
+            A list with the detected regions of interest.
+        peak_data : DataFrame
+            A DataFrame with features detected and their associated descriptors.
+            Each feature is a row, each descriptor is a column. The descriptors
+            are:
+            - mz: Mean m/z of the feature
+            - mz std: standard deviation of the m/z. Computed as the standard
+            deviation of the m/z in the region where the peak was detected.
+            - rt: retention time of the feature, computed as the weighted mean
+             of the retention time, using as weights the intensity at each time.
+            - width: Chromatographic peak width.
+            - intensity: Maximum intensity of the chromatographic peak.
+            - area: Area of the chromatographic peak.
+            Also, two additional columns have information to search each feature
+            in its correspondent Roi:
+            - Roi index: index in `roi_list` where the feature was detected.
+            - peak_index: index of the peaks attribute of each Roi associated
+            to the feature.
+
+        See Also
+        --------
+        lcms.make_roi
+        lcms.Roi
 
         References
         ----------
@@ -442,19 +471,18 @@ class MSData:
         feature detection for high resolution LC/MS. BMC Bioinformatics 9,
         504 (2008). https://doi.org/10.1186/1471-2105-9-504
         """
+        # TODO: subtract_bl, rt_estimation, should be moved to cwt params.
 
-        features = list()
-        for chrom in self.chromatograms:
-            chrom.find_peaks(mode, **cwt_params)
-            peaks_params = chrom.get_peak_params(subtract_bl=subtract_bl,
-                                                 rt_estimation=rt_estimation)
-            features.append(peaks_params)
+        # step 1: detect ROI
+        tmp_roi_params = lcms.get_make_roi_params(mode, ms_mode)
+        if make_roi_params is not None:
+            tmp_roi_params.update(make_roi_params)
+        make_roi_params = tmp_roi_params
+        roi_list = lcms.make_roi(self.reader, **make_roi_params)
 
-        # organize features into a DataFrame
-        roi_ind = [np.ones(y.shape[0]) * x for x, y in enumerate(features)]
-        roi_ind = np.hstack(roi_ind)
-        features = pd.concat(features)
-        features["roi"] = roi_ind.astype(int)
-        features = features.reset_index()
-        features.rename(columns={"index": "peak"}, inplace=True)
-        self.features = features
+        # step 2 and 3: find peaks and make DataFrame
+        peak_data = lcms.detect_roi_peaks(roi_list, mode=mode,
+                                          subtract_bl=subtract_bl,
+                                          rt_estimation=rt_estimation,
+                                          cwt_params=find_peaks_params)
+        return roi_list, peak_data
