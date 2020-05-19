@@ -29,11 +29,12 @@ constructor:
 
 from . import utils
 from . import validation
+from . import fileio
 from ._names import *
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
-from typing import List, Optional, Iterable, Union
+from typing import List, Optional, Iterable, Union, BinaryIO, TextIO
 import bokeh.plotting
 import pickle
 from bokeh.palettes import Spectral
@@ -43,13 +44,20 @@ from bokeh.models import LabelSet
 
 
 # TODO: remove data_path attribute. check with webapp example.
+# TODO: add order_from_csv file method.
+# TODO: maybe its a good idea to combine export methods into and ExportMethods
+#       object
+# TODO: export datacontainer to metaboanalyst format.
+
 
 class DataContainer(object):
     """
     A container object to store Metabolomics Data.
 
     The data is separated in three attributes: data_matrix, sample_metadata and
-    feature_metadata. Each one is a pandas DataFrame.
+    feature_metadata. Each one is a pandas DataFrame. DataContainers can be
+    created, apart from using the constructor, importing data in common formats
+    (such as: XCMS, MZMmine2, Progenesis, etc..) using the
 
     Attributes
     ---------
@@ -87,8 +95,8 @@ class DataContainer(object):
     samples/features, transformed values.
     is_valid_class_name(value) : checks if a class is present in the
     DataContainer
-    diagnose() : creates a dictionary with information about the information in
-    the DataContainer. Used by Processor objects as a validity check.
+    diagnose() : creates a dictionary with information about the status of the
+    DataContainer. Used by Processor objects as a validity check.
     select_features(mz, rt, mz_tol=0.01, rt_tol=5) : Search features within
     a m/z and rt tolerance.
     set_default_order() : Assigns a default run order of the samples assuming
@@ -96,11 +104,14 @@ class DataContainer(object):
     sort(field, axis) : sort features/samples using metadata information.
     save(filename) : save the DataContainer as a pickle.
 
+
     See Also
     --------
-    read_pickle: loads a DataContainer created with save method
-    read_progenesis: read a Progenesis csv file into a DataContainer.
-
+    from_progenesis : static method used to create a DataContainer from a
+    Progenesis csv file.
+    from_pickle : static method used to load a DataContainer from a pickle.
+    read_pickle
+    read_progenesis
     """
 
     def __init__(self, data_matrix: pd.DataFrame,
@@ -455,6 +466,50 @@ class DataContainer(object):
         """
         with open(filename, "wb") as fin:
             pickle.dump(self, fin)
+
+    def to_csv(self, filename: str) -> None:
+        """
+        Save the DataContainer into a csv file.
+
+        Parameters
+        ----------
+        filename: str
+        """
+        df = pd.concat([self.feature_metadata.T, self.data_matrix], axis=0)
+        df = pd.concat([self.sample_metadata, df], axis=1)
+        df.to_csv(filename)
+
+    @staticmethod
+    def from_progenesis(path: Union[str, TextIO]):
+        """
+        Read a progenesis file into a DataContainer
+
+        Parameters
+        ----------
+        path : str or file
+            path to an Progenesis csv output or file object
+
+        Returns
+        -------
+        dc = DataContainer
+        """
+        return fileio.read_progenesis(path)
+
+    @staticmethod
+    def from_pickle(path: Union[str, BinaryIO]):
+        """
+        read a DataContainer stored as a pickle
+
+        Parameters
+        ----------
+        path: str or file
+            path to read DataContainer
+
+        Returns
+        -------
+        DataContainer
+        """
+        return fileio.read_pickle(path)
 
 
 class _MetricMethods:
