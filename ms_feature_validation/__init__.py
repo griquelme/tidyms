@@ -17,6 +17,7 @@ from . import utils
 from . import peaks
 from . import filter
 from . import lcms
-from . import metabolomics
+from .metabolomics import *
 from .data_container import DataContainer
 from .fileio import MSData
+from .lcms import Chromatogram, MSSpectrum
