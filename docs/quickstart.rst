@@ -144,3 +144,75 @@ If you want to create an average spectrum from a set of consecutive scans, the
 
 Feature detection
 -----------------
+
+Feature detection is the first step performed in untargeted metabolomics to
+convert raw data into a data matrix. In LC-MS based metabolomics, a feature
+is usually defined as a chromatographic peak. Feature detection in LC-MS is then
+then process of finding chromatographic peaks in a sample. In order to perform
+feature detection, an implementation of the centWave algorithm [1]_ is used.
+This algorithm detects chromatographic peaks in **samples in centroid mode** in
+two steps:
+
+1.  Region Of Interest (ROI) are searched in the whole experiment. A ROI is a
+    time window in an experiment where a m/z trace is found. ROIs are built
+    connecting m/z values across scans within a given tolerance.
+2.  Chromatographic peaks are detected on each ROI. A feature table is built
+    with mean m/z, m/z standard deviation, mean rt, peak intensity, peak area
+    and peak width.
+
+feature detection is available through the
+:meth:`ms_feature_validation.MSData.detect_features` method which returns a ROI
+list and the feature table.
+
+.. code-block:: python
+
+    roi, feature_data = ms_data.detect_features()
+
+Default values for the method are set using the instrument and separation
+attributes. Several parameters can be set, from peak filter criteria, to
+estimators for each peak parameter. For a detailed explanation on each
+parameter see the :doc:`api`.
+
+To perform feature detection on several samples, you can use the
+:py:function:`ms_feature_validation.detect_features` function.
+
+.. code-block:: python
+
+    import os
+    # creates a list of path to each data file to analyze
+    path = "data"
+    file_list = [os.path.join(path, x) for x in os.listdir(path)]
+    roi, feature_data = mfv.detect_features(data_path, separation="uplc",
+                                            instrument="qtof")
+
+Feature correspondence
+----------------------
+
+**This algorithm wasn't thoroughly tested on untargeted data set and should be
+used with caution**
+
+Before performing any kind of statistical comparison between samples, features
+in the different samples must be matched. This process is known as feature
+correspondence and can be quite complex due to the difference in the feature
+descriptors obtained on each sample [2]_. We use a cluster based approach
+to perform feature correspondence.
+
+.. code-block:: python
+
+    mz_tolerance = 0.005
+    rt_tolerance = 5
+    cluster = mfv.feature_correspondence(feature_data, mz_tolerance,
+                                         rt_tolerance)
+
+The  cluster assigns an unique value to features that are matched across
+samples.
+
+References
+----------
+
+..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+    feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+    504 (2008). https://doi.org/10.1186/1471-2105-9-504
+..  [2] Smith, R., Ventura, D., Prince, J.T., LC-MS alignment in theory and
+    practice: a comprehensive algorithmic review, Briefings in Bioinformatics
+    16, Issue 1, January 2015, Pages 104–117, https://doi.org/10.1093/bib/bbt080

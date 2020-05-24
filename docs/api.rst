@@ -15,6 +15,7 @@ Tools for working with raw data
     ms_feature_validation.MSSpectrum
     ms_feature_validation.detect_features
     ms_feature_validation.feature_correspondence
+    ms_feature_validation.make_data_container
 
 Tools for working with processed data
 -------------------------------------
