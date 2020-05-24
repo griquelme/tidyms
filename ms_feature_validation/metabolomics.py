@@ -179,7 +179,7 @@ def feature_correspondence(feature_data: pd.DataFrame, mz_tolerance: float,
         fraction greater than `min_fraction`. Using :math:`n_{species}`, Each
         cluster is fit to a gaussian mixture model. Once again, because
         dispersion in rt and m/z is orthogonal, we used diagonal covariances
-        matrix in the GMM. After this step, for each cluster, subclusters
+        matrices in the GMM. After this step, for each cluster, subclusters
         may be generated if :math:`n_{species}` is greater than one.
     3.  Each subcluster is analyzed then to remove repeated features. To
         remove repeated features the log-likelihood is evaluated for
@@ -224,7 +224,7 @@ def feature_correspondence(feature_data: pd.DataFrame, mz_tolerance: float,
                                       min_likelihood=min_likelihood)
         cluster[subcluster.index] = subcluster
 
-    # map cluster to number again
+    # map cluster to numbers again
     cluster_value = np.sort(cluster.unique())
     n_cluster = cluster_value.size
     # set a feature code for each feature
