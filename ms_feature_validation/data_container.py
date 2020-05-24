@@ -57,10 +57,10 @@ class DataContainer(object):
     The data is separated in three attributes: data_matrix, sample_metadata and
     feature_metadata. Each one is a pandas DataFrame. DataContainers can be
     created, apart from using the constructor, importing data in common formats
-    (such as: XCMS, MZMmine2, Progenesis, etc..) using the
+    (such as: XCMS, MZMmine2, Progenesis, etc..) static methods.
 
     Attributes
-    ---------
+    ----------
     data_matrix : DataFrame.
         feature values for each sample. Data is organized in a "tidy" way:
         each row is an observation, each column is a feature. dtype must
@@ -108,7 +108,7 @@ class DataContainer(object):
     See Also
     --------
     from_progenesis : static method used to create a DataContainer from a
-    Progenesis csv file.
+        Progenesis csv file.
     from_pickle : static method used to load a DataContainer from a pickle.
     read_pickle
     read_progenesis

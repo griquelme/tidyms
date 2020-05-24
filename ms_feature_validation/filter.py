@@ -1,5 +1,49 @@
 """
-Filter objects to curate data
+Tools to filter and correct DataContainers.
+
+A Filter removes features or samples from a DataContainer according to some
+criteria. Correctors perform transformations on the data matrix. Each filter and
+corrector has a default behaviour based on recommendations by Dunn and
+collaborators [1]_, [2]_. Operations on DataContainers are made in place. To
+generate corrections and filters, the default corrections are generated using
+information in the DataContainer mapping.
+
+For example, The BlankCorrector generates and estimation of the blank
+contribution to the signal using sample classes that are mapped from
+the "blank" sample type. See each Processor object for detailed information.
+Processor and Pipeline objects are used in a similar way:
+
+    1.  Create a filter or Pipeline instance.
+    2.  Use the process method on a DataContainer to process your data.
+
+Objects
+-------
+Processor : Abstract object used to create custom Filters and correctors.
+DuplicateMerger : Merge duplicate samples.
+ClassRemover : Remove samples with a given class name.
+BlankCorrector : corrects features contribution originated from sample prep.
+BatchCorrector : Removes time dependent bias in features
+PrevalenceFilter : Remove features with low detection rate.
+VariationFilter : Remove features with high coefficient of variation.
+DRatioFilter : Removes features using the D-Ratio.
+Pipeline : Combines Processors to apply them simultaneously.
+
+Exceptions
+----------
+MissingMappingInformation : Error raised when there are no sample classes \
+                            assigned to sample type.
+MissingValueError : Error raised when the data matrix has missing values.
+
+References
+----------
+..  [1] W. B. Dunn *et al*, "Procedures for large-scale metabolic profiling of
+    serum and plasma using gas chromatography and liquid chromatography coupled
+    to mass spectrometry", Nature Protocols volume 6, pages 1060–1083 (2011).
+..  [2] D. Broadhurst *et al*, "Guidelines and considerations for the use
+    of system suitability and quality control samples in mass spectrometry
+    assays applied in untargeted clinical metabolomic studies",
+    Metabolomics (2018) 14:72.
+
 """
 
 
@@ -8,12 +52,14 @@ from . import data_container
 from ._names import *
 from ._filter_functions import *
 from . import validation
-from .exceptions import *
 import yaml
 import os.path
 import pandas as pd
 from typing import Optional, List, Union, Callable
 Number = Union[float, int]
+
+# TODO: replace Processor with Filter and Corrector objects to create specific
+#  correctors and filters.
 
 
 class Reporter(object):
@@ -104,6 +150,10 @@ class Processor(Reporter):
         dictionary with the same keys as the obtained from the diagnose method
         from a DataContainer. If any value is different compared to the values
         from diagnose an error is raised.
+
+    Methods
+    -------
+    process(data) : Applies a filter/correction to a DataContainer
     """
     def __init__(self, mode: str, axis: Optional[str] = None,
                  verbose: bool = False, default_process: Optional[str] = None,
@@ -148,7 +198,7 @@ class Processor(Reporter):
                     msg = "classes listed in {} aren't present " \
                           "in the DataContainer"
                     msg = msg.format(class_type)
-                    raise data_container.InvalidClassName(msg)
+                    raise data_container.ClassNameError(msg)
 
         for requirement in self._requirements:
             if self._requirements[requirement] != dc_status[requirement]:
@@ -235,12 +285,13 @@ def register(f):
 
 
 @register
-class DuplicateAverager(Processor):
+class DuplicateMerger(Processor):
     """
-    A filter that averages duplicates
+    Merge sample replicates.
+    TODO: add merger parameter, classes to merge.
     """
     def __init__(self, process_classes: Optional[List[str]] = None):
-        super(DuplicateAverager, self).__init__(axis=None, mode="transform")
+        super(DuplicateMerger, self).__init__(axis=None, mode="transform")
         self.params["process_classes"] = process_classes
 
     def func(self, dc: DataContainer):
@@ -274,7 +325,7 @@ class ClassRemover(Processor):
                 try:
                     idx = dc.mapping[sample_type].index(c)
                     del dc.mapping[sample_type][idx]
-                except:
+                except (ValueError, KeyError):
                     pass
         return remove_samples
 
@@ -282,36 +333,44 @@ class ClassRemover(Processor):
 @register
 class BlankCorrector(Processor):
     """
-    Corrects values using blank information
+    Applies a blank correction to a DataContainer. Subclassed from Processor.
     """
     def __init__(self, corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
                  mode: Union[str, Callable] = "lod", factor: float = 1,
                  verbose=False):
         """
-        Correct sample values using blank samples.
+        Constructor for the BlankCorrector.
 
         Parameters
         ----------
         corrector_classes: list[str], optional
-            Classes used to generate the blank correction. If None, uses blank
-            samples defined on the DataContainer mapping attribute.
+            Classes used to generate the blank correction. If None, uses the
+            value from blank in the DataContainer mapping attribute.
         process_classes:  list[str], optional
-            Classes to be corrected. If None, uses all classes listed on the
+            Classes to be corrected. If None, uses the value from sample in the
             DataContainer mapping attribute.
         factor: float
             factor used to convert values to zero (see notes)
         mode: {"mean", "max", "lod", "loq"}, function.
-            Function used to generate the blank correction.
+            Function used to generate the blank correction. If `mode` is mean,
+            the correction is generated as the mean of all blank samples. If
+            max, the correction is generated as the maximum value for each
+            feature in all blank samples. If `mode` is lod, the correction is
+            the mean plus three standard deviations. If `mode` is loq, the
+            correction is the mean plus ten times the standard deviation.
         verbose: bool
+            Shows a message with information after the correction has been
+            applied.
 
         Notes
         -----
-
         Blank correction is applied for each feature in the following way:
 
         .. math:: X_{corrected} = 0 if X < factor * mode(X_{blank})
         .. math:: X_{corrected} = X - mode(X_{blank}) else
+
+
         """
         super(BlankCorrector, self).__init__(axis=None, mode="transform",
                                              verbose=verbose,
@@ -335,31 +394,39 @@ class BlankCorrector(Processor):
 @register
 class PrevalenceFilter(Processor):
     """
-    Remove Features with a low number of occurrences. The prevalence is defined
-    as the fraction of samples where the signal is observed.
+    Remove Features with with prevalence outside of the specified bounds.
+    Subclassed from Processor.
 
-    Parameters
-    ----------
-    process_classes: List[str], optional
-        Classes used to compute prevalence. If None, classes are obtained from
-        sample classes in the DataContainer mapping.
-    lb: float
-        Lower bound of prevalence.
-    ub: float
-        Upper bound of prevalence.
-    threshold: float
-        Minimum intensity to consider a feature as detected.
-    intraclass: bool
-        Whether to evaluate a global prevalence or a per class prevalence.
-        If intraclass is True, prevalence is computed for each class and
-        features in which the prevalence is outside the selected bounds for all
-        classes are removed.
-
+    The prevalence is defined as the fraction of samples where a given feature
+    has been detected.
     """
     def __init__(self, process_classes: Optional[List[str]] = None,
                  lb: Number = 0.5, ub: Number = 1,
                  intraclass: bool = True, verbose: bool = False,
                  threshold: Number = 0):
+        """
+        Constructor of the PrevalenceFilter.
+
+        Parameters
+        ----------
+        process_classes : List[str], optional
+            Classes used to compute prevalence. If None, classes are obtained
+            from sample classes in the DataContainer mapping.
+        lb : float
+            Lower bound of prevalence.
+        ub : float
+            Upper bound of prevalence.
+        threshold : float
+            Minimum intensity to consider a feature as detected.
+        intraclass : bool
+            Whether to evaluate a global prevalence or a per class prevalence.
+            If intraclass is True, prevalence is computed for each class and
+            features in which the prevalence is outside the selected bounds for
+            all classes are removed.
+        verbose : bool
+            Shows a message with information after the correction has been
+            applied.
+        """
         super(PrevalenceFilter, self).__init__(axis="features", mode="filter",
                                                verbose=verbose,
                                                requirements={"empty": False,
@@ -386,28 +453,41 @@ class PrevalenceFilter(Processor):
 @register
 class DRatioFilter(Processor):
     """
-    Remove Features with a D-ratio value higher than a predefined threshold.
+    Remove Features with a D-ratio [1] outside of the specified bounds.
 
-    Parameters
+    References
     ----------
-    lb: float
-        Lower bound of D-ratio. Should be zero
-    ub: float
-        Upper bound of D-ratio. Usually 50% or lower, the lower the better.
-    robust: bool
-        if True uses the MAD to compute the d-ratio. Else uses the standard
-        deviation.
+    .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use
+        of system suitability and quality control samples in mass spectrometry
+        assays applied in untargeted clinical metabolomic studies",
+        Metabolomics (2018) 14:72.
     """
 
     def __init__(self, lb=0, ub=0.5, robust=False,
                  verbose=False):
-        super(DRatioFilter, self).__init__(axis="features", mode="filter",
-                                           verbose=verbose,
-                                           requirements={"empty": False,
-                                                         "missing": False,
-                                                         _qc_type: True,
-                                                         _sample_type: True}
-                                           )
+        """
+        Constructor of the DRatioFilter. To use this filter the qc sample type
+        and the study sample type must been specified in the DataContainer
+        mapping.
+
+        Parameters
+        ----------
+        lb: float
+            Lower bound of D-ratio. Should be zero
+        ub: float
+            Upper bound of D-ratio. Usually 50% or lower, the lower the better.
+        robust: bool
+        if True uses the MAD to compute the d-ratio. Else uses the standard
+        deviation.
+        verbose : bool
+            Shows a message with information after the correction has been
+            applied.
+        """
+        (super(DRatioFilter, self)
+         .__init__(axis="features", mode="filter", verbose=verbose,
+                   requirements={"empty": False, "missing": False,
+                                 _qc_type: True, _sample_type: True})
+         )
         self.name = "D-Ratio Filter"
         self.params["lb"] = lb
         self.params["ub"] = ub
@@ -424,15 +504,40 @@ class DRatioFilter(Processor):
 @register
 class VariationFilter(Processor):
     """
-    Remove samples with high coefficient of variation.
+    Remove samples with a high coefficient of variation.
     """
     def __init__(self, lb=0, ub=0.25, process_classes=None, robust=False,
                  intraclass=True, verbose=False):
-        super(VariationFilter, self).__init__(axis="features", mode="filter",
-                                              verbose=verbose,
-                                              requirements={"empty": False,
-                                                            "missing": False}
-                                              )
+        """
+        Constructor of the VariationFilter.
+
+        Parameters
+        ----------
+        lb : float
+            Lower bound for the coefficient of variation. Must be a positive
+            number between zero and one and lower or equal than `ub`.
+        ub : float
+            Upper bound for the coefficient of variation. Must be a positive
+            number between zero and one and greater or equal than `lb`.
+        process_classes: List[str], optional
+            Classes used to evaluate the coefficient of variation. If None,
+            list of classes is taken from the qc sample type from the
+            DataContainer mapping attribute.
+        robust: bool
+            If false uses the mean and standard deviation to compute the cv.
+            Else, the cv is estimated using the MAD and the median of the
+            feature, assuming a normal distribution.
+        intraclass: bool
+            If True, the cv is computed for each class in `process_classes` and
+            then the maximum value is compared against `lb` and `ub`. Else
+            a global cv is computed for all classes in `process_classes`.
+        verbose: bool
+            If True, prints a message
+        """
+        (super(VariationFilter, self)
+         .__init__(axis="features", mode="filter", verbose=verbose,
+                   requirements={"empty": False, "missing": False})
+         )
         self.name = "Variation Filter"
         self.params["lb"] = lb
         self.params["ub"] = ub
@@ -453,7 +558,7 @@ class VariationFilter(Processor):
         return get_outside_bounds_index(variation, lb, ub)
 
 
-class BatchSchemeChecker(Processor):
+class _BatchSchemeChecker(Processor):
     """
     Checks that process samples in each batch are surrounded by corrector
     samples. Batches that do not meet te requirements are removed.
@@ -487,14 +592,14 @@ class BatchSchemeChecker(Processor):
     def __init__(self, n_min: int = 4, verbose: bool = False,
                  process_classes: Optional[List[str]] = None,
                  corrector_classes: Optional[List[str]] = None):
-        super(BatchSchemeChecker, self).__init__(axis="samples",
-                                                 mode="filter",
-                                                 verbose=verbose,
-                                                 requirements={"empty": False,
+        super(_BatchSchemeChecker, self).__init__(axis="samples",
+                                                  mode="filter",
+                                                  verbose=verbose,
+                                                  requirements={"empty": False,
                                                                "missing": False,
                                                                "order": True,
                                                                "batch": True}
-                                                 )
+                                                  )
         self.name = "Batch Scheme Checker"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
@@ -537,7 +642,7 @@ class BatchSchemeChecker(Processor):
         return invalid_samples
 
 
-class BatchPrevalenceChecker(Processor):
+class _BatchPrevalenceChecker(Processor):
     """
     Check prevalence of Corrector samples. To be used as a part of the batch
     correction pipeline.
@@ -567,15 +672,15 @@ class BatchPrevalenceChecker(Processor):
                  process_classes: Optional[List[str]] = None,
                  corrector_classes: Optional[List[str]] = None,
                  threshold: float = 0.0):
-        super(BatchPrevalenceChecker, self).__init__(axis="features",
-                                                     mode="filter",
-                                                     verbose=verbose,
-                                                     requirements={
+        super(_BatchPrevalenceChecker, self).__init__(axis="features",
+                                                      mode="filter",
+                                                      verbose=verbose,
+                                                      requirements={
                                                          "empty": False,
                                                          "missing": False,
                                                          "order": True,
                                                          "batch": True}
-                                                     )
+                                                      )
         self.name = "Batch Prevalence Checker"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
@@ -597,7 +702,7 @@ class BatchPrevalenceChecker(Processor):
         return res
 
 
-class BatchCorrectorProcessor(Processor):
+class _BatchCorrectorProcessor(Processor):
     """
     Corrects instrumental drift between in a batch. Part of the batch
     corrector pipeline
@@ -609,15 +714,15 @@ class BatchCorrectorProcessor(Processor):
                  n_qc: Optional[int] = None,
                  verbose: bool = False):
 
-        super(BatchCorrectorProcessor, self).__init__(axis=None,
-                                                      mode="transform",
-                                                      verbose=verbose,
-                                                      requirements={
+        super(_BatchCorrectorProcessor, self).__init__(axis=None,
+                                                       mode="transform",
+                                                       verbose=verbose,
+                                                       requirements={
                                                           "empty": False,
                                                           "missing": False,
                                                           "order": True,
                                                           "batch": True}
-                                                      )
+                                                       )
         self.name = "Batch Corrector"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
@@ -640,8 +745,34 @@ class BatchCorrector(Pipeline):
     Correct systematic bias along samples due to variation in instrumental
     response [1, 2].
 
-    Attributes
+    Notes
+    -----
+    The correction is applied as described by Broadhurst in [2]. Using QC
+    samples a correction is generated for each feature in the following way:
+    The signal of a Quality control can be described in terms of three
+    components: a mean value, a systematic bias f and error.
+
+    .. math::
+       m_{i} = \bar{m_{i}} + f(t) + \epsilon
+
+    f(t) is estimated after mean subtraction using Locally weighted scatterplot
+    smoothing (LOESS). The optimal fraction of samples for each local
+    regression is found using LOOCV.
+
+    Mean centering is performed subtracting a batch mean and adding a grand
+    mean.
+
+    References
     ----------
+    .. [1] W B Dunn *et al*, "Procedures for large-scale metabolic profiling of
+        serum and plasma using gas chromatography and liquid chromatography
+        coupled to mass spectrometry", Nature Protocols volume 6, pages
+        1060–1083 (2011).
+    .. [2] D Broadhurst *et al*, "Guidelines and considerations for the use of
+        system suitability and quality control samples in mass spectrometry
+        assays applied in untargeted clinical metabolomic studies.",
+        Metabolomics, 2018;14(6):72. doi: 10.1007/s11306-018-1367-3
+
     """
     def __init__(self, corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
@@ -649,56 +780,56 @@ class BatchCorrector(Pipeline):
                  interpolator: str = "splines", threshold: float = 0,
                  verbose: bool = False,
                  n_qc: Optional[int] = None):
-        checker = BatchSchemeChecker(n_min=n_min, verbose=verbose,
-                                     process_classes=process_classes,
-                                     corrector_classes=corrector_classes)
-        prevalence = BatchPrevalenceChecker(n_min=n_min, verbose=verbose,
-                                            process_classes=process_classes,
-                                            corrector_classes=corrector_classes,
-                                            threshold=threshold)
-        corrector = BatchCorrectorProcessor(corrector_classes=corrector_classes,
-                                            process_classes=process_classes,
-                                            frac=frac,
-                                            interpolator=interpolator,
-                                            verbose=verbose,
-                                            n_qc=n_qc)
+        checker = _BatchSchemeChecker(n_min=n_min, verbose=verbose,
+                                      process_classes=process_classes,
+                                      corrector_classes=corrector_classes)
+        prevalence = _BatchPrevalenceChecker(n_min=n_min, verbose=verbose,
+                                             process_classes=process_classes,
+                                             corrector_classes=corrector_classes,
+                                             threshold=threshold)
+        corrector = _BatchCorrectorProcessor(corrector_classes=corrector_classes,
+                                             process_classes=process_classes,
+                                             frac=frac,
+                                             interpolator=interpolator,
+                                             verbose=verbose,
+                                             n_qc=n_qc)
         pipeline = [checker, prevalence, corrector]
         super(BatchCorrector, self).__init__(pipeline, verbose=verbose)
 
 
-def merge_data_containers(dcs):
-    """
-    Applies concat on `data_matrix`, `sample_information` and
-    `feature_definitions`.
-    Parameters
-    ----------
-    dcs : Iterable[DataContainer]
+# def merge_data_containers(dcs):
+#     """
+#     Applies concat on `data_matrix`, `sample_information` and
+#     `feature_definitions`.
+#     Parameters
+#     ----------
+#     dcs : Iterable[DataContainer]
+#
+#     Returns
+#     -------
+#     merged_dc : DataContainer
+#     """
+#     dms = [x.data_matrix for x in dcs]
+#     sis = [x.sample_metadata for x in dcs]
+#     fds = [x.feature_metadata for x in dcs]
+#     dm = pd.concat(dms)
+#     si = pd.concat(sis)
+#     fd = pd.concat(fds)
+#     return DataContainer(dm, fd, si)
 
-    Returns
-    -------
-    merged_dc : DataContainer
-    """
-    dms = [x.data_matrix for x in dcs]
-    sis = [x.sample_metadata for x in dcs]
-    fds = [x.feature_metadata for x in dcs]
-    dm = pd.concat(dms)
-    si = pd.concat(sis)
-    fd = pd.concat(fds)
-    return DataContainer(dm, fd, si)
 
-
-def data_container_from_excel(excel_file: str) -> DataContainer:
-    data_matrix = pd.read_excel(excel_file,
-                                sheet_name="data_matrix",
-                                index_col="sample")
-    sample_metadata = pd.read_excel(excel_file,
-                                    sheet_name="sample_metadata",
-                                    index_col="sample")
-    feature_metadata = pd.read_excel(excel_file,
-                                     sheet_name="feature_metadata",
-                                     index_col="feature")
-    dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
-    return dc
+# def data_container_from_excel(excel_file: str) -> DataContainer:
+#     data_matrix = pd.read_excel(excel_file,
+#                                 sheet_name="data_matrix",
+#                                 index_col="sample")
+#     sample_metadata = pd.read_excel(excel_file,
+#                                     sheet_name="sample_metadata",
+#                                     index_col="sample")
+#     feature_metadata = pd.read_excel(excel_file,
+#                                      sheet_name="feature_metadata",
+#                                      index_col="feature")
+#     dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
+#     return dc
 
 
 def read_config(path):
@@ -743,6 +874,16 @@ def _validate_pipeline(t):
             msg = ("elements of the Pipeline must be",
                    "instances of Filter, DataCorrector or another Pipeline.")
             raise TypeError(msg)
+
+
+class MissingMappingInformation(ValueError):
+    """error raised when an empty sample type is used from a mapping"""
+    pass
+
+
+class MissingValueError(ValueError):
+    """error raise when a DataContainer's data matrix has missing values"""
+    pass
 
 
 _requirements_error = {"empty": data_container.EmptyDataContainerError,
