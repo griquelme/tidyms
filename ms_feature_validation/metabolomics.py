@@ -20,8 +20,8 @@ from sklearn import mixture
 from typing import Optional, Tuple, List, Dict
 
 
-def detect_features(path_list: List[str], mode: str = "uplc",
-                    ms_mode: str = "qtof", roi_params: Optional[dict] = None,
+def detect_features(path_list: List[str], separation: str = "uplc",
+                    instrument: str = "qtof", roi_params: Optional[dict] = None,
                     cwt_params: Optional[dict] = None, verbose: bool = True
                     ) -> Tuple[Dict[str, Roi], pd.DataFrame]:
     """
@@ -35,18 +35,16 @@ def detect_features(path_list: List[str], mode: str = "uplc",
     ----------
     path_list: List[str]
         List of path to centroided mzML files.
-    mode: {"uplc", "hplc"}
-        Analytical platform used for separation. Used to set default values
+    separation: {"uplc", "hplc"}
+        Analytical platform used for separation. Used to set default the values
         of `cwt_params` and `roi_params`.
-    ms_mode: {"qtof". "orbitrap"}
+    instrument: {"qtof". "orbitrap"}
         MS instrument used for data acquisition. Used to set default values
-        of `cwt_params` and `roi_params`.
+        of `roi_params`.
     roi_params: dict, optional
         Set roi detection parameters in MSData detect_features method.
-        Overwrites defaults values set by `mode` and `ms_mode`.
     cwt_params: dict, optional
         Set peak detection parameters in MSData detect_features method.
-        Overwrites defaults values set by `mode` and `ms_mode`.
     verbose: bool
         If True prints a message each time a sample is analyzed.
 
@@ -87,8 +85,7 @@ def detect_features(path_list: List[str], mode: str = "uplc",
 
     See Also
     --------
-    MSData
-    get_make_roi_params
+    MSData : Object used to analyze each sample.
 
     References
     ----------
@@ -110,10 +107,10 @@ def detect_features(path_list: List[str], mode: str = "uplc",
             msg = "Processing sample {} ({}/{})."
             msg = msg.format(sample_name, k + 1, n_samples)
             print(msg)
-        ms_data = MSData(sample_path)
-        roi, df = ms_data.detect_features(mode, ms_mode,
-                                          make_roi_params=roi_params,
-                                          find_peaks_params=cwt_params)
+        ms_data = MSData(sample_path, ms_mode="centroid",
+                         instrument=instrument, separation=separation)
+        roi, df = ms_data.detect_features(roi_params=roi_params,
+                                          peaks_params=cwt_params)
         df["sample"] = sample_name
         roi_mapping[sample_name] = roi
         ft_df_list.append(df)
@@ -492,8 +489,8 @@ def _search_missing_features(cluster: pd.Series, sample_data: pd.Series,
 
 
 def _process_cluster(df: pd.DataFrame, noise: pd.DataFrame, cluster: pd.Series,
-                     sample_names: list, cluster_name, min_likelihood: float,
-                     n_species: int):
+                     sample_names: list, cluster_name: str,
+                     min_likelihood: float, n_species: int):
     """
     Process each cluster obtained from DBSCAN. Auxiliary function to
     `feature_correpondence`.

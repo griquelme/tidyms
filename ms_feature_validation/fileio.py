@@ -238,11 +238,11 @@ class MSData:
 
     Methods
     -------
-    make_tic(mode) : Computes the total ion chromatogram.
-    make_chromatograms(mz) : Computes extracted ion chromatograms.
     accumulate_spectra(start, end) : Merge several scans into one.
+    detect_features() : Detect features in the data.
     get_rt() : returns the retention time vector of the experiment.
-
+    make_chromatograms(mz) : Computes extracted ion chromatograms.
+    make_tic(mode) : Computes the total ion chromatogram.
 
     """
 
@@ -271,9 +271,20 @@ class MSData:
         self.reader = lcms.reader(path, on_disc=True)
         self.ms_mode = ms_mode
         if separation is None:
-            self.separation_technique = "uplc"
+            self.separation = "uplc"
+        elif separation in ["uplc", "hplc"]:
+            self.separation = separation
+        else:
+            msg = "`separation` must be uplc or hplc"
+            raise ValueError(msg)
+            # TODO : the option None should be possible for DI experiments.
         if instrument is None:
-            self.ms_instrument = "qtof"
+            self.instrument = "qtof"
+        elif instrument in ["qtof", "orbitrap"]:
+            self.instrument = instrument
+        else:
+            msg = "`instrument` must be qtof or orbitrap"
+            raise ValueError(msg)
 
     @property
     def ms_mode(self) -> str:
@@ -337,7 +348,6 @@ class MSData:
             Mass-to-charge values to build EICs.
         window: float
             Mass window in absolute units
-            TODO: add tolerance in different units (Da, ppm).
         start: int, optional
             first scan used to build the chromatogram.
             If None, uses the first scan.
@@ -352,6 +362,7 @@ class MSData:
         chromatograms : list[Chromatograms]
 
         """
+        # TODO: add tolerance in different units (Da, ppm).
         # parameter validation
         params = {"window": window, "accumulator": accumulator,
                   "start": start, "end": end}
@@ -391,6 +402,8 @@ class MSData:
         -------
         MSSpectrum
         """
+        # TODO: accumulate spectra needs to have different behaviours for
+        #   centroid and profile data.
         accum_mz, accum_int = \
             lcms.accumulate_spectra(self.reader, start, end, subtract=subtract,
                                     kind=kind, accumulator=accumulator)
@@ -440,41 +453,17 @@ class MSData:
         rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
         return rt
 
-    def detect_features(self, mode: str = "uplc", ms_mode: str = "qtof",
-                        subtract_bl: bool = True,
+    def detect_features(self, subtract_bl: bool = True,
                         rt_estimation: str = "weighted",
-                        make_roi_params: Optional[dict] = None,
-                        find_peaks_params: Optional[dict] = None
+                        roi_params: Optional[dict] = None,
+                        peaks_params: Optional[dict] = None
                         ) -> Tuple[List[lcms.Roi], pd.DataFrame]:
         """
-        Find features (mz, rt pairs) in the data using the algorithm described
-        in [1]_. MS data must be in centroid mode.
-
-        Feature detection is done in three steps:
-
-        1.  Region of interest (ROI) are detected in the data. Each ROI
-            consists in m/z traces where a chromatographic peak may be found.
-            It has the detected mz and intensity associated to each scan and the
-            time where it was detected.
-        2.  For each ROI, chromatographic peaks are searched. Each
-            chromatographic peak is a feature. Several descriptors associated to
-            each feature are computed.
-        3.  Features are organized in a DataFrame, where each row is a
-            feature and each column is a feature descriptor.
-
+        Detect features in centroided MS data. Each feature is a chromatographic
+        peak represented by m/z, rt, peak area and peak width values.
 
         Parameters
         ----------
-        mode : {"hplc", "uplc"}
-            HPLC assumes longer columns with particle size greater than 3 micron
-            (min_width is set to 10 seconds and `max_width` is set to 90
-            seconds). UPLC is for data acquired with short columns with particle
-            size lower than 3 micron (min_width is set to 5 seconds and
-            `max_width` is set to 60 seconds). Used to generate default
-            `make_roi_params` and `find_peak_params`.
-        ms_mode : {"qtof", "orbitrap"}
-            MS instrument used to generate de data. Used to set mass tolerance
-            params in make_roi_params.
         subtract_bl : bool
             If True subtracts the estimated baseline from the intensity and
             area.
@@ -482,20 +471,22 @@ class MSData:
             if "weighted", the peak retention time is computed as the weighted
             mean of rt in the extension of the peak. If "apex", rt is
             simply the value obtained after peak picking.
-        make_roi_params : dict, optional
-            Parameters to pass to the make_roi_function. Overwrites default
+        roi_params : dict, optional
+            Parameters to pass to the make_roi function. Overwrites default
             parameters. See function function documentation for a detailed
-            description of each parameter.
-        find_peaks_params : dict, optional
-            Parameters to pass to the find_peaks_function. Overwrites default
-            parameters. See function function documentation for a detailed
-            description of each parameter.
+            description of each parameter. Default parameters are set using
+            the `ms_instrument` and `separation_technique` attributes.
+        peaks_params : dict, optional
+            Parameters to pass to the find_peaks_cwt function. Overwrites
+            default parameters. Default values are set using the
+            `separation_technique` attribute. See function function
+            documentation for a detailed description of each parameter.
 
         Returns
         -------
         roi_list : list[Roi]
             A list with the detected regions of interest.
-        peak_data : DataFrame
+        feature_data : DataFrame
             A DataFrame with features detected and their associated descriptors.
             Each feature is a row, each descriptor is a column. The descriptors
             are:
@@ -526,10 +517,34 @@ class MSData:
                 index of the peaks attribute of each Roi associated to the
                 feature.
 
+        Raises
+        ------
+        ValueError
+            If the data is not in centroid mode.
+
+        Notes
+        -----
+
+        Feature detection is done in three steps using the algorithm described
+        in [1]_:
+
+        1.  Regions of interest (ROI) search: ROI are searched in the data. Each
+            ROI consists in m/z traces where a chromatographic peak may be
+            found. It has the detected mz and intensity associated to each scan
+            and the time where it was detected.
+        2.  Chromatographic peak detection: For each ROI, chromatographic peaks
+            are searched. Each chromatographic peak is a feature.
+            Several descriptors associated to each feature are computed.
+        3.  Features are organized in a DataFrame, where each row is a
+            feature and each column is a feature descriptor.
+
         See Also
         --------
-        lcms.make_roi
-        lcms.Roi
+        lcms.make_roi : Function used to search ROIs.
+        lcms.Roi : Representation of a ROI.
+        peaks.find_peaks_cwt : Function used to detect chromatographic peaks.
+        lcms.get_lc_cwt_params : Creates default parameters for peak picking.
+        lcms.get_roi_params : Creates default parameters for roi search.
 
         References
         ----------
@@ -541,16 +556,22 @@ class MSData:
 
         # TODO: subtract_bl, rt_estimation, should be moved to cwt params.
 
+        if self.ms_mode != "centroid":
+            msg = "Data must be in centroid mode for feature detection."
+            raise ValueError(msg)
+
         # step 1: detect ROI
-        tmp_roi_params = lcms.get_make_roi_params(mode, ms_mode)
-        if make_roi_params is not None:
-            tmp_roi_params.update(make_roi_params)
-        make_roi_params = tmp_roi_params
-        roi_list = lcms.make_roi(self.reader, **make_roi_params)
+        tmp_roi_params = lcms.get_roi_params(self.separation,
+                                             self.instrument)
+        if roi_params is not None:
+            tmp_roi_params.update(roi_params)
+        roi_params = tmp_roi_params
+        roi_list = lcms.make_roi(self.reader, **roi_params)
 
         # step 2 and 3: find peaks and make DataFrame
-        peak_data = lcms.detect_roi_peaks(roi_list, mode=mode,
-                                          subtract_bl=subtract_bl,
-                                          rt_estimation=rt_estimation,
-                                          cwt_params=find_peaks_params)
-        return roi_list, peak_data
+        feature_data = \
+            lcms.detect_roi_peaks(roi_list,
+                                  subtract_bl=subtract_bl,
+                                  rt_estimation=rt_estimation,
+                                  cwt_params=peaks_params)
+        return roi_list, feature_data

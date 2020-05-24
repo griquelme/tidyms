@@ -1,5 +1,12 @@
 """
-Functions for working with LC-MS data
+Functions and objects for working with LC-MS data
+
+Objects
+-------
+Chromatogram
+MSSpectrum
+Roi
+
 """
 
 import numpy as np
@@ -23,11 +30,12 @@ def reader(path: str, on_disc: bool = True):
     """
     Load `path` file into an OnDiskExperiment. If the file is not indexed, load
     the file.
+
     Parameters
     ----------
-    path: str
+    path : str
         path to read mzML file from.
-    on_disc:
+    on_disc : bool
         if True doesn't load the whole file on memory.
 
     Returns
@@ -54,26 +62,27 @@ def chromatogram(msexp: msexperiment, mz: Iterable[float],
                  end: Optional[int] = None,
                  accumulator: str = "sum") -> Tuple[np.ndarray, np.ndarray]:
     """
-    Calculates the EIC for the msexperiment
+    Computes extracted ion chromatograms for a list of m/z values from raw
+    data.
+
     Parameters
     ----------
-    msexp: MSExp or OnDiskMSExp.
-    mz: iterable[float]
+    msexp : MSExp or OnDiskMSExp.
+    mz : iterable[float]
         mz values used to build the EICs.
-    start: int, optional
+    start : int, optional
         first scan to build the chromatogram
-    end: int, optional
+    end : int, optional
         last scan to build the chromatogram.
-    window: float.
+    window : float.
                Tolerance to build the EICs.
-    accumulator: {"sum", "mean"}
+    accumulator : {"sum", "mean"}
         "mean" divides the intensity in the EIC using the number of points in
         the window.
     Returns
     -------
-    rt, chromatograms: tuple
-        rt is an array of retention times. chromatograms is an array with rows
-        of EICs.
+    rt : array of retention times
+    eic : array with rows of EICs.
     """
     if not isinstance(mz, np.ndarray):
         mz = np.array(mz)
@@ -87,7 +96,7 @@ def chromatogram(msexp: msexperiment, mz: Iterable[float],
     if end is None:
         end = nsp
 
-    chromatograms = np.zeros((mz.size, end - start))
+    eic = np.zeros((mz.size, end - start))
     rt = np.zeros(end - start)
     for ksp in range(start, end):
         sp = msexp.getSpectrum(ksp)
@@ -98,19 +107,19 @@ def chromatogram(msexp: msexperiment, mz: Iterable[float],
         has_mz = (ind_sp[1::2] - ind_sp[::2]) > 0
         # elements added at the end of mz_sp raise IndexError
         ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
-        chromatograms[:, ksp] = np.where(has_mz,
+        eic[:, ksp] = np.where(has_mz,
                                          np.add.reduceat(int_sp, ind_sp)[::2],
                                          0)
         if accumulator == "mean":
             norm = ind_sp[1::2] - ind_sp[::2]
             norm[norm == 0] = 1
-            chromatograms[:, ksp] = chromatograms[:, ksp] / norm
+            eic[:, ksp] = eic[:, ksp] / norm
         elif accumulator == "sum":
             pass
         else:
             msg = "accumulator possible values are `mean` and `sum`."
             raise ValueError(msg)
-    return rt, chromatograms
+    return rt, eic
 
 
 def accumulate_spectra(msexp: msexperiment, start: int,
@@ -124,11 +133,11 @@ def accumulate_spectra(msexp: msexperiment, start: int,
     Parameters
     ----------
     msexp : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
-    start: int
+    start : int
         start slice for scan accumulation
-    end: int
+    end : int
         end slice for scan accumulation.
-    kind: str
+    kind : str
         kind of interpolator to use with scipy interp1d.
     subtract : None or Tuple[int], left, right
         Scans regions to substract. `left` must be smaller than `start` and
@@ -137,7 +146,8 @@ def accumulate_spectra(msexp: msexperiment, start: int,
 
     Returns
     -------
-    accum_mz, accum_int : tuple[np.array]
+    accum_mz : array of m/z values
+    accum_int : array of intensities.
     """
     accumulator_functions = {"sum": np.sum, "mean": np.mean}
     accumulator = accumulator_functions[accumulator]
@@ -176,12 +186,12 @@ def _get_mz_roi(ms_experiment, scans):
 
     Parameters
     ----------
-    ms_experiment: pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
+    ms_experiment : pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
     scans : tuple[int] : start, end
 
     Returns
     -------
-    mz_ref = numpy.array
+    mz_ref : array
     """
     mz_0, _ = ms_experiment.getSpectrum(scans[0]).get_peaks()
     mz_min = mz_0.min()
@@ -204,10 +214,11 @@ def make_widths_lc(mode: str) -> np.ndarray:
 
     Parameters
     ----------
-    mode: {"hplc", "uplc"
+    mode: {"hplc", "uplc"}
+
     Returns
     -------
-    widths: numpy.ndarray
+    widths: array
     """
     if mode == "uplc":
         min_width = 1
@@ -239,11 +250,11 @@ def make_widths_ms(mode: str) -> np.ndarray:
 
     Parameters
     ----------
-    mode: {"qtof", "orbitrap"}
+    mode : {"qtof", "orbitrap"}
 
     Returns
     -------
-    widths: numpy.ndarray
+    widths : array
     """
     if mode == "qtof":
         min_width = 0.005
@@ -268,14 +279,14 @@ def get_lc_cwt_params(mode: str) -> dict:
 
     Parameters
     ----------
-    mode: {"hplc", "uplc"}
+    mode : {"hplc", "uplc"}
         HPLC assumes typical experimental conditions for HPLC experiments:
         longer columns with particle size greater than 3 micron. UPLC is for
         data acquired with short columns with particle size lower than 3 micron.
 
     Returns
     -------
-    cwt_params: dict
+    cwt_params : dict
         parameters to pass to .peak.pick_cwt function.
     """
     cwt_params = {"snr": 10, "bl_ratio": 2, "min_length": None,
@@ -299,14 +310,14 @@ def get_ms_cwt_params(mode: str) -> dict:
 
     Parameters
     ----------
-    mode: {"qtof", "orbitrap"}
+    mode : {"qtof", "orbitrap"}
         qtof assumes a peak width in the range of 0.01-0.05 Da. `orbitrap`
         assumes a peak width in the range of 0.001-0.005 Da.
         TODO: add ppm scale
 
     Returns
     -------
-    cwt_params: dict
+    cwt_params : dict
         parameters to pass to .peak.pick_cwt function.
     """
     cwt_params = {"snr": 10, "bl_ratio": 2, "min_length": None,
@@ -324,6 +335,46 @@ def get_ms_cwt_params(mode: str) -> dict:
     return cwt_params
 
 
+def get_roi_params(separation: str = "uplc", instrument: str = "qtof"):
+    """
+    Creates a dictionary with recommended parameters for the make_roi function
+    in different use cases.
+
+    Parameters
+    ----------
+    separation : {"uplc", "hplc"}
+        Mode in which the data was acquired. Used to set minimum length of the
+        roi and number of missing values.
+    instrument : {"qtof", "orbitrap"}
+        Type of MS instrument. Used to set the tolerance.
+
+    Returns
+    -------
+    roi_parameters : dict
+    """
+    roi_params = {"min_intensity": 500, "multiple_match": "reduce"}
+
+    if separation == "uplc":
+        roi_params.update({"max_missing": 1, "min_length": 10})
+    elif separation == "hplc":
+        roi_params.update({"max_missing": 1, "min_length": 20})
+    else:
+        msg = "valid `mode` are uplc and hplc"
+        raise ValueError(msg)
+
+    if instrument == "qtof":
+        roi_params.update({"tolerance": 0.01})
+    elif instrument == "orbitrap":
+        roi_params.update({"tolerance": 0.005})
+    else:
+        msg = "valid `ms_mode` are qtof and orbitrap"
+        raise ValueError(msg)
+
+    roi_params["mode"] = separation
+
+    return roi_params
+
+
 def find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
                                    q: int, n_isotopes: int,
                                    tol: float):
@@ -335,19 +386,19 @@ def find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
 
     Parameters
     ----------
-    mz: numpy.ndarray
+    mz : numpy.ndarray
         List of peaks
-    mz_ft: float
+    mz_ft : float
         Monoisotopic mass
-    q: charge state of the ion
-    n_isotopes: int
+    q : charge state of the ion
+    n_isotopes : int
         Number of isotopes to search in the distribution
     tol: float
         Mass tolerance, in absolute units
 
     Returns
     -------
-    match_ind: np.ndarray
+    match_ind : np.ndarray
         array of indices for the isotopic distribution.
     """
     mono_index = find_closest(mz, mz_ft)
@@ -375,15 +426,15 @@ def find_isotopic_distribution(mz: np.ndarray, mz_mono: float,
 
     Parameters
     ----------
-    mz: numpy.ndarray
+    mz : numpy.ndarray
         List of peaks
-    mz_mono: float
+    mz_mono : float
         Monoisotopic mass
-    q_max: int
+    q_max : int
         max charge to analyze
-    n_isotopes: int
+    n_isotopes : int
         Number of isotopes to search in the distribution
-    tol: float
+    tol : float
         Mass tolerance, in absolute units
 
     Returns
@@ -403,23 +454,58 @@ def find_isotopic_distribution(mz: np.ndarray, mz_mono: float,
 
 class Chromatogram:
     """
-    Manages chromatograms plotting and peak picking
+    Representation of a chromatogram. Manages plotting and peak picking.
 
     Attributes
     ----------
-    spint: numpy.ndarray
+    spint : array
         intensity in each scan
-    mz: numpy.ndarray or float
-        mz value for each scan. Used to estimate mean and deviation of the
-        mz in the chromatogram
-    start: int, optional
+    mz : float
+        mz value used to build the chromatogram.
+    start : int, optional
         scan number where chromatogram starts
-    end: int, optional
+    end : int, optional
+    mode : str
+        used to set default parameter for peak picking.
+
+    Methods
+    -------
+    find_peaks() : perform peak detection on the chromatograms.
+    get_peak_params() : convert peak information into a DataFrame.
+    plot() : plot the chromatogram.
+
+    See Also
+    --------
+
     """
 
     def __init__(self, spint: np.ndarray, rt: np.ndarray,
-                 mz: Union[np.ndarray, float], start: Optional[int] = None,
-                 end: Optional[int] = None):
+                 mz: Optional[float] = None, start: Optional[int] = None,
+                 end: Optional[int] = None, mode: Optional[str] = None):
+        """
+        Constructor of the Chromatogram.
+
+        Parameters
+        ----------
+        spint : array of non negative numbers.
+            Intensity values of each scan
+        rt : array of positive numbers.
+            Retention time values.
+        mz : positive number, optional
+            m/z value used to generate the chromatogram
+        start : int, optional
+        end : int, optional
+        mode : {"uplc", "hplc"}, optional
+            used to set default parameters in peak picking. If None, `mode` is
+            set to uplc.
+        """
+        if mode is None:
+            self.mode = "uplc"
+        elif mode in ["uplc", "hplc"]:
+            self.mode = mode
+        else:
+            msg = "mode must be None, uplc or hplc"
+            raise ValueError(msg)
 
         self.rt = rt
         self.spint = spint
@@ -431,37 +517,36 @@ class Chromatogram:
         if end is None:
             self.end = rt.size
 
-    def find_peaks(self, mode: str = "uplc",
-                   cwt_params: Optional[dict] = None) -> None:
+    def find_peaks(self, cwt_params: Optional[dict] = None) -> None:
         """
         Find peaks with the modified version of the cwt algorithm described in
-        the CentWave algorithm [1]. Peaks are added to the peaks
+        the CentWave algorithm [1]_. Peaks are added to the peaks
         attribute of the Chromatogram object.
 
         Parameters
         ----------
-        mode: {"hplc", "uplc"}
-            Set peak picking parameters assuming HPLC or UPLC experimental
-            conditions. HPLC assumes longer columns with particle size greater
-            than 3 micron (min_width is set to 10 seconds and `max_width` is set
-             to 90 seconds). UPLC is for data acquired with short columns with
-            particle size lower than 3 micron (min_width is set to 5 seconds and
-            `max_width` is set to 60 seconds). In both cases snr is set to 10.
-        cwt_params:
+        cwt_params: dict
             key-value parameters to overwrite the defaults in the pick_cwt
-            function from the peak module.
+            function. The default are obtained using the mode attribute.
+
+        See Also
+        --------
+        pick_cwt : peak detection using the CWT algorithm.
+        get_lc_cwt_params : set default parameters for pick_cwt.
 
         References
         ----------
-        .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-        504 (2008). https://doi.org/10.1186/1471-2105-9-504
+        ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+            feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+            504 (2008). https://doi.org/10.1186/1471-2105-9-504
+
         """
-        default_params = get_lc_cwt_params(mode)
+        default_params = get_lc_cwt_params(self.mode)
+
         if cwt_params:
             default_params.update(cwt_params)
 
-        widths = make_widths_lc(mode)
+        widths = make_widths_lc(self.mode)
         peak_list = peaks.pick_cwt(self.rt[self.start:self.end],
                                    self.spint[self.start:self.end],
                                    widths, **default_params)
@@ -489,7 +574,7 @@ class Chromatogram:
 
         Returns
         -------
-        peak_params: pandas.DataFrame
+        peak_params: DataFrame
         """
         if self.peaks is None:
             msg = "`pick_cwt` method must be runned before using this method"
@@ -501,16 +586,16 @@ class Chromatogram:
                                        subtract_bl=subtract_bl,
                                        center_estimation=rt_estimation)
             tmp["rt"] = tmp.pop("location")
-            if isinstance(self.mz, np.ndarray):
-                missing = np.isnan(self.mz[peak.start:peak.end])
-                mz_not_missing = self.mz[peak.start:peak.end][~missing]
-                sp_not_missing = self.spint[peak.start:peak.end][~missing]
-                mz_mean = np.average(mz_not_missing, weights=sp_not_missing)
-                mz_std = mz_not_missing.std()
-                tmp["mz mean"] = mz_mean
-                tmp["mz std"] = mz_std
-            else:
-                tmp["mz mean"] = self.mz
+            # if isinstance(self.mz, np.ndarray):
+            #     missing = np.isnan(self.mz[peak.start:peak.end])
+            #     mz_not_missing = self.mz[peak.start:peak.end][~missing]
+            #     sp_not_missing = self.spint[peak.start:peak.end][~missing]
+            #     mz_mean = np.average(mz_not_missing, weights=sp_not_missing)
+            #     mz_std = mz_not_missing.std()
+            #     tmp["mz mean"] = mz_mean
+            #     tmp["mz std"] = mz_std
+            # else:
+            tmp["mz mean"] = self.mz
             peak_params.append(tmp)
         peak_params = pd.DataFrame(data=peak_params)
         if not peak_params.empty:
@@ -521,6 +606,26 @@ class Chromatogram:
              fig_params: Optional[dict] = None,
              line_params: Optional[dict] = None,
              scatter_params: Optional[dict] = None) -> bokeh.plotting.Figure:
+        """
+        Plot the chromatogram.
+
+        Parameters
+        ----------
+        subtract_bl : bool, optional
+        draw : bool, optional
+            if True run bokeh show function.
+        fig_params : dict
+            key-value parameters to pass into bokeh figure function.
+        line_params : dict
+            key-value parameters to pass into bokeh line function.
+        scatter_params : dict
+            key-value parameters to pass into bokeh line function.
+
+        Returns
+        -------
+        bokeh Figure
+        """
+        # TODO: remove subtract_bl and other parameters...
 
         default_line_params = {"line_width": 1, "line_color": "black",
                                "alpha": 0.8}
@@ -538,7 +643,6 @@ class Chromatogram:
 
         if scatter_params is None:
             scatter_params = dict()
-
 
         fig = bokeh.plotting.figure(**fig_params)
         fig.line(self.rt, self.spint, **line_params)
@@ -565,33 +669,71 @@ class Chromatogram:
 
 class MSSpectrum:
     """
-    Manages peak picking, isotopic distribution analysis and plotting of MS
-    data.
+    Representation of a Mass Spectrum. Manages peak picking, isotopic
+    distribution analysis and plotting of MS data.
+
+    Attributes
+    ----------
+    mz : array of m/z values
+    spint : array of intensity values.
+    mode : str
+        MS instrument type. Used to set default values in peak picking.
+
+    Methods
+    -------
+    find_peaks() : perform peak detection on the MS spectrum.
+    get_peak_params() : convert peak information into a DataFrame.
+    plot() : plot the MS spectrum.
+
     """
-    def __init__(self, mz: np.ndarray, spint: np.ndarray):
+    def __init__(self, mz: np.ndarray, spint: np.ndarray,
+                 mode: Optional[str] = None):
+        """
+        Constructor of the MSSpectrum.
+
+        Parameters
+        ----------
+        mz: array
+            m/z values.
+        spint: array
+            intensity values.
+
+        """
         self.mz = mz
         self.spint = spint
         self.peaks = None
 
-    def find_peaks(self, mode, cwt_params: Optional[dict] = None):
+        if mode is None:
+            self.mode = "qtof"
+        elif mode in ["qtof", "orbitrap"]:
+            self.mode = mode
+        else:
+            msg = "mode must be qtof or orbitrap"
+            raise ValueError(msg)
+
+    def find_peaks(self, mode: str = "qtof", cwt_params: Optional[dict] = None):
         """
         Find peaks with the modified version of the cwt algorithm described in
-        the CentWave algorithm [1]. Peaks are added to the attribute.
+        the CentWave algorithm [1]_. Peaks are added to the peaks attribute.
 
         Parameters
         ----------
-        mode: {"qtof", "orbitrap"}
-            qtof assumes a peak width in the range of 0.01-0.05 Da. `orbitrap`
-            assumes a peak width in the range of 0.001-0.005 Da.
-        cwt_params:
+        cwt_params : dict
             key-value parameters to overwrite the defaults in the pick_cwt
-            function from the peak module.
+            function from the peak module. Defaults are set using the `mode`
+            attribute.
+
+        See Also
+        --------
+        pick_cwt : peak detection using the CWT algorithm.
+        get_ms_cwt_params : set default parameters for pick_cwt.
 
         References
         ----------
-        .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-        504 (2008). https://doi.org/10.1186/1471-2105-9-504
+        ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+            feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+            504 (2008). https://doi.org/10.1186/1471-2105-9-504
+
         """
         default_params = get_ms_cwt_params(mode)
         if cwt_params:
@@ -609,10 +751,10 @@ class MSSpectrum:
 
         Parameters
         ----------
-        subtract_bl: bool
+        subtract_bl : bool
             If True subtracts the estimated baseline from the intensity and
             area.
-        mz_estimation: {"weighted", "apex"}
+        mz_estimation : {"weighted", "apex"}
             if "weighted", the location of the peak is computed as the weighted
             mean of x in the extension of the peak, using y as weights. If
             "apex", the location is simply the location obtained after peak
@@ -620,7 +762,8 @@ class MSSpectrum:
 
         Returns
         -------
-        peak_params: pandas.DataFrame
+        peak_params: DataFrame
+
         """
         if self.peaks is None:
             msg = "`find_peaks` method must be used first."
@@ -640,6 +783,26 @@ class MSSpectrum:
              fig_params: Optional[dict] = None,
              line_params: Optional[dict] = None,
              scatter_params: Optional[dict] = None) -> bokeh.plotting.Figure:
+        """
+        Plot the MS spectrum.
+
+        Parameters
+        ----------
+        subtract_bl : bool, optional
+        draw : bool, optional
+            if True run bokeh show function.
+        fig_params : dict
+            key-value parameters to pass into bokeh figure function.
+        line_params : dict
+            key-value parameters to pass into bokeh line function.
+        scatter_params : dict
+            key-value parameters to pass into bokeh line function.
+
+        Returns
+        -------
+        bokeh Figure
+
+        """
 
         default_line_params = {"line_width": 1, "line_color": "black",
                                "alpha": 0.8}
@@ -664,8 +827,8 @@ class MSSpectrum:
             source = \
                 ColumnDataSource(self.get_peak_params(subtract_bl=subtract_bl))
             for k, peak in enumerate(self.peaks):
-                fig.varea(self.mz[peak.mz_start:(peak.end + 1)],
-                          self.spint[peak.mz_start:(peak.end + 1)], 0,
+                fig.varea(self.mz[peak.start:(peak.end + 1)],
+                          self.spint[peak.start:(peak.end + 1)], 0,
                           fill_alpha=0.8, fill_color=cmap[k])
             scatter = fig.scatter(source=source, x="mz", y="intensity",
                                   **scatter_params)
@@ -691,12 +854,18 @@ def make_empty_temp_roi():
 
 class Roi(Chromatogram):
     """
-    Region of interest for detecting features. Region of a mz trace where
-    the intensity is non zero.
+    mz traces where a chromatographic peak may be found. Subclassed from
+    Chromatogram. To be used with the detect_features method of MSData.
+
+    Attributes
+    ----------
+    first_scan : int
+        first scan of the raw data where the ROI was detected.
     """
     def __init__(self, spint: np.ndarray, mz: np.ndarray, rt: np.ndarray,
-                 first_scan: int):
-        super(Roi, self).__init__(spint, rt, mz)
+                 first_scan: int, mode: Optional[str]):
+        super(Roi, self).__init__(spint, rt, mode=mode)
+        self.mz = mz
         self.first_scan = first_scan
 
     def fill_nan(self):
@@ -712,7 +881,7 @@ class Roi(Chromatogram):
         return np.average(self.mz[~missing], weights=self.spint[~missing])
 
     def get_peak_params(self, subtract_bl: bool = True,
-                        rt_estimation: str = "weighted") -> pd.DataFrame:
+                        rt_estimation: str = "weighted") -> dict:
         """
         Compute peak parameters using retention time and mass-to-charge ratio
 
@@ -762,7 +931,7 @@ class Roi(Chromatogram):
 
 class _RoiProcessor:
     """
-    Class used by cent-wave algorithm to generate roi
+    Class used by make_roi function to generate Roi instances.
 
     Attributes
     ----------
@@ -771,14 +940,15 @@ class _RoiProcessor:
         based on a tolerance. its updated after adding a new column
     n_missing: numpy.ndarray
         number of consecutive missing values. Used to detect finished rois
-    roi: list
+    roi: list[ROI]
     """
 
     def __init__(self, mz_seed: np.ndarray, max_missing: int = 1,
                  min_length: int = 5, min_intensity: float = 0,
                  tolerance: float = 0.005, multiple_match: str = "closest",
                  mz_reduce: Union[str, Callable] = "mean",
-                 sp_reduce: Union[str, Callable] = "sum"):
+                 sp_reduce: Union[str, Callable] = "sum",
+                 mode: Optional[str] = None):
         """
 
         Parameters
@@ -813,6 +983,8 @@ class _RoiProcessor:
             numpy arrays and returning numbers. Only used when `multiple_match`
             is reduce. To use custom functions see the prototype shown on
             `mz_reduce`.
+        mode: str, optional
+            Mode used to create ROI.
         """
         if len(mz_seed.shape) != 1:
             msg = "array must be a vector"
@@ -847,6 +1019,7 @@ class _RoiProcessor:
         self.min_length = min_length
         self.tolerance = tolerance
         self.multiple_match = multiple_match
+        self.mode = mode
 
     def add(self, mz: np.ndarray, sp: np.ndarray, targeted: bool = False):
         """
@@ -896,7 +1069,7 @@ class _RoiProcessor:
             roi_ind = self.roi_index[ind]
             finished_roi = self.temp_roi_dict.pop(roi_ind)
             if is_valid_roi[ind]:
-                roi = tmp_roi_to_roi(finished_roi, rt)
+                roi = tmp_roi_to_roi(finished_roi, rt, mode=self.mode)
                 self.roi.append(roi)
         if targeted:
             self.n_missing[is_completed] = 0
@@ -959,6 +1132,7 @@ def _compare_max(old: np.ndarray, new: np.ndarray) -> np.ndarray:
     """
     new[np.isnan(new)] = 0
     return np.maximum(old, new)
+
 
 def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
               tolerance: float, mode: str, mz_reduce: Callable,
@@ -1049,7 +1223,8 @@ def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
     return match_index, mz_match, sp_match, mz_no_match, sp_no_match
 
 
-def tmp_roi_to_roi(tmp_roi: TempRoi, rt: np.ndarray) -> Roi:
+def tmp_roi_to_roi(tmp_roi: TempRoi, rt: np.ndarray,
+                   mode: Optional[str] = None) -> Roi:
     first_scan = tmp_roi.scan[0]
     last_scan = tmp_roi.scan[-1]
     size = last_scan + 1 - first_scan
@@ -1059,44 +1234,65 @@ def tmp_roi_to_roi(tmp_roi: TempRoi, rt: np.ndarray) -> Roi:
     rt_tmp = rt[first_scan:(last_scan + 1)]
     mz_tmp[tmp_index] = tmp_roi.mz
     spint_tmp[tmp_index] = tmp_roi.sp
-    roi = Roi(spint_tmp, mz_tmp, rt_tmp, first_scan)
+    roi = Roi(spint_tmp, mz_tmp, rt_tmp, first_scan, mode=mode)
     return roi
 
 
-def _make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
-              min_length: int, min_intensity: float,  multiple_match,
-              targeted_mz: Optional[np.ndarray] = None,
-              start: Optional[int] = None, end: Optional[int] = None,
-              mz_reduce: Union[str, Callable] = "mean",
-              sp_reduce: Union[str, Callable] = "sum"
-              ) -> List[Chromatogram]:
+def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
+             min_length: int, min_intensity: float, multiple_match: str,
+             targeted_mz: Optional[np.ndarray] = None,
+             start: Optional[int] = None, end: Optional[int] = None,
+             mz_reduce: Union[str, Callable] = "mean",
+             sp_reduce: Union[str, Callable] = "sum",
+             mode: Optional[str] = None
+             ) -> List[Roi]:
     """
-    Make Region of interest from MS data in centroid mode [1]
+    Make Region of interest from MS data in centroid mode. [1]
 
     Parameters
     ----------
-    msexp: pyopenms.MSExperiment or pyopenms.OnDiskMSExperiment
     max_missing: int
-        maximum number of missing consecutive values. when a row surpases
-        this number the roi is considered as finished. and is added to roi
-        list if it's length is greater than `min_length`.
+        maximum number of missing consecutive values. when a row surpass this
+        number the roi is considered as finished and is added to the roi list if
+        it meets the length and intensity criteria.
     min_length: int
-        The minimum length of a roi to be considered valid before adding it
-        to roi list.
+        The minimum length of a roi to be considered valid.
+    min_intensity: float
+        Minimum intensity in a roi to be considered valid.
     tolerance: float
-        mz tolerance to connect values
-    multiple_match: {"closest", "merge"}
-        how to match peaks when there is more than one match. If mode is
+        mz tolerance to connect values across scans
+    start: int, optional
+        First scan to analyze. If None starts at scan 0
+    end: int, optional
+        Last scan to analyze. If None, uses the last scan number.
+    multiple_match: {"closest", "reduce"}
+        How to match peaks when there is more than one match. If mode is
         `closest`, then the closest peak is assigned as a match and the
-        others are assigned to no match. If mode is `merge`, then a unique
-        mz and int value is generated using the average of the mz and the
-        sum of the intensities.
+        others are assigned to no match. If mode is `reduce`, then unique
+        mz and intensity values are generated using the reduce function in
+        `mz_reduce` and `spint_reduce` respectively.
+    mz_reduce: "mean" or Callable
+        function used to reduce mz values. Can be a function accepting
+        numpy arrays and returning numbers. Only used when `multiple_match`
+        is reduce. See the following prototype:
+
+        .. codeblock: python
+
+        def mz_reduce(mz_match: np.ndarray) -> float:
+            pass
+
+        TODO: change mean for None.
+    sp_reduce: {"mean", "sum"} or Callable
+        function used to reduce spint values. Can be a function accepting
+        numpy arrays and returning numbers. Only used when `multiple_match`
+        is reduce. To use custom functions see the prototype shown on
+        `mz_reduce`.
     targeted_mz: numpy.ndarray, optional
-        if a list of mz is provided, roi are searched only using this list
+        if a list of mz is provided, roi are searched only using this list.
 
     Returns
     -------
-    roi: list[Chromatogram]
+    roi: list[Roi]
 
     References
     ----------
@@ -1123,7 +1319,8 @@ def _make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
                               min_length=min_length,
                               min_intensity=min_intensity, tolerance=tolerance,
                               multiple_match=multiple_match,
-                              mz_reduce=mz_reduce, sp_reduce=sp_reduce)
+                              mz_reduce=mz_reduce, sp_reduce=sp_reduce,
+                              mode=mode)
     for k_scan in range(start, end):
         sp = msexp.getSpectrum(k_scan)
         rt[k_scan - start] = sp.getRT()
@@ -1136,7 +1333,8 @@ def _make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
     processor.append_to_roi(rt)
     return processor.roi
 
-def _detect_roi_peaks(roi: List[Roi],
+def detect_roi_peaks(roi: List[Roi],
+                     subtract_bl: bool = True, rt_estimation: str = "weighted",
                      cwt_params: Optional[dict] = None) -> pd.DataFrame:
     if cwt_params is None:
         cwt_params = dict()
@@ -1148,7 +1346,8 @@ def _detect_roi_peaks(roi: List[Roi],
     for roi_index, k_roi in enumerate(roi):
         k_roi.fill_nan()
         k_roi.find_peaks(cwt_params=cwt_params)
-        temp_params = k_roi.get_peak_params()
+        temp_params = k_roi.get_peak_params(subtract_bl=subtract_bl,
+                                            rt_estimation=rt_estimation)
         temp_params["roi index"] = [roi_index] * len(temp_params["rt"])
         peak_index = np.arange(len(k_roi.peaks))
         temp_params["peak index"] = peak_index
@@ -1165,4 +1364,4 @@ def _detect_roi_peaks(roi: List[Roi],
     return peak_params
 
 # TODO: feature detection should be implemented using a general function
-# called detect_features, and accept modes, such as uplc, hplc, di, etc...
+#  called detect_features, and accept modes, such as uplc, hplc, di, etc...
