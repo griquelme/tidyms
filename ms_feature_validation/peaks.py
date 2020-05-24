@@ -10,7 +10,7 @@ from scipy.integrate import trapz
 from scipy.interpolate import interp1d
 # from scipy.optimize import curve_fit
 from typing import Tuple, List, Optional
-from .utils import find_closest_sorted
+from .utils import _find_closest_sorted
 
 
 class PeakLocation:
@@ -48,7 +48,7 @@ class PeakLocation:
         PeakLocation
         """
         old_points = old_scale[[self.start, self.loc, self.end]]
-        start, loc, end = find_closest_sorted(new_scale, old_points)
+        start, loc, end = _find_closest_sorted(new_scale, old_points)
         return PeakLocation(loc, self.scale, start, end, self.snr,
                             self.baseline)
 
@@ -224,7 +224,7 @@ def snr_calculation(y: np.ndarray,
         left_bl = left_25_lower.mean()
         left_noise = left_25_lower.std()
     else:
-        left_bl, left_noise = 0, 0
+        left_bl, left_noise = np.inf, np.inf
     right_25_lower = np.sort(y[extension[1]:right])
     # right_25_lower = right_25_lower[:(right_25_lower.size // 4)]
     rperc_5 = int(5 * right_25_lower.size / 100)
@@ -234,8 +234,7 @@ def snr_calculation(y: np.ndarray,
         right_bl = right_25_lower.mean()
         right_noise = right_25_lower.std()
     else:
-        right_bl = 0
-        right_noise = 0
+        right_bl, right_noise = np.inf, np.inf
 
     baseline = min(left_bl, right_bl)
     noise = min(left_noise, right_noise)
@@ -301,8 +300,8 @@ def resample_data(x: np.ndarray,
 def convert_to_original_scale(x_orig: np.ndarray, x_rescaled: np.ndarray,
                               peak: PeakLocation) -> PeakLocation:
 
-    start, loc, end = find_closest_sorted(x_orig,
-                                          x_rescaled[[peak.start, peak.loc,
+    start, loc, end = _find_closest_sorted(x_orig,
+                                           x_rescaled[[peak.start, peak.loc,
                                                       peak.end]])
     return PeakLocation(loc, peak.scale, start, end, peak.snr, peak.baseline)
 
