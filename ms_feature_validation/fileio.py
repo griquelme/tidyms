@@ -62,11 +62,10 @@ def read_progenesis(path: Union[str, TextIO]):
     Parameters
     ----------
     path : str or file
-        path to an Progenesis csv output or file object
 
     Returns
     -------
-    dc = DataContainer
+    dc : DataContainer
     """
     df_header = pd.read_csv(path, low_memory=False)
     df = df_header.iloc[2:].copy()
@@ -196,7 +195,8 @@ def add_order_from_csv(dc: DataContainer, path: Union[str, TextIO],
 def read_data_matrix(path: Union[str, TextIO, BinaryIO],
                      data_matrix_format: str) -> DataContainer:
     """
-    Read different Data Matrix formats into a DataContainer
+    Read different Data Matrix formats into a DataContainer.
+
     Parameters
     ----------
     path: str
@@ -206,6 +206,10 @@ def read_data_matrix(path: Union[str, TextIO, BinaryIO],
     Returns
     -------
     DataContainer
+
+    Examples
+    --------
+    >>> data = read_data_matrix("data_path.csv", "progenesis")
     """
     if data_matrix_format == "progenesis":
         return read_progenesis(path)
@@ -222,25 +226,61 @@ class MSData:
 
     Attributes
     ----------
-    reader: pyopenms.OnDiscExperiment or pyopenms.MSExperiment
-    mode: {"centroid", "profile"}, optional
-        The mode in which the data is stored. If None, mode is guessed, but
+    reader : pyopenms.OnDiscExperiment or pyopenms.MSExperiment
+        pyopenms object used to read raw data.
+    ms_mode : {"centroid", "profile"}
+        The mode in which the MS data is stored. If None, mode is guessed, but
         it's recommended to supply the mode in the constructor.
+    instrument : {"qtof". "orbitrap"}, optional
+        The MS instrument type used to acquire the experimental data.
+    separation : {"uplc", "hplc"}, optional
+        The separation technique used before MS analysis
+
+    Methods
+    -------
+    make_tic(mode) : Computes the total ion chromatogram.
+    make_chromatograms(mz) : Computes extracted ion chromatograms.
+    accumulate_spectra(start, end) : Merge several scans into one.
+    get_rt() : returns the retention time vector of the experiment.
+
+
     """
 
-    def __init__(self, path: str, mode: Optional[str] = None,
-                 on_disc: bool = True):
-        self.reader = lcms.reader(path, on_disc=on_disc)
-        self.mode = mode
-        self.chromatograms = None
-        self.features = None
+    def __init__(self, path: str, ms_mode: Optional[str] = None,
+                 instrument: Optional[str] = None,
+                 separation: Optional[str] = None):
+        """
+        Constructor for MSData
+
+        Parameters
+        ----------
+        path : str
+            Path to a mzML file.
+        ms_mode : {"centroid", "profile"}, optional
+            Mode of the MS data. if None, the data mode is guessed, but it's
+            better to provide a mode. The `ms_mode` is used to set default
+            parameters on the methods.
+        instrument : {"qtof", "orbitrap"}, optional
+            MS instrument type used for data acquisition. Used to set default
+            parameters in the methods.
+        separation: {"uplc", "hplc"}, optional
+            Type of separation technique used in the experiment. Used to set
+            default parameters in the methods.
+
+        """
+        self.reader = lcms.reader(path, on_disc=True)
+        self.ms_mode = ms_mode
+        if separation is None:
+            self.separation_technique = "uplc"
+        if instrument is None:
+            self.ms_instrument = "qtof"
 
     @property
-    def mode(self) -> str:
+    def ms_mode(self) -> str:
         return self._mode
 
-    @mode.setter
-    def mode(self, value: Optional[str]):
+    @ms_mode.setter
+    def ms_mode(self, value: Optional[str]):
         if value is None:
             if self._is_centroided():
                 self._mode = "centroid"
@@ -309,11 +349,8 @@ class MSData:
 
         Returns
         -------
-        rt: np.ndarray
-            Retention time for each scan
-        eic: np.ndarray
-            Extracted Ion Chromatogram for each mz value. Each column is a mz
-            and each row is a scan.
+        chromatograms : list[Chromatograms]
+
         """
         # parameter validation
         params = {"window": window, "accumulator": accumulator,
@@ -328,7 +365,7 @@ class MSData:
         for row in range(spint.shape[0]):
             tmp = lcms.Chromatogram(spint[row, :], rt, mz[row], start=start)
             chromatograms.append(tmp)
-        self.chromatograms = chromatograms
+        return chromatograms
 
     def accumulate_spectra(self, start: Optional[int], end: Optional[int],
                            subtract: Optional[Tuple[int, int]] = None,
@@ -367,19 +404,37 @@ class MSData:
         Returns
         -------
         bool
+
         """
         mz, spint = self.reader.getSpectrum(0).get_peaks()
         dmz = np.diff(mz)
         # if the data is in profile mode, mz values are going to be closer.
         return dmz.min() > 0.008
 
+    def get_spectrum(self, scan: int):
+        """
+        get the spectrum for the given scan number.
+
+        Parameters
+        ----------
+        scan: int
+            scan number
+
+        Returns
+        -------
+        MSSpectrum
+        """
+        mz, sp = self.reader.getSpectrum(scan).get_peaks()
+        return lcms.MSSpectrum(mz, sp)
+
     def get_rt(self):
         """
-        Retention time vector for the experiment.
+        Gets the retention time vector for the experiment.
 
         Returns
         -------
         rt: np.ndarray
+
         """
         nsp = self.reader.getNrSpectra()
         rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
@@ -393,22 +448,20 @@ class MSData:
                         ) -> Tuple[List[lcms.Roi], pd.DataFrame]:
         """
         Find features (mz, rt pairs) in the data using the algorithm described
-        in [1]. MS data must be in centroid mode.
+        in [1]_. MS data must be in centroid mode.
 
         Feature detection is done in three steps:
 
-            1. Region of interest (ROI) are detected in the data. Each ROI
+        1.  Region of interest (ROI) are detected in the data. Each ROI
             consists in m/z traces where a chromatographic peak may be found.
             It has the detected mz and intensity associated to each scan and the
-            time where it was detected. This step is done with the make_roi
-            function.
-            2. For each ROI, chromatographic peaks are searched. Each
+            time where it was detected.
+        2.  For each ROI, chromatographic peaks are searched. Each
             chromatographic peak is a feature. Several descriptors associated to
-            each feature are computed: m/z mean, m/z std, rt, chromatographic
-            peak width, peak intensity and peak area. This step is done with the
-            Roi method find_peaks.
-            3. Features are organized in a DataFrame, where each row is a
+            each feature are computed.
+        3.  Features are organized in a DataFrame, where each row is a
             feature and each column is a feature descriptor.
+
 
         Parameters
         ----------
@@ -446,19 +499,32 @@ class MSData:
             A DataFrame with features detected and their associated descriptors.
             Each feature is a row, each descriptor is a column. The descriptors
             are:
-            - mz: Mean m/z of the feature
-            - mz std: standard deviation of the m/z. Computed as the standard
-            deviation of the m/z in the region where the peak was detected.
-            - rt: retention time of the feature, computed as the weighted mean
-             of the retention time, using as weights the intensity at each time.
-            - width: Chromatographic peak width.
-            - intensity: Maximum intensity of the chromatographic peak.
-            - area: Area of the chromatographic peak.
+
+            mz :
+                Mean m/z of the feature.
+            mz std :
+                standard deviation of the m/z. Computed as the standard
+                deviation of the m/z in the region where the peak was detected.
+            rt :
+                retention time of the feature, computed as the weighted mean
+                of the retention time, using as weights the intensity at each
+                time.
+            width :
+                Chromatographic peak width.
+            intensity :
+                Maximum intensity of the chromatographic peak.
+            area :
+                Area of the chromatographic peak.
+
+
             Also, two additional columns have information to search each feature
             in its correspondent Roi:
-            - Roi index: index in `roi_list` where the feature was detected.
-            - peak_index: index of the peaks attribute of each Roi associated
-            to the feature.
+
+            roi_index :
+                index in `roi_list` where the feature was detected.
+            peak_index :
+                index of the peaks attribute of each Roi associated to the
+                feature.
 
         See Also
         --------
@@ -467,10 +533,12 @@ class MSData:
 
         References
         ----------
-        .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-        504 (2008). https://doi.org/10.1186/1471-2105-9-504
+        ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+            feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+            504 (2008). https://doi.org/10.1186/1471-2105-9-504
+
         """
+
         # TODO: subtract_bl, rt_estimation, should be moved to cwt params.
 
         # step 1: detect ROI
