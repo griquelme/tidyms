@@ -26,10 +26,12 @@ Roi
 
 import numpy as np
 import pandas as pd
+import os
 from typing import Optional, Iterable, Tuple, Union, List, BinaryIO, TextIO
 from .data_container import DataContainer
 from . import lcms
 from . import validation
+from . import utils
 import pickle
 
 
@@ -101,95 +103,6 @@ def read_progenesis(path: Union[str, TextIO]):
     validation.validate_data_container(data, ft_def, sample_info, None)
     dc = DataContainer(data, ft_def, sample_info)
     return dc
-
-
-def _convert_to_interbatch_order(order: pd.Series,
-                                 batch: pd.Series) -> pd.Series:
-    """
-    Convert the order values from a per-batch order to a interbatch order.
-
-    Parameters
-    ----------
-    order: pandas.Series
-        order and batch must share the same index, be of the same size and of
-        dtype int.
-    batch: pandas.Series
-
-    Returns
-    -------
-    interbatch_order: pandas.Series
-
-    Raises
-    ------
-    ValueError: if the order values are already unique.
-
-    Examples
-    --------
-    >>>order = pd.Series([1, 2, 3, 1, 2, 3])
-    >>>batch = pd.Series([1, 1, 1, 2, 2, 2])
-    >>>_convert_to_interbatch_order(order, batch)
-    pd.Series([1, 2, 3, 4, 5, 6])
-    """
-
-    if order.unique().size == order.size:
-        msg = "order values are already unique"
-        raise ValueError(msg)
-
-    # find a value to add to each batch to make unique and sorted order values
-    max_order = order.groupby(batch).max()
-    add_to_order = np.roll(max_order, 1)
-    add_to_order[0] = 0
-    add_to_order = add_to_order.cumsum()
-    add_to_order = pd.Series(data=add_to_order, index=max_order.index)
-    add_to_order = batch.map(add_to_order)
-    interbatch_order = order + add_to_order
-    return interbatch_order
-
-
-def add_order_from_csv(dc: DataContainer, path: Union[str, TextIO],
-                       interbatch_order: bool = True) -> None:
-    """
-    adds sample order and sample batch using information from a csv file.
-    A column with the name `sample`  with the same values as the index of
-    the DataContainer sample_metadata must be provided.
-    order information is taken from a column with name `order` and the same
-    is done with batch information. order data must be positive integers
-    and each batch must have unique values. Each batch must be identified
-    with a positive integer.
-
-    Parameters
-    ----------
-    dc: DataContainer
-    path: str
-        path to the file with order data. Data format is inferred from the
-        file extension.
-    interbatch_order: bool
-        If True converts the order value to a unique value for the whole
-        DataContainer. This makes plotting the data as a function of order
-        easier.
-
-    """
-    # if hasattr(path, "read"):
-    #     filename = path.name
-    # else:
-    #     filename = path
-    # ext = filename.split(".")[-1]
-    #
-    # if ext == "csv":
-    df = pd.read_csv(path, index_col="sample")
-    # elif ext in ["xls", "xlsx"]:
-    #     df = pd.read_excel(path)
-    order = df["order"].astype(int)
-    batch = df["batch"].astype(int)
-
-    if interbatch_order:
-        try:
-            order = _convert_to_interbatch_order(order, batch)
-        except ValueError:
-            # order is already unique
-            pass
-    dc.order = order
-    dc.batch = batch
 
 
 def read_data_matrix(path: Union[str, TextIO, BinaryIO],
@@ -369,9 +282,9 @@ class MSData:
         validation.validate(params,
                             validation.make_make_chromatogram_validator(self))
 
-        rt, spint = lcms.chromatogram(self.reader, mz, window=window,
-                                      start=start, end=end,
-                                      accumulator=accumulator)
+        rt, spint = lcms.make_chromatograms(self.reader, mz, window=window,
+                                            start=start, end=end,
+                                            accumulator=accumulator)
         chromatograms = list()
         for row in range(spint.shape[0]):
             tmp = lcms.Chromatogram(spint[row, :], rt, mz[row], start=start)
@@ -383,7 +296,7 @@ class MSData:
                            kind: str = "linear", accumulator: str = "sum"
                            ) -> lcms.MSSpectrum:
         """
-        accumulates a spectra into a single spectrum.
+        accumulates a series of consecutive spectra into a single spectrum.
 
         Parameters
         ----------
@@ -397,6 +310,7 @@ class MSData:
             Scans regions to subtract. `left` must be smaller than `start` and
             `right` greater than `end`.
         accumulator : {"sum", "mean"}
+            Accumulation method used to merge the scans.
 
         Returns
         -------
@@ -459,7 +373,7 @@ class MSData:
                         peaks_params: Optional[dict] = None
                         ) -> Tuple[List[lcms.Roi], pd.DataFrame]:
         """
-        Detect features in centroided MS data. Each feature is a chromatographic
+        Detect features in centroid mode data. Each feature is a chromatographic
         peak represented by m/z, rt, peak area and peak width values.
 
         Parameters
@@ -526,7 +440,7 @@ class MSData:
         -----
 
         Feature detection is done in three steps using the algorithm described
-        in [1]_:
+        in [1]:
 
         1.  Regions of interest (ROI) search: ROI are searched in the data. Each
             ROI consists in m/z traces where a chromatographic peak may be
@@ -542,7 +456,7 @@ class MSData:
         --------
         lcms.make_roi : Function used to search ROIs.
         lcms.Roi : Representation of a ROI.
-        peaks.find_peaks_cwt : Function used to detect chromatographic peaks.
+        peaks.pick_cwt : Function used to detect chromatographic peaks.
         lcms.get_lc_cwt_params : Creates default parameters for peak picking.
         lcms.get_roi_params : Creates default parameters for roi search.
 
@@ -575,3 +489,82 @@ class MSData:
                                   rt_estimation=rt_estimation,
                                   cwt_params=peaks_params)
         return roi_list, feature_data
+
+
+def _get_datasets_path(dataset_type: str = "matrix") -> List[str]:
+    """
+    List full path to available data sets.
+
+    Parameters
+    ----------
+    dataset_type : {"matrix", "raw"}
+        "matrix" shows available data in matrix form. "raw" lists mzML data
+        files.
+
+    Returns
+    -------
+    datasets_path: list[str]
+    """
+    module_fullname = __file__
+    project_path, _ = os.path.split(module_fullname)
+    project_path, _ = os.path.split(project_path)
+    data_path = os.path.join(project_path, "datasets", dataset_type)
+    datasets = os.listdir(data_path)
+    dataset_path = [os.path.join(data_path, x) for x in datasets]
+    return dataset_path
+
+
+def get_available_datasets(dataset_type: str = "matrix") -> List[str]:
+    """
+    List available datasets
+
+    Parameters
+    ----------
+    dataset_type : {"matrix", "raw"}
+        "matrix" shows available data in matrix form. "raw" lists mzML data
+        files.
+
+    Returns
+    -------
+    datasets: list[str]
+    """
+    dataset_path = _get_datasets_path(dataset_type)
+
+    datasets = [utils.get_filename(x) for x in dataset_path]
+    return datasets
+
+
+def load_dataset(name: str, dataset_type: str = "matrix"):
+    """
+    Load a data set
+
+    Parameters
+    ----------
+    name : str
+        name of an available dataset.
+    dataset_type : str
+        "matrix" shows available data in matrix form. "raw" lists mzML data
+        files.
+
+    Returns
+    -------
+    data: if dataset_type is matrix, then returns a DataContainer. if the
+    dataset_type is raw, returns a MSData object.
+    """
+    data_path = _get_datasets_path(dataset_type=dataset_type)
+    datasets = get_available_datasets(dataset_type=dataset_type)
+    try:
+        ind = datasets.index(name)
+        path = data_path[ind]
+        if dataset_type == "raw":
+            data = MSData(path)
+        elif dataset_type == "matrix":
+            data = DataContainer.from_progenesis(path)
+        else:
+            msg = "`dataset_type` must be raw or matrix"
+            raise ValueError(msg)
+        return data
+    except KeyError:
+        msg = "{} is not an available data set name".format(name)
+        raise ValueError(msg
+                         )
