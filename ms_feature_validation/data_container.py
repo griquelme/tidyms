@@ -41,6 +41,7 @@ from bokeh.palettes import Spectral
 from bokeh.models import ColumnDataSource
 from bokeh.transform import factor_cmap
 from bokeh.models import LabelSet
+import seaborn as sns
 
 
 # TODO: remove data_path attribute. check with webapp example.
@@ -117,7 +118,8 @@ class DataContainer(object):
                  feature_metadata: pd.DataFrame,
                  sample_metadata: pd.DataFrame,
                  data_path: Optional[str] = None,
-                 mapping: Optional[dict] = None):
+                 mapping: Optional[dict] = None,
+                 plot_mode: str = "seaborn"):
         
         """
         See help(DataContainer) for more details
@@ -136,6 +138,8 @@ class DataContainer(object):
             path to raw Data. Files must have the same name as each sample.
         mapping : dict or None
             if dict, set each sample class to sample type.
+        plot_mode : {"seaborn", "bokeh"}
+            The package used to generate plots with the plot methods
         """
         validation.validate_data_container(data_matrix, feature_metadata,
                                            sample_metadata, data_path)
@@ -151,8 +155,24 @@ class DataContainer(object):
 
         # adding methods
         self.metrics = MetricMethods(self)
-        self.plot = PlotMethods(self)
         self.preprocess = PreprocessMethods(self)
+        self.plot = plot_mode
+
+    @property
+    def plot(self):
+        """plot mode"""
+        return self._plot
+
+    @plot.setter
+    def plot(self, value):
+        """plot mode setter."""
+        if value == "seaborn":
+            self._plot = SeabornPlotMethods(self)
+        elif value == "bokeh":
+            self._plot = PlotMethods(self)
+        else:
+            msg = "`mode` must be seaborn or bokeh"
+            raise ValueError(msg)
 
     @property
     def data_path(self) -> pd.DataFrame:
@@ -466,6 +486,41 @@ class DataContainer(object):
         with open(filename, "wb") as fin:
             pickle.dump(self, fin)
 
+    def add_order_from_csv(self, path: Union[str, TextIO],
+                           interbatch_order: bool = True) -> None:
+        """
+        adds sample order and sample batch using information from a csv file.
+        A column with the name `sample`  with the same values as the index of
+        the DataContainer sample_metadata must be provided.
+        order information is taken from a column with name `order` and the same
+        is done with batch information. order data must be positive integers
+        and each batch must have unique values. Each batch must be identified
+        with a positive integer.
+
+        Parameters
+        ----------
+        path : str
+            path to the file with order data. Data format is inferred from the
+            file extension.
+        interbatch_order : bool
+            If True converts the order value to a unique value for the whole
+            DataContainer. This makes plotting the data as a function of order
+            easier.
+
+        """
+        df = pd.read_csv(path, index_col="sample")
+        order = df["order"].astype(int)
+        batch = df["batch"].astype(int)
+
+        if interbatch_order:
+            try:
+                order = _convert_to_interbatch_order(order, batch)
+            except ValueError:
+                # order is already unique
+                pass
+        self.order = order
+        self.batch = batch
+
     def to_csv(self, filename: str) -> None:
         """
         Save the DataContainer into a csv file.
@@ -652,7 +707,8 @@ class MetricMethods:
     
     def pca(self, n_components: Optional[int] = 2,
             normalization: Optional[str] = None,
-            scaling: Optional[str] = None):
+            scaling: Optional[str] = None,
+            ignore_classes: Optional[List[str]] = None):
         """
         Computes PCA score, loadings and  PC variance of each component.
         
@@ -664,6 +720,8 @@ class MetricMethods:
             scaling method.
         normalization: {`sum`, `max`, `euclidean`}, optional
             normalizing method
+        ignore_classes : list[str], optional
+            classes in the data to ignore to build the PCA model.
         
         Returns
         -------
@@ -675,6 +733,13 @@ class MetricMethods:
             Total variance of the scaled data.
         """
         data = self.__data.data_matrix
+        if ignore_classes:
+            class_mask = ~self.__data.classes.isin(ignore_classes)
+            ind = data.index[class_mask]
+            data = data[class_mask]
+        else:
+            ind = data.index
+
 
         if normalization:
             data = utils.normalize(data, normalization)
@@ -688,7 +753,7 @@ class MetricMethods:
         variance = pca.explained_variance_
         pc_str = ["PC" + str(x) for x in range(1, n_components + 1)]
         scores = pd.DataFrame(data=scores,
-                              index=self.__data.data_matrix.index,
+                              index=ind,
                               columns=pc_str)
         loadings = pd.DataFrame(data=loadings,
                                 index=self.__data.data_matrix.columns,
@@ -923,6 +988,93 @@ class PlotMethods:
         return fig
 
 
+class SeabornPlotMethods(object):
+    """
+    Methods to plot feature data from a DataContainer using Matplotlib/Seaborn.
+    """
+
+    def __init__(self, data: DataContainer):
+        self._data = data
+
+    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = "class",
+                   ignore_classes: Optional[List[str]] = None,
+                   show_order: bool = False,
+                   scaling: Optional[str] = None,
+                   normalization: Optional[str] = None,
+                   relplot_params: Optional[dict] = None):
+        """
+        plots PCA scores using seaborn relplot function.
+
+        Parameters
+        ----------
+        x_pc : int
+            Principal component number to plot along X axis.
+        y_pc : int
+            Principal component number to plot along Y axis.
+        hue : {"class", "type", "batch"}
+            How to color samples. "class" color points according to sample
+            class, "type" color points according to the sample type
+            assigned in the mapping and "batch" uses batch information. Samples
+            classes without a mapping are not shown in the plot
+        ignore_classes : list[str], optional
+            classes in the data to ignore to build the PCA model.
+        show_order: bool
+            add a label with the run order.
+        scaling : {`autoscaling`, `rescaling`, `pareto`}, optional
+            scaling method.
+        normalization : {`sum`, `max`, `euclidean`}, optional
+            normalization method
+        relplot_params : dict, optional
+            key-values to pass to relplot function.
+
+        Returns
+        -------
+        bokeh.plotting.Figure.
+        """
+
+        x_name = "PC" + str(x_pc)
+        y_name = "PC" + str(y_pc)
+        n_comps = max(x_pc, y_pc)
+        score, _, variance, total_var = \
+            self._data.metrics.pca(n_components=n_comps, scaling=scaling,
+                                   normalization=normalization,
+                                   ignore_classes=ignore_classes)
+        score = score.join(self._data.sample_metadata)
+
+        tmp_params = {"x": x_name, "y": y_name, "hue": hue, "kind": "scatter"}
+        if relplot_params is None:
+            relplot_params = tmp_params
+        else:
+            relplot_params.update(tmp_params)
+
+        if hue == "type":
+            rev_map = _reverse_mapping(self._data.mapping)
+            score["type"] = score["class"].apply(lambda x: rev_map.get(x))
+            score = score[~pd.isna(score["type"])]
+        elif hue == "batch":
+            score["batch"] = score["batch"].astype(str)
+        elif hue == "class":
+            score["class"] = self._data.classes
+
+        g = sns.relplot(data=score, **relplot_params)
+
+        if show_order:
+            for ind in score.index:
+                x = score.loc[ind, x_name] * 1.01
+                y = score.loc[ind, y_name] * 1.01
+                t = str(self._data.order[ind])
+                g.ax.annotate(t, (x, y))
+
+        # set x and y label
+        x_var = variance[x_name] * 100 / total_var
+        y_var = variance[y_name] * 100 / total_var
+        x_label = "{} ({:.0f} %)".format(x_name, x_var)
+        y_label = "{} ({:.0f} %)".format(y_name, y_var)
+        g.ax.set_xlabel(x_label)
+        g.ax.set_ylabel(y_label)
+        return g
+
+
 class PreprocessMethods:
     """
     Common Preprocessing operations.
@@ -1055,6 +1207,49 @@ def _validate_mapping(mapping, valid_samples):
                     msg = "{} is not a valid sample class".format(c)
                     raise ValueError(msg)
 # TODO: move _validate_mapping to validation module
+
+
+def _convert_to_interbatch_order(order: pd.Series,
+                                 batch: pd.Series) -> pd.Series:
+    """
+    Convert the order values from a per-batch order to a interbatch order.
+
+    Parameters
+    ----------
+    order: pandas.Series
+        order and batch must share the same index, be of the same size and of
+        dtype int.
+    batch: pandas.Series
+
+    Returns
+    -------
+    interbatch_order: pandas.Series
+
+    Raises
+    ------
+    ValueError: if the order values are already unique.
+
+    Examples
+    --------
+    >>>order = pd.Series([1, 2, 3, 1, 2, 3])
+    >>>batch = pd.Series([1, 1, 1, 2, 2, 2])
+    >>>_convert_to_interbatch_order(order, batch)
+    pd.Series([1, 2, 3, 4, 5, 6])
+    """
+
+    if order.unique().size == order.size:
+        msg = "order values are already unique"
+        raise ValueError(msg)
+
+    # find a value to add to each batch to make unique and sorted order values
+    max_order = order.groupby(batch).max()
+    add_to_order = np.roll(max_order, 1)
+    add_to_order[0] = 0
+    add_to_order = add_to_order.cumsum()
+    add_to_order = pd.Series(data=add_to_order, index=max_order.index)
+    add_to_order = batch.map(add_to_order)
+    interbatch_order = order + add_to_order
+    return interbatch_order
 
 
 def _make_empty_mapping():
