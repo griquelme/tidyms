@@ -1,7 +1,7 @@
 import ms_feature_validation as mfv
 import numpy as np
-import bokeh as bk
-bk.plotting.output_file("example.html")
+from bokeh import plotting
+plotting.output_file("example.html")
 
 rt = np.arange(200)
 chrom_params = np.array([[50, 5, 10], [70, 5, 20]])
