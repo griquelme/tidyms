@@ -1,7 +1,7 @@
 import numpy as np
 import ms_feature_validation as mfv
-import bokeh as bk
-bk.plotting.output_file("example.html")
+from bokeh import plotting
+plotting.output_file("example.html")
 
 mz = np.linspace(400, 404, 1000)
 
