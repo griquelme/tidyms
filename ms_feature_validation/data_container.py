@@ -74,12 +74,15 @@ class DataContainer(object):
         retention time (rt), etc...). The index is equal to the `data_matrix`
         column. "mz" and "rt" are required columns.
     mapping : dictionary of sample types to a list of sample classes.
-        maps a sample types to sample classes. valid samples types are `qc`,
+        Maps sample types to sample classes. valid samples types are `qc`,
         `blank`, `sample` or `suitability`. values are list of sample classes.
         Mapping is used by Processor objects to define a default behaviour. For
         example, when using a BlankCorrector, the blank contribution to each
         feature is estimated using the sample classes that are values of the
         `blank` sample type.
+    metrics : methods to compute common feature metrics.
+    plot : methods to plot features.
+    preprocess : methods to perform common preprocessing tasks.
     data_path
     id
     batch
@@ -87,9 +90,6 @@ class DataContainer(object):
 
     Methods
     -------
-    metrics : methods to compute common metrics
-    plot : methods to plot features
-    preprocess: methods to perform common preprocessing tasks.
     remove(remove, axis) : Remove samples/features from the DataContainer.
     reset(reset_mapping=True) : Reset the DataContainer, ie: recover removed
     samples/features, transformed values.
@@ -104,14 +104,13 @@ class DataContainer(object):
     sort(field, axis) : sort features/samples using metadata information.
     save(filename) : save the DataContainer as a pickle.
 
-
     See Also
     --------
-    from_progenesis : static method used to create a DataContainer from a
-        Progenesis csv file.
-    from_pickle : static method used to load a DataContainer from a pickle.
-    read_pickle
-    read_progenesis
+    from_progenesis
+    from_pickle
+    MetricMethods
+    PlotMethods
+    PreprocessMethods
     """
 
     def __init__(self, data_matrix: pd.DataFrame,
@@ -151,9 +150,9 @@ class DataContainer(object):
         self.id = data_matrix.index
 
         # adding methods
-        self.metrics = _MetricMethods(self)
-        self.plot = _PlotMethods(self)
-        self.preprocess = _PreprocessMethods(self)
+        self.metrics = MetricMethods(self)
+        self.plot = PlotMethods(self)
+        self.preprocess = PreprocessMethods(self)
 
     @property
     def data_path(self) -> pd.DataFrame:
@@ -230,7 +229,7 @@ class DataContainer(object):
     
     @property
     def batch(self) -> pd.Series:
-        """pd.Series[str] or pd.Series[int]. Batch number"""
+        """pd.Series[str] or pd.Series[int]. Analytical batch number"""
         try:
             return self._sample_metadata.loc[self._sample_mask, _sample_batch]
         except KeyError:
@@ -246,7 +245,7 @@ class DataContainer(object):
     
     @property
     def order(self) -> pd.Series:
-        """pd.Series[int] : order of analysis of samples"""
+        """pd.Series[int] : Run order in which samples were analyzed."""
         try:
             return self._sample_metadata.loc[self._sample_mask, _sample_order]
         except KeyError:
@@ -512,7 +511,7 @@ class DataContainer(object):
         return fileio.read_pickle(path)
 
 
-class _MetricMethods:
+class MetricMethods:
     """
     Methods to compute feature metrics from a DataContainer
 
@@ -522,18 +521,12 @@ class _MetricMethods:
     each feature.
     dratio(robust=False, sample_classes=None, qc_classes=None): Computes the
     D-Ratio of features, a metric used to compare technical to biological
-    variation [1].
+    variation.
     detection_rate(intraclass=True, threshold=0): Computes the ratio of samples
     where a features was detected.
     pca(n_components=2, normalization=None, scaling=None): Computes the PCA
     scores, loadings and  PC variance.
 
-    References
-    ----------
-    .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use
-    of system suitability and quality control samples in mass spectrometry
-    assays applied in untargeted clinical metabolomic studies",
-    Metabolomics (2018) 14:72.
     """
     
     def __init__(self, data: DataContainer):
@@ -609,6 +602,7 @@ class _MetricMethods:
         of system suitability and quality control samples in mass spectrometry
         assays applied in untargeted clinical metabolomic studies",
         Metabolomics (2018) 14:72.
+
         """
         if robust:
             cv_func = utils.mad
@@ -704,7 +698,7 @@ class _MetricMethods:
         return scores, loadings, variance, total_variance
 
 
-class _PlotMethods:
+class PlotMethods:
     """
     Methods to plot data from a DataContainer. Generates Bokeh Figures.
 
@@ -929,7 +923,7 @@ class _PlotMethods:
         return fig
 
 
-class _PreprocessMethods:
+class PreprocessMethods:
     """
     Common Preprocessing operations.
 
