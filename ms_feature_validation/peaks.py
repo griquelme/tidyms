@@ -1,5 +1,5 @@
 """
-Utilities to work with peaks
+functions and objects used to detect peaks.
 """
 
 import numpy as np
@@ -8,23 +8,43 @@ from scipy.signal import find_peaks
 from scipy.signal.wavelets import ricker, cwt
 from scipy.integrate import trapz
 from scipy.interpolate import interp1d
-# from scipy.optimize import curve_fit
 from typing import Tuple, List, Optional
 from .utils import _find_closest_sorted
+
+# TODO : restructure module.
+# TODO : PeakLocation should only store: loc, start, end, scale and signal,
+#   obtained from CWT estimation.
+# TODO : add find_peaks_cwt function that find peaks using only a list of
+#   widths, and ridgeline tolerance, ridgeline min_length and ridgeline
+#   n_missing. This function should return a list of PeakLocation.
+# TODO : add estimate_peak_params function that takes a list of PeakLocation,
+#   the signal used to detect the peaks, a dictionary of estimators and a
+#   dictionary of filter params. This function should estimate parameters from
+#   the peaks and filter them. The estimator dictionary should have as keys
+#   parameters to estimate of the peaks (area, intensity, width) or estimations
+#   for the whole signal (noise, baseline). The values of the dictionary
+#   should be strings for predefined estimation functions or callables for
+#   custom estimators. Using these estimators peaks can also be filtered using
+#   the filter dictionary: available filters should be: snr, width,
+#   baseline_ratio.
 
 
 class PeakLocation:
     """
-    Holds peak information
+    Holds peak information for peak picking with the CWT algorithm.
 
     Attributes
     ----------
     loc: int
+        index where a the apex of a peak was found.
     start: int
     scale: float
+        width value where the peak optimally was found.
     end: int
     snr: float
+        Signal to noise ratio estimation.
     baseline: float
+        baseline estimation.
     """
 
     def __init__(self, loc, scale, start, end, snr, baseline):
@@ -37,7 +57,8 @@ class PeakLocation:
 
     def rescale(self, old_scale, new_scale) -> 'PeakLocation':
         """
-        rescale:
+        create a new PeakLocation object using values from the new scale.
+
         Parameters
         ----------
         old_scale: numpy.ndarray
@@ -361,233 +382,3 @@ def pick_cwt(x: np.ndarray, y: np.ndarray, widths: np.ndarray, snr: float = 3,
 
 
     return peaks
-
-
-# def get_peak_params2(cwt_array: np.ndarray, spint: np.ndarray, max_width: int,
-#                      peak_loc: int, extension: Tuple[int, int], mode: str,
-#                      min_snr: Optional[float] = 3,
-#                      min_sblr: Optional[float] = 0.25,
-#                      noise_perc: Optional[float] = 0.25) -> Optional[dict]:
-#     """
-#     Estimate peaks parameters.
-#
-#     Parameters
-#     ----------
-#     cwt_array: numpy.ndarray
-#     spint: numpy.ndarray
-#     max_width: int
-#     peak_loc: int
-#     extension: Tuple[int, int]
-#     mode: {"centwave", "cwt"}
-#         Estimate parameters according to centwave algorithm [1] or cwt peak
-#         picking [2].
-#     min_snr: float
-#         Minimum SNR of peaks. SNR definition varies according to the method
-#         selected.
-#     min_sblr: float
-#         Minimum signal to baseline ratio. Only used in centwave algorithm.
-#
-#     Returns
-#     -------
-#     peak_params: dict
-#     """
-#     if mode == "centwave":
-#         start = max(peak_loc - max_width, 0)
-#         end = min(peak_loc + max_width, spint.size)
-#         # noise percentile intensity to estimate bl and noise
-#         tmp_int = np.sort(spint[start:end])
-#         tmp_int = tmp_int[:int(noise_perc * tmp_int.size)]
-#         bl = tmp_int.mean()
-#         noise = tmp_int.std()
-#         ft_max = spint[peak_loc] - bl
-#         snr = ft_max / noise
-#         sblr = spint[peak_loc] / bl     # signal to baseline ratio
-#
-#         if (snr >= min_snr) and (sblr >= min_sblr):
-#             area = trapz(spint[extension[0]:extension[1]])
-#
-#
-# def get_peak_params(spint, peak_params, min_snr=3, blr=0.25):
-#     results = list()
-#     for peak in peak_params:
-#         ext = 30
-#         start = max(peak[1] - ext, 0)
-#         end = min(peak[2] + ext, spint.size)
-#         tmp_int = np.sort(spint[start:end])
-#         # TODO: check negative index
-#         tmp_int = tmp_int[:int(0.25 * tmp_int.size)]
-#         bl = tmp_int.mean()
-#         noise = tmp_int.std()
-#         ft_int = spint[peak[0]] - bl
-#         print(peak[0])
-#         print(ft_int)
-#         print(bl)
-#         print(ft_int / noise)
-#         print("-----")
-#         if ((ft_int / noise) >= min_snr) and ((bl / spint[peak[0]]) <= blr):
-#             results.append((peak[0], peak[1], peak[2], ft_int, ft_int / noise,
-#                             bl, peak[3]))
-#     return results
-
-
-# def peak_cwt(y: np.ndarray, x: Optional[np.ndarray] = None,
-#              snr: Optional[float: 3,], min_width: float = 3,
-#              max_width: float = 60, min_roi_length: Optional[int] = None,
-#              min_window_size: Optional[int] = None):
-#
-#     if min
-
-
-# def pick(x, y, fwhm=None, height=None, asymmetry=False,
-#          tailing=False, integrate=False, integrate_height=0.95):
-#
-#     peak_params = dict()
-#     peaks, _ = find_peaks(y, height, prominence=500)
-#     if fwhm:
-#         fwhm_index = get_peak_widths(y, peaks, 0.5)
-#         peaks_fwhm = x[fwhm_index[1, :]] - x[fwhm_index[0, :]]
-#         # fwhm filter
-#         fwhm_filter = (peaks_fwhm >= fwhm[0]) & (peaks_fwhm <= fwhm[1])
-#         fwhm_index = fwhm_index[:, fwhm_filter]
-#         peaks = peaks[fwhm_filter]
-#         peak_params["fwhm left"] = x[fwhm_index[0, :]]
-#         peak_params["fwhm right"] = x[fwhm_index[1, :]]
-#         peak_params["fwhm"] = peaks_fwhm[fwhm_filter]
-#         peak_params["fwhm overlap"] = find_overlap(fwhm_index)
-#     if asymmetry:
-#         peak_params["asymmetry"] = analyse_peak_shape(x, y, peaks, "asymmetry")
-#     if tailing:
-#         peak_params["tailing"] = analyse_peak_shape(x, y, peaks, "tailing")
-#     if integrate:
-#         lims = get_peak_widths(y, peaks, integrate_height)
-#         area = np.zeros(lims.shape[1])
-#         for k in range(area.size):
-#             y_lims = y[lims[0, k]:(lims[1, k] + 1)]
-#             x_lims = x[lims[0, k]:(lims[1, k] + 1)]
-#             area[k] = trapz(y_lims, x_lims)
-#         peak_params["area"] = area
-#         peak_params["area left"] = x[lims[0, :]]
-#         peak_params["area right"] = x[lims[1, :]]
-#         peak_params["area overlap"] = find_overlap(lims)
-#     peak_params["index"] = peaks
-#     peak_params["loc"] = x[peaks]
-#     peak_params["height"] = y[peaks]
-#     return peak_params
-#
-#
-# def make_empty_peaks():
-#     d = dict()
-#     params = ["index", "fwhm left", "fwhm right", "fwhm", "fwhm overlap",
-#               "asymmetry", "tailing", "area", "area left", "area right",
-#               "area overlap", "loc", "height"]
-#     for param in params:
-#         d[param] = np.array([])
-#     return d
-#
-#
-# def get_peak_widths(y, peaks, rel_height):
-#
-#     w = peak_widths(y, peaks, rel_height)
-#     left_index = np.round(w[2]).astype(int)
-#     right_index = np.round(w[3]).astype(int)
-#     return np.vstack((left_index, right_index))
-#
-#
-# def analyse_peak_shape(x, y, peaks, mode):
-#     """
-#     computes peak asymmetry or peak tailing factor.
-#
-#     Parameters
-#     ----------
-#     x : np.array
-#     y : np.array
-#     peaks : peaks index
-#     mode : {"asymmetry", "tailing"}
-#
-#     Returns
-#     -------
-#     factor : np.array
-#     """
-#
-#     rel_height = {"asymmetry": 0.9, "tailing": 0.95}
-#     rel_height = rel_height[mode]
-#
-#     w = get_peak_widths(y, peaks, rel_height)
-#     left_width = x[peaks] - x[w[0, :]]
-#     right_width = x[w[1, :]] - x[peaks]
-#     left_width[left_width == 0] = np.nan
-#     if mode == "asymmetry":
-#         factor = right_width / left_width
-#     elif mode == "tailing":
-#         factor = (left_width + right_width) / (2 * left_width)
-#     else:
-#         raise ValueError("mode should be `asymmetry` or `tailing`")
-#     return factor
-#
-#
-# def find_overlap(intervals):
-#     reshaped = intervals.T.reshape(intervals.size)
-#     has_overlap = np.where(np.diff(reshaped)[1::2] < 0)[0]
-#     has_overlap = np.hstack((has_overlap, has_overlap + 1))
-#     overlap = np.zeros(intervals.shape[1], dtype=bool)
-#     overlap[has_overlap] = True
-#     return overlap
-#
-#
-# def fit_gaussian(x, y):
-#     """
-#     Fit multiple gaussians.
-#
-#     Parameters
-#     ----------
-#     x: np.array
-#     y: np.array
-#
-#     Returns
-#     -------
-#     result
-#     """
-#     # initial parameters guess
-#     peak_list = pick(x, y, fwhm=[0, 1], asymmetry=True)
-#     mu = peak_list["loc"]
-#     # correct peaks fwhm in cases of overlap
-#     fwhm = guess_fwhm(peak_list["fwhm"], peak_list["fwhm overlap"])
-#     sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
-#     amp = peak_list["height"]
-#     guess = np.vstack((mu, sigma, amp)).T.flatten()
-#     popt, pcov = curve_fit(utils.gaussian_mixture, x, y, p0=guess)
-#     return popt, pcov
-#
-#
-# def overlap_groups(overlap):
-#     """
-#     Group contiguous overlapped peaks.
-#
-#     Parameters
-#     ----------
-#     overlap: list[bool].
-#         returned from pick.
-#
-#     Returns
-#     -------
-#     groups: list[int].
-#         List of peaks with overlap.
-#     """
-#     groups = list()
-#     group = list()
-#     for i, has_overlap in enumerate(overlap):
-#         group.append(i)
-#         if not has_overlap:
-#             groups.append(group)
-#             group = list()
-#     if group:
-#         groups.append(group)
-#     return groups
-#
-#
-# def guess_fwhm(fwhm, overlap):
-#     groups = overlap_groups(overlap)
-#     guess = np.zeros_like(fwhm)
-#     for group in groups:
-#         guess[group] = fwhm[group].mean()
-#     return guess
