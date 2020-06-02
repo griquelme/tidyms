@@ -70,35 +70,32 @@ def average_replicates(data: pd.DataFrame, sample_id: pd.Series,
 def correct_blanks(df: pd.DataFrame, classes: pd.Series,
                    corrector_classes: List[str], process_classes: List[str],
                    factor: float == 1,
-                   mode: Union[str, Callable] = "mean") -> pd.DataFrame:
+                   mode: Union[str, Callable] = "mean",
+                   process_blanks: bool = True) -> pd.DataFrame:
     """
     Correct samples using blanks.
 
     Parameters
     ----------
-    df: pandas.DataFrame
+    df : pandas.DataFrame
         Data to correct.
-    classes: pandas.Series
+    classes : pandas.Series
         Samples class labels.
-    corrector_classes: list[str]
+    corrector_classes : list[str]
         Classes to be used as blanks.
-    process_classes: list[str]
+    process_classes : list[str]
         Classes to be used as samples
-    factor: float
+    process_blanks : bool
+        If True apply blank correction to corrector classes.
+    factor : float
         factor used to convert low values to zero (see notes)
-    mode: {'mean', 'max', 'lod', 'loq'} or function
+    mode : {'mean', 'max', 'lod', 'loq'} or function
 
     Returns
     -------
     corrected : pandas.DataFrame
         Data with applied correction
 
-    Notes
-    -----
-
-    Blank correction is applied for each feature in the following way:
-
-    .. math:: X_{corrected} = X_{uncorrected} - factor * mode(X_{blank})
     """
     corrector = {"max": lambda x: x.max(),
                  "mean": lambda x: x.mean(),
@@ -115,6 +112,10 @@ def correct_blanks(df: pd.DataFrame, classes: pd.Series,
     corrected = samples - correction
     corrected[(samples - factor * correction) < 0] = 0
     df[classes.isin(process_classes)] = corrected
+    if process_blanks:
+        corrected_blanks = blanks - correction
+        corrected_blanks[(blanks - factor * correction) < 0] = 0
+        df[classes.isin(corrector_classes)] = corrected_blanks
     return df
 
 
@@ -400,7 +401,8 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
                           process_classes: List[str],
                           frac: Optional[float] = None,
                           interpolator: Optional[str] = "splines",
-                          n_qc: Optional[int] = None
+                          n_qc: Optional[int] = None,
+                          process_qc: bool = True
                           ) -> pd.DataFrame:
     """
     Correct instrument response drift using LOESS regression [1, 2]
@@ -425,7 +427,11 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     interpolator: {"linear", "splines"}
         Type of interpolator to use.
     n_qc: int, optional
-    Number of QCs involved in mean calculation. If None, all QCs are involved.
+        Number of QCs involved in mean calculation. If None, all QCs are
+        involved.
+    process_qc : bool
+        If True, applies corection to QC samples.
+
 
 
     Returns
@@ -466,14 +472,20 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     interp_func = {"splines": CubicSpline, "linear": interp1d}
     interp_func = interp_func[interpolator]
 
+    if process_qc:
+        # add QC classes to process classes
+        process_classes = corrector_classes + process_classes
+        process_classes = list(set(process_classes))
+
     def corrector_helper(df_group):
         return batch_corrector_func(df_group, order[df_group.index],
                                     classes[df_group.index], frac,
                                     interp_func, corrector_classes,
-                                    process_classes, n_qc = n_qc)
+                                    process_classes, n_qc=n_qc)
 
     # intra batch correction
     corrected = df.groupby(batch).apply(corrector_helper)
+
     # inter batch mean alignment
 
     def batch_mean_func(df_group):
