@@ -17,6 +17,7 @@ from .lcms import Roi
 import os.path
 from sklearn.cluster import DBSCAN
 from sklearn import mixture
+from scipy.optimize import linear_sum_assignment
 from typing import Optional, Tuple, List, Dict
 
 
@@ -29,7 +30,7 @@ def detect_features(path_list: List[str], separation: str = "uplc",
 
     Samples are analyzed one at a time using the detect_features method
     of MSData. See this method for a detailed explanation of each parameter.
-    Feature detection is done using the method described in [1]_
+    Feature detection is done using the method described in [1]
 
     Parameters
     ----------
@@ -94,8 +95,9 @@ def detect_features(path_list: List[str], separation: str = "uplc",
             504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
     """
-    # TODO : returning all the ROI can generate memory problems. In this case
-    #  maybe an alternative is writing ROI to disk.
+    # TODO : check memory for large data sets ( ~ 1000 samples)
+    #  ROI can generate memory problems. In this case
+    #  maybe an alternative is writing the ROI data to disk.
 
     roi_mapping = dict()
     ft_df_list = list()
@@ -115,7 +117,7 @@ def detect_features(path_list: List[str], separation: str = "uplc",
         roi_mapping[sample_name] = roi
         ft_df_list.append(df)
     proto_dm = pd.concat(ft_df_list).reset_index(drop=True)
-    # TODO: need to check performance for concat when n_samples is big.
+    # TODO: need to check performance for concat when n_samples is large.
     return roi_mapping, proto_dm
 
 
@@ -147,6 +149,11 @@ def feature_correspondence(feature_data: pd.DataFrame, mz_tolerance: float,
     -------
     cluster: Series
         The cluster number for each feature.
+
+    See Also
+    --------
+    detect_features
+    make_data_container
 
     Notes
     -----
@@ -227,9 +234,14 @@ def feature_correspondence(feature_data: pd.DataFrame, mz_tolerance: float,
     # map cluster to numbers again
     cluster_value = np.sort(cluster.unique())
     n_cluster = cluster_value.size
+    has_noise = "-1" in cluster_value
     # set a feature code for each feature
-    cluster_names = _make_feature_names(n_cluster - 1)
-    cluster_names = ["noise"] + cluster_names
+    if has_noise:
+        cluster_names = _make_feature_names(n_cluster - 1)
+        cluster_names = ["noise"] + cluster_names
+    else:
+        cluster_names = _make_feature_names(n_cluster)
+
     cluster_mapping = dict(zip(cluster_value, cluster_names))
     cluster = cluster.map(cluster_mapping)
     return cluster
@@ -249,17 +261,16 @@ def make_data_container(feature_data: pd.DataFrame, cluster: pd.Series,
         Series obtained from feature_correspondence function.
     sample_metadata: DataFrame
         DataFrame with information from each analyzed sample. The index must
-        be the sample names used in feature_data. A column with class of each
-         sample and named class is required. For further data processing run
-         order information in a column named order and analytical batch
-         information in a column named batch are recommended.
+        be the sample names used in feature_data. A column named "class", with
+        the class name of each sample is required. For further data processing
+        run order information in a column named "order" and analytical batch
+        information in a column named "batch" are recommended.
     fill_na: bool, True
         If True fill missing values in the data matrix with zeros.
 
     Returns
     -------
     DataContainer
-
     """
 
     # remove noise
@@ -361,18 +372,19 @@ def _estimate_n_species_per_cluster(df: pd.DataFrame, cluster: pd. Series,
     # the number of features in a cluster is the maximum number of samples
     # in a cluster above the minimum detection rate.
 
-    def sample_to_count(x):
-        return x["sample"].value_counts().value_counts()
-
     def find_n_cluster(x):
         return x.index[np.where(x > min_dr)[0]][-1]
 
-    sample_per_cluster = (df.groupby(cluster)
-                          .apply(sample_to_count)
+
+    sample_per_cluster = (df["sample"].groupby(cluster)
+                          .value_counts()
                           .unstack(-1)
                           .fillna(0)
                           .astype(int)
-                          .apply(lambda x: x / x.sum(), axis=1))
+                          .apply(lambda x: x.value_counts(), axis=1)
+                          .fillna(0))
+    sample_per_cluster = sample_per_cluster / df["sample"].unique().size
+
     features_per_cluster = sample_per_cluster.apply(find_n_cluster, axis=1)
     return features_per_cluster
 
@@ -398,11 +410,45 @@ def _make_gmm(ft_data: pd.DataFrame, n_feature: int, cluster_name: str):
     """
     gmm = mixture.GaussianMixture(n_components=n_feature,
                                   covariance_type="diag")
-    gmm.fit(ft_data)
-    scores = pd.Series(data=gmm.score_samples(ft_data), index=ft_data.index)
-    subcluster = pd.Series(data=gmm.predict(ft_data), index=ft_data.index,
-                           dtype=str)
+    gmm.fit(ft_data.loc[:, ["mz", "rt"]])
+    # scores = pd.Series(data=gmm.score_samples(ft_data), index=ft_data.index)
+    ft_data["score"] = gmm.score_samples(ft_data.loc[:, ["mz", "rt"]])
+
+    # get index of features in the cases where the number of features is greater
+    # than the number of components in the gmm
+    noise_index = (ft_data
+                   .groupby("sample")
+                   .filter(lambda x: x.shape[0] > n_feature))
+
+    if not noise_index.empty:
+        noise_index = (noise_index
+                       .groupby("sample")
+                       .apply(lambda x: _noise_ind(x, n_feature))
+                       .droplevel(0)
+                       .index)
+    else:
+        noise_index = noise_index.index
+
+    noise = pd.Series(data="-1", index=noise_index)
+
+    # if the number of features is equal to the number of components in the
+    # gmm, each feature is assigned to a cluster using the Hungarian algorithm
+    # on the posterior probabilities on each component
+    subcluster = (ft_data.loc[ft_data.index.difference(noise_index)]
+                  .groupby("sample")
+                  .filter(lambda x: x.shape[0] <= n_feature)
+                  .groupby("sample")
+                  .apply(lambda x: _get_best_cluster(x, gmm))
+                  .droplevel(0)
+                  .astype(str))
     subcluster = subcluster.apply(lambda x: str(cluster_name) + "-" + x)
+    subcluster = pd.concat([noise, subcluster])
+    subcluster = subcluster.sort_index()
+    # TODO: add here the case where n_features < n_components
+
+    # subcluster = pd.Series(data=gmm.predict(ft_data), index=ft_data.index,
+    #                        dtype=str)
+    scores = 1
     return gmm, scores, subcluster
 
 
@@ -493,7 +539,7 @@ def _process_cluster(df: pd.DataFrame, noise: pd.DataFrame, cluster: pd.Series,
                      min_likelihood: float, n_species: int):
     """
     Process each cluster obtained from DBSCAN. Auxiliary function to
-    `feature_correpondence`.
+    `feature_correspondence`.
 
     Parameters
     ----------
@@ -518,7 +564,7 @@ def _process_cluster(df: pd.DataFrame, noise: pd.DataFrame, cluster: pd.Series,
         The subcluster values.
     """
 
-    ft_data = df.loc[:, ["mz", "rt"]]
+    ft_data = df.loc[:, ["mz", "rt", "sample"]]
     sample_data = df["sample"]
 
     # fit a Gaussian mixture model using the cluster data
@@ -526,14 +572,38 @@ def _process_cluster(df: pd.DataFrame, noise: pd.DataFrame, cluster: pd.Series,
 
     # send repeated samples to noise: only the feature with the best
     # score in the subcluster is conserved
-    _remove_repeated_features(ft_data, subcluster, sample_data, scores)
+    # _remove_repeated_features(ft_data, subcluster, sample_data, scores)
 
     to_noise = df[subcluster == "-1"]
     if not to_noise.empty:
         noise = pd.concat([noise, to_noise])
 
     # search missing samples in noise:
-    _search_missing_features(cluster, sample_data, n_species, cluster_name,
-                             sample_names, noise, subcluster, gmm,
-                             min_likelihood)
+    # _search_missing_features(cluster, sample_data, n_species, cluster_name,
+    #                          sample_names, noise, subcluster, gmm,
+    #                          min_likelihood)
     return subcluster
+
+
+def _get_best_cluster(x, gmm):
+    """
+    Assigns a feature to a cluster the posterior probability to each cluster.
+    """
+    proba = gmm.predict_proba(x.loc[:, ["mz", "rt"]].values)
+    rows, cols = proba.shape
+    if rows != cols:
+        fill = np.zeros(shape=(cols - rows, cols))
+        proba = np.vstack((proba, fill))
+    _, best_cluster = linear_sum_assignment(proba)
+    best_cluster = best_cluster[:rows]
+    best_cluster = pd.Series(data=best_cluster, index=x.index)
+    return best_cluster
+
+def _noise_ind(x, n):
+    """
+    search the index of samples that are going to be considered as noise.
+    Reduces the number of features from a sample in a cluster until the size is
+    equal to n
+    """
+    ind = x["score"].sort_values().index[:(x.shape[0] - n)]
+    return x.loc[ind, :]
