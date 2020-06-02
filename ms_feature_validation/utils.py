@@ -25,7 +25,7 @@ find_closest(x, xq) : Finds the elements in xq closest to x.
 import numpy as np
 import pandas as pd
 import os.path
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 
 def gauss(x: np.ndarray, mu: float, sigma: float, amp: float):
@@ -291,3 +291,18 @@ def find_closest(x: np.ndarray, xq: Union[np.ndarray, float, int],
         sorted_index = np.argsort(x)
         closest_index = _find_closest_sorted(x[sorted_index], xq)
         return sorted_index[closest_index]
+
+
+def get_filename(fullpath: str) -> str:
+    """
+    get the filename from a full path.
+
+    Parameters
+    ----------
+    fullpath: str
+
+    Returns
+    -------
+    filename: str`
+    """
+    return os.path.splitext(os.path.split(fullpath)[1])[0]
