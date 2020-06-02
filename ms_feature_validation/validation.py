@@ -181,7 +181,8 @@ blank_corrector_schema = {"corrector_classes": {"type": "list",
                                                           "mean", "max"]},
                                              {"check_with": is_callable}]},
                           "factor": {"type": "number",
-                                     "is_positive": True}
+                                     "is_positive": True},
+                          "process_blanks": {"type": "boolean"}
                           }
 blankCorrectorValidator = ValidatorWithLowerThan(blank_corrector_schema)
 
@@ -224,7 +225,8 @@ batch_corrector_schema = {"n_min": {"type": "integer",
                                    "nullable": True,
                                    "is_positive": True},
                           "interpolator": {"type": "string",
-                                           "allowed": ["splines", "linear"]}
+                                           "allowed": ["splines", "linear"]},
+                          "process_qc": {"type": "boolean"}
                           }
 batch_corrector_schema["threshold"] = prevalence_filter_schema["threshold"]
 batch_corrector_schema["process_classes"] = \
