@@ -57,10 +57,11 @@ def reader(path: str, on_disc: bool = True):
     return exp_reader
 
 
-def chromatogram(msexp: msexperiment, mz: Iterable[float],
-                 window: float = 0.005, start: Optional[int] = None,
-                 end: Optional[int] = None,
-                 accumulator: str = "sum") -> Tuple[np.ndarray, np.ndarray]:
+def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
+                       window: float = 0.005, start: Optional[int] = None,
+                       end: Optional[int] = None,
+                       accumulator: str = "sum"
+                       ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Computes extracted ion chromatograms for a list of m/z values from raw
     data.
@@ -107,9 +108,7 @@ def chromatogram(msexp: msexperiment, mz: Iterable[float],
         has_mz = (ind_sp[1::2] - ind_sp[::2]) > 0
         # elements added at the end of mz_sp raise IndexError
         ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
-        eic[:, ksp] = np.where(has_mz,
-                                         np.add.reduceat(int_sp, ind_sp)[::2],
-                                         0)
+        eic[:, ksp] = np.where(has_mz, np.add.reduceat(int_sp, ind_sp)[::2], 0)
         if accumulator == "mean":
             norm = ind_sp[1::2] - ind_sp[::2]
             norm[norm == 0] = 1
@@ -375,9 +374,9 @@ def get_roi_params(separation: str = "uplc", instrument: str = "qtof"):
     return roi_params
 
 
-def find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
-                                   q: int, n_isotopes: int,
-                                   tol: float):
+def _find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
+                                    q: int, n_isotopes: int,
+                                    tol: float):
     """
     Finds the isotopic distribution for a given charge state. Auxiliary function
     to find_isotopic_distribution.
@@ -414,9 +413,9 @@ def find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
     return match_ind
 
 
-def find_isotopic_distribution(mz: np.ndarray, mz_mono: float,
-                               q_max: int, n_isotopes: int,
-                               tol: float):
+def _find_isotopic_distribution(mz: np.ndarray, mz_mono: float,
+                                q_max: int, n_isotopes: int,
+                                tol: float):
     """
     Finds the isotopic distribution within charge lower than q_max.
     Isotopes are searched based on the assumption that the mass difference
@@ -445,8 +444,8 @@ def find_isotopic_distribution(mz: np.ndarray, mz_mono: float,
     best_peaks = np.array([], dtype=int)
     n_peaks = 0
     for q in range(1, q_max + 1):
-        tmp = find_isotopic_distribution_aux(mz, mz_mono, q,
-                                             n_isotopes, tol)
+        tmp = _find_isotopic_distribution_aux(mz, mz_mono, q,
+                                              n_isotopes, tol)
         if tmp.size > n_peaks:
             best_peaks = tmp
     return best_peaks
@@ -520,7 +519,7 @@ class Chromatogram:
     def find_peaks(self, cwt_params: Optional[dict] = None) -> None:
         """
         Find peaks with the modified version of the cwt algorithm described in
-        the CentWave algorithm [1]_. Peaks are added to the peaks
+        the CentWave algorithm [1]. Peaks are added to the peaks
         attribute of the Chromatogram object.
 
         Parameters
@@ -531,8 +530,8 @@ class Chromatogram:
 
         See Also
         --------
-        pick_cwt : peak detection using the CWT algorithm.
-        get_lc_cwt_params : set default parameters for pick_cwt.
+        peaks.pick_cwt : peak detection using the CWT algorithm.
+        lcms.get_lc_cwt_params : set default parameters for pick_cwt.
 
         References
         ----------
@@ -711,10 +710,10 @@ class MSSpectrum:
             msg = "mode must be qtof or orbitrap"
             raise ValueError(msg)
 
-    def find_peaks(self, mode: str = "qtof", cwt_params: Optional[dict] = None):
+    def find_peaks(self, cwt_params: Optional[dict] = None):
         """
         Find peaks with the modified version of the cwt algorithm described in
-        the CentWave algorithm [1]_. Peaks are added to the peaks attribute.
+        the CentWave algorithm [1]. Peaks are added to the peaks attribute.
 
         Parameters
         ----------
@@ -725,8 +724,8 @@ class MSSpectrum:
 
         See Also
         --------
-        pick_cwt : peak detection using the CWT algorithm.
-        get_ms_cwt_params : set default parameters for pick_cwt.
+        peaks.pick_cwt : peak detection using the CWT algorithm.
+        lcms.get_ms_cwt_params : set default parameters for pick_cwt.
 
         References
         ----------
@@ -735,11 +734,11 @@ class MSSpectrum:
             504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
         """
-        default_params = get_ms_cwt_params(mode)
+        default_params = get_ms_cwt_params(self.mode)
         if cwt_params:
             default_params.update(cwt_params)
 
-        widths = make_widths_ms(mode)
+        widths = make_widths_ms(self.mode)
         peak_list = peaks.pick_cwt(self.mz, self.spint, widths,
                                    **default_params)
         self.peaks = peak_list
@@ -845,11 +844,11 @@ class MSSpectrum:
         return fig
 
 
-TempRoi = namedtuple("TempRoi", ["mz", "sp", "scan"])
+_TempRoi = namedtuple("TempRoi", ["mz", "sp", "scan"])
 
 
-def make_empty_temp_roi():
-    return TempRoi(mz=list(), sp=list(), scan=list())
+def _make_empty_temp_roi():
+    return _TempRoi(mz=list(), sp=list(), scan=list())
 
 
 class Roi(Chromatogram):
@@ -1012,7 +1011,7 @@ class _RoiProcessor:
         self.max_intensity = np.zeros_like(mz_seed)
         self.length = np.zeros_like(mz_seed, dtype=int)
         self.index = 0
-        self.temp_roi_dict = {x: make_empty_temp_roi() for x in self.roi_index}
+        self.temp_roi_dict = {x: _make_empty_temp_roi() for x in self.roi_index}
         self.roi = list()
         self.min_intensity = min_intensity
         self.max_missing = max_missing
@@ -1080,7 +1079,7 @@ class _RoiProcessor:
             new_indices = np.arange(max_roi_ind + 1,
                                     max_roi_ind + 1 + n_completed)
             self.roi_index[is_completed] = new_indices
-            new_tmp_roi = {k: make_empty_temp_roi() for k in new_indices}
+            new_tmp_roi = {k: _make_empty_temp_roi() for k in new_indices}
             self.temp_roi_dict.update(new_tmp_roi)
         else:
             self.mz_mean = self.mz_mean[~is_completed]
@@ -1104,7 +1103,7 @@ class _RoiProcessor:
         max_int_tmp = np.hstack((self.max_intensity, max_int_tmp))
 
         for k_index, k_mz, k_sp in zip(new_indices, mz, sp):
-            new_roi = TempRoi(mz=[k_mz], sp=[k_sp], scan=[self.index])
+            new_roi = _TempRoi(mz=[k_mz], sp=[k_sp], scan=[self.index])
             self.temp_roi_dict[k_index] = new_roi
         self.mz_mean = mz_mean_tmp[sorted_index]
         self.roi_index = roi_index_tmp[sorted_index]
@@ -1223,7 +1222,7 @@ def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
     return match_index, mz_match, sp_match, mz_no_match, sp_no_match
 
 
-def tmp_roi_to_roi(tmp_roi: TempRoi, rt: np.ndarray,
+def tmp_roi_to_roi(tmp_roi: _TempRoi, rt: np.ndarray,
                    mode: Optional[str] = None) -> Roi:
     first_scan = tmp_roi.scan[0]
     last_scan = tmp_roi.scan[-1]
@@ -1247,52 +1246,78 @@ def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
              mode: Optional[str] = None
              ) -> List[Roi]:
     """
-    Make Region of interest from MS data in centroid mode. [1]
+    Make Region of interest from MS data in centroid mode.
 
     Parameters
     ----------
-    max_missing: int
+    msexp: pyopenms.MSExperiment
+    max_missing : int
         maximum number of missing consecutive values. when a row surpass this
         number the roi is considered as finished and is added to the roi list if
         it meets the length and intensity criteria.
-    min_length: int
+    min_length : int
         The minimum length of a roi to be considered valid.
-    min_intensity: float
+    min_intensity : float
         Minimum intensity in a roi to be considered valid.
-    tolerance: float
+    tolerance : float
         mz tolerance to connect values across scans
-    start: int, optional
+    start : int, optional
         First scan to analyze. If None starts at scan 0
-    end: int, optional
+    end : int, optional
         Last scan to analyze. If None, uses the last scan number.
-    multiple_match: {"closest", "reduce"}
+    multiple_match : {"closest", "reduce"}
         How to match peaks when there is more than one match. If mode is
         `closest`, then the closest peak is assigned as a match and the
         others are assigned to no match. If mode is `reduce`, then unique
         mz and intensity values are generated using the reduce function in
-        `mz_reduce` and `spint_reduce` respectively.
-    mz_reduce: "mean" or Callable
+        `mz_reduce` and `sp_reduce` respectively.
+    mz_reduce : "mean" or Callable
         function used to reduce mz values. Can be a function accepting
         numpy arrays and returning numbers. Only used when `multiple_match`
         is reduce. See the following prototype:
 
-        .. codeblock: python
+        .. code-block:: python
 
-        def mz_reduce(mz_match: np.ndarray) -> float:
-            pass
+            def mz_reduce(mz_match: np.ndarray) -> float:
+                pass
 
         TODO: change mean for None.
-    sp_reduce: {"mean", "sum"} or Callable
-        function used to reduce spint values. Can be a function accepting
+    sp_reduce : {"mean", "sum"} or Callable
+        function used to reduce intensity values. Can be a function accepting
         numpy arrays and returning numbers. Only used when `multiple_match`
         is reduce. To use custom functions see the prototype shown on
         `mz_reduce`.
-    targeted_mz: numpy.ndarray, optional
+    targeted_mz : numpy.ndarray, optional
         if a list of mz is provided, roi are searched only using this list.
+
+    mode : str, optional
+        mode used to create Roi objects.
 
     Returns
     -------
     roi: list[Roi]
+
+    Notes
+    -----
+
+    ROI are created as described in [1]_, with some modifications. To create a
+    ROI, m/z values in consecutive scans are connected if they are within the
+    `tolerance`. If there's more than one possible m/z value to connect in the
+    next scan, two different strategies are available, using the
+    `multiple_match` parameter: If "closest" is used, then m/z values are
+    matched to the closest ones, and the others are used to create new ROI. If
+    "reduce" is used, then all values within the tolerance are combined. m/z and
+    intensity values are combined using the `mz_reduce`  and `sp_reduce`
+    parameters respectively. If no matching value has be found in a scan, a NaN
+    is added to the ROI. If no matching values are found in `max_missing`
+    consecutive scans the ROI is flagged as finished. In this stage, two
+    checks are made before the ROI is considered valid:
+
+    1.  The number of non missing values must be higher than `min_length`.
+    2.  The maximum intensity value in the ROI must be higher than
+        `min_intensity`.
+
+    If the two conditions are meet, the ROI is added to the list of valid ROI.
 
     References
     ----------
@@ -1332,6 +1357,7 @@ def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
     processor.flag_as_completed()
     processor.append_to_roi(rt)
     return processor.roi
+
 
 def detect_roi_peaks(roi: List[Roi],
                      subtract_bl: bool = True, rt_estimation: str = "weighted",
