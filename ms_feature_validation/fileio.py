@@ -135,7 +135,9 @@ def read_data_matrix(path: Union[str, TextIO, BinaryIO],
 
 class MSData:
     """
-    Reads mzML files and perform common operations on MS Data.
+    Container object for raw MS data.
+
+    Manages chromatogram creation, spectra creation and feature detection.
 
     Attributes
     ----------
@@ -245,7 +247,7 @@ class MSData:
             rt[k_scan] = sp.getRT()
             _, spint = sp.get_peaks()
             tic[k_scan] = reduce(spint)
-        return lcms.Chromatogram(tic, rt, None)
+        return lcms.Chromatogram(rt, tic, None)
 
     def make_chromatograms(self, mz: List[float], window: float = 0.05,
                            start: Optional[int] = None,
@@ -287,7 +289,7 @@ class MSData:
                                             accumulator=accumulator)
         chromatograms = list()
         for row in range(spint.shape[0]):
-            tmp = lcms.Chromatogram(spint[row, :], rt, mz[row], start=start)
+            tmp = lcms.Chromatogram(rt, spint[row, :], mz[row], start=start)
             chromatograms.append(tmp)
         return chromatograms
 
@@ -566,5 +568,5 @@ def load_dataset(name: str, dataset_type: str = "matrix"):
         return data
     except KeyError:
         msg = "{} is not an available data set name".format(name)
-        raise ValueError(msg
-                         )
+        raise ValueError(msg)
+    

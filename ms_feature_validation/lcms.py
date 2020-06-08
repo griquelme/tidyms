@@ -457,6 +457,8 @@ class Chromatogram:
 
     Attributes
     ----------
+    rt : array
+        retention time in each scan.
     spint : array
         intensity in each scan
     mz : float
@@ -478,7 +480,7 @@ class Chromatogram:
 
     """
 
-    def __init__(self, spint: np.ndarray, rt: np.ndarray,
+    def __init__(self, rt: np.ndarray, spint: np.ndarray,
                  mz: Optional[float] = None, start: Optional[int] = None,
                  end: Optional[int] = None, mode: Optional[str] = None):
         """
@@ -862,8 +864,8 @@ class Roi(Chromatogram):
         first scan of the raw data where the ROI was detected.
     """
     def __init__(self, spint: np.ndarray, mz: np.ndarray, rt: np.ndarray,
-                 first_scan: int, mode: Optional[str]):
-        super(Roi, self).__init__(spint, rt, mode=mode)
+                 first_scan: int, mode: Optional[str] == None):
+        super(Roi, self).__init__(rt, spint, mode=mode)
         self.mz = mz
         self.first_scan = first_scan
 
@@ -1352,7 +1354,8 @@ def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
         mz, spint = sp.get_peaks()
         processor.add(mz, spint, targeted=targeted)
         processor.append_to_roi(rt, targeted=targeted)
-        assert (np.diff(processor.mz_mean) >= 0).all()
+        # this was added during debugging and needs to be removed
+        # assert (np.diff(processor.mz_mean) >= 0).all()
     # add roi not completed during last scan
     processor.flag_as_completed()
     processor.append_to_roi(rt)

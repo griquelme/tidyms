@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-The object used to store metabolomics data
+Objects used to store and manage metabolomics data
 
 Objects
 -------
@@ -53,7 +53,7 @@ import seaborn as sns
 
 class DataContainer(object):
     """
-    A container object to store Metabolomics Data.
+    Container object that stores processed metabolomics data.
 
     The data is separated in three attributes: data_matrix, sample_metadata and
     feature_metadata. Each one is a pandas DataFrame. DataContainers can be
@@ -119,7 +119,7 @@ class DataContainer(object):
                  sample_metadata: pd.DataFrame,
                  data_path: Optional[str] = None,
                  mapping: Optional[dict] = None,
-                 plot_mode: str = "seaborn"):
+                 plot_mode: str = "bokeh"):
         
         """
         See help(DataContainer) for more details
@@ -169,7 +169,7 @@ class DataContainer(object):
         if value == "seaborn":
             self._plot = SeabornPlotMethods(self)
         elif value == "bokeh":
-            self._plot = PlotMethods(self)
+            self._plot = BokehPlotMethods(self)
         else:
             msg = "`mode` must be seaborn or bokeh"
             raise ValueError(msg)
@@ -763,7 +763,7 @@ class MetricMethods:
         return scores, loadings, variance, total_variance
 
 
-class PlotMethods:
+class BokehPlotMethods:
     """
     Methods to plot data from a DataContainer. Generates Bokeh Figures.
 
@@ -932,7 +932,7 @@ class PlotMethods:
             bokeh.plotting.show(fig)
         return fig
 
-    def feature(self, ft: str, color_by: str = "class", draw: bool = True,
+    def feature(self, ft: str, hue: str = "class", draw: bool = True,
                 fig_params: Optional[dict] = None,
                 scatter_params: Optional[dict] = None) -> bokeh.plotting.Figure:
         """
@@ -942,7 +942,7 @@ class PlotMethods:
         ----------
         ft: str
             Feature to plot. Index of feature in `feature_metadata`
-        color_by: {"class", "type"}
+        hue: {"class", "type"}
         draw: bool
             If True calls bokeh.plotting.show on figure.
         fig_params: dict
@@ -963,14 +963,14 @@ class PlotMethods:
         source = (self._data_container.sample_metadata
                   .join(self._data_container.data_matrix[ft]))
 
-        if color_by == "type":
+        if hue == "type":
             rev_map = _reverse_mapping(self._data_container.mapping)
             source["type"] = (self._data_container.classes
                               .apply(lambda x: rev_map.get(x)))
             source = source[~source["type"].isna()]
 
         # setup the colors
-        unique_values = source[color_by].unique().astype(str)
+        unique_values = source[hue].unique().astype(str)
         cmap = Spectral[11]
         palette = cmap * (int(unique_values.size / len(cmap)) + 1)
         palette = palette[:unique_values.size]
@@ -980,9 +980,9 @@ class PlotMethods:
         tooltips = [("class", "@class"), ("order", "@order"),
                     ("batch", "@batch"), ("id", "@id")]
         fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
-        cmap_factor = factor_cmap(color_by, palette, unique_values)
+        cmap_factor = factor_cmap(hue, palette, unique_values)
         fig.scatter(source=source, x="order", y=ft, color=cmap_factor,
-                    legend_group=color_by, **scatter_params)
+                    legend_group=hue, **scatter_params)
         if draw:
             bokeh.plotting.show(fig)
         return fig

@@ -324,7 +324,7 @@ class ClassRemover(Processor):
 @register
 class BlankCorrector(Processor):
     """
-    Applies a blank correction to a DataContainer.
+    Corrects systematic bias due to sample preparation.
     """
     def __init__(self, corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
@@ -392,7 +392,7 @@ class BlankCorrector(Processor):
 @register
 class PrevalenceFilter(Processor):
     """
-    Remove Features with with prevalence outside of the specified bounds.
+    Remove Features detected in a low number of samples.
 
     The prevalence is defined as the fraction of samples where a given feature
     has been detected.
@@ -450,7 +450,7 @@ class PrevalenceFilter(Processor):
 @register
 class DRatioFilter(Processor):
     r"""
-    Remove Features with a D-ratio outside of the specified bounds.
+    Remove Features with low biological information.
 
     D-Ratio is a metric defined in [1]_ as the quotient between the technical
     and the biological variation of a feature:
@@ -509,7 +509,7 @@ class DRatioFilter(Processor):
 @register
 class VariationFilter(Processor):
     """
-    Remove samples with a high coefficient of variation.
+    Remove features with low reproducibility.
     """
     def __init__(self, lb=0, ub=0.25, process_classes=None, robust=False,
                  intraclass=True, verbose=False):
@@ -834,6 +834,7 @@ class BatchCorrector(Pipeline):
                                      n_qc=n_qc)
         pipeline = [checker, prevalence, corrector]
         super(BatchCorrector, self).__init__(pipeline, verbose=verbose)
+        self.name = "Batch Corrector"
 
 
 def read_config(path):
