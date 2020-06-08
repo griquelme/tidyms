@@ -7,7 +7,7 @@ Here is a list of some of the most used concepts in the MSKM.
 
 .. glossary::
 
-    data Matrix
+    data matrix
         A matrix of feature values where each row is a sample or observation and
         each column is a feature.
 
@@ -29,7 +29,7 @@ Here is a list of some of the most used concepts in the MSKM.
         sample types are: study sample, quality control, blank, system
         suitability.
 
-    sample Class
+    sample class
         The category of the sample. Can be related to the study (e.g: healthy,
         disease) or to the experiment design (quality control, blank, etc...).
 

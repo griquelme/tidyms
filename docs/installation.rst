@@ -15,7 +15,8 @@ installed we recommend installing it using the `Anaconda`_ distribution .
 Install MSKM
 ------------
 
-If you already have Python, you can install the MSKM with pip:
+If you already have Python, you can install the MSKM from the Python Package
+Index:
 
 On Linux:
 

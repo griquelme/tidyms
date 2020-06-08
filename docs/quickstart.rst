@@ -15,13 +15,13 @@ format and `Numpy <https://numpy.org/>`_,
 Some of the functionality that offers is:
 
 *   creating chromatograms and accumulated spectra from raw data.
-*   :term:`Feature detection` and :term:`feature correspondence` in whole data
-    sets.
+*   :term:`Feature detection<feature detection>` and
+    :term:`feature correspondence` in metabolomics data sets.
 *   Read processed data from other mass spectrometry processing software
     (XCMS, mzmine2, etc...).
 *   A container object to manage metabolomics data.
-*   :term:`Data curation` of untargeted metabolomics data sets using widely
-    accepted practices from the metabolomics community [4]_
+*   :term:`Data curation<data curation>` of untargeted metabolomics data sets
+    using widely accepted practices from the metabolomics community [4]_
 *   Interactive data visualization using `bokeh <https://bokeh.org/>`_, or
     publication quality plots using `seaborn <https://seaborn.pydata.org/>`_.
 
@@ -77,7 +77,7 @@ Chromatogram again, we can see the detected peaks.
 Creating mass spectra
 ---------------------
 
-In the same way, we can create a :class:`ms_feature_validation.MSSpectrum`
+In a similar way, we can create a :class:`ms_feature_validation.MSSpectrum`
 object:
 
 .. code-block:: python
@@ -153,9 +153,9 @@ Feature detection
 -----------------
 
 Feature detection is the first step performed in untargeted metabolomics to
-convert raw data into a data matrix. In LC-MS based metabolomics, a feature
-is usually defined as a chromatographic peak. Feature detection in LC-MS is
-then then process of finding chromatographic peaks in a sample. In order to
+convert raw data into a :term:`data matrix`. In LC-MS based metabolomics, a
+feature is usually defined as a chromatographic peak. Feature detection in LC-MS
+is then then process of finding chromatographic peaks in a sample. In order to
 perform feature detection, an implementation of the centWave algorithm [1]_
 is used. This algorithm detects chromatographic peaks using **samples in
 centroid mode** in two steps:
@@ -233,12 +233,13 @@ the cluster information, metadata for each sample must be provided. The sample
 metadata is a DataFrame where the index is the name of each sample and at the
 very least a column named class with the class name of each sample must be
 included. The DataContainer contains the data matrix, along with feature
-metadata (e.g. feature m/z and  rt) computed using feature values from each
-sample. In the function documentation there is information on how each value
-is estimated. For users wanting to create a custom data matrix or feature
-metadata, we recommend looking at the following :py:class:`pandas.DataFrame`
-methods: :py:meth:`pandas.DataFrame.groupby`,
-:py:meth:`pandas.DataFrame.pivot` and :py:meth:`pandas.DataFrame.aggregate`.
+metadata (e.g. feature m/z and  rt) computed using
+:term:`feature descriptors<feature descriptor>` from each sample. In the function
+documentation there is information on how each value is estimated. For users
+wanting to create a custom data matrix or feature metadata, we recommend looking
+at the following :py:class:`pandas.DataFrame` methods:
+:py:meth:`pandas.DataFrame.groupby`, :py:meth:`pandas.DataFrame.pivot` and
+:py:meth:`pandas.DataFrame.aggregate`.
 
 Working with DataContainers
 ---------------------------
@@ -247,7 +248,7 @@ The functionality to work with metabolomics data in a data matrix form is
 provided through the :py:class:`ms_feature_validation.DataContainer` object.
 The DataContainer object organizes the data matrix, feature metadata and
 sample metadata in three different DataFrames and manages several common tasks
-such as computing metrics, normalization plotting features and
+such as computing metrics, normalization, plotting features and
 :term:`data curation`.
 
 Computing feature metrics
@@ -310,16 +311,16 @@ The intensity of a feature, as function of the run order can also be plotted:
 Data curation
 -------------
 
-Before performing any kind of statistical analysis of the samples, it's
-necessary to correct the bias in the data due to sample preparation and also
-remove any features that cannot be measured in an analytically robust way
-[3]_, [4]_. We call this process :term:`data curation`. In the MSKM, the data
-curation is applied using :term:`filtration` and :term:`correction` steps to
-obtain a robust data matrix. Before applying data curation, it's recommended to
-define a :term:`mapping`. A mapping is a dictionary that map a
-:term:`sample type` to a list of :term:`sample class`. You can still use the
-Filters and Correctors without setting a mapping, but defining one makes
-work easier, as it's used to set a default behaviour for the different
+In order to increase the confidence in the results obtained during analysis of
+the data, it's necessary to correct the bias in the data due to sample
+preparation and also remove any features that cannot be measured in an
+analytically robust way [3]_, [4]_. We call this process :term:`data curation`.
+In the MSKM, the data curation is applied using :term:`filtration` and
+:term:`correction` steps to obtain a robust data matrix. Before applying data
+curation, it's recommended to define a :term:`mapping`. A mapping is a
+dictionary that map a :term:`sample type` to a list of :term:`sample class`. You
+can still use the Filters and Correctors without setting a mapping, but defining
+one makes work easier, as it's used to set a default behaviour for the different
 Filters and Correctors that are used for data curation. These default values are
 set using the recommendations from Broadhurst *et al* [4]_. To define a mapping,
 simply create a dictionary with sample types as keys and a list of sample
@@ -364,17 +365,17 @@ The Pipeline object accepts Filters, Correctors and other Pipelines as elements
 in the list. This allow us to create more sophisticated strategies for data
 curation. For example, the implementation for :term:`batch correction` is
 a Pipeline object that checks samples and features that cannot be corrected and
-removes them and the corrects the remainder samples/features.
+removes them before applying the correction.
 See here to create custom Filters.
 
 Data Preprocessing
 ------------------
 
-Before analyzing data, it's a common practice to normalize, scale or transform
-the data. All of these operations are available through the :code:`preprocess`
-attribute of the DataContainer. The following code normalises each sample
-to an unitary total intensity, and scales each feature to have a zero mean
-and unitary variance:
+Before modelling the data, it's a common practice to normalize, scale or
+transform the data matrix. All of these operations are available through the
+:code:`preprocess` attribute of the DataContainer. The following code normalises
+each sample to an unitary total intensity, and scales each feature to have a
+zero mean and unitary variance:
 
 .. code-block::
 
