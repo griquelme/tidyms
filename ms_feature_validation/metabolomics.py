@@ -59,14 +59,15 @@ def detect_features(path_list: List[str], separation: str = "uplc",
         Each feature is a row, each descriptor is a column. The descriptors
         are:
 
-        mz :
-            Mean m/z of the feature
-        mz std :
-            standard deviation of the m/z. Computed as the standard
-            deviation of the m/z in the region where the peak was detected.
-        rt :
-            retention time of the feature, computed as the weighted mean
-            of the retention time, using as weights the intensity at each time.
+        mz : m/z of the feature
+            Computed as the weighted mean of the m/z, using as weights the
+            intensity at each time.
+        mz std : standard deviation of the m/z.
+            Computed as the standard deviation of the m/z in the region where
+            the peak was detected.
+        rt : retention time of the feature
+            Computed as the weighted mean of the retention time, using as
+            weights the intensity at each time.
         width :
             Chromatographic peak width.
         intensity :
@@ -162,7 +163,7 @@ def feature_correspondence(feature_data: pd.DataFrame, mz_tolerance: float,
     1.  Features ares clustered using m/z and rt information with the DBSCAN
         algorithm. Because the dispersion in the m/z and r/t dimension is
         independent the Chebyshev distance is used to make the clusters.
-        `rt_tolerance` and `mz_tolerance` are used to build the :math:`epsilon`
+        `rt_tolerance` and `mz_tolerance` are used to build the :math:`\epsilon`
         parameter of the model. rt is scaled using these two parameters to have
         the same tolerance in both dimensions in the following way:
 
@@ -567,8 +568,11 @@ def _process_cluster(df: pd.DataFrame, noise: pd.DataFrame, cluster: pd.Series,
     ft_data = df.loc[:, ["mz", "rt", "sample"]]
     sample_data = df["sample"]
 
-    # fit a Gaussian mixture model using the cluster data
-    gmm, scores, subcluster = _make_gmm(ft_data, n_species, cluster_name)
+    if n_species >= 1:
+        # fit a Gaussian mixture model using the cluster data
+        gmm, scores, subcluster = _make_gmm(ft_data, n_species, cluster_name)
+    else:
+        subcluster = pd.Series(data="-1", index=df.index)
 
     # send repeated samples to noise: only the feature with the best
     # score in the subcluster is conserved
