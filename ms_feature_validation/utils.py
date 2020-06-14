@@ -25,7 +25,7 @@ find_closest(x, xq) : Finds the elements in xq closest to x.
 import numpy as np
 import pandas as pd
 import os.path
-from typing import Optional, Union, List
+from typing import Optional, Union
 
 
 def gauss(x: np.ndarray, mu: float, sigma: float, amp: float):
@@ -47,7 +47,7 @@ def gauss(x: np.ndarray, mu: float, sigma: float, amp: float):
     return gaussian
 
 
-def gaussian_mixture(x: np.array, params: np.ndarray) -> np.array:
+def gaussian_mixture(x: np.ndarray, params: np.ndarray) -> np.ndarray:
     """
     Mixture of gaussian curves.
 
