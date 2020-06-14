@@ -8,25 +8,10 @@ from scipy.signal import find_peaks
 from scipy.signal.wavelets import ricker, cwt
 from scipy.integrate import trapz
 from scipy.interpolate import interp1d
-from typing import Tuple, List, Optional
+from scipy.stats import median_absolute_deviation as mad
+from typing import Tuple, List, Optional, Union, Callable, Dict
 from .utils import _find_closest_sorted
-
-# TODO : restructure module.
-# TODO : PeakLocation should only store: loc, start, end, scale and signal,
-#   obtained from CWT estimation.
-# TODO : add find_peaks_cwt function that find peaks using only a list of
-#   widths, and ridgeline tolerance, ridgeline min_length and ridgeline
-#   n_missing. This function should return a list of PeakLocation.
-# TODO : add estimate_peak_params function that takes a list of PeakLocation,
-#   the signal used to detect the peaks, a dictionary of estimators and a
-#   dictionary of filter params. This function should estimate parameters from
-#   the peaks and filter them. The estimator dictionary should have as keys
-#   parameters to estimate of the peaks (area, intensity, width) or estimations
-#   for the whole signal (noise, baseline). The values of the dictionary
-#   should be strings for predefined estimation functions or callables for
-#   custom estimators. Using these estimators peaks can also be filtered using
-#   the filter dictionary: available filters should be: snr, width,
-#   baseline_ratio.
+_estimator_type = Dict[str, Callable]
 
 
 class PeakLocation:
@@ -41,19 +26,14 @@ class PeakLocation:
     scale: float
         width value where the peak optimally was found.
     end: int
-    snr: float
-        Signal to noise ratio estimation.
-    baseline: float
-        baseline estimation.
+
     """
 
-    def __init__(self, loc, scale, start, end, snr, baseline):
+    def __init__(self, loc, scale, start, end):
         self.loc = loc
         self.scale = scale
         self.start = start
         self.end = end
-        self.snr = snr
-        self.baseline = baseline
 
     def rescale(self, old_scale, new_scale) -> 'PeakLocation':
         """
@@ -70,201 +50,40 @@ class PeakLocation:
         """
         old_points = old_scale[[self.start, self.loc, self.end]]
         start, loc, end = _find_closest_sorted(new_scale, old_points)
-        return PeakLocation(loc, self.scale, start, end, self.snr,
-                            self.baseline)
+        return PeakLocation(loc, self.scale, start, end)
 
-    def get_peak_params(self, y: np.ndarray, x: Optional[np.ndarray] = None,
-                        subtract_bl: bool = True,
-                        center_estimation: str = "weighted") -> dict:
+    def get_loc(self, x: np.ndarray, y: np.ndarray, baseline: np.ndarray):
         """
-        compute peak parameters based on x and y.
-
-        Parameters
-        ----------
-        y: numpy.ndarray
-        x: numpy.ndarray, optional
-            if None computes parameters using index values.
-        subtract_bl: bool
-            If True subtract baseline to peak intensity and area
-        center_estimation: {"weighted", "apex"}
-            Only used when x is provided. if "weighted", the location of the
-            peak is computed as the weighted mean of x in the extension of the
-            peak, using y as weights. If "apex", the location is simply the
-            location obtained after peak picking.
-
-        Returns
-        -------
-        dict
+        Estimate the location of the peak apex using a weighted average of x.
         """
+        weights = y[self.start:self.end] - baseline[self.start:self.end]
+        weights = np.abs(weights)
+        loc = np.average(x[self.start:self.end], weights=weights)
+        return loc
 
-        if x is None:
-            width = self.end - self.start
-            area = trapz(y[self.start:(self.end + 1)])
-            location = self.loc
+    def get_extension(self, x: np.ndarray):
+        width = x[self.end] - x[self.start]
+        return width
+
+    def get_area(self, x: np.ndarray, y: np.ndarray,
+                 baseline: Optional[np.ndarray] = None):
+        """
+        Estimates the peak area.
+        """
+        if baseline is None:
+            baseline_area = 0
         else:
-            width = x[self.end] - x[self.start]
-            area = trapz(y[self.start:(self.end + 1)],
-                         x[self.start:(self.end + 1)])
-            if center_estimation == "weighted":
-                # weighted mean
-                y_sum = y[self.start:self.end].sum()
-                location = (x[self.start:self.end]
-                            * y[self.start:self.end] / y_sum).sum()
-            elif center_estimation == "apex":
-                location = x[self.loc]
-            else:
-                msg = "center_estimation must be `weighted` or `apex`"
-                raise ValueError(msg)
+            baseline_area = trapz(baseline[self.start:(self.end + 1)],
+                                  x[self.start:(self.end + 1)])
+        total_area = trapz(y[self.start:(self.end + 1)],
+                           x[self.start:(self.end + 1)])
+        peak_area = max(0, total_area - baseline_area)
+        return peak_area
 
-        intensity = y[self.loc]
-
-        if subtract_bl:
-            area -= width * self.baseline
-
-        peak_params = {"location": location, "intensity": intensity,
-                       "width": width, "area": area}
-        return peak_params
-
-
-def make_widths(x: np.ndarray, max_width: float) -> np.ndarray:
-    """
-    Create an array of widths to use in CWT.
-
-    Parameters
-    ----------
-    x: numpy.ndarray
-        vector of x axis. It's assumed that x is sorted.
-    max_width: float
-    Returns
-    -------
-    widths: numpy.ndarray
-    """
-    min_x_distance = np.diff(x).min()
-    n = int((max_width - min_x_distance) / min_x_distance)
-    first_half = np.linspace(min_x_distance, 10 * min_x_distance, 40)
-    second_half = np.linspace(11 * min_x_distance, max_width, n - 10)
-    widths = np.hstack((first_half, second_half))
-
-    return widths
-
-
-def process_ridge_lines(y: np.ndarray,
-                        cwt_array: np.ndarray,
-                        ridge_lines: List[Tuple[np.ndarray, np.ndarray]],
-                        min_width: int,
-                        max_width: int,
-                        min_length=None,
-                        min_snr: float = 3,
-                        min_bl_ratio: float = 2) -> List[PeakLocation]:
-    """
-    Filter ridge lines and estimate peak parameters.
-
-    Parameters
-    ----------
-    y: np.ndarray
-        intensity vector used estimate baseline and noise
-    cwt_array: numpy.ndarray
-        CWT using y and widths, obtained using scipy.signal.wavelets.cwt
-    ridge_lines: list[(numpy.ndarray, numpy.ndarray)]
-        Ridge lines from cwt_array computed using
-        scipy.signal._peak_finding._identify_ridge_lines.
-    min_width: int
-    max_width: int
-    min_length: int
-        minimum length of a ridge line
-    min_snr: float
-    min_bl_ratio: float
-        minimum ratio between the intensity and the baseline
-
-    Returns
-    -------
-
-    """
-    # TODO: add BL estimator
-    if min_length is None:
-        min_length = np.ceil(cwt_array.shape[0] / 8)
-
-    peaks = list()
-
-    for row_ind, col_ind in ridge_lines:
-        rl_peaks = list()   # peaks in the current ridge line
-
-        # min_length check
-        if len(row_ind) < min_length:
-            continue
-
-        # snr check and width check for all scale max
-        line = cwt_array[row_ind, col_ind]
-        max_index = find_peaks(line)[0]
-
-        for ind in max_index:
-            scale_index, peak_index = row_ind[ind], col_ind[ind]
-            extension = _find_peak_extension(cwt_array, scale_index, peak_index)
-
-            peak_width = extension[1] - extension[0]
-            width_check = ((peak_width >= min_width)
-                           and (peak_width <= max_width))
-            baseline, snr = snr_calculation(y, peak_index, extension)
-            snr_check = snr >= min_snr
-            bl_ratio_check = y[peak_index] > min_bl_ratio * baseline
-            if snr_check and width_check and bl_ratio_check:
-                temp_peak = PeakLocation(peak_index, scale_index,
-                                         extension[0], extension[1],
-                                         snr, baseline)
-                rl_peaks.append(temp_peak)
-
-        if len(rl_peaks) > 0:
-            best_peak = max(rl_peaks,
-                            key=lambda x: cwt_array[x.scale, x.loc])
-            peaks.append(best_peak)
-    return peaks
-
-
-def snr_calculation(y: np.ndarray,
-                    peak_index: int,
-                    extension: Tuple[int, int]):
-
-    # baseline and noise estimation.  region at the left and right of the peak
-    # are used to estimate baseline.
-    # BL is the mean of the 25 % lower values of each region.
-    # Noise is the std of the same region
-    # The BL is finally chosen as the smaller value of left and right regions.
-    # Noise is the higher of both regions.
-
-    # prevents to use negative indices or indices greater than size of y
-    width = (extension[1] - extension[0])
-    left = max(0, extension[0] - width)
-    right = min(y.size, extension[1] + width)
-
-    left_25_lower = np.sort(y[left:extension[0]])
-    # left_25_lower = left_25_lower[:(left_25_lower.size // 4)]
-    lperc_5 = int(5 * left_25_lower.size / 100)
-    lperc_95 = int(95 * left_25_lower.size / 100)
-    left_25_lower = left_25_lower[lperc_5:lperc_95]
-    if left_25_lower.size > 0:
-        left_bl = left_25_lower.mean()
-        left_noise = left_25_lower.std()
-    else:
-        left_bl, left_noise = np.inf, np.inf
-    right_25_lower = np.sort(y[extension[1]:right])
-    # right_25_lower = right_25_lower[:(right_25_lower.size // 4)]
-    rperc_5 = int(5 * right_25_lower.size / 100)
-    rperc_95 = int(95 * right_25_lower.size / 100)
-    right_25_lower = right_25_lower[rperc_5:rperc_95]
-    if right_25_lower.size > 0:
-        right_bl = right_25_lower.mean()
-        right_noise = right_25_lower.std()
-    else:
-        right_bl, right_noise = np.inf, np.inf
-
-    baseline = min(left_bl, right_bl)
-    noise = min(left_noise, right_noise)
-
-    if noise:
-        snr = (y[peak_index] - baseline) / noise
-    else:
-        snr = 0
-    return baseline, snr
+    def __repr__(self):
+        str_repr = "PeakLocation(loc={}, start={}, end={})"
+        str_repr = str_repr.format(self.loc, self.start, self.end)
+        return str_repr
 
 
 def _find_peak_extension(cwt_array: np.ndarray, scale_index: int,
@@ -291,10 +110,19 @@ def _find_peak_extension(cwt_array: np.ndarray, scale_index: int,
     return extension
 
 
-def resample_data(x: np.ndarray,
-                  y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def _is_uniform_sampled(x: np.ndarray) -> bool:
     """
-    Resample data to uniform sampling. Helper function to cwt peak_picking
+    check if the distance between points is constant
+    """
+    dx = np.diff(x)
+    is_uniform = (dx == dx[0]).all()
+    return is_uniform
+
+
+def _resample_data(x: np.ndarray, y: np.ndarray
+                   ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Resample data to uniform sampling. Helper function to detect_peaks
 
     Parameters
     ----------
@@ -308,77 +136,511 @@ def resample_data(x: np.ndarray,
     yr: np.ndarray
         y resampled
     """
-    min_dist = np.diff(x).min()
-    x_max = x.max()
-    x_min = x.min()
-    n_interp = int((x_max - x_min) / min_dist) + 1
-    xr = np.linspace(x_min, x_max, n_interp)
-    interpolator = interp1d(x, y)
-    yr = interpolator(xr)
-    return xr, yr
+
+    if _is_uniform_sampled(x):
+        xu, yu = x, y
+    else:
+        min_dist = np.diff(x).min()
+        x_max = x.max()
+        x_min = x.min()
+        n_interp = int((x_max - x_min) / min_dist) + 1
+        xu = np.linspace(x_min, x_max, n_interp)
+        interpolator = interp1d(x, y)
+        yu = interpolator(xu)
+    return xu, yu
 
 
-def convert_to_original_scale(x_orig: np.ndarray, x_rescaled: np.ndarray,
-                              peak: PeakLocation) -> PeakLocation:
+def _process_ridge_lines(cwt_array: np.ndarray, y_peaks: np.ndarray,
+                         ridge_lines: List[Tuple[np.ndarray, np.ndarray]],
+                         min_length, max_distance) -> List[PeakLocation]:
+    """
+    find peaks in each ridge line. A peak is a local maximum in a ridge line
+    If more than one maximum is found in a ridge line, the maximum with found
+    at the lowest scale is selected.
 
-    start, loc, end = _find_closest_sorted(x_orig,
-                                           x_rescaled[[peak.start, peak.loc,
-                                                      peak.end]])
-    return PeakLocation(loc, peak.scale, start, end, peak.snr, peak.baseline)
+    Parameters
+    ----------
+    cwt_array: numpy.ndarray
+        CWT using y and widths, obtained using scipy.signal.wavelets.cwt
+    ridge_lines: list[(numpy.ndarray, numpy.ndarray)]
+        Ridge lines from cwt_array computed using
+        scipy.signal._peak_finding._identify_ridge_lines.
+    min_length: int
+        minimum length of a ridge line
+
+    Returns
+    -------
+    list[PeakLocation]
+    """
+
+    if min_length is None:
+        min_length = np.ceil(cwt_array.shape[0] / 8)
+
+    peaks = list()
+
+    for k, (row_ind, col_ind) in enumerate(ridge_lines):
+
+        # sometimes the function to detect ridgelines repeats rows values.
+        # TODO : implement a custom function for ridgeline detection.
+        row_ind, unique_ind = np.unique(row_ind, return_index=True)
+        col_ind = col_ind[unique_ind]
+
+        # min_length check
+        if len(row_ind) < min_length:
+            continue
+
+        # snr check and width check for all scale max
+        line = cwt_array[row_ind, col_ind]
+        max_index = find_peaks(line)[0]
+        if max_index.size == 0:
+            max_index = np.array([line.size - 1])
+
+        for ind in max_index:
+            scale_index, peak_index = row_ind[ind], col_ind[ind]
+            start, end = _find_peak_extension(cwt_array, scale_index,
+                                              peak_index)
+            temp_peak = PeakLocation(peak_index, scale_index, start, end)
+            temp_peak = _validate_peak(temp_peak, y_peaks, col_ind,
+                                       max_distance[0])
+            if temp_peak is not None:
+                peaks.append(temp_peak)
+                break
+    return peaks
 
 
-def pick_cwt(x: np.ndarray, y: np.ndarray, widths: np.ndarray, snr: float = 3,
-             bl_ratio: float = 2, min_width: Optional[float] = 5,
-             max_width: Optional[float] = 60,
-             max_distance: Optional[int] = None,
-             min_length: Optional[int] = None,
-             gap_thresh: int = 1) -> List[PeakLocation]:
+def _baseline_noise_estimation(y: np.ndarray) -> Tuple[np.ndarray, float]:
+    # Noise estimation
+    # ----------------
+    # if y = s + b + e
+    # where s is the peak signal, b is a baseline and e is an error term.
+    # some assumptions:
+    # 1. s is symmetric. This ensures that the cumulative sum of the
+    #     difference is of the peak is ~ 0.
+    # 2. e ~ N(0, sigma) iid.
+    # 3. The derivative of b, |db/dx| is small. in particular , for two co
+    # consecutive points |b[n + 1] - b[n]| << sigma
+    #
+    # From this we can say that for two consecutive points the following
+    # approximation is valid:
+    #
+    #  dy[n] = y[n + 1] - y[n] ~ s[n + 1] - s[n] + e
+    #
+    # If there's no peak signal, then:
+    #
+    # dy[n] ~= e ~ N(0, sqrt(2) * sigma)
+    #
+    # (The sqrt(2) term comes from adding two independent normal random
+    # variables with std = sigma.
+    # To remove zones with peaks we use an iterative approach, where we remove
+    # the higher 90th percentile of the signal. The noise is computed as the std
+    # of the remaining values from dy. The MAD is used as a robust estimator of
+    # std. Using this noise value, we find baseline points and using these
+    # points we compute a new noise value using the dy values. If the difference
+    # is greater than 50 percent, the procedure is repeated, but now using
+    # the higher 80th percentile of the signal...
+    #
+    # Baseline estimation
+    # -------------------
+    # The points where dy is smaller than three times the noise are considered
+    # as baseline. The baseline is then interpolated in the peak zones.
+
+    quantiles = np.linspace(0.1, 0.9, 9)[::-1]
+    dy = np.diff(y)
+    dy_cumsum = dy.cumsum()  + y[0] - min(y[0], y[-1])
+    noise_found = False
+    max_noise = 0
+
+    for q in quantiles:
+
+        # initial noise estimation
+        threshold = np.quantile(dy_cumsum, q)
+        noise = mad(dy[dy_cumsum < threshold]) / np.sqrt(2)
+        max_noise = max(noise, max_noise)
+
+        # prevent noise equal to zero
+        if np.isclose(noise, 0):
+            noise  = np.finfo(np.float64).eps
+
+        # sanity check, this consider cases with very low intensity peaks.
+        sanity_check = (y.max() - np.quantile(y, q)) > (3 * noise)
+        if not sanity_check:
+            baseline = y
+            return baseline, noise
+
+        # detect baseline points
+        baseline_index = np.where(dy_cumsum <= (np.sqrt(2) * 3 * noise))[0] + 1
+        # compare the noise value obtained with the index selected as baseline
+        new_noise = mad(dy[baseline_index - 1]) / np.sqrt(2)
+        dnoise = np.abs(new_noise - noise) / noise
+
+        # checks the difference with the new noise value
+        if dnoise <= 0.5:
+            noise = new_noise
+            baseline_y = y[baseline_index]
+            found = True
+            break
+
+    # fallback to the maximum noise value found if there was no convergence
+    if not found:
+        noise = max_noise
+        baseline_index = np.where(dy_cumsum <= (np.sqrt(2) * 3 * noise))[0] + 1
+        baseline_y = y[baseline_index]
+
+    # append first and last elements if they are not part of the baseline
+    # this is a necessary step before interpolation.
+    if baseline_index[0] > 0:
+        start_x = 0
+        start_y = y[baseline_index[0]]
+    else:
+        start_x = np.array([], dtype=int)
+        start_y = np.array([])
+
+    if baseline_index[-1] < (y.size - 1):
+        end_x = y.size - 1
+        end_y = y[baseline_index[-1]]
+    else:
+        end_x = np.array([], dtype=int)
+        end_y = np.array([])
+    baseline_x = np.hstack([start_x, baseline_index, end_x])
+    baseline_y = np.hstack([start_y, baseline_y, end_y])
+
+    interpolator = interp1d(baseline_x, baseline_y)
+    baseline = interpolator(np.arange(y.size))
+    return baseline, noise
+
+
+def _estimate_params(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
+                     w: np.ndarray, peaks: List[PeakLocation], snr: float,
+                     min_width: float, max_width: float,
+                     estimators: Union[str, _estimator_type],
+                     baseline: Optional[np.ndarray] = None,
+                     noise: Optional[np.ndarray] = None,
+                     append_empty_params: bool = False):
+
+    filtered_peaks = list()
+    peak_params = list()
+
+    if noise is None:
+        noise = np.nan
+
+    if baseline is None:
+        baseline = np.zeros_like(y)
+
+    for peak in peaks:
+        if estimators == "default":
+            peak_width = peak.get_extension(x)
+            peak_height = max(0, y[peak.loc] - baseline[peak.loc])
+            peak_snr = abs(peak_height) / noise
+        elif estimators == "cwt":
+            peak_width = widths[peak.scale]
+            peak_snr = abs(w[peak.scale, peak.loc] / w[0, peak.loc])
+            peak_height = x[peak.loc]
+        else:
+            peak_width = estimators["width"](x, y, peak, baseline)
+            peak_height = estimators["height"](x, y, peak, baseline)
+            peak_snr = abs(peak_height) / noise
+
+        is_valid_peak = ((peak_snr >= snr) and (peak_width >= min_width) and
+                         (peak_width <= max_width))
+        # if the peak is valid, then the area is computed
+        if is_valid_peak:
+            if estimators == "default":
+                peak_area = peak.get_area(x, y, baseline)
+                peak_loc = peak.get_loc(x, y, baseline)
+            elif estimators == "cwt":
+                peak_area = w[peak.scale, peak.loc]
+                peak_loc = x[peak.loc]
+            else:
+                peak_area = estimators["area"](x, y, peak, baseline)
+                peak_loc = estimators["loc"](x, y, peak, baseline)
+            peak_param = {"area": peak_area, "loc": peak_loc,
+                          "height": peak_height, "width": peak_width}
+            filtered_peaks.append(peak)
+            peak_params.append(peak_param)
+        else:
+            if append_empty_params:
+                empty_dict = dict()
+                peak_params.append(empty_dict)
+    return filtered_peaks, peak_params
+
+
+def detect_peaks(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
+                 min_length: int = 5, max_distance: int = 2,
+                 gap_threshold: int = 1, snr: float = 3, min_width: float = 5,
+                 max_width: float = 60,
+                 estimators: Union[str, _estimator_type] = "default"):
+    r"""
+    Find peaks in a 1D signal.
+
+    Peaks are detected using a modified version of the algorithm described in
+    [1].
+
+    Parameters
+    ----------
+    x : sorted array
+    y : array of intenisties
+    widths : array
+        Array of widths, in x units. Used as scales to build the wavelet
+        array.
+    min_length : int
+        Minimum number of points in a ridge line.
+    max_distance : float
+        Maximum x distance between consecutive points in a ridge line, in x
+        units.
+    gap_threshold : int
+        Maximum number of consecutive missing peaks in a ridge line.
+    snr : positive number
+        Signal-to-noise- ratio used to filter peaks. Deined as follows:
+
+        .. math::
+
+            SNR = \frac{peak height - baseline}{noise}
+
+    min_width : positive number
+        Minimum width of the peaks
+    max_width : positive number
+        Maximum width of the peaks
+    estimators : str or dict
+        How to estimate baseline, noise, peak height, peak width, peak area and
+        peak location. If `estimators` is 'cwt', parameters are computed as
+        described in [1]. Check the Notes to see how estimations in 'default'
+        mode are computed or how custom estimators can be used.
+
+    Returns
+    -------
+    peaks : List of PeakLocation
+    params : dict of peak parameters
+
+    Notes
+    -----
+    Peaks are detected using the CWT algorithm described in [1]. The optimum
+    scale where each peak is detected is the local maximum at the lowest scale
+    in the ridge line. If no local maximum was found, the scale with the maximum
+    coefficient is chosen. After finding a peak, the extension of the peak
+    is found as described in [2], by finding the nearest local minimum at both
+    sides of the peak, using the wavelet coefficients with the best scale. A
+    peak is represented then by three indices specifying the peak location, peak
+    start and peak end. These three values, together with baseline and noise
+    estimations are used to estimate peak parameters. If the mode used is
+    'default`, the peak parameters are defined as follows:
+
+        baseline :
+            A baseline is built using y values where no peak was detected. These
+            values are interpolated to build the baseline.
+        noise :
+            The noise is computed as the standard deviation of the values used
+            to build the baseline. To obtain a robust estimation, the median
+            absolute deviation of the baseline is used.
+        height :
+            The height of a peak is computed as the difference between the
+            y value baseline value at the peak location
+        snr :
+            The quotient between the height of the peak and the noise.
+        area :
+            Area of the peak obtained by integration between the start and
+            the end of the peak. The area of the baseline is subtracted.
+        width :
+            The peak width is computed as the peak extension, that is, the
+            difference between the end and the start of the peak.
+
+    After computing these parameters, peaks are filtered based on SNR and peak
+    width. Peak overlap between the filtered peaks is analyzed then. Two
+    peaks are overlapping if there is superposition in their peak extensions.
+    Overlapping peaks are flagged, their extension corrected and  corrected peak
+    parameters are computed again.
+
+    Custom estimators can be used for noise, baseline, peak height, peak
+    location, peak width and peak area:
+
+    .. code-block:: python
+
+            estimators = {"baseline": baseline_func, "noise": noise_func,
+                          "height": height_func,  "loc": loc_func,
+                          "width": width_func, "area": area_func}
+
+            # x and y are the same array used in the function
+            # peaks is a list of PeakLocation instances
+            # peak is a single PeakLocation instance
+
+            # baseline must have the same size as x and y
+            baseline = baseline_func(x, y, peaks)
+            # noise is a positive number
+            noise = noise_func(x, y, peaks)
+            # peak_parameters are all positive numbers
+            # (area and height can be zero)
+            height = height_func(x, y, peak, baseline)
+            area = area_func(x, y, peak, baseline)
+            width = width_func(x, y, peak, baseline)
+            loc = loc_func(x, y, peak, baseline)
+
+    References
+    ----------
+
+    ..  [1] Pan Du, Warren A. Kibbe, Simon M. Lin, Improved peak detection in
+        mass spectrum by incorporating continuous wavelet transform-based
+        pattern matching, Bioinformatics, Volume 22, Issue 17, 1 September 2006,
+        Pages 2059–2065, https://doi.org/10.1093/bioinformatics/btl355
+    ..  [2] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+        504 (2008). https://doi.org/10.1186/1471-2105-9-504
+    """
 
     # Convert to uniform sampling
-    xu, yu = resample_data(x, y)    # x uniform, y uniform
+    xu, yu = _resample_data(x, y)
 
-    # convert min_width and max_width to number of points
-    min_width = int(min_width / (xu[1] - xu[0])) + 1
-    max_width = int(max_width / (xu[1] - xu[0])) + 1
+    # convert parameters to number of points
+    widths, min_width, max_width, max_distance = \
+        _convert_to_points(xu, widths, min_width, max_width, max_distance)
 
-    # widths = make_widths(xu, max_width=max_width)
-    widths = widths / (xu[1] - xu[0])
-
-    # Setting max_distance
-    if max_distance is None:
-        max_distance = np.ones_like(widths) * 3
-    else:
-        max_distance = int(max_distance / (xu[1] - xu[0])) + 1
-        max_distance = np.ones_like(widths) * max_distance
-
+    # detect peaks in the ridge lines
     w = cwt(yu, ricker, widths)
-    ridge_lines = _peak_finding._identify_ridge_lines(w, max_distance,
-                                                      gap_thresh)
-    peaks = process_ridge_lines(yu, w, ridge_lines, min_width, max_width,
-                                min_length=min_length, min_snr=snr,
-                                min_bl_ratio=bl_ratio)
+    ridge_lines = \
+        _peak_finding._identify_ridge_lines(w, max_distance, gap_threshold)
+    # y_peaks are the local maxima of y and are used to validate peaks
+    y_peaks = find_peaks(yu)[0]
+    peaks = _process_ridge_lines(w, y_peaks, ridge_lines, min_length,
+                                 max_distance)
 
-    # convert back from uniform sampling to original x scale
-    peaks = [p.rescale(xu, x) for p in peaks]
-    # sort peaks based on loc
+    # baseline and noise estimation
+    if estimators == "default":
+        baseline, noise = _baseline_noise_estimation(yu)
+    elif estimators == "cwt":
+        baseline, noise = None, None
+    else:
+        baseline = estimators["baseline"](xu, yu, peaks)
+        noise = estimators["noise"](xu, yu, peaks)
 
-    peaks.sort(key=lambda x: x.loc)
-    # correct overlap between consecutive peaks:
+    # peak filtering and parameter estimation
+    peaks, params = \
+        _estimate_params(xu, yu, widths, w, peaks, snr, min_width, max_width,
+                         estimators, baseline=baseline, noise=noise)
 
-    remove = list()
+    # sort peaks based on location
+    sorted_index = sorted(range(len(peaks)), key=lambda s: peaks[s].loc)
+    peaks = [peaks[k] for k in sorted_index]
+    params = [params[k] for k in sorted_index]
+
+    # find and correct overlap between consecutive peaks:
+    overlap_index = list()
+    rm_index = list()
     for k in range(len(peaks) - 1):
         left, right = peaks[k], peaks[k + 1]
-        if left.end > right.start:
+        is_same_peak = right.loc == left.loc
+        merge = (right.loc - left.loc) <= max_distance[0]
+        has_overlap = left.end > right.start
+        if is_same_peak:
+            rm_index.append(k + (left.scale < right.scale))
+        elif merge:
+            rm_index.append(k)
+            right.start = left.start
+            right.loc = (left.loc + right.loc) // 2
+        elif has_overlap:
+            _fix_peak_extension(left, right, yu)
+            overlap_index.extend([k, k + 1])
+
+    overlap_peaks = [peaks[x] for x in overlap_index]
+
+    # if there are peaks with overlap, then compute again peak parameters after
+    # correction
+    if overlap_index:
+        _, overlap_params = \
+            _estimate_params(xu, yu, widths, w, overlap_peaks, snr, min_width,
+                             max_width, estimators, baseline=baseline,
+                             noise=noise, append_empty_params=True)
+        # replace corrected values in params:
+        for k, param in zip(overlap_index, overlap_params):
+            if len(param):
+                params[k] = param
+            else:
+                rm_index.append(k)
+
+    # remove invalid peaks and back scale peaks
+    peaks = [p.rescale(xu, x) for (k, p) in enumerate(peaks)
+             if k not in rm_index]
+    params = [p for k, p in enumerate(params) if (len(p) and k not in rm_index)]
+
+    return peaks, params
+
+
+def _fix_peak_extension(left: PeakLocation, right: PeakLocation,
+                        y: np.ndarray):
+    """
+    Correct the peak extension and location when there's peak overlap.
+    aux function for _detect_peaks
+    """
+
+    # There are four possible cases of overlap
+    # 1 - left.loc < right.start and left.end < right.loc
+    # 2 - left.loc < right.start and left.end > right.loc
+    # 3 - left.loc > right.start and left.end < right.loc
+    # 4 - left.loc > right.start and left.end > right.loc
+    # in the case 1, a middle point is computed as the boundary between peaks.
+    # In the case 2 and 3, one of the peaks is assumed to have the correct
+    # boundary and the value of the other peak is corrected.
+    # The case 4 only can occur if one of the peaks is invalid. This is because
+    # two local maximum cannot be consecutive without a minimum between them.
+
+    # values used for the case 4
+
+    if left.loc < right.start:
+        if left.end < right.loc:
+            # TODO : maybe is a better alternative to use the min
+            #   between left.loc and right.loc
+            middle = (left.end + right.start) // 2
+            left.end = middle
+            right.start = middle
+        else:
+            left.end = right.start
+    else:
+        if left.end < right.loc:
             right.start = left.end
-        if right.start > right.end:
-            remove.append(k+1)
+        else:
+            # one of the peaks is invalid and must be removed
+            # the least intense peak is assumed to be invalid
+            if y[left.loc] > y[right.loc]:
+                # dummy values to remove the peak
+                right.start = right.loc - 1
+                right.end = right.loc + 1
+            else:
+                left.start = left.loc - 1
+                left.end = left.loc + 1
 
-    for ind in reversed(remove):
-        del peaks[ind]
 
-    for p in peaks:
-        if p.start > p.end:
-            print(p.end - p.start)
+def _convert_to_points(xu: np.ndarray, widths: np.ndarray, min_width: float,
+                       max_width: float, max_distance: float):
+    """
+    Convert the parameters for detect_peaks function from x units to point
+    units.
+    """
+    dxu = xu[1] - xu[0]
+    min_width = np.rint(min_width / dxu).astype(int)
+    max_width = np.rint(max_width / dxu).astype(int)
+    widths = widths / dxu
+    max_distance = np.rint(max_distance / dxu)
+    max_distance = np.ones_like(widths, dtype=int) * max_distance
+    return widths, min_width, max_width, max_distance
 
 
-    return peaks
+def _validate_peak(peak: PeakLocation, y_peaks:np.ndarray, rl_col: np.ndarray,
+                   max_distance: int):
+    """
+    Check if there is a local maximum in y close to the found peak.
+    Auxiliary function to _process_ridgelines.
+    """
+    start, end = np.searchsorted(y_peaks, [peak.start, peak.end])
+    ext_peaks = y_peaks[start:end]
+    # check if there's at least a local maximum in the defined peak extension
+    if ext_peaks.size:
+        # check is close in any scale
+        crop_rl_col = rl_col[:(peak.scale + 1)]
+        closest_scale = _find_closest_sorted(ext_peaks, crop_rl_col)
+        peak_dist = np.abs(ext_peaks[closest_scale] - crop_rl_col)
+        min_dist = peak_dist.min()
+        if min_dist <= max_distance:
+            new_loc = crop_rl_col[np.argmin(peak_dist)]
+            peak.loc = new_loc
+        else:
+            peak = None
+    else:
+        peak = None
+    return peak

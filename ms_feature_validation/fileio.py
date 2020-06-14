@@ -149,15 +149,7 @@ class MSData:
     instrument : {"qtof". "orbitrap"}, optional
         The MS instrument type used to acquire the experimental data.
     separation : {"uplc", "hplc"}, optional
-        The separation technique used before MS analysis
-
-    Methods
-    -------
-    accumulate_spectra(start, end) : Merge several scans into one.
-    detect_features() : Detect features in the data.
-    get_rt() : returns the retention time vector of the experiment.
-    make_chromatograms(mz) : Computes extracted ion chromatograms.
-    make_tic(mode) : Computes the total ion chromatogram.
+        The separation technique used before MS analysis.
 
     """
 
@@ -369,9 +361,7 @@ class MSData:
         rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
         return rt
 
-    def detect_features(self, subtract_bl: bool = True,
-                        rt_estimation: str = "weighted",
-                        roi_params: Optional[dict] = None,
+    def detect_features(self, roi_params: Optional[dict] = None,
                         peaks_params: Optional[dict] = None
                         ) -> Tuple[List[lcms.Roi], pd.DataFrame]:
         """
@@ -380,20 +370,13 @@ class MSData:
 
         Parameters
         ----------
-        subtract_bl : bool
-            If True subtracts the estimated baseline from the intensity and
-            area.
-        rt_estimation : {"weighted", "apex"}
-            if "weighted", the peak retention time is computed as the weighted
-            mean of rt in the extension of the peak. If "apex", rt is
-            simply the value obtained after peak picking.
         roi_params : dict, optional
             Parameters to pass to the make_roi function. Overwrites default
             parameters. See function function documentation for a detailed
             description of each parameter. Default parameters are set using
             the `ms_instrument` and `separation_technique` attributes.
         peaks_params : dict, optional
-            Parameters to pass to the find_peaks_cwt function. Overwrites
+            Parameters to pass to the detect_peaks function. Overwrites
             default parameters. Default values are set using the
             `separation_technique` attribute. See function function
             documentation for a detailed description of each parameter.
@@ -470,8 +453,6 @@ class MSData:
 
         """
 
-        # TODO: subtract_bl, rt_estimation, should be moved to cwt params.
-
         if self.ms_mode != "centroid":
             msg = "Data must be in centroid mode for feature detection."
             raise ValueError(msg)
@@ -484,12 +465,9 @@ class MSData:
         roi_params = tmp_roi_params
         roi_list = lcms.make_roi(self.reader, **roi_params)
 
-        # step 2 and 3: find peaks and make DataFrame
+        # step 2 and 3: find peaks and build a DataFrame with the parameters
         feature_data = \
-            lcms.detect_roi_peaks(roi_list,
-                                  subtract_bl=subtract_bl,
-                                  rt_estimation=rt_estimation,
-                                  cwt_params=peaks_params)
+            lcms.detect_roi_peaks(roi_list, cwt_params=peaks_params)
         return roi_list, feature_data
 
 

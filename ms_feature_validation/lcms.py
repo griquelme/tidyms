@@ -17,8 +17,6 @@ from typing import Optional, Iterable, Tuple, Union, List, Callable
 from . import peaks
 import bokeh.plotting
 from bokeh.palettes import Set3
-from bokeh.models import ColumnDataSource
-from bokeh.models import HoverTool
 from collections import namedtuple
 
 from .utils import find_closest
@@ -220,26 +218,16 @@ def make_widths_lc(mode: str) -> np.ndarray:
     widths: array
     """
     if mode == "uplc":
-        min_width = 1
-        middle = 15
-        max_width = 60
+        widths = [np.linspace(0.25, 5, 20), np.linspace(6, 20, 8),
+                  np.linspace(25, 60, 8)]
+        widths = np.hstack(widths)
     elif mode == "hplc":
-        min_width = 1
-        middle = 30
-        max_width = 90
+        widths = [np.linspace(1, 10, 20), np.linspace(10, 30, 8),
+                  np.linspace(40, 90, 8)]
+        widths = np.hstack(widths)
     else:
         msg = "Valid modes are `hplc` or `uplc`."
         raise ValueError(msg)
-
-    # [:-1] prevents repeated value
-    widths = np.hstack((np.linspace(min_width, middle, 20)[:-1],
-                        np.linspace(middle, max_width, 20)))
-    # min_x_distance = np.diff(x).min()
-    # n = int((max_width - min_x_distance) / min_x_distance)
-    # first_half = np.linspace(min_x_distance, 10 * min_x_distance, 40)
-    # second_half = np.linspace(11 * min_x_distance, max_width, n - 10)
-    # widths = np.hstack((first_half, second_half))
-
     return widths
 
 
@@ -256,10 +244,10 @@ def make_widths_ms(mode: str) -> np.ndarray:
     widths : array
     """
     if mode == "qtof":
-        min_width = 0.005
+        min_width = 0.01
         middle = 0.1
         max_width = 0.2
-    elif mode == "qtof":
+    elif mode == "orbitrap":
         min_width = 0.0005
         middle = 0.001
         max_width = 0.005
@@ -288,8 +276,8 @@ def get_lc_cwt_params(mode: str) -> dict:
     cwt_params : dict
         parameters to pass to .peak.pick_cwt function.
     """
-    cwt_params = {"snr": 10, "bl_ratio": 2, "min_length": None,
-                  "max_distance": None, "gap_thresh": 1}
+    cwt_params = {"snr": 10, "min_length": 5, "max_distance": 1,
+                  "gap_threshold": 1, "estimators": "default"}
 
     if mode == "hplc":
         cwt_params["min_width"] = 10
@@ -312,15 +300,14 @@ def get_ms_cwt_params(mode: str) -> dict:
     mode : {"qtof", "orbitrap"}
         qtof assumes a peak width in the range of 0.01-0.05 Da. `orbitrap`
         assumes a peak width in the range of 0.001-0.005 Da.
-        TODO: add ppm scale
 
     Returns
     -------
     cwt_params : dict
         parameters to pass to .peak.pick_cwt function.
     """
-    cwt_params = {"snr": 10, "bl_ratio": 2, "min_length": None,
-                  "max_distance": None, "gap_thresh": 1}
+    cwt_params = {"snr": 10, "min_length": 5, "max_distance": 1,
+                  "gap_threshold": 1, "estimators": "default"}
 
     if mode == "qtof":
         cwt_params["min_width"] = 0.01
@@ -460,29 +447,14 @@ class Chromatogram:
     rt : array
         retention time in each scan.
     spint : array
-        intensity in each scan
-    mz : float
-        mz value used to build the chromatogram.
-    start : int, optional
-        scan number where chromatogram starts
-    end : int, optional
+        intensity in each scan.
     mode : str
         used to set default parameter for peak picking.
-
-    Methods
-    -------
-    find_peaks() : perform peak detection on the chromatograms.
-    get_peak_params() : convert peak information into a DataFrame.
-    plot() : plot the chromatogram.
-
-    See Also
-    --------
 
     """
 
     def __init__(self, rt: np.ndarray, spint: np.ndarray,
-                 mz: Optional[float] = None, start: Optional[int] = None,
-                 end: Optional[int] = None, mode: Optional[str] = None):
+                 mode: Optional[str] = None):
         """
         Constructor of the Chromatogram.
 
@@ -492,10 +464,6 @@ class Chromatogram:
             Intensity values of each scan
         rt : array of positive numbers.
             Retention time values.
-        mz : positive number, optional
-            m/z value used to generate the chromatogram
-        start : int, optional
-        end : int, optional
         mode : {"uplc", "hplc"}, optional
             used to set default parameters in peak picking. If None, `mode` is
             set to uplc.
@@ -510,15 +478,9 @@ class Chromatogram:
 
         self.rt = rt
         self.spint = spint
-        self.mz = mz
         self.peaks = None
 
-        if start is None:
-            self.start = 0
-        if end is None:
-            self.end = rt.size
-
-    def find_peaks(self, cwt_params: Optional[dict] = None) -> None:
+    def find_peaks(self, cwt_params: Optional[dict] = None) -> dict:
         """
         Find peaks with the modified version of the cwt algorithm described in
         the CentWave algorithm [1]. Peaks are added to the peaks
@@ -526,13 +488,18 @@ class Chromatogram:
 
         Parameters
         ----------
-        cwt_params: dict
+        cwt_params : dict
             key-value parameters to overwrite the defaults in the pick_cwt
             function. The default are obtained using the mode attribute.
 
+        Returns
+        -------
+        params : dict
+            dictionary of peak parameters
+
         See Also
         --------
-        peaks.pick_cwt : peak detection using the CWT algorithm.
+        peaks.detect_peaks : peak detection using the CWT algorithm.
         lcms.get_lc_cwt_params : set default parameters for pick_cwt.
 
         References
@@ -548,89 +515,32 @@ class Chromatogram:
             default_params.update(cwt_params)
 
         widths = make_widths_lc(self.mode)
-        peak_list = peaks.pick_cwt(self.rt[self.start:self.end],
-                                   self.spint[self.start:self.end],
-                                   widths, **default_params)
+        peak_list, peak_params = \
+            peaks.detect_peaks(self.rt, self.spint, widths, **default_params)
         self.peaks = peak_list
-        if self.start > 0:
-            for peak in self.peaks:
-                peak.start += self.start
-                peak.end += self.start
-                peak.loc += self.start
-
-    def get_peak_params(self, subtract_bl: bool = True,
-                        rt_estimation: str = "weighted") -> pd.DataFrame:
-        """
-        Compute peak parameters using retention time and mass-to-charge ratio
-
-        Parameters
-        ----------
-        subtract_bl: bool
-            If True subtracts the estimated baseline from the intensity and
-            area.
-        rt_estimation: {"weighted", "apex"}
-            if "weighted", the peak retention time is computed as the weighted
-            mean of rt in the extension of the peak. If "apex", rt is
-            simply the value obtained after peak picking.
-
-        Returns
-        -------
-        peak_params: DataFrame
-        """
-        if self.peaks is None:
-            msg = "`pick_cwt` method must be runned before using this method"
-            raise ValueError(msg)
-
-        peak_params = list()
-        for peak in self.peaks:
-            tmp = peak.get_peak_params(self.spint, x=self.rt,
-                                       subtract_bl=subtract_bl,
-                                       center_estimation=rt_estimation)
-            tmp["rt"] = tmp.pop("location")
-            # if isinstance(self.mz, np.ndarray):
-            #     missing = np.isnan(self.mz[peak.start:peak.end])
-            #     mz_not_missing = self.mz[peak.start:peak.end][~missing]
-            #     sp_not_missing = self.spint[peak.start:peak.end][~missing]
-            #     mz_mean = np.average(mz_not_missing, weights=sp_not_missing)
-            #     mz_std = mz_not_missing.std()
-            #     tmp["mz mean"] = mz_mean
-            #     tmp["mz std"] = mz_std
-            # else:
-            tmp["mz mean"] = self.mz
-            peak_params.append(tmp)
-        peak_params = pd.DataFrame(data=peak_params)
-        if not peak_params.empty:
-            peak_params = peak_params.sort_values("rt").reset_index(drop=True)
         return peak_params
 
-    def plot(self, subtract_bl: bool = True, draw: bool = True,
-             fig_params: Optional[dict] = None,
-             line_params: Optional[dict] = None,
-             scatter_params: Optional[dict] = None) -> bokeh.plotting.Figure:
+    def plot(self, draw: bool = True, fig_params: Optional[dict] = None,
+             line_params: Optional[dict] = None) -> bokeh.plotting.Figure:
         """
         Plot the chromatogram.
 
         Parameters
         ----------
-        subtract_bl : bool, optional
         draw : bool, optional
             if True run bokeh show function.
         fig_params : dict
             key-value parameters to pass into bokeh figure function.
         line_params : dict
             key-value parameters to pass into bokeh line function.
-        scatter_params : dict
-            key-value parameters to pass into bokeh line function.
 
         Returns
         -------
         bokeh Figure
         """
-        # TODO: remove subtract_bl and other parameters...
-
         default_line_params = {"line_width": 1, "line_color": "black",
                                "alpha": 0.8}
-        cmap = Set3[12] + Set3[12]
+        cmap = Set3[12]
 
         if line_params is None:
             line_params = default_line_params
@@ -642,27 +552,14 @@ class Chromatogram:
         if fig_params is None:
             fig_params = dict()
 
-        if scatter_params is None:
-            scatter_params = dict()
-
         fig = bokeh.plotting.figure(**fig_params)
         fig.line(self.rt, self.spint, **line_params)
         if self.peaks:
-            source = ColumnDataSource(
-                self.get_peak_params(subtract_bl=subtract_bl))
             for k, peak in enumerate(self.peaks):
                 fig.varea(self.rt[peak.start:(peak.end + 1)],
                           self.spint[peak.start:(peak.end + 1)], 0,
-                          fill_alpha=0.8, fill_color=cmap[k])
-            scatter = fig.scatter(source=source, x="rt", y="intensity",
-                                  **scatter_params)
-            # add hover tool only on scatter points
-            tooltips = [("rt", "@rt"), ("mz", "@{mz mean}"),
-                        ("intensity", "@intensity"),
-                        ("area", "@area"), ("width", "@width")]
-            hover = HoverTool(renderers=[scatter], tooltips=tooltips)
-            fig.add_tools(hover)
-
+                          fill_alpha=0.8, fill_color=cmap[k % 12])
+                # k % 12 is used to cycle over the colormap
         if draw:
             bokeh.plotting.show(fig)
         return fig
@@ -679,12 +576,6 @@ class MSSpectrum:
     spint : array of intensity values.
     mode : str
         MS instrument type. Used to set default values in peak picking.
-
-    Methods
-    -------
-    find_peaks() : perform peak detection on the MS spectrum.
-    get_peak_params() : convert peak information into a DataFrame.
-    plot() : plot the MS spectrum.
 
     """
     def __init__(self, mz: np.ndarray, spint: np.ndarray,
@@ -741,73 +632,32 @@ class MSSpectrum:
             default_params.update(cwt_params)
 
         widths = make_widths_ms(self.mode)
-        peak_list = peaks.pick_cwt(self.mz, self.spint, widths,
-                                   **default_params)
+        peak_list, peak_params = \
+            peaks.detect_peaks(self.mz, self.spint, widths, **default_params)
         self.peaks = peak_list
-
-    def get_peak_params(self, subtract_bl: bool = True,
-                        mz_estimation: str = "weighted") -> pd.DataFrame:
-        """
-        Compute peak parameters using mass-to-charge ratio and intensity
-
-        Parameters
-        ----------
-        subtract_bl : bool
-            If True subtracts the estimated baseline from the intensity and
-            area.
-        mz_estimation : {"weighted", "apex"}
-            if "weighted", the location of the peak is computed as the weighted
-            mean of x in the extension of the peak, using y as weights. If
-            "apex", the location is simply the location obtained after peak
-            picking.
-
-        Returns
-        -------
-        peak_params: DataFrame
-
-        """
-        if self.peaks is None:
-            msg = "`find_peaks` method must be used first."
-            raise ValueError(msg)
-
-        peak_params = [x.get_peak_params(self.spint, self.mz,
-                                         subtract_bl=subtract_bl,
-                                         center_estimation=mz_estimation)
-                       for x in self.peaks]
-        peak_params = pd.DataFrame(data=peak_params)
-        peak_params.rename(columns={"location": "mz"}, inplace=True)
-        if not peak_params.empty:
-            peak_params = peak_params.sort_values("mz").reset_index(drop=True)
         return peak_params
 
-    def plot(self, subtract_bl: bool = True, draw: bool = True,
-             fig_params: Optional[dict] = None,
-             line_params: Optional[dict] = None,
-             scatter_params: Optional[dict] = None) -> bokeh.plotting.Figure:
+    def plot(self, draw: bool = True, fig_params: Optional[dict] = None,
+             line_params: Optional[dict] = None) -> bokeh.plotting.Figure:
         """
-        Plot the MS spectrum.
+        Plot the spectrum.
 
         Parameters
         ----------
-        subtract_bl : bool, optional
         draw : bool, optional
             if True run bokeh show function.
         fig_params : dict
             key-value parameters to pass into bokeh figure function.
         line_params : dict
             key-value parameters to pass into bokeh line function.
-        scatter_params : dict
-            key-value parameters to pass into bokeh line function.
 
         Returns
         -------
         bokeh Figure
-
         """
-
         default_line_params = {"line_width": 1, "line_color": "black",
                                "alpha": 0.8}
-        cmap = Set3[12] + Set3[12] + Set3[12] + Set3[12]
+        cmap = Set3[12]
 
         if line_params is None:
             line_params = default_line_params
@@ -819,28 +669,14 @@ class MSSpectrum:
         if fig_params is None:
             fig_params = dict()
 
-        if scatter_params is None:
-            scatter_params = dict()
-
         fig = bokeh.plotting.figure(**fig_params)
         fig.line(self.mz, self.spint, **line_params)
         if self.peaks:
-            source = \
-                ColumnDataSource(self.get_peak_params(subtract_bl=subtract_bl))
             for k, peak in enumerate(self.peaks):
                 fig.varea(self.mz[peak.start:(peak.end + 1)],
                           self.spint[peak.start:(peak.end + 1)], 0,
-                          fill_alpha=0.8, fill_color=cmap[k])
-            scatter = fig.scatter(source=source, x="mz", y="intensity",
-                                  **scatter_params)
-            # add hover tool only on scatter points
-            tooltips = [("mz", "@{mz}{%0.4f}"),
-                        ("intensity", "@intensity"),
-                        ("area", "@area"), ("width", "@width")]
-            hover = HoverTool(renderers=[scatter], tooltips=tooltips)
-            hover.formatters = {"mz": "printf"}
-            fig.add_tools(hover)
-
+                          fill_alpha=0.8, fill_color=cmap[k % 12])
+                # k % 12 is used to cycle over the colormap
         if draw:
             bokeh.plotting.show(fig)
         return fig
@@ -860,11 +696,18 @@ class Roi(Chromatogram):
 
     Attributes
     ----------
+    rt : array
+        retention time in each scan.
+    spint : array
+        intensity in each scan.
+    mz : array
+        m/z in each scan.
     first_scan : int
-        first scan of the raw data where the ROI was detected.
+        first scan in the raw data where the ROI was detected.
+
     """
     def __init__(self, spint: np.ndarray, mz: np.ndarray, rt: np.ndarray,
-                 first_scan: int, mode: Optional[str] == None):
+                 first_scan: int, mode: Optional[str] = None):
         super(Roi, self).__init__(rt, spint, mode=mode)
         self.mz = mz
         self.first_scan = first_scan
@@ -875,59 +718,79 @@ class Roi(Chromatogram):
         """
         missing = np.isnan(self.spint)
         interpolator = interp1d(self.rt[~missing], self.spint[~missing])
+        mz_mean = np.nanmean(self.mz)
+        self.mz[missing] = mz_mean
         self.spint[missing] = interpolator(self.rt[missing])
 
-    def get_mean_mz(self):
-        missing = np.isnan(self.mz)
-        return np.average(self.mz[~missing], weights=self.spint[~missing])
-
-    def get_peak_params(self, subtract_bl: bool = True,
-                        rt_estimation: str = "weighted") -> dict:
+    def get_peaks_mz(self):
         """
-        Compute peak parameters using retention time and mass-to-charge ratio
-
-        Parameters
-        ----------
-        subtract_bl: bool
-            If True subtracts the estimated baseline from the intensity and
-            area.
-        rt_estimation: {"weighted", "apex"}
-            if "weighted", the peak retention time is computed as the weighted
-            mean of rt in the extension of the peak. If "apex", rt is
-            simply the value obtained after peak picking.
-
+        Computes the weighted mean of the m/z for each peak and the m/z
+        standard deviation
         Returns
         -------
-        peak_params: pandas.DataFrame
+        mean_mz : array
+        mz_std : array
         """
-        if self.peaks is None:
-            msg = "`pick_cwt` method must be runned before using this method"
-            raise ValueError(msg)
+        mz_std = np.zeros(len(self.peaks))
+        mz_mean = np.zeros(len(self.peaks))
+        for k, peak in enumerate(self.peaks):
+            # missing = np.isnan(self.mz[peak.start:peak.end + 1])
+            # print("wat")
+            # peak_mz = self.mz[peak.start:peak.end + 1][~missing]
+            # peak_spint = self.spint[peak.start:peak.end + 1][~missing]
+            peak_mz = self.mz[peak.start:peak.end + 1]
+            peak_spint = self.spint[peak.start:peak.end + 1]
+            mz_mean[k] = np.average(peak_mz, weights=peak_spint)
+            mz_std[k] = peak_mz.std()
+        return mz_mean, mz_std
 
-        peak_params = {"rt": list(), "intensity": list(), "width": list(),
-                       "area": list(), "mz": list(), "mz std": list()}
-        for peak in self.peaks:
-            tmp = peak.get_peak_params(self.spint, x=self.rt,
-                                       subtract_bl=subtract_bl,
-                                       center_estimation=rt_estimation)
-            tmp["rt"] = tmp.pop("location")
-            for k in peak_params:
-                if k not in ["mz", "mz std"]:
-                    peak_params[k].append(tmp[k])
-
-            # set mz mean and mz std
-            missing = np.isnan(self.mz[peak.start:peak.end])
-            if ~missing.all():
-                mz_not_missing = self.mz[peak.start:peak.end][~missing]
-                sp_not_missing = self.spint[peak.start:peak.end][~missing]
-                mz_mean = np.average(mz_not_missing, weights=sp_not_missing)
-                mz_std = mz_not_missing.std()
-            else:
-                mz_mean = np.nan
-                mz_std = np.nan
-            peak_params["mz"].append(mz_mean)
-            peak_params["mz std"].append(mz_std)
-        return peak_params
+    # def get_peak_params(self, subtract_bl: bool = True,
+    #                     rt_estimation: str = "weighted") -> dict:
+    #     """
+    #     Compute peak parameters using retention time and mass-to-charge ratio
+    #
+    #     Parameters
+    #     ----------
+    #     subtract_bl: bool
+    #         If True subtracts the estimated baseline from the intensity and
+    #         area.
+    #     rt_estimation: {"weighted", "apex"}
+    #         if "weighted", the peak retention time is computed as the weighted
+    #         mean of rt in the extension of the peak. If "apex", rt is
+    #         simply the value obtained after peak picking.
+    #
+    #     Returns
+    #     -------
+    #     peak_params: pandas.DataFrame
+    #     """
+    #     if self.peaks is None:
+    #         msg = "`pick_cwt` method must be runned before using this method"
+    #         raise ValueError(msg)
+    #
+    #     peak_params = {"rt": list(), "intensity": list(), "width": list(),
+    #                    "area": list(), "mz": list(), "mz std": list()}
+    #     for peak in self.peaks:
+    #         tmp = peak.get_peak_params(self.spint, x=self.rt,
+    #                                    subtract_bl=subtract_bl,
+    #                                    center_estimation=rt_estimation)
+    #         tmp["rt"] = tmp.pop("location")
+    #         for k in peak_params:
+    #             if k not in ["mz", "mz std"]:
+    #                 peak_params[k].append(tmp[k])
+    #
+    #         # set mz mean and mz std
+    #         missing = np.isnan(self.mz[peak.start:peak.end])
+    #         if ~missing.all():
+    #             mz_not_missing = self.mz[peak.start:peak.end][~missing]
+    #             sp_not_missing = self.spint[peak.start:peak.end][~missing]
+    #             mz_mean = np.average(mz_not_missing, weights=sp_not_missing)
+    #             mz_std = mz_not_missing.std()
+    #         else:
+    #             mz_mean = np.nan
+    #             mz_std = np.nan
+    #         peak_params["mz"].append(mz_mean)
+    #         peak_params["mz std"].append(mz_std)
+    #     return peak_params
 
 
 class _RoiProcessor:
@@ -1283,7 +1146,6 @@ def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
             def mz_reduce(mz_match: np.ndarray) -> float:
                 pass
 
-        TODO: change mean for None.
     sp_reduce : {"mean", "sum"} or Callable
         function used to reduce intensity values. Can be a function accepting
         numpy arrays and returning numbers. Only used when `multiple_match`
@@ -1363,34 +1225,37 @@ def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
 
 
 def detect_roi_peaks(roi: List[Roi],
-                     subtract_bl: bool = True, rt_estimation: str = "weighted",
                      cwt_params: Optional[dict] = None) -> pd.DataFrame:
     if cwt_params is None:
         cwt_params = dict()
 
-    peak_params = {"rt": list(), "intensity": list(), "width": list(),
-                   "area": list(), "mz": list(), "mz std": list(),
-                   "roi index": list(), "peak index": list()}
+    roi_index_list = list()
+    peak_index_list = list()
+    mz_mean_list = list()
+    mz_std_list = list()
+    peak_params = list()
 
     for roi_index, k_roi in enumerate(roi):
         k_roi.fill_nan()
-        k_roi.find_peaks(cwt_params=cwt_params)
-        temp_params = k_roi.get_peak_params(subtract_bl=subtract_bl,
-                                            rt_estimation=rt_estimation)
-        temp_params["roi index"] = [roi_index] * len(temp_params["rt"])
-        peak_index = np.arange(len(k_roi.peaks))
-        temp_params["peak index"] = peak_index
-        for k in peak_params:
-            peak_params[k].extend(temp_params[k])
-    n_features = len(peak_params["rt"])
-    max_ft_str_length = len(str(n_features))
+        k_params = k_roi.find_peaks(cwt_params=cwt_params)
+        n_features = len(k_params)
+        peak_params.extend(k_params)
+        k_mz_mean, k_mz_std = k_roi.get_peaks_mz()
+        roi_index_list.append([roi_index] * n_features)
+        peak_index_list.append(range(n_features))
+        mz_mean_list.append(k_mz_mean)
+        mz_std_list.append(k_mz_std)
 
-    def ft_formatter(x):
-        return "FT" + str(x + 1).rjust(max_ft_str_length, "0")
+    roi_index_list = np.hstack(roi_index_list)
+    peak_index_list = np.hstack(peak_index_list)
+    mz_mean_list = np.hstack(mz_mean_list)
+    mz_std_list = np.hstack(mz_std_list)
 
-    index = [ft_formatter(x) for x in range(n_features)]
-    peak_params = pd.DataFrame(data=peak_params, index=index)
+    peak_params = pd.DataFrame(data=peak_params)
+    peak_params = peak_params.rename(columns={"loc": "rt"})
+    peak_params["mz"] = mz_mean_list
+    peak_params["mz std"] = mz_std_list
+    peak_params["roi index"] = roi_index_list
+    peak_params["peak index"] = peak_index_list
+    peak_params = peak_params.dropna(axis=0)
     return peak_params
-
-# TODO: feature detection should be implemented using a general function
-#  called detect_features, and accept modes, such as uplc, hplc, di, etc...
