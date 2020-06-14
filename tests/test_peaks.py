@@ -68,10 +68,11 @@ def test_two_overlapping_peaks(peak_data):
                      [peak_loc + dist, peak_width, peak_height * ratio]]
         gm_params = np.array(gm_params)
         y = mfv.utils.gaussian_mixture(x, gm_params).sum(axis=0)
-        y += baseline
+        y += baseline + noise
         peaks, params = mfv.peaks.detect_peaks(x, y, widths, max_width=100,
                                                snr=5, max_distance=1)
-
-        assert len(peaks) == mfv.peaks.find_peaks(y)[0].size
+        if len(peaks) == 0:
+            print(peak_width, dist, ratio)
+        assert len(peaks) <= 2
         assert (((params[0]["loc"] - peak_loc) <= peak_width + 1) or
                 ((-params[0]["loc"] - peak_loc - dist) <= peak_width + 1))
