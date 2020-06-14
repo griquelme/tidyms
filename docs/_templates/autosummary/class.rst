@@ -7,6 +7,7 @@
 
 .. currentmodule:: {{ module }}
 
+
 .. autoclass:: {{ name }}
     :members:
 
