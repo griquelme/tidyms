@@ -5,6 +5,7 @@ functions and objects used to detect peaks.
 import numpy as np
 from scipy.signal import _peak_finding
 from scipy.signal import find_peaks
+from scipy.signal import argrelmax
 from scipy.signal.wavelets import ricker, cwt
 from scipy.integrate import trapz
 from scipy.interpolate import interp1d
@@ -57,7 +58,7 @@ class PeakLocation:
         Estimate the location of the peak apex using a weighted average of x.
         """
         weights = y[self.start:self.end] - baseline[self.start:self.end]
-        weights = np.abs(weights)
+        weights[weights < 0] = 0
         loc = np.average(x[self.start:self.end], weights=weights)
         return loc
 
@@ -102,7 +103,8 @@ def _find_peak_extension(cwt_array: np.ndarray, scale_index: int,
     -------
     extension: Tuple[int, int]
     """
-    min_index = find_peaks(-cwt_array[scale_index, :])[0]
+    # min_index = find_peaks(-cwt_array[scale_index, :])[0]
+    min_index = argrelmax(-cwt_array[scale_index, :])[0]
     # 0 and 1 are included in case there's no minimum
     min_index = np.hstack((0, min_index, cwt_array.shape[1] - 1))
     ext = np.searchsorted(min_index, peak_index)
@@ -191,7 +193,8 @@ def _process_ridge_lines(cwt_array: np.ndarray, y_peaks: np.ndarray,
 
         # snr check and width check for all scale max
         line = cwt_array[row_ind, col_ind]
-        max_index = find_peaks(line)[0]
+        # max_index = find_peaks(line)[0]
+        max_index = argrelmax(line)[0]
         if max_index.size == 0:
             max_index = np.array([line.size - 1])
 
@@ -208,7 +211,7 @@ def _process_ridge_lines(cwt_array: np.ndarray, y_peaks: np.ndarray,
     return peaks
 
 
-def _baseline_noise_estimation(y: np.ndarray) -> Tuple[np.ndarray, float]:
+def baseline_noise_estimation(y: np.ndarray) -> Tuple[np.ndarray, float]:
     # Noise estimation
     # ----------------
     # if y = s + b + e
@@ -246,9 +249,10 @@ def _baseline_noise_estimation(y: np.ndarray) -> Tuple[np.ndarray, float]:
 
     quantiles = np.linspace(0.1, 0.9, 9)[::-1]
     dy = np.diff(y)
-    dy_cumsum = dy.cumsum()  + y[0] - min(y[0], y[-1])
+    dy_cumsum = dy.cumsum() + y[0] - min(y[0], y[-1])
     noise_found = False
     max_noise = 0
+    noise = 0
 
     for q in quantiles:
 
@@ -277,11 +281,11 @@ def _baseline_noise_estimation(y: np.ndarray) -> Tuple[np.ndarray, float]:
         if dnoise <= 0.5:
             noise = new_noise
             baseline_y = y[baseline_index]
-            found = True
+            noise_found = True
             break
 
     # fallback to the maximum noise value found if there was no convergence
-    if not found:
+    if not noise_found:
         noise = max_noise
         baseline_index = np.where(dy_cumsum <= (np.sqrt(2) * 3 * noise))[0] + 1
         baseline_y = y[baseline_index]
@@ -331,10 +335,15 @@ def _estimate_params(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
             peak_width = peak.get_extension(x)
             peak_height = max(0, y[peak.loc] - baseline[peak.loc])
             peak_snr = abs(peak_height) / noise
+            # if peak_snr > snr:
+            #     print("snr:", peak_snr)
+            #     print("height:", peak_height)
+            #     print("width:", peak_width)
+            #     print("loc: ", x[peak.loc])
         elif estimators == "cwt":
-            peak_width = widths[peak.scale]
+            peak_width = widths[peak.scale] * (x[1] - x[0])
+            peak_height = y[peak.loc]
             peak_snr = abs(w[peak.scale, peak.loc] / w[0, peak.loc])
-            peak_height = x[peak.loc]
         else:
             peak_width = estimators["width"](x, y, peak, baseline)
             peak_height = estimators["height"](x, y, peak, baseline)
@@ -489,21 +498,22 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
     xu, yu = _resample_data(x, y)
 
     # convert parameters to number of points
-    widths, min_width, max_width, max_distance = \
-        _convert_to_points(xu, widths, min_width, max_width, max_distance)
+    widths, max_distance = \
+        _convert_to_points(xu, widths, max_distance)
 
     # detect peaks in the ridge lines
     w = cwt(yu, ricker, widths)
     ridge_lines = \
         _peak_finding._identify_ridge_lines(w, max_distance, gap_threshold)
     # y_peaks are the local maxima of y and are used to validate peaks
-    y_peaks = find_peaks(yu)[0]
+    # y_peaks = find_peaks(yu)[0]
+    y_peaks = argrelmax(yu, order=2)[0]
     peaks = _process_ridge_lines(w, y_peaks, ridge_lines, min_length,
                                  max_distance)
 
     # baseline and noise estimation
     if estimators == "default":
-        baseline, noise = _baseline_noise_estimation(yu)
+        baseline, noise = baseline_noise_estimation(yu)
     elif estimators == "cwt":
         baseline, noise = None, None
     else:
@@ -537,6 +547,9 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
         elif has_overlap:
             _fix_peak_extension(left, right, yu)
             overlap_index.extend([k, k + 1])
+        # remove invalid peaks after the extension was fixed
+        if yu[left.loc] < max(yu[left.start], yu[left.end]):
+            rm_index.append(k)
 
     overlap_peaks = [peaks[x] for x in overlap_index]
 
@@ -606,22 +619,22 @@ def _fix_peak_extension(left: PeakLocation, right: PeakLocation,
                 left.end = left.loc + 1
 
 
-def _convert_to_points(xu: np.ndarray, widths: np.ndarray, min_width: float,
-                       max_width: float, max_distance: float):
+def _convert_to_points(xu: np.ndarray, widths: np.ndarray,
+                       max_distance: float):
     """
     Convert the parameters for detect_peaks function from x units to point
     units.
     """
     dxu = xu[1] - xu[0]
-    min_width = np.rint(min_width / dxu).astype(int)
-    max_width = np.rint(max_width / dxu).astype(int)
     widths = widths / dxu
+    if widths[0] > 1:
+        widths = np.hstack([1, widths])
     max_distance = np.rint(max_distance / dxu)
     max_distance = np.ones_like(widths, dtype=int) * max_distance
-    return widths, min_width, max_width, max_distance
+    return widths, max_distance
 
 
-def _validate_peak(peak: PeakLocation, y_peaks:np.ndarray, rl_col: np.ndarray,
+def _validate_peak(peak: PeakLocation, y_peaks: np.ndarray, rl_col: np.ndarray,
                    max_distance: int):
     """
     Check if there is a local maximum in y close to the found peak.
@@ -644,3 +657,101 @@ def _validate_peak(peak: PeakLocation, y_peaks:np.ndarray, rl_col: np.ndarray,
     else:
         peak = None
     return peak
+
+
+def find_centroids(x: np.ndarray, y: np.ndarray, snr: float,
+                   min_distance: float):
+
+    r"""
+    Convert peaks to centroid mode.
+
+
+    Parameters
+    ----------
+    x : sorted array
+    y : array
+    snr : positive number
+        Signal to noise ratio
+    min_distance : positive number
+        Minimum distance between consecutive peaks.
+
+    Returns
+    -------
+    x_centroid : the centroid of each peak.
+    y_area : area of each peak.
+    peak_index : index of each centroid in the original x array.
+
+    Notes
+    -----
+    Each peak is found a a local maximum in the data. To remove peaks, the
+    SNR of the peak is computed as follows:
+
+    .. math::
+
+        SNR = \frac{peak intensity - baseline}{noise}
+
+    Peak boundaries are
+    defined as the closest local minimum to the peak. The area of each peak
+    is the area between the boundaries, after subtracting the baseline.
+
+    See Also
+    --------
+    baseline_noise_estimation
+
+    """
+
+    # baseline and noise estimation
+    baseline, noise = baseline_noise_estimation(y)
+    peak_index = argrelmax(y, order=2)[0]
+
+    # filter peaks by baseline and noise
+    yb = y - baseline
+    yb[yb < 0] = 0
+    peak_index = peak_index[(yb[peak_index] / noise) > snr]
+
+    # find peak boundaries: peak boundaries are the
+    # baseline points closest at each side of a peak
+    # bl_index = np.where(yb <= 0)[0]
+    y_min = find_peaks(-y)[0]
+    boundaries = np.searchsorted(y_min, peak_index)
+    boundaries[boundaries < 1] = 1
+    boundaries[boundaries >= y_min.size] = y_min.size - 1
+    start = y_min[boundaries - 1]
+    end = y_min[boundaries] + 1
+
+    # merge close peaks
+    merge_index = np.where(np.diff(x[peak_index]) < min_distance)[0]
+    peak_index[merge_index] = (peak_index[merge_index] +
+                               peak_index[merge_index + 1]) // 2
+    end[merge_index] = end[merge_index + 1]
+    rm_mask = np.ones(shape=peak_index.size, dtype=bool)
+    rm_mask[merge_index + 1] = False
+    peak_index = peak_index[rm_mask]
+    start = start[rm_mask]
+    end = end[rm_mask]
+
+    # find peak area and centroid for each peak
+    x_centroid = np.zeros(peak_index.size)
+    y_area = np.zeros(peak_index.size)
+    for k, ks, ke, in zip(range(boundaries.size), start, end):
+        y_area[k] = trapz(yb[ks:ke], x[ks:ke])
+        try:
+            cent = np.average(x[ks:ke], weights=yb[ks:ke])
+        except ZeroDivisionError:
+            cent = 0
+        x_centroid[k] = cent
+
+    # if the distance between two peaks is smaller than min_dist
+    # conserve only the peak with the greatest area
+    dx_centroid = np.diff(x_centroid)
+    dy_area = np.diff(y_area)
+    rm_index = np.where(dx_centroid < min_distance)[0]
+    rm_index += dy_area[rm_index] < 0
+    rm_mask = np.ones(shape=x_centroid.size, dtype=bool)
+    rm_mask[rm_index] = False
+    rm_mask[x_centroid <= 0] = False    # remove values with zero weight
+    x_centroid = x_centroid[rm_mask]
+    y_area = y_area[rm_mask]
+    peak_index = peak_index[rm_mask]
+
+    return x_centroid, y_area, peak_index

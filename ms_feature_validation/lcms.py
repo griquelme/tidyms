@@ -244,7 +244,7 @@ def make_widths_ms(mode: str) -> np.ndarray:
     widths : array
     """
     if mode == "qtof":
-        min_width = 0.01
+        min_width = 0.005
         middle = 0.1
         max_width = 0.2
     elif mode == "orbitrap":
@@ -306,15 +306,17 @@ def get_ms_cwt_params(mode: str) -> dict:
     cwt_params : dict
         parameters to pass to .peak.pick_cwt function.
     """
-    cwt_params = {"snr": 10, "min_length": 5, "max_distance": 1,
-                  "gap_threshold": 1, "estimators": "default"}
+    cwt_params = {"snr": 10, "min_length": 5, "gap_threshold": 1,
+                  "estimators": "default"}
 
     if mode == "qtof":
         cwt_params["min_width"] = 0.01
         cwt_params["max_width"] = 0.2
+        cwt_params["max_distance"] = 0.005
     elif mode == "orbitrap":
         cwt_params["min_width"] = 0.0005
         cwt_params["max_width"] = 0.005
+        cwt_params["max_distance"] = 0.0025
     else:
         msg = "`mode` must be `qtof` or `orbitrap`"
         raise ValueError(msg)
@@ -567,8 +569,8 @@ class Chromatogram:
 
 class MSSpectrum:
     """
-    Representation of a Mass Spectrum. Manages peak picking, isotopic
-    distribution analysis and plotting of MS data.
+    Representation of a Mass Spectrum in profile mode. Manages conversion to
+    centroids and plotting of data.
 
     Attributes
     ----------
@@ -603,39 +605,72 @@ class MSSpectrum:
             msg = "mode must be qtof or orbitrap"
             raise ValueError(msg)
 
-    def find_peaks(self, cwt_params: Optional[dict] = None):
-        """
-        Find peaks with the modified version of the cwt algorithm described in
-        the CentWave algorithm [1]. Peaks are added to the peaks attribute.
+    def find_centroids(self, mode: str = "qtof", snr: Optional[float] = None,
+                       min_distance: Optional[float] = None
+                       ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        r"""
+        Find centroids in the spectrum.
+
+        Centroids are found as local maxima above a noise value. See notes for
+        implementation details.
 
         Parameters
         ----------
-        cwt_params : dict
-            key-value parameters to overwrite the defaults in the pick_cwt
-            function from the peak module. Defaults are set using the `mode`
-            attribute.
+        mode : {"qtof", "orbitrap"}
+            If qtof, sets `min_distance` to 0.01. If orbitrap, `min_distance`
+            is set to 0.005. In both cases `snr` is set to 10.
+        snr : positive number, optional
+            Minimum signal to noise ratio of the peaks. Overwrites values
+            set by mode.
+        min_distance : positive number, optional
+            Minimum distance between consecutive peaks. Overwrites values set
+            by mode.
 
-        See Also
-        --------
-        peaks.pick_cwt : peak detection using the CWT algorithm.
-        lcms.get_ms_cwt_params : set default parameters for pick_cwt.
+        Returns
+        -------
+        centroids : array of peak centroids
+        area : array of peak area
+        centroid_index : index of the centroids in `mz`
 
-        References
-        ----------
-        ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-            feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-            504 (2008). https://doi.org/10.1186/1471-2105-9-504
+        Notes
+        -----
+        Peaks are found as local maxima in the signal. To remove low intensity
+        values, a baseline and noise is estimated assuming that y has additive
+        contributions from signal,  baseline and noise:
+
+        .. math::
+
+            y[n] = s[n] + b[n] + \epsilon
+
+        Where :math:`\epsilon` ~ N(0, \sigma)`. A peak is valid only if
+
+        .. math::
+
+            \frac{y[n_{peak}] - b[n_{peak}}{\sigma} \geq SNR
+
+        The extension of the peak is computed as the closest minimum to the
+        peak. If two peaks are closer than `min_distance`, the peaks are merged.
 
         """
-        default_params = get_ms_cwt_params(self.mode)
-        if cwt_params:
-            default_params.update(cwt_params)
+        params = {"snr": 10}
+        if mode == "qtof":
+            params["min_distance"] = 0.01
+        elif mode == "orbitrap":
+            params["min_distance"] = 0.005
+        else:
+            msg = "valid modes are qtof or orbitrap"
+            raise ValueError(msg)
 
-        widths = make_widths_ms(self.mode)
-        peak_list, peak_params = \
-            peaks.detect_peaks(self.mz, self.spint, widths, **default_params)
-        self.peaks = peak_list
-        return peak_params
+        if snr is not None:
+            params["snr"] = snr
+
+        if min_distance is not None:
+            params["min_distance"] = min_distance
+
+        centroids, area, centroid_index = \
+            peaks.find_centroids(self.mz, self.spint, **params)
+
+        return centroids, area, centroid_index
 
     def plot(self, draw: bool = True, fig_params: Optional[dict] = None,
              line_params: Optional[dict] = None) -> bokeh.plotting.Figure:
