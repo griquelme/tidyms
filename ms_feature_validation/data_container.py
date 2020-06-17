@@ -37,7 +37,7 @@ from sklearn.decomposition import PCA
 from typing import List, Optional, Iterable, Union, BinaryIO, TextIO
 import bokeh.plotting
 import pickle
-from bokeh.palettes import Spectral
+from bokeh.palettes import Category10
 from bokeh.models import ColumnDataSource
 from bokeh.transform import factor_cmap
 from bokeh.models import LabelSet
@@ -813,8 +813,12 @@ class BokehPlotMethods:
         -------
         bokeh.plotting.Figure.
         """
+        default_fig_params = {"aspect_ratio": 1}
         if fig_params is None:
-            fig_params = dict()
+            fig_params = default_fig_params
+        else:
+            default_fig_params.update(fig_params)
+            fig_params = default_fig_params
 
         if scatter_params is None:
             scatter_params = dict()
@@ -842,7 +846,7 @@ class BokehPlotMethods:
         # setup the colors
         unique_values = score[hue].unique().astype(str)
         score = ColumnDataSource(score)
-        cmap = Spectral[11]
+        cmap = Category10[10]
         palette = cmap * (int(unique_values.size / len(cmap)) + 1)
         palette = palette[:unique_values.size]
         # TODO: Category10_3 should be in a parameter file
@@ -851,12 +855,15 @@ class BokehPlotMethods:
                     color=factor_cmap(hue, palette, unique_values),
                     legend_group=hue, **scatter_params)
 
+        #  figure appearance
         x_label = x_name + " ({:.1f} %)"
         x_label = x_label.format(variance[x_pc - 1] * 100 / total_var)
         y_label = y_name + " ({:.1f} %)"
         y_label = y_label.format(variance[y_pc - 1] * 100 / total_var)
         fig.xaxis.axis_label = x_label
         fig.yaxis.axis_label = y_label
+        fig.yaxis.axis_label_text_font_style = "bold"
+        fig.xaxis.axis_label_text_font_style = "bold"
 
         if show_order:
             labels = LabelSet(x=x_name, y=y_name, text='order', level='glyph',
@@ -898,8 +905,12 @@ class BokehPlotMethods:
         -------
         bokeh.plotting.Figure.
         """
+        default_fig_params = {"aspect_ratio": 1}
         if fig_params is None:
-            fig_params = dict()
+            fig_params = default_fig_params
+        else:
+            default_fig_params.update(fig_params)
+            fig_params = default_fig_params
 
         if scatter_params is None:
             scatter_params = dict()
@@ -927,6 +938,8 @@ class BokehPlotMethods:
         y_label = y_label.format(variance[y_pc - 1] * 100 / total_var)
         fig.xaxis.axis_label = x_label
         fig.yaxis.axis_label = y_label
+        fig.yaxis.axis_label_text_font_style = "bold"
+        fig.xaxis.axis_label_text_font_style = "bold"
 
         if draw:
             bokeh.plotting.show(fig)
@@ -955,8 +968,13 @@ class BokehPlotMethods:
         bokeh.plotting.Figure
         """
 
+        default_fig_params = {"aspect_ratio": 1.5}
         if fig_params is None:
-            fig_params = dict()
+            fig_params = default_fig_params
+        else:
+            default_fig_params.update(fig_params)
+            fig_params = default_fig_params
+
         if scatter_params is None:
             scatter_params = dict()
 
@@ -971,7 +989,7 @@ class BokehPlotMethods:
 
         # setup the colors
         unique_values = source[hue].unique().astype(str)
-        cmap = Spectral[11]
+        cmap = Category10[10]
         palette = cmap * (int(unique_values.size / len(cmap)) + 1)
         palette = palette[:unique_values.size]
 
@@ -983,6 +1001,14 @@ class BokehPlotMethods:
         cmap_factor = factor_cmap(hue, palette, unique_values)
         fig.scatter(source=source, x="order", y=ft, color=cmap_factor,
                     legend_group=hue, **scatter_params)
+
+        fig.xaxis.axis_label = "Run order"
+        fig.yaxis.axis_label = "{} intensity [au]".format(ft)
+        fig.yaxis.axis_label_text_font_style = "bold"
+        fig.yaxis.formatter.precision = 2
+        fig.xaxis.formatter.precision = 2
+        fig.xaxis.axis_label_text_font_style = "bold"
+
         if draw:
             bokeh.plotting.show(fig)
         return fig

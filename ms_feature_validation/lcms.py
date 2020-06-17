@@ -551,8 +551,12 @@ class Chromatogram:
                 default_line_params[params] = line_params[params]
             line_params = default_line_params
 
+        default_fig_params = {"aspect_ratio": 1.5}
         if fig_params is None:
-            fig_params = dict()
+            fig_params = default_fig_params
+        else:
+            default_fig_params.update(fig_params)
+            fig_params = default_fig_params
 
         fig = bokeh.plotting.figure(**fig_params)
         fig.line(self.rt, self.spint, **line_params)
@@ -562,6 +566,14 @@ class Chromatogram:
                           self.spint[peak.start:(peak.end + 1)], 0,
                           fill_alpha=0.8, fill_color=cmap[k % 12])
                 # k % 12 is used to cycle over the colormap
+
+        #  figure appearance
+        fig.xaxis.axis_label = "Rt [s]"
+        fig.yaxis.axis_label = "intensity [au]"
+        fig.yaxis.axis_label_text_font_style = "bold"
+        fig.yaxis.formatter.precision = 2
+        fig.xaxis.axis_label_text_font_style = "bold"
+
         if draw:
             bokeh.plotting.show(fig)
         return fig
@@ -605,7 +617,7 @@ class MSSpectrum:
             msg = "mode must be qtof or orbitrap"
             raise ValueError(msg)
 
-    def find_centroids(self, mode: str = "qtof", snr: Optional[float] = None,
+    def find_centroids(self, snr: float = 10,
                        min_distance: Optional[float] = None
                        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         r"""
@@ -616,15 +628,13 @@ class MSSpectrum:
 
         Parameters
         ----------
-        mode : {"qtof", "orbitrap"}
-            If qtof, sets `min_distance` to 0.01. If orbitrap, `min_distance`
-            is set to 0.005. In both cases `snr` is set to 10.
-        snr : positive number, optional
+        snr : positive number
             Minimum signal to noise ratio of the peaks. Overwrites values
             set by mode.
         min_distance : positive number, optional
-            Minimum distance between consecutive peaks. Overwrites values set
-            by mode.
+            Minimum distance between consecutive peaks. If None, sets the value
+            to 0.01 if the `mode` attribute is qtof. If the `mode` is orbitrap,
+            sets the value to 0.005
 
         Returns
         -------
@@ -642,30 +652,28 @@ class MSSpectrum:
 
             y[n] = s[n] + b[n] + \epsilon
 
-        Where :math:`\epsilon` ~ N(0, \sigma)`. A peak is valid only if
+        Where :math:`\epsilon \sim N(0, \sigma)`. A peak is valid only if
 
         .. math::
 
-            \frac{y[n_{peak}] - b[n_{peak}}{\sigma} \geq SNR
+            \frac{y[n_{peak}] - b[n_{peak}]}{\sigma} \geq SNR
 
         The extension of the peak is computed as the closest minimum to the
         peak. If two peaks are closer than `min_distance`, the peaks are merged.
 
         """
-        params = {"snr": 10}
-        if mode == "qtof":
-            params["min_distance"] = 0.01
-        elif mode == "orbitrap":
-            params["min_distance"] = 0.005
-        else:
-            msg = "valid modes are qtof or orbitrap"
-            raise ValueError(msg)
-
-        if snr is not None:
-            params["snr"] = snr
+        params = {"snr": snr}
 
         if min_distance is not None:
             params["min_distance"] = min_distance
+        else:
+            if self.mode == "qtof":
+                md = 0.01
+            elif self.mode == "orbitrap":
+                md = 0.005
+            else:
+                raise ValueError
+            params["min_distance"] = md
 
         centroids, area, centroid_index = \
             peaks.find_centroids(self.mz, self.spint, **params)
@@ -701,8 +709,13 @@ class MSSpectrum:
                 default_line_params[params] = line_params[params]
             line_params = default_line_params
 
+        default_fig_params = {"aspect_ratio": 1.5}
         if fig_params is None:
-            fig_params = dict()
+            fig_params = default_fig_params
+        else:
+            default_fig_params.update(fig_params)
+            fig_params = default_fig_params
+
 
         fig = bokeh.plotting.figure(**fig_params)
         fig.line(self.mz, self.spint, **line_params)
@@ -712,6 +725,14 @@ class MSSpectrum:
                           self.spint[peak.start:(peak.end + 1)], 0,
                           fill_alpha=0.8, fill_color=cmap[k % 12])
                 # k % 12 is used to cycle over the colormap
+
+        #  figure appearance
+        fig.xaxis.axis_label = "m/z"
+        fig.yaxis.axis_label = "intensity [au]"
+        fig.yaxis.axis_label_text_font_style = "bold"
+        fig.yaxis.formatter.precision = 2
+        fig.xaxis.axis_label_text_font_style = "bold"
+
         if draw:
             bokeh.plotting.show(fig)
         return fig
