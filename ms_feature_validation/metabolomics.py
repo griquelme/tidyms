@@ -284,10 +284,12 @@ def make_data_container(feature_data: pd.DataFrame, cluster: pd.Series,
                   "rt": ["mean", "std", "min", "max"]}
     feature_metadata = feature_data.groupby("cluster").agg(estimators)
     feature_metadata.columns = _flatten_column_multindex(feature_metadata)
+    feature_metadata.index.name = "feature"
 
     # make data matrix
     data_matrix = feature_data.pivot(index="sample", columns="cluster",
                                      values="area")
+    data_matrix.columns.name = "feature"
     if fill_na:
         data_matrix = data_matrix.fillna(0)
 
