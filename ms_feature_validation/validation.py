@@ -244,16 +244,7 @@ def make_make_chromatogram_validator(ms_data):
                                             "nullable": True,
                                             "is_positive": True},
                                  "accumulator": {"type": "string",
-                                                 "allowed": ["mean", "sum"]},
-                                 "start": {"type": "integer",
-                                           "nullable": True,
-                                           "min": 0,
-                                           "max": n_spectra,
-                                           "lower_than": "end"},
-                                 "end": {"type": "integer",
-                                         "nullable": True,
-                                         "min": 0,
-                                         "max": n_spectra}
+                                                 "allowed": ["mean", "sum"]}
                                  }
     return ValidatorWithLowerThan(_make_chromatogram_schema)
 

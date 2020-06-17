@@ -241,10 +241,9 @@ class MSData:
             tic[k_scan] = reduce(spint)
         return lcms.Chromatogram(rt, tic, None)
 
-    def make_chromatograms(self, mz: List[float], window: float = 0.05,
-                           start: Optional[int] = None,
-                           end: Optional[int] = None,
-                           accumulator: str = "sum"):
+    def make_chromatograms(self, mz: List[float],
+                           window: Optional[float] = None,
+                           accumulator: str = "sum") -> List[lcms.Chromatogram]:
         """
         Computes the Extracted Ion Chromatogram for a list mass-to-charge
         values.
@@ -253,14 +252,10 @@ class MSData:
         ----------
         mz: Iterable[float]
             Mass-to-charge values to build EICs.
-        window: float
-            Mass window in absolute units
-        start: int, optional
-            first scan used to build the chromatogram.
-            If None, uses the first scan.
-        end: int
-            last scan used to build the chromatogram.
-            if None, uses the last scan.
+        window: positive number, optional
+            Mass window in absolute units. If None, uses a 0.01  window if the
+            `instrument` attribute is qtof or a 0.005 value if the instrument
+            is orbitrap.
         accumulator: {"mean", "sum"}
             accumulator function used to in each scan.
 
@@ -269,19 +264,19 @@ class MSData:
         chromatograms : list[Chromatograms]
 
         """
-        # TODO: add tolerance in different units (Da, ppm).
         # parameter validation
-        params = {"window": window, "accumulator": accumulator,
-                  "start": start, "end": end}
-        validation.validate(params,
-                            validation.make_make_chromatogram_validator(self))
+        params = {"accumulator": accumulator}
+        if window is None:
+            if self.instrument == "qtof":
+                window = 0.05
+            elif self.instrument == "orbitrap":
+                window = 0.005
+            params["window"] = window
 
-        rt, spint = lcms.make_chromatograms(self.reader, mz, window=window,
-                                            start=start, end=end,
-                                            accumulator=accumulator)
+        rt, spint = lcms.make_chromatograms(self.reader, mz, **params)
         chromatograms = list()
         for row in range(spint.shape[0]):
-            tmp = lcms.Chromatogram(rt, spint[row, :], mz[row], start=start)
+            tmp = lcms.Chromatogram(rt, spint[row, :], mode=self.separation)
             chromatograms.append(tmp)
         return chromatograms
 
@@ -315,7 +310,7 @@ class MSData:
         accum_mz, accum_int = \
             lcms.accumulate_spectra(self.reader, start, end, subtract=subtract,
                                     kind=kind, accumulator=accumulator)
-        sp = lcms.MSSpectrum(accum_mz, accum_int)
+        sp = lcms.MSSpectrum(accum_mz, accum_int, mode=self.instrument)
         return sp
 
     def _is_centroided(self) -> bool:
@@ -332,7 +327,7 @@ class MSData:
         # if the data is in profile mode, mz values are going to be closer.
         return dmz.min() > 0.008
 
-    def get_spectrum(self, scan: int):
+    def get_spectrum(self, scan: int) -> lcms.MSSpectrum:
         """
         get the spectrum for the given scan number.
 
@@ -345,6 +340,7 @@ class MSData:
         -------
         MSSpectrum
         """
+        scan = int(scan)  # this prevents a bug in pyopenms with numpy int types
         mz, sp = self.reader.getSpectrum(scan).get_peaks()
         return lcms.MSSpectrum(mz, sp)
 
