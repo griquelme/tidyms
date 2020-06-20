@@ -1,6 +1,6 @@
 """
-The Mass Spectrometry Kit for Metabolomics (MSKM)
-=================================================
+TidyMS
+======
 
 A package to work with Mass Spectrometry data from Metabolomics Experiments.
 
