@@ -3,12 +3,16 @@ import numpy as np
 import pytest
 from itertools import product
 
+# random seed
+SEED = 1234
+
 # test peak picking functions using typical values expected in chromatography
+
 
 @pytest.fixture
 def peak_data():
     # the same data is generated always
-    np.random.seed(1234)
+    np.random.seed(SEED)
     x = np.arange(100)
     noise = np.random.normal(size=x.size, scale=0.25)
     # the scale used for peak picking
@@ -36,7 +40,7 @@ def test_one_peak_several_widths(peak_data):
 
 def test_one_peak_several_snr(peak_data):
     x, widths, baseline, _ = peak_data
-    np.random.seed(1234)
+    np.random.seed(SEED)
     peak_loc = 50
     peak_height = 10
     peak_width = 3
@@ -57,7 +61,7 @@ def test_one_peak_several_snr(peak_data):
 
 def test_two_overlapping_peaks(peak_data):
     x, widths, baseline, noise = peak_data
-    np.random.seed(1234)
+    np.random.seed(SEED)
     peak_loc = 50
     peak_height = 20
     peak_widths = [2, 3, 4]
@@ -76,3 +80,19 @@ def test_two_overlapping_peaks(peak_data):
         assert len(peaks) <= 2
         assert (((params[0]["loc"] - peak_loc) <= peak_width + 1) or
                 ((-params[0]["loc"] - peak_loc - dist) <= peak_width + 1))
+
+
+def test_find_centroids():
+    np.random.seed(SEED)
+    p = np.array([[110, 0.01, 300], [120, 0.01, 500],
+                  [140, 0.01, 200], [141, 0.01, 100]])
+    x_peaks = np.array([110, 120, 140, 141])
+    x = np.linspace(100, 200, 10000)
+    y = mfv.utils.gaussian_mixture(x, p).sum(axis=0)
+
+    y += np.random.normal(size=x.size, scale=1)
+    centroid, _, _ = mfv.peaks.find_centroids(x, y, 10, 0.01)
+
+    # test differences between peak mean and centrois
+    print(np.abs(centroid - x_peaks))
+    assert (np.abs(centroid - x_peaks) < 0.0005).all()
