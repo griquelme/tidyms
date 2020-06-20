@@ -12,7 +12,7 @@ using a combination of clustering algorithms.
 import pandas as pd
 import numpy as np
 from .fileio import MSData
-from .data_container import DataContainer
+from .container import DataContainer
 from .lcms import Roi
 import os.path
 from sklearn.cluster import DBSCAN

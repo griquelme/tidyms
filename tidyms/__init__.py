@@ -12,12 +12,12 @@ Provides
 """
 
 from . import fileio
-from . import data_container
+from . import container
 from . import utils
 from . import peaks
 from . import filter
 from . import lcms
 from .metabolomics import *
-from .data_container import DataContainer
+from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum

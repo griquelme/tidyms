@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 import os
 from typing import Optional, Iterable, Tuple, Union, List, BinaryIO, TextIO
-from .data_container import DataContainer
+from .container import DataContainer
 from . import lcms
 from . import validation
 from . import utils

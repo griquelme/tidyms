@@ -37,8 +37,8 @@ MissingValueError : Error raised when the data matrix has missing values.
 """
 
 
-from .data_container import DataContainer
-from . import data_container
+from .container import DataContainer
+from . import container
 from ._names import *
 from ._filter_functions import *
 from . import validation
@@ -186,7 +186,7 @@ class Processor(Reporter):
                     msg = "classes listed in {} aren't present " \
                           "in the DataContainer"
                     msg = msg.format(class_type)
-                    raise data_container.ClassNameError(msg)
+                    raise container.ClassNameError(msg)
 
         for requirement in self._requirements:
             if self._requirements[requirement] != dc_status[requirement]:
@@ -891,12 +891,12 @@ class MissingValueError(ValueError):
     pass
 
 
-_requirements_error = {"empty": data_container.EmptyDataContainerError,
+_requirements_error = {"empty": container.EmptyDataContainerError,
                        "missing": MissingValueError,
                        _qc_type: MissingMappingInformation,
                        _blank_type: MissingMappingInformation,
-                       "batch": data_container.BatchInformationError,
-                       "order": data_container.RunOrderError}
+                       "batch": container.BatchInformationError,
+                       "order": container.RunOrderError}
 
 
 # TODO : refactor Processor using the following func prototype:
