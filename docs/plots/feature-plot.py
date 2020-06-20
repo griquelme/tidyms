@@ -1,9 +1,9 @@
-import ms_feature_validation as mfv
+import tidyms as ms
 from bokeh import plotting
 import numpy as np
 plotting.output_file("example.html")
 
-data = mfv.fileio.load_dataset("ltr")
+data = ms.fileio.load_dataset("ltr")
 
 # search [M+H]+ from trp in the features
 mz = 205.097

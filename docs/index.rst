@@ -1,12 +1,12 @@
-.. MSKM documentation master file, created by
+.. TidyMS documentation master file, created by
    sphinx-quickstart on Tue May 19 15:53:07 2020.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-mskm: The Mass Spectrometry Kit for Metabolomics
-================================================
+TidyMS
+======
 
-The mskm is a python package that provides easy to use tools for processing and
+TidyMS is a python package that provides easy to use tools for processing and
 analyzing mass spectrometry based metabolomics data sets. It's built on top
 of Numpy, Pandas and scikit-learn. Get started by reading the
 :doc:`installation` instructions and then see an overview of the package in the

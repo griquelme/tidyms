@@ -1,11 +1,11 @@
 .. quickstart
 
-.. py:currentmodule:: ms_feature_validation
+.. py:currentmodule:: tidyms
 
 Quickstart
 ==========
 
-The mskm is a Python package that provides tools to process and analyze
+TidyMS is a Python package that provides tools to process and analyze
 Mass Spectroscopy data from any data set, but it's functionality was mostly
 thought to be used with data from metabolomics experiments. It uses the
 `pyopenms <https://www.openms.de/>`_ package to read raw data in the mzML
@@ -25,30 +25,30 @@ Some of the functionality that offers is:
 *   Interactive data visualization using `bokeh <https://bokeh.org/>`_, or
     publication quality plots using `seaborn <https://seaborn.pydata.org/>`_.
 
-In the rest of this guide, we show different use cases for the mskm. A basic
-knowledge of mass spectrometry and metabolomics is assumed, but you can look
-at the :doc:`glossary` section to see the concepts used in this guide.
+In the rest of this guide, we show different use cases for the TidyMS package.
+A basic knowledge of mass spectrometry and metabolomics is assumed, but you can
+look at the :doc:`glossary` section to see the concepts used in this guide.
 Installation instructions are available :doc:`here<installation>`.
 
 Creating chromatograms
 ----------------------
 
-A :class:`ms_feature_validation.Chromatogram` object can be created using a
+A :class:`tidyms.Chromatogram` object can be created using a
 retention time array and an intensity array.
 
 .. code-block:: python
 
-    import ms_feature_validation as mfv
+    import tidyms as ms
     import numpy as np
 
     # this creates two gaussian overlapping peaks simulating a chromatogram
     rt = np.arange(100)
     chrom_params = np.array([[50, 5, 10], [70, 5, 20]])
-    spint = mfv.utils.gaussian_mixture(rt, chrom_params).sum(axis=0)
+    spint = ms.utils.gaussian_mixture(rt, chrom_params).sum(axis=0)
 
-    chromatogram = mfv.Chromatogram(rt, spint)
+    chromatogram = ms.Chromatogram(rt, spint)
 
-Using the :class:`ms_feature_validation.Chromatogram` object, we can perform
+Using the :class:`tidyms.Chromatogram` object, we can perform
 common tasks like plotting or peak picking:
 
 .. code-block:: python
@@ -58,11 +58,11 @@ common tasks like plotting or peak picking:
 .. bokeh-plot:: plots/chromatogram.py
     :source-position: none
 
-The :meth:`ms_feature_validation.Chromatogram.find_peaks` method detects peaks
+The :meth:`tidyms.Chromatogram.find_peaks` method detects peaks
 and stores them as a list inside the peaks attribute. The method for peak
 picking uses a CWT based algorithm with parameters optimized to be used on
 chromatographic data. Using
-:meth:`ms_feature_validation.Chromatogram.get_peak_params` we can obtain a
+:meth:`tidyms.Chromatogram.get_peak_params` we can obtain a
 :py:class:`pandas.DataFrame` with peak information, or if we plot the
 Chromatogram again, we can see the detected peaks.
 
@@ -77,7 +77,7 @@ Chromatogram again, we can see the detected peaks.
 Creating mass spectra
 ---------------------
 
-In a similar way, we can create a :class:`ms_feature_validation.MSSpectrum`
+In a similar way, we can create a :class:`tidyms.MSSpectrum`
 object:
 
 .. code-block:: python
@@ -86,9 +86,9 @@ object:
 
     # creates three gaussian peaks simulating an isotopic envelope
     sp_params = np.array([[401, 0.01, 100], [402, 0.01, 15], [403, 0.01, 2]])
-    spint = mfv.utils.gaussian_mixture(rt, sp_params).sum(axis=0)
+    spint = ms.utils.gaussian_mixture(rt, sp_params).sum(axis=0)
 
-    spectrum = mfv.MSSpectrum(rt, spint)
+    spectrum = ms.MSSpectrum(rt, spint)
     spectrum.find_peaks()
     spectrum.plot()
 
@@ -100,18 +100,18 @@ Reading raw data
 
 In the majority of cases, chromatograms and spectra are going to be created
 from experimental data. Working with raw data can be done using the
-:class:`ms_feature_validation.MSData` object, which reads data in the mzML
+:class:`tidyms.MSData` object, which reads data in the mzML
 format. You can read :doc:`this tutorial <mzml>` on how to convert
 experimental data from proprietary, instrument-specific formats to mzML. The
 MSData object can create Total Ion Chromatograms (TIC), or Base Peak
 intensity (BPI) chromatograms using the
-:meth:`ms_feature_validation.MSData.make_tic` method, which returns a
-:class:`ms_feature_validation.Chromatogram` object.
+:meth:`tidyms.MSData.make_tic` method, which returns a
+:class:`tidyms.Chromatogram` object.
 
 .. code-block:: python
 
     data_path = "exp_data.mzML"
-    ms_data = mfv.MSData(data_path,
+    ms_data = ms.MSData(data_path,
                          ms_mode="centroid",
                          instrument="qtof",
                          separation="uplc")
@@ -121,9 +121,9 @@ It's recommended to provide the instrument type used and the separation
 technique on the constructor, as this provides a reasonable set of default
 values for each method according to the analytical platform being used.
 To create extracted ion chromatograms the
-:meth:`ms_feature_validation.MSData.make_chromatograms` method accepts a list
+:meth:`tidyms.MSData.make_chromatograms` method accepts a list
 or array of m/z values and return a list of
-:class:`ms_feature_validation.Chromatogram`:
+:class:`tidyms.Chromatogram`:
 
 .. code-block:: python
 
@@ -131,8 +131,8 @@ or array of m/z values and return a list of
     mz_list = [205.0977, 89.0477]
     chromatograms = ms_data.make_chromatograms(mz_list)
 
-To create a mass spectrum, the :meth:`ms_feature_validation.MSData.get_spectrum`
-takes a scan number and returns a :class:`ms_feature_validation.MSSpectrum`.
+To create a mass spectrum, the :meth:`tidyms.MSData.get_spectrum`
+takes a scan number and returns a :class:`tidyms.MSSpectrum`.
 
 .. code-block:: python
 
@@ -140,7 +140,7 @@ takes a scan number and returns a :class:`ms_feature_validation.MSSpectrum`.
     sp = ms_data.get_spectrum(n_scan)
 
 If you want to create an average spectrum from a set of consecutive scans, the
-:meth:`ms_feature_validation.MSData.accumulate_spectra` does the task.
+:meth:`tidyms.MSData.accumulate_spectra` does the task.
 
 .. code-block:: python
 
@@ -168,7 +168,7 @@ centroid mode** in two steps:
     and peak width.
 
 feature detection is available through the
-:meth:`ms_feature_validation.MSData.detect_features` method which returns a
+:meth:`tidyms.MSData.detect_features` method which returns a
 ROI list and the feature table.
 
 .. code-block:: python
@@ -181,7 +181,7 @@ estimators for each peak parameter. For a detailed explanation on each
 parameter see the :doc:`api`.
 
 To perform feature detection on several samples, you can use the
-:py:func:`ms_feature_validation.detect_features` function.
+:py:func:`tidyms.detect_features` function.
 
 .. code-block:: python
 
@@ -189,7 +189,7 @@ To perform feature detection on several samples, you can use the
     # creates a list of path to each data file to analyze
     path = "data"
     file_list = [os.path.join(path, x) for x in os.listdir(path)]
-    roi, feature_data = mfv.detect_features(data_path, separation="uplc",
+    roi, feature_data = ms.detect_features(data_path, separation="uplc",
                                             instrument="qtof")
 
 This creates a DataFrame where each row is a feature detected in a specific
@@ -212,20 +212,20 @@ about the correspondence algorithm here).
 
     mz_tolerance = 0.005
     rt_tolerance = 5
-    cluster = mfv.feature_correspondence(feature_data, mz_tolerance,
+    cluster = ms.feature_correspondence(feature_data, mz_tolerance,
                                          rt_tolerance)
 
 After performing feature correspondence, each feature is assigned to a cluster.
 This Data can be converted to a data matrix, where each row is a sample and
 each column is a feature. Working with data matrices is done with the
-:class:`ms_feature_validation.DataContainer` object. To create a DataContainer
+:class:`tidyms.DataContainer` object. To create a DataContainer
 with the matched features, the function
-:py:func:`ms_feature_validation.make_data_container` is used:
+:py:func:`tidyms.make_data_container` is used:
 
 .. code-block:: python
 
     sample_metadata = pd.read_csv("sample_metadata.csv")
-    data = mfv.make_data_container(feature_data, cluster,
+    data = ms.make_data_container(feature_data, cluster,
                                    sample_metadata)
 
 To create a DataContainer object, in addition to the detected features and
@@ -245,7 +245,7 @@ Working with DataContainers
 ---------------------------
 
 The functionality to work with metabolomics data in a data matrix form is
-provided through the :py:class:`ms_feature_validation.DataContainer` object.
+provided through the :py:class:`tidyms.DataContainer` object.
 The DataContainer object organizes the data matrix, feature metadata and
 sample metadata in three different DataFrames and manages several common tasks
 such as computing metrics, normalization, plotting features and
@@ -260,7 +260,7 @@ through the metrics attribute, which has methods to compute metrics:
 
 .. code-block:: python
 
-    data = mfv.fileio.load_dataset("ltr")
+    data = ms.fileio.load_dataset("ltr")
     # coefficient of variation
     cv = data.metrics.cv()
 
@@ -345,20 +345,20 @@ same process method, that accepts a DataContainer and process it in place:
     # estimated using samples of type blank using the mapping.
     # using mode="mean" the mean of all blank samples is used to estimate
     # the blank contribution.
-    bc = mfv.filter.BlankCorrector(mode="mean")
+    bc = ms.filter.BlankCorrector(mode="mean")
     bc.process(data)
     # remove all features with a prevalence lower than 80 % in all classes.
-    pf = mfv.filter.PrevalenceFilter(lb=0.8)
+    pf = ms.filter.PrevalenceFilter(lb=0.8)
     bc.proces(data)
 
 Refer to the :doc:`api` to see a list of available Filters and Correctors.
 Often, we want to apply a series of filters and correctors to our data. This
-can be done using the :class:`ms_feature_validation.filter.Pipeline` object,
+can be done using the :class:`tidyms.filter.Pipeline` object,
 which accepts a list of filters and correctors and applies them in order:
 
 .. code-block:: python
 
-    pipeline = mfv.filter.Pipeline([bc, pf])
+    pipeline = ms.filter.Pipeline([bc, pf])
     pipeline.process(data)
 
 The Pipeline object accepts Filters, Correctors and other Pipelines as elements
@@ -383,7 +383,7 @@ zero mean and unitary variance:
     data.preprocess.scale("autoscaling")
 
 Finally, a DataContainer can be reset to the values that were used to create it
-using the :py:meth:`ms_feature_validation.DataContainer.reset`
+using the :py:meth:`tidyms.DataContainer.reset`
 
 References
 ----------
@@ -401,4 +401,4 @@ References
 ..  [4] D Broadhurst *et al*, "Guidelines and considerations for the use of
     system suitability and quality control samples in mass spectrometry assays
     applied in untargeted clinical metabolomic studies.", Metabolomics,
-    2018;14(6):72. doi: 10.1007/s11306-018-1367-3`
+    2018;14(6):72. doi: 10.1007/s11306-018-1367-3

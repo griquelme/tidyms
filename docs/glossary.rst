@@ -3,7 +3,7 @@
 Definitions
 ===========
 
-Here is a list of some of the most used concepts in the MSKM.
+Here is a list of the concepts used in TidyMS.
 
 .. glossary::
 
