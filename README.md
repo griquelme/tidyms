@@ -1,58 +1,39 @@
-Data Curation in Mass Spectrometry
-==================================
+TidyMS: Tools for working with MS data in metabolomics
+======================================================
 
-The proposed workflow is to read the processed data into a data container
-object, which stores three types of data:
+TidyMS is a python library for processing Mass Spectrometry data. It aims to
+provide easy to use tools to read, process and visualize MS data generated in
+metabolomics studies.
 
+Features
+--------
 
-- Data Matrix: Areas of detected Features. Each column is a feature (pair rt, mz)
-and each row is a sample.
-- Features Definitions: Information about features
-  (mz, rt, etc…).
-- Sample Information: Information about samples (class, run order, etc…)
+TidyMS provides functionality to:
 
-These data container objects are processed through a series of Filters and
-Correctors:
+1. Read raw MS data in the mzML format
+2. Spectrum and chromatogram creation.
+3. Powerful and flexible peak picking functions optimized for chromatographic and spectral data.
+4. Feature detection and feature correspondence in LC-MS data.
+5. Reading processed data in a variety of formats (XCMS, MZMine2, ...)
+5. Data matrix curation using widely accepted guidelines from the metabolomics community.
+6. Interactive visualizations of raw and processed data using Bokeh, or publication quality plots using seaborn.
 
-- A Filter removes Features or samples according to diverse criteria
-(prevalence, type of sample, etc…).
-- Correctors transform Data (blank correction, inter batch correction, etc…).
+Installation
+------------
 
-Filters and correctors can be coupled together using a Pipeline object which
-concatenates each filter and reports features or samples removed in each step
-or metrics associated with a correction step (eg: diminution of CV after
-performing interbatch correction).
+The latest release can be installed from PyPI:
 
-What is done right now
-----------------------
+```
+    pip install tidyms
+``` 
 
-- Data container object
-- Generic Filter and corrector objects
-- File IO:
-    - Reading Processed data into Data Containers objects
-    - Config file from a YAML file.
-- Pipeline object
-- Correctors (Blank Corrector)
-- Filters (Prevalence Filter, Variation Filter)
-- Tests with simulated data to check the correct implementation of each filter.
+Documentation
+-------------
 
-TODO
-----
+The official documentation is available at **COMPLETE**
 
-- Read several common formats into Data Container (Progenesis,
-xcms, mzmine, etc…).
-- Create chromatograms and pseudospectra from raw mzML data.
-- Review intensity filter, peak shape filter, peak area filter.
-- Add a flag attribute to data_container.
-- Refactor code used to evaluate isotopic profile.
-- Test filter on real data sets and compare with manually curated data.
+License
+-------
 
-Filter details
---------------
+**ADD A LICENSE**
 
-- **Prevalence filter:** Removes features with a great number of zero or NA 
-values across samples. Prevalence is defined  as the fraction of samples  with
-detected values for each feature. Features with values outside an interval
-defined as [lb, ub] (lower bound, upper bound. Default: [0.5, 1]) are removed.
-Prevalence can be calculated globally or per class and selected classes can be
-ignored (blanks, QA, etc...).
