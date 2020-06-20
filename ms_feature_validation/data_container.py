@@ -45,8 +45,7 @@ import seaborn as sns
 
 
 # TODO: remove data_path attribute. check with webapp example.
-# TODO: add order_from_csv file method.
-# TODO: maybe its a good idea to combine export methods into and ExportMethods
+# TODO: maybe its a good idea to combine export methods into an ExportMethods
 #       object
 # TODO: export datacontainer to metaboanalyst format.
 
@@ -615,8 +614,6 @@ class MetricMethods:
             result = (self.__data.data_matrix
                       .groupby(self.__data.classes)
                       .apply(cv_func))
-        # TODO: check where this is used, maybe its to compute the cv for the
-        #  whole data_matrix here...
         else:
             if self.__data.mapping[_sample_type] is None:
                 result = cv_func(self.__data.data_matrix)
@@ -1232,7 +1229,6 @@ def _validate_mapping(mapping, valid_samples):
                 if c not in valid_samples:
                     msg = "{} is not a valid sample class".format(c)
                     raise ValueError(msg)
-# TODO: move _validate_mapping to validation module
 
 
 def _convert_to_interbatch_order(order: pd.Series,
@@ -1309,4 +1305,3 @@ def _reverse_mapping(mapping):
 
 # TODO: subclass DataContainer into  NMRDataContainer and MSDataContainer
 #  (add DI, LC)
-# TODO: implement a PCA function to avoid importing sklearn
