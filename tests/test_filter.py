@@ -1,7 +1,4 @@
-import ms_feature_validation as mfv
-import numpy as np
-import pandas as pd
-import pytest
+import tidyms as ms
 
 
 def test_prevalence_filter_remove_none(data_container_example):
@@ -11,11 +8,9 @@ def test_prevalence_filter_remove_none(data_container_example):
     ub = 1
     intraclass = True
     threshold = 0
-    pf = mfv.filter.PrevalenceFilter(process_classes=process_classes,
-                                     lb=lb,
-                                     ub=ub,
-                                     intraclass=intraclass,
-                                     threshold=threshold)
+    pf = ms.filter.PrevalenceFilter(process_classes=process_classes, lb=lb,
+                                    ub=ub, intraclass=intraclass,
+                                    threshold=threshold)
     pf.process(data)
     assert True
 
@@ -29,20 +24,18 @@ def test_prevalence_filter_remove_one_feature(data_container_example):
     ub = 1
     intraclass = True
     threshold = 0
-    pf = mfv.filter.PrevalenceFilter(process_classes=process_classes,
-                                     lb=lb,
-                                     ub=ub,
-                                     intraclass=intraclass,
-                                     threshold=threshold)
+    pf = ms.filter.PrevalenceFilter(process_classes=process_classes,
+                                    lb=lb,
+                                    ub=ub,
+                                    intraclass=intraclass,
+                                    threshold=threshold)
     pf.process(data)
     assert rm_ft in pf.remove
 
 
-
 def test_blank_filter_custom_func(data_container_example):
     data = data_container_example
-    func = lambda x: 20     # value higher than mean in samples
-    bc = mfv.filter.BlankCorrector(mode=func)
+    bc = ms.filter.BlankCorrector(mode=lambda x: 20)
     bc.process(data)
     assert (data._data_matrix[data.classes
             .isin(bc.params["process_classes"])] == 0).all().all()
@@ -50,9 +43,9 @@ def test_blank_filter_custom_func(data_container_example):
 
 def test_variation_filter(data_container_example):
     data = data_container_example
-    vf = mfv.filter.VariationFilter(lb=0,
-                                    ub=0.2,
-                                    process_classes=None)
+    vf = ms.filter.VariationFilter(lb=0,
+                                   ub=0.2,
+                                   process_classes=None)
     vf.process(data)
     print(vf.remove)
     assert vf.remove.empty

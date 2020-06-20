@@ -1,4 +1,4 @@
-from ms_feature_validation import data_container
+from tidyms import container
 import numpy as np
 import pandas as pd
 import pytest

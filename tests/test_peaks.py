@@ -1,4 +1,4 @@
-import ms_feature_validation as mfv
+import tidyms as ms
 import numpy as np
 import pytest
 from itertools import product
@@ -29,10 +29,10 @@ def test_one_peak_several_widths(peak_data):
     peak_height = 10
     peak_widths = np.linspace(2, 5, 10)
     for w in peak_widths:
-        y = mfv.utils.gauss(x, peak_loc, w, peak_height)
+        y = ms.utils.gauss(x, peak_loc, w, peak_height)
         y += baseline + noise
-        peaks, params = mfv.peaks.detect_peaks(x, y, widths, max_width=60,
-                                               snr=5)
+        peaks, params = ms.peaks.detect_peaks(x, y, widths, max_width=60,
+                                              snr=5)
         # the number of peaks should be 1
         # the error in the peak location should be smaller than the peak width
         assert abs(params[0]["loc"] - peak_loc) <= (w + 1)
@@ -47,11 +47,11 @@ def test_one_peak_several_snr(peak_data):
     # snr used in peak pick is 10, max noise std should be 1
     noise_list = np.linspace(0.1, 0.9, 10)
     for n in noise_list:
-        y = mfv.utils.gauss(x, peak_loc, peak_width, peak_height)
+        y = ms.utils.gauss(x, peak_loc, peak_width, peak_height)
         noise = np.random.normal(size=x.size, scale=n)
         y += baseline + noise
-        peaks, params = mfv.peaks.detect_peaks(x, y, widths, max_width=60,
-                                               snr=5)
+        peaks, params = ms.peaks.detect_peaks(x, y, widths, max_width=60,
+                                              snr=5)
         if len(peaks) == 0:
             print(n)
         assert len(peaks) == 1
@@ -71,10 +71,10 @@ def test_two_overlapping_peaks(peak_data):
         gm_params = [[peak_loc, peak_width, peak_height],
                      [peak_loc + dist, peak_width, peak_height * ratio]]
         gm_params = np.array(gm_params)
-        y = mfv.utils.gaussian_mixture(x, gm_params).sum(axis=0)
+        y = ms.utils.gaussian_mixture(x, gm_params).sum(axis=0)
         y += baseline + noise
-        peaks, params = mfv.peaks.detect_peaks(x, y, widths, max_width=100,
-                                               snr=5, max_distance=1)
+        peaks, params = ms.peaks.detect_peaks(x, y, widths, max_width=100,
+                                              snr=5, max_distance=1)
         if len(peaks) == 0:
             print(peak_width, dist, ratio)
         assert len(peaks) <= 2
@@ -88,10 +88,10 @@ def test_find_centroids():
                   [140, 0.01, 200], [141, 0.01, 100]])
     x_peaks = np.array([110, 120, 140, 141])
     x = np.linspace(100, 200, 10000)
-    y = mfv.utils.gaussian_mixture(x, p).sum(axis=0)
+    y = ms.utils.gaussian_mixture(x, p).sum(axis=0)
 
     y += np.random.normal(size=x.size, scale=1)
-    centroid, _, _ = mfv.peaks.find_centroids(x, y, 10, 0.01)
+    centroid, _, _ = ms.peaks.find_centroids(x, y, 10, 0.01)
 
     # test differences between peak mean and centrois
     print(np.abs(centroid - x_peaks))

@@ -1,4 +1,4 @@
-from ms_feature_validation import utils
+from tidyms import utils
 import numpy as np
 import pytest
 

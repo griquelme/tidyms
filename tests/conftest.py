@@ -1,4 +1,4 @@
-from ms_feature_validation import data_container
+from tidyms import container
 import numpy as np
 import pandas as pd
 import pytest
@@ -25,16 +25,12 @@ mapping = {"sample": ["healthy", "disease"],
 @pytest.fixture
 def data_container_example():
     dm = pd.DataFrame(data=dm_data, columns=ft_names, index=sample_names)
-    sample_information = pd.DataFrame(data=classes,
-                                      index=sample_names,
+    sample_information = pd.DataFrame(data=classes, index=sample_names,
                                       columns=["class"])
-    feature_definitions = pd.DataFrame(data=ft_data,
-                                       columns=["mz", "rt"],
+    feature_definitions = pd.DataFrame(data=ft_data, columns=["mz", "rt"],
                                        index=ft_names)
-    data = data_container.DataContainer(dm,
-                                        feature_definitions,
-                                        sample_information,
-                                        mapping=mapping)
+    data = container.DataContainer(dm, feature_definitions, sample_information,
+                                   mapping=mapping)
     data.batch = batch
     data.order = order
     return data
