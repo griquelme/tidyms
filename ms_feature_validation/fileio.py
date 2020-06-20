@@ -105,8 +105,120 @@ def read_progenesis(path: Union[str, TextIO]):
     return dc
 
 
+def read_mzmine(data: Union[str, TextIO],
+                sample_metadata: Union[str, TextIO]) -> DataContainer:
+    """
+    read a MZMine2 csv file into a DataContainer.
+
+    Parameters
+    ----------
+    data : str or file
+        csv file generated with MZMine.
+    sample_metadata : str, file or DataFrame
+        csv file with sample metadata. The following columns are required:
+            sample : the same sample names used in `data`
+            class : the sample classes
+        Columns with run order and analytical batch information are optional.
+        Must be names "order" and "batch"
+
+    Returns
+    -------
+    DataContainer
+
+    """
+    df = pd.read_csv(data)
+    colnames = pd.Series(df.columns)
+    sample_mask = ~df.columns.str.startswith("row")
+
+    # remove filename extensions
+    colnames = colnames.str.split(".").apply(lambda x: x[0])
+    # remove "row " in columns
+    colnames = colnames.str.replace("row ", "")
+    colnames = colnames.str.replace("Peak area", "")
+    colnames = colnames.str.strip()
+    df.columns = colnames
+    df = df.rename(columns={"m/z": "mz", "retention time": "rt"})
+    ft_metadata = df.loc[:, ["mz", "rt"]]
+
+    # make feature metadata
+    n_ft = df.shape[0]
+    ft_len = len(str(n_ft))
+    ft_names = ["FT" + str(x).rjust(ft_len, "0") for x in (range(1, n_ft + 1))]
+    ft_metadata.index = ft_names
+
+    # data matrix
+    data_matrix = df.loc[:, sample_mask]
+    data_matrix = data_matrix.loc[:, ~data_matrix.isna().all()]
+    data_matrix.index = ft_names
+    data_matrix = data_matrix.T
+
+    if not isinstance(sample_metadata, pd.DataFrame):
+        sample_metadata = pd.DataFrame(data=sample_metadata)
+        sample_metadata["sample"] += ".raw"
+        sample_metadata["sample"] = (sample_metadata["sample"]
+                                     .str.split(".")
+                                     .apply(lambda x: x[0]))
+        sample_metadata = sample_metadata.set_index("sample")
+
+    dc = DataContainer(data_matrix, ft_metadata, sample_metadata)
+    return dc
+
+
+def read_xcms(data_matrix: str, feature_metadata: str,
+              sample_metadata: str, class_column: str = "class",
+              sep: str = "\t"):
+    """
+    Reads tabular data generated with xcms.
+
+    Parameters
+    ----------
+    data_matrix : str
+        Path to a tab-delimited data matrix generated with the R package
+        SummarizedExperiment assay method.
+    feature_metadata : str
+        Path to a tab-delimited  file with feature metadata, (called feature
+        definitions in XCMS) generated with the R package SummarizedExperiment
+        colData method.
+    sample_metadata : str
+        Path to a tab-delimited  file with sample metadata, generated with the
+        R package SummarizedExperiment colData method. A column named class is
+        required. If the class information is under another name, it must be
+        specified in the `class_column` parameter.
+    class_column : str
+        Column name which holds sample class information in the sample metadata.
+    sep : str
+        Separator used in the files. As the feature metadata generated with XCMS
+        has comma characters, the default value for the separator is "\t".
+
+    Returns
+    -------
+    DataContainer
+    """
+
+    # data matrix
+    dm = pd.read_csv(data_matrix, sep=sep)
+    dm = dm.T
+    dm.columns.name = "feature"
+    dm.index.name = "sample"
+
+    # feature metadata
+    fm = pd.read_csv(feature_metadata, sep=sep)
+    fm.index.name = "feature"
+    fm = fm.rename(columns={"mzmed": "mz", "rtmed": "rt"})
+    fm = fm.loc[:, ["mz", "rt"]]
+    # TODO : include information from CAMERA package
+
+    # sample_metadata
+    sm = pd.read_csv(sample_metadata, sep=sep)
+    sm.index.name = "sample"
+    sm = sm.rename(columns={class_column: "class"})
+    dc = DataContainer(dm, fm, sm)
+    return dc
+
 def read_data_matrix(path: Union[str, TextIO, BinaryIO],
-                     data_matrix_format: str) -> DataContainer:
+                     data_matrix_format: str,
+                     sample_metadata: Union[str, TextIO, pd.DataFrame]
+                     ) -> DataContainer:
     """
     Read different Data Matrix formats into a DataContainer.
 
@@ -114,7 +226,9 @@ def read_data_matrix(path: Union[str, TextIO, BinaryIO],
     ----------
     path: str
         path to the data matrix file.
-    data_matrix_format: {"progenesis", "pickle"}
+    data_matrix_format: {"progenesis", "pickle", "mzmine"}
+    sample_metadta : str, file or DataFrame.
+        Required for mzmine data.
 
     Returns
     -------
@@ -128,6 +242,8 @@ def read_data_matrix(path: Union[str, TextIO, BinaryIO],
         return read_progenesis(path)
     elif data_matrix_format == "pickle":
         return read_pickle(path)
+    elif data_matrix_format == "mzmine":
+        return  read_mzmine(path, sample_metadata)
     else:
         msg = "Invalid Format"
         raise ValueError(msg)
