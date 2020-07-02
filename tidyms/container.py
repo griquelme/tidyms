@@ -462,13 +462,16 @@ class DataContainer(object):
         axis: {"samples", "features"}
         """
         if axis == "samples":
-            sorted_index = self.sample_metadata.sort_values(field).index
-            self.sample_metadata = self.sample_metadata.loc[sorted_index, :]
-            self.data_matrix = self.data_matrix.loc[sorted_index, :]
+            tmp = self._sample_metadata.sort_values(field).index
+            self._sample_mask = tmp.intersection(self._sample_mask)
+
+            # self.sample_metadata = self.sample_metadata.loc[sorted_index, :]
+            # self.data_matrix = self.data_matrix.loc[sorted_index, :]
         elif axis == "features":
-            sorted_index = self.feature_metadata.sort_values(field).index
-            self.feature_metadata = self.feature_metadata.loc[sorted_index, :]
-            self.data_matrix = self.data_matrix.loc[:, sorted_index]
+            tmp = self.feature_metadata.sort_values(field).index
+            self._feature_mask = tmp.intersection(self._feature_mask)
+            # self.feature_metadata = self.feature_metadata.loc[sorted_index, :]
+            # self.data_matrix = self.data_matrix.loc[:, sorted_index]
         else:
             msg = "axis must be `samples` or `features`"
             raise ValueError(msg)
@@ -774,6 +777,7 @@ class BokehPlotMethods:
         self._data_container = data
 
     def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = "class",
+                   ignore_classes: Optional[List[str]] = None,
                    show_order: bool = False, scaling: Optional[str] = None,
                    normalization: Optional[str] = None, draw: bool = True,
                    fig_params: Optional[dict] = None,
@@ -793,6 +797,8 @@ class BokehPlotMethods:
             class, "type" color points according to the sample type
             assigned in the mapping and "batch" uses batch information. Samples
             classes without a mapping are not shown in the plot
+        ignore_classes : list[str], optional
+            classes in the data to ignore to build the PCA model.
         show_order: bool
             add a label with the run order.
         scaling: {`autoscaling`, `rescaling`, `pareto`}, optional
@@ -817,8 +823,12 @@ class BokehPlotMethods:
             default_fig_params.update(fig_params)
             fig_params = default_fig_params
 
+        default_scatter_params = {"size": 6}
         if scatter_params is None:
-            scatter_params = dict()
+            scatter_params = default_scatter_params
+        else:
+            default_scatter_params.update(scatter_params)
+            scatter_params = default_scatter_params
 
         tooltips = [("class", "@class"), ("order", "@order"),
                     ("batch", "@batch"), ("id", "@id")]
@@ -829,6 +839,7 @@ class BokehPlotMethods:
         n_comps = max(x_pc, y_pc)
         score, _, variance, total_var = \
             self._data_container.metrics.pca(n_components=n_comps,
+                                             ignore_classes=ignore_classes,
                                              normalization=normalization,
                                              scaling=scaling)
         score = score.join(self._data_container.sample_metadata)
