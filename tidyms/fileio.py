@@ -217,7 +217,7 @@ def read_xcms(data_matrix: str, feature_metadata: str,
 
 def read_data_matrix(path: Union[str, TextIO, BinaryIO],
                      data_matrix_format: str,
-                     sample_metadata: Union[str, TextIO, pd.DataFrame]
+                     sample_metadata: Optional[str] = None
                      ) -> DataContainer:
     """
     Read different Data Matrix formats into a DataContainer.
