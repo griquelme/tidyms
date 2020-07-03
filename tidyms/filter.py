@@ -614,18 +614,21 @@ class _BatchDesignChecker(Processor):
 
         dc.sort(_sample_order, "samples")
 
-        def invalid_batch_aux(x):
+        def invalid_batch_aux(x, min_sample_order_per_batch,
+                              max_sample_order_per_batch):
             n_min = self.params["n_min"]
             qc_classes = self.params["corrector_classes"]
-            return x.isin(qc_classes).sum() < n_min
+            min_order = min_sample_order_per_batch[x.name]
+            max_order = max_sample_order_per_batch[x.name]
+            qc_middle_block_mask = (x["class"].isin(qc_classes) &
+                                    (x["order"] > min_order) &
+                                    (x["order"] < max_order))
+            n_middle_block_qc = qc_middle_block_mask.sum()
+            return n_middle_block_qc < (n_min - 2)
 
         ps = self.params["process_classes"]
         ps = [x for x in ps if x not in self.params["corrector_classes"]]
         self.params["process_classes"] = ps
-        low_qc_batch = (dc.classes
-                        .groupby(dc.batch)
-                        .apply(invalid_batch_aux))
-        low_qc_batch = low_qc_batch[low_qc_batch].index
 
         min_corr_order = batch_ext(dc.order, dc.batch, dc.classes,
                                    self.params["corrector_classes"], "min")
@@ -635,6 +638,12 @@ class _BatchDesignChecker(Processor):
                                    self.params["process_classes"], "min")
         max_proc_order = batch_ext(dc.order, dc.batch, dc.classes,
                                    self.params["process_classes"], "max")
+
+        low_qc_batch = (dc.sample_metadata
+                        .groupby("batch")
+                        .apply(invalid_batch_aux, min_proc_order,
+                               max_proc_order))
+        low_qc_batch = low_qc_batch[low_qc_batch].index
 
         invalid_batches = ((min_corr_order > min_proc_order)
                            | (max_corr_order < max_proc_order))

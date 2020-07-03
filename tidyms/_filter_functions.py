@@ -305,7 +305,7 @@ def check_qc_prevalence(data_matrix: pd.DataFrame, order: pd.Series,
                                    .index)
         midd_block_valid_features = ((data_matrix
                                       .loc[middle_block_qc_samples] > threshold)
-                                     .sum() >= min_n_qc)
+                                     .sum() >= (min_n_qc - 2))
         midd_block_valid_features = \
             midd_block_valid_features[midd_block_valid_features].index
 
