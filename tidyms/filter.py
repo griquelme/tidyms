@@ -563,49 +563,35 @@ class VariationFilter(Processor):
         return get_outside_bounds_index(variation, lb, ub)
 
 
-class _BatchDesignChecker(Processor):
+class _TemplateValidationFilter(Processor):
     """
     Checks that process samples in each batch are surrounded by corrector
-    samples. Batches that do not meet te requirements are removed.
-    This filter is used as a first step in batch correction and should not be
-    called directly.
+    samples. Samples that do not meet te requirements are removed.
+    The minimum number of corrector samples necessary to perform LOESS based
+    correction is also tested. Analytical batches where the number of corrector
+    samples is lower than four are removed. This filter is used as a first step
+    during batch correction and should not be called directly.
 
     Parameters
     ----------
-    n_min: int
-        Minimum number of QC samples per batch
     process_classes: list[str], optional
         list of classes used as corrector samples
     corrector_classes: list[str], optional
         list of classes used as process samples
     verbose: bool
 
-    Notes
-    -----
-    For a batch to be valid the samples at the start and at the end of each
-    batch needs to be a corrector sample. For example, if q is a corrector
-    sample and s is a process sample, then a valid batch has the following
-    structure:
-
-        qqssssqssssqsssssqsssssqq
-
-    On the other side, an invalid batch is for example a batch with the
-    following structure:
-
-        sssssqsssssqsssssq
     """
-    def __init__(self, n_min: int = 4, verbose: bool = False,
-                 process_classes: Optional[List[str]] = None,
-                 corrector_classes: Optional[List[str]] = None):
+    def __init__(self, process_classes: Optional[List[str]] = None,
+                 corrector_classes: Optional[List[str]] = None,
+                 verbose: bool = False):
 
         req = {"empty": False, "missing": False, "order": True, "batch": True}
-        (super(_BatchDesignChecker, self)
+        (super(_TemplateValidationFilter, self)
          .__init__(axis="samples", mode="filter", verbose=verbose,
                    requirements=req))
-        self.name = "Batch Scheme Checker"
+        self.name = "Batch Template Check"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
-        self.params["n_min"] = n_min
         self._default_process = _sample_type
         self._default_correct = _qc_type
         validation.validate(self.params, validation.batchCorrectorValidator)
@@ -614,64 +600,65 @@ class _BatchDesignChecker(Processor):
 
         dc.sort(_sample_order, "samples")
 
-        def invalid_batch_aux(x, min_sample_order_per_batch,
-                              max_sample_order_per_batch):
-            n_min = self.params["n_min"]
-            qc_classes = self.params["corrector_classes"]
-            min_order = min_sample_order_per_batch[x.name]
-            max_order = max_sample_order_per_batch[x.name]
-            qc_middle_block_mask = (x["class"].isin(qc_classes) &
-                                    (x["order"] > min_order) &
-                                    (x["order"] < max_order))
-            n_middle_block_qc = qc_middle_block_mask.sum()
-            return n_middle_block_qc < (n_min - 2)
+        block_type, block_number = \
+            make_sample_blocks(dc.classes, self.params["corrector_classes"],
+                               self.params["process_classes"])
+        qc_block_mask = block_type == 0
+        sample_block_mask = block_type == 1
+        sample_names = block_number[block_type == 1].index
 
-        ps = self.params["process_classes"]
-        ps = [x for x in ps if x not in self.params["corrector_classes"]]
-        self.params["process_classes"] = ps
+        # check the minimum number of qc samples in a batch
+        n_qc = dc.classes[qc_block_mask].groupby(dc.batch).count()
+        min_n_qc = 4    # the minimum number of QC samples to use LOESS
+        valid_batch = n_qc >= min_n_qc
+        valid_batch = valid_batch[valid_batch].index
+        invalid_samples = ~dc.batch.isin(valid_batch)
+        invalid_samples = invalid_samples[invalid_samples].index
 
-        min_corr_order = batch_ext(dc.order, dc.batch, dc.classes,
-                                   self.params["corrector_classes"], "min")
-        max_corr_order = batch_ext(dc.order, dc.batch, dc.classes,
-                                   self.params["corrector_classes"], "max")
-        min_proc_order = batch_ext(dc.order, dc.batch, dc.classes,
-                                   self.params["process_classes"], "min")
-        max_proc_order = batch_ext(dc.order, dc.batch, dc.classes,
-                                   self.params["process_classes"], "max")
+        # min and max run order per batch
+        min_qc_order = dc.order[qc_block_mask].groupby(dc.batch).min()
+        max_qc_order = dc.order[qc_block_mask].groupby(dc.batch).max()
 
-        low_qc_batch = (dc.sample_metadata
-                        .groupby("batch")
-                        .apply(invalid_batch_aux, min_proc_order,
-                               max_proc_order))
-        low_qc_batch = low_qc_batch[low_qc_batch].index
-
-        invalid_batches = ((min_corr_order > min_proc_order)
-                           | (max_corr_order < max_proc_order))
-        invalid_batches = invalid_batches[invalid_batches].index
-        invalid_batches = invalid_batches.union(low_qc_batch)
-        invalid_samples = dc.batch[dc.batch.isin(invalid_batches)].index
+        sample_order = dc.order.loc[sample_names].groupby(dc.batch)
+        for batch_number, batch_order in sample_order:
+            rm_mask = ((batch_order < min_qc_order[batch_number]) |
+                       (batch_order > max_qc_order[batch_number]))
+            rm_sample = rm_mask[rm_mask].index
+            invalid_samples = invalid_samples.union(rm_sample)
         return invalid_samples
 
 
-class _BatchPrevalenceChecker(Processor):
+class _BatchCorrectorPrevalenceFilter(Processor):
     """
-    Check prevalence of Corrector samples. To be used as a part of the batch
-    correction pipeline.
+    Checks the prevalence of the features in the corrector samples.
 
-    Prevalence of the corrector samples is checked in a similar way as the
-    one described in BatchSchemeChecker.
-    Start blocK: features must be detected in at least one sample on the
-    starting block.
-    middle block: features must be detected in at least n_min - 2 samples
-    end block: features must be detected in at least one sample on the
-    ending block.
+    Prevalence in the corrector samples is checked using the concept of
+    corrector blocks: A corrector block is a set of consecutive samples of
+    the corrector class. a feature is detected in a block if it was detected
+    in at least one sample in the block. For example:
+
+    start                   Middle                  End
+    B1          B2          B3          B4          B5
+    CCC PPPP    C   PPPP    C   PPPP    C   PPPP    CCC
+
+    B1, B2, etc... are corrector blocks. C is a corrector sample and P is a
+    process class. The prevalence is tested on each block by comparing against
+    a threshold value. The feature is detected in a block if at least one sample
+    is above the threshold. Then the fraction of the blocks where the feature
+    was detected is the prevalence. A feature is removed if:
+
+    1. The prevalence if lower than the `min_qc_dr` parameter.
+    2. The feature is not detected in the start or end block.
+
 
     Parameters
     ----------
-    n_min: int
-        Minimum number of QC samples per batch
+    min_qc_dr: float
+        minimum fraction of QC blocks where the feature was detected.
+        This value is corrected in a way such that the minimum number of QC
+        samples is greater than 4.
     threshold: float
-        Minimum intensity to consider a sample detected
+        Minimum intensity to consider a feature detected
     process_classes: list[str], optional
         list of classes used as corrector samples
     corrector_classes: list[str], optional
@@ -679,19 +666,19 @@ class _BatchPrevalenceChecker(Processor):
     verbose: bool
     """
 
-    def __init__(self, n_min: int = 4, verbose: bool = False,
+    def __init__(self, min_qc_dr: float = 0.9, verbose: bool = False,
                  process_classes: Optional[List[str]] = None,
                  corrector_classes: Optional[List[str]] = None,
                  threshold: float = 0.0):
 
         req = {"empty": False, "missing": False, "order": True, "batch": True}
-        (super(_BatchPrevalenceChecker, self)
+        (super(_BatchCorrectorPrevalenceFilter, self)
          .__init__(axis="features", mode="filter", verbose=verbose,
                    requirements=req))
         self.name = "Batch Prevalence Checker"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
-        self.params["n_min"] = n_min
+        self.params["min_qc_dr"] = min_qc_dr
         self.params["threshold"] = threshold
         self._default_process = _sample_type
         self._default_correct = _qc_type
@@ -701,11 +688,11 @@ class _BatchPrevalenceChecker(Processor):
         ps = self.params["process_classes"]
         ps = [x for x in ps if x not in self.params["corrector_classes"]]
         self.params["process_classes"] = ps
-        res = check_qc_prevalence(dc.data_matrix, dc.order, dc.batch,
+        res = check_qc_prevalence(dc.data_matrix, dc.batch,
                                   dc.classes, self.params["corrector_classes"],
                                   self.params["process_classes"],
                                   threshold=self.params["threshold"],
-                                  min_n_qc=self.params["n_min"])
+                                  min_qc_dr=self.params["min_qc_dr"])
         return res
 
 
@@ -751,38 +738,108 @@ class _BatchCorrectorProcessor(Processor):
 @register
 class BatchCorrector(Pipeline):
     r"""
-    Correct systematic bias along samples due to variation in instrumental
-    response
+    Correct time dependant systematic bias along samples due to variation in
+    instrumental response.
+
+    Parameters
+    ----------
+    min_qc_dr : float
+        minimum fraction of QC where the feature was detected. See the notes for
+        an explanation of how this value is computed.
+    first_n_qc : int, optional
+        The number of first QC samples used to estimate the expected
+        value for each feature in the QC. If None uses all QC samples in a
+        batch. See notes for an explanation of its use.
+    threshold : float
+        Minimum value to consider a feature detected. Used to compute the
+        detection rate of each feature.
+    frac : float, optional
+        frac parameter of the LOESS model. If None, the best value for each
+        feature is estimated using LOOCV.
+    interpolator : {"splines", "linear"}
+        Interpolator used to estimate the correction for each sample.
+    corrector_classes : list[str], optional
+        list of classes used to generate the correction. If None uses
+        QC sample types from the mapping.
+    process_classes : list[str], optional
+        list of classes used to correct. If None uses
+        sample sample types from the mapping.
+    verbose : bool
+        If True a message is shown after processing the data matrix.
 
     Notes
     -----
     The correction is applied as described by Broadhurst in [1]. Using QC
-    samples a correction is generated for each feature in the following way:
-    The signal of a Quality control can be described in terms of three
-    components: a mean value, a systematic bias f and error.
+    samples, a correction is generated for each feature in the following way:
+    The signal of a feature is modeled as three additive components: a expected
+    value :math:`m_{jk}`, a systematic bias :math:`f_{k}` and error term
+    :math:`\epsilon`:
 
     .. math::
-       m_{i} = \bar{m_{i}} + f(t) + \epsilon
+       m_{jk} = \bar{m_{k}} + f_{k}(t_{j}) + \epsilon
 
-    f(t) is estimated after mean subtraction using Locally weighted scatterplot
-    smoothing (LOESS). The optimal fraction of samples for each local
-    regression is found using LOOCV.
+    Where :math:`m_{jk}` is the element in the j-th row and k-th column of the
+    data matrix. 
+    
+    First, :math:`\bar{m_{k}}` is subtracted to the detected values and then
+    :math:`f_{k}` is estimated using Locally weighted scatter plot smoothing
+    (LOESS). The optimal fraction of samples for each feature is obtained using
+    Leave One Out Cross Validation (LOOCV).
 
-    Before applying batch correction, the QC template is checked and samples
-    that cannot be corrected are removed. A study sample is valid if it is
-    surrounded by a quality control sample. This is necessary because to
-    estimate the correction an interpolation step is performed. After checking
-    the QC template, each feature is checked to see if the minimum number of
-    QC samples necessary to perform LOESS are available. This is done counting
-    the number of QC samples above a `threhold`. A minimum of four QC features
-    is necessary to perform LOESS, but in order to estimate the `frac` parameter
-    with LOOCV, we suggest a minimum of six QC samples.
-    To estimate the mean during batch correction, all of the QC samples can be
-    used or only a subset. It can be argued that during the first QC samples the
-    mean value is going to be closer to the real value because there's a small
-    contribution from carryover. Taking this into account, the `n_qc` parameter
-    controls the number of first n QC samples used to estimate the mean of the
-    batch.
+    In order to apply this correction, several checks needs to be made. First,
+    the QC template is checked and samples that cannot be corrected are removed.
+    A study sample is valid if it is surrounded by a quality control sample.
+    This is a necessary step because the correction for the study samples is
+    built using interpolation. It's recommended to have three QC samples at the
+    beginning and at the end of each batch. See [1] for recommendations on
+    analytical batches templates.
+
+    After checking the QC template, each feature is checked to see if the
+    minimum number of QC samples necessary to perform LOESS are available. This
+    step is done grouping samples of the same type into QC blocks: a QC block is
+    a set of consecutive QC samples. A feature is detected in a block if it was
+    detected in at least one sample in the block. For example, in an analytical
+    batch:
+
+    +---------------+---------------+---------------+
+    | Run order     | Sample type   | Block number  |
+    +===============+===============+===============+
+    | 1, 2, 3       | Q, Q, Q       |   1 (start)   |
+    +---------------+---------------+---------------+
+    | 4, 5, 6, 7    | S, S, S, S    |   2 (middle)  |
+    +---------------+---------------+---------------+
+    | 8             | Q             |   3           |
+    +---------------+---------------+---------------+
+    | 9, 10, 11, 12 | S, S, S, S    |   4           |
+    +---------------+---------------+---------------+
+    | 13            | Q             |   5           |
+    +---------------+---------------+---------------+
+    | 13, 14, 15, 16| S, S, S, S    |   6           |
+    +---------------+---------------+---------------+
+    | 17            | Q             |   7           |
+    +---------------+---------------+---------------+
+    | 18, 19, 20, 21| S, S, S, S    |   8           |
+    +---------------+---------------+---------------+
+    | 22, 23, 24    | Q, Q, Q       |   9 (end)     |
+    +---------------+---------------+---------------+
+
+    Detection is evaluated on each block, comparing samples against a
+    `threshold` value. Then the fraction of the blocks where the feature was
+    detected is the detection rate in the QC samples. A feature is removed if:
+
+    1.  The prevalence if lower than the `min_qc_dr` parameter (this parameter
+        is corrected in a way such that the minimum number of QC samples must be
+        always greater or equal than 4).
+    2.  The feature is not detected in the start or end block.
+
+    After these two checks, the remaining samples and features are suitable
+    for LOESS batch correction. A final consideration is how to estimate the
+    :math:`\bar{m_{k}}` for each feature. This value is usually computed as the
+    mean or median of the QC values in a batch, but ff the temporal bias becomes
+    stronger as more samples are analyzed, a better estimation of
+    :math:`\bar{m_{k}}` can be obtained using the average of the first samples
+    analyzed in a batch. To this end, the `n_qc` parameter controls how many
+    QC samples are used to estimate the expected values in the QC samples.
 
     References
     ----------
@@ -792,55 +849,30 @@ class BatchCorrector(Pipeline):
         Metabolomics, 2018;14(6):72. doi: 10.1007/s11306-018-1367-3
 
     """
-    def __init__(self, corrector_classes: Optional[List[str]] = None,
+    def __init__(self,
+                 min_qc_dr: float = 0.9,
+                 first_n_qc: Optional[int] = None,
+                 threshold: float = 0, frac: Optional[float] = None,
+                 interpolator: str = "splines",
+                 corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
-                 n_min: int = 6, frac: Optional[float] = None,
-                 interpolator: str = "splines", threshold: float = 0,
-                 verbose: bool = False,
-                 n_qc: Optional[int] = None):
-        """
-        BatchCorrector Constructor.
+                 verbose: bool = False):
 
-        Parameters
-        ----------
-        corrector_classes : list[str], optional
-            list of classes used to generate the correction. If None uses
-            QC sample types from the mapping.
-        process_classes : list[str], optional
-            list of classes used to correct. If None uses
-            sample sample types from the mapping.
-        n_min : int
-            Minimum number of QC samples in the batch to apply the correction.
-            Features with a lower number of QC samples are removed.
-        frac : float, optional
-            frac parameter of the LOESS model. If None, the best value for each
-            feature is estimated using LOOCV.
-        interpolator : {"splines", "linear"}
-            Interpolator used to estimate the correction for each sample.
-        threshold : float
-            Minimum value to consider a QC detected. Used to count the number
-            of QC samples available for each feature.
-        verbose : bool
-            If True a message is shown after processing the data matrix.
-        n_qc : int, optional
-            The number of first QC samples used to estimate the expected
-            value for each feature in the QC. If None uses all samples.
-
-        """
         checker = \
-            _BatchDesignChecker(n_min=n_min, verbose=verbose,
-                                process_classes=process_classes,
-                                corrector_classes=corrector_classes)
+            _TemplateValidationFilter(process_classes=process_classes,
+                                      corrector_classes=corrector_classes,
+                                      verbose=verbose)
         prevalence = \
-            _BatchPrevalenceChecker(n_min=n_min, verbose=verbose,
-                                    process_classes=process_classes,
-                                    corrector_classes=corrector_classes,
-                                    threshold=threshold)
+            _BatchCorrectorPrevalenceFilter(min_qc_dr=min_qc_dr,
+                                            verbose=verbose,
+                                            process_classes=process_classes,
+                                            corrector_classes=corrector_classes,
+                                            threshold=threshold)
         corrector = \
             _BatchCorrectorProcessor(corrector_classes=corrector_classes,
                                      process_classes=process_classes, frac=frac,
                                      interpolator=interpolator, verbose=verbose,
-                                     n_qc=n_qc)
+                                     n_qc=first_n_qc)
         pipeline = [checker, prevalence, corrector]
         super(BatchCorrector, self).__init__(pipeline, verbose=verbose)
         self.name = "Batch Corrector"

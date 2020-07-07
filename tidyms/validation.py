@@ -215,8 +215,9 @@ variation_filter_schema["process_classes"] = \
 variation_filter_schema["intraclass"] = prevalence_filter_schema["intraclass"]
 variationFilterValidator = ValidatorWithLowerThan(variation_filter_schema)
 
-batch_corrector_schema = {"n_min": {"type": "integer",
-                                    "min": 4},
+batch_corrector_schema = {"min_qc_dr": {"type": "number",
+                                        "is_positive": True,
+                                        "max": 1},
                           "frac": {"type": "number",
                                    "is_positive": True,
                                    "max": 1,

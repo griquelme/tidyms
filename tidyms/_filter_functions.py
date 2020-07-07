@@ -239,91 +239,58 @@ def batch_ext(order: pd.Series, batch: pd.Series, classes: pd.Series,
     return ext_order
 
 
-def check_qc_prevalence(data_matrix: pd.DataFrame, order: pd.Series,
+def check_qc_prevalence(data_matrix: pd.DataFrame,
                         batch: pd.Series, classes: pd.Series,
                         qc_classes: List[str], sample_classes: List[str],
-                        threshold: float = 0, min_n_qc: int = 4) -> pd.Index:
+                        threshold: float = 0,
+                        min_qc_dr: float = 0.9) -> pd.Index:
     """
-    Check prevalence in the QC samples. This step is necessary interpolate
-    the bias contribution to biological samples.
+    Remove features with low detection rate in the QC samples. Also check that
+    each feature is detected in the first and last block (this step is necessary
+    interpolate the bias contribution to biological samples).
+
+    Aux function to use in the BatchCorrector Pipeline.
 
     Parameters
     ----------
-    data_matrix
-    order
-    batch
-    classes
-    qc_classes
-    sample_classes
-    threshold
-    min_n_qc
+    data_matrix: DataFrame
+    batch: Series
+    classes: Series
+    qc_classes: List[str]
+    sample_classes: List[str]
+    threshold: float
+    min_qc_dr: float
 
     Returns
     -------
-
+    index of invalid features
     """
-    min_qc_order = batch_ext(order, batch, classes, qc_classes, "min")
-    min_sample_order = batch_ext(order, batch, classes,
-                                 sample_classes, "min")
-    max_qc_order = batch_ext(order, batch, classes, qc_classes, "max")
-    max_sample_order = batch_ext(order, batch, classes,
-                                 sample_classes, "max")
-    batches = batch[classes.isin(qc_classes)].unique()
-    valid_features = data_matrix.columns
+    invalid_features = pd.Index([])
+    for batch_number, batch_class in classes.groupby(batch):
+        block_type, block_number = \
+            make_sample_blocks(batch_class, qc_classes, sample_classes)
+        qc_blocks = block_number[block_type == 0]
+        block_prevalence = (data_matrix.loc[qc_blocks.index]
+                            .groupby(qc_blocks)
+                            .apply(lambda x: (x > threshold).any()))
 
-    for k_batch in batches:
-        # feature check is done for each batch in three parts:
-        # | start block | middle block      | end block |
-        #   q   q         ssss q ssss q ssss  q  q
-        #  where q is a qc sample and s is a biological sample
-        # in the start block, a feature is valid if is detected
-        # in at least one sample of the block
-        # in the middle block, a feature is valid if the number
-        # of qc samples where the feature was detected is greater
-        # than the total number of qc samples in the block minus the
-        # n_missing parameter
-        # in the end block the same strategy applied in the start
-        # block is used.
-        # A feature is considered valid only if is valid in the totallity
-        # of the batches.
+        # check start block
+        start_block_mask = block_prevalence.loc[qc_blocks.iloc[0]]
+        tmp_rm = data_matrix.columns[~start_block_mask]
+        invalid_features = invalid_features.union(tmp_rm)
 
-        # start block check
-        start_block_qc_samples = (order[(order >= min_qc_order[k_batch])
-                                        & (order < min_sample_order[k_batch])
-                                        & classes.isin(qc_classes)]
-                                  .index)
-        start_block_valid_features = \
-            (data_matrix.loc[start_block_qc_samples] > threshold).any()
-        start_block_valid_features = \
-            start_block_valid_features[start_block_valid_features].index
-        valid_features = valid_features.intersection(start_block_valid_features)
+        # check end block
+        end_block_mask = block_prevalence.loc[qc_blocks.iloc[-1]]
+        tmp_rm = data_matrix.columns[~end_block_mask]
+        invalid_features = invalid_features.union(tmp_rm)
 
-        # middle block check
-        middle_block_qc_samples = (order[(order > min_sample_order[k_batch])
-                                         & (order < max_sample_order[k_batch])
-                                         & classes.isin(qc_classes)]
-                                   .index)
-        midd_block_valid_features = ((data_matrix
-                                      .loc[middle_block_qc_samples] > threshold)
-                                     .sum() >= (min_n_qc - 2))
-        midd_block_valid_features = \
-            midd_block_valid_features[midd_block_valid_features].index
+        # check qc prevalence
+        n_blocks = qc_blocks.unique().size
+        qc_prevalence = block_prevalence.sum() / n_blocks
+        batch_min_qc_dr = max(4 / n_blocks, min_qc_dr)
+        tmp_rm = data_matrix.columns[qc_prevalence < batch_min_qc_dr]
+        invalid_features = invalid_features.union(tmp_rm)
 
-        valid_features = valid_features.intersection(
-            midd_block_valid_features)
-
-        # end block check
-        end_block_qc_samples = (order[(order > max_sample_order[k_batch])
-                                      & (order <= max_qc_order[k_batch])
-                                      & classes.isin(qc_classes)]
-                                .index)
-        end_block_valid_features = \
-            (data_matrix.loc[end_block_qc_samples] > threshold).any()
-        end_block_valid_features = end_block_valid_features[
-            end_block_valid_features].index
-        valid_features = valid_features.intersection(end_block_valid_features)
-
-    invalid_features = data_matrix.columns.difference(valid_features)
     return invalid_features
 
 
@@ -504,4 +471,26 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
 
     return corrected
 
+def make_sample_blocks(classes: pd.Series, corrector_classes: List[str],
+                       process_classes: List[str]):
+    """
+    groups samples into blocks of consecutive samples of the same type
+    aux function in BatchCorrector pipeline.
 
+    each class is assigned to each one of three possible sample blocks:
+    0 if the sample is mapped as QC, 1 if the sample is mapped as a
+    sample, and 2 otherwise.
+
+    Each block is assigned an unique number.
+    """
+    class_to_block_type = dict()
+    for c in classes.unique():
+        if c in corrector_classes:
+            class_to_block_type[c] = 0
+        elif c in process_classes:
+            class_to_block_type[c] = 1
+        else:
+            class_to_block_type[c] = 2
+    block_type = classes.map(class_to_block_type)
+    block_number = (block_type.diff().fillna(0) != 0).cumsum()
+    return block_type, block_number
