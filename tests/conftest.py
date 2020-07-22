@@ -12,7 +12,9 @@ classes = ["SV", "SV", "SV"] + ["disease", "healthy", "QC"] * 5
 n_features = len(ft_names)
 n_samples = len(sample_names)
 batch = [1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3]
+batch = pd.Series(data=batch, index=sample_names)
 order = list(range(1, 19))
+order = pd.Series(data=order, index=sample_names)
 dm_data = np.vstack((np.random.normal(loc=3, size=(3, n_features)),
                      np.random.normal(loc=10, size=(n_samples - 3, n_features)))
                     )
@@ -23,7 +25,7 @@ mapping = {"sample": ["healthy", "disease"],
 
 
 @pytest.fixture
-def data_container_example():
+def data_container_with_order():
     dm = pd.DataFrame(data=dm_data, columns=ft_names, index=sample_names)
     sample_information = pd.DataFrame(data=classes, index=sample_names,
                                       columns=["class"])
@@ -33,4 +35,15 @@ def data_container_example():
                                    mapping=mapping)
     data.batch = batch
     data.order = order
+    return data
+
+@pytest.fixture
+def data_container_without_order():
+    dm = pd.DataFrame(data=dm_data, columns=ft_names, index=sample_names)
+    sample_information = pd.DataFrame(data=classes, index=sample_names,
+                                      columns=["class"])
+    feature_definitions = pd.DataFrame(data=ft_data, columns=["mz", "rt"],
+                                       index=ft_names)
+    data = container.DataContainer(dm, feature_definitions, sample_information,
+                                   mapping=mapping)
     return data

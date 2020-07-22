@@ -30,7 +30,8 @@ def dratio_filter_params():
 
 @pytest.fixture
 def batch_corrector_params():
-    params = {"n_min": 5,
+    params = {"min_qc_dr": 0.9,
+              "n_qc": 3,
               "frac": None,
               "interpolator": "splines",
               "threshold": 0}
