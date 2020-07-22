@@ -249,30 +249,24 @@ def baseline_noise_estimation(y: np.ndarray) -> Tuple[np.ndarray, float]:
 
     quantiles = np.linspace(0.1, 0.9, 9)[::-1]
     dy = np.diff(y)
-    dy_cumsum = dy.cumsum() + y[0] - min(y[0], y[-1])
+    dy_abs = np.abs(dy)
     noise_found = False
-    max_noise = 0
     noise = 0
 
     for q in quantiles:
 
         # initial noise estimation
-        threshold = np.quantile(dy_cumsum, q)
-        noise = mad(dy[dy_cumsum < threshold]) / np.sqrt(2)
-        max_noise = max(noise, max_noise)
+        threshold = np.quantile(y, q)
+        noise = mad(dy[y[1:] < threshold]) / np.sqrt(2)
 
-        # prevent noise equal to zero
-        if np.isclose(noise, 0):
-            noise  = np.finfo(np.float64).eps
-
-        # sanity check, this consider cases with very low intensity peaks.
-        sanity_check = (y.max() - np.quantile(y, q)) > (3 * noise)
-        if not sanity_check:
-            baseline = y
-            return baseline, noise
+        # prevent noise equal to zero or nan
+        if np.isnan(noise) or np.isclose(noise, 0) :
+            noise = np.finfo(np.float64).eps
 
         # detect baseline points
-        baseline_index = np.where(dy_cumsum <= (np.sqrt(2) * 3 * noise))[0] + 1
+        baseline_mask = (dy_abs <= (3 * noise)) & (y[1:] < threshold)
+        baseline_index = np.where(baseline_mask)[0] + 1
+
         # compare the noise value obtained with the index selected as baseline
         new_noise = mad(dy[baseline_index - 1]) / np.sqrt(2)
         dnoise = np.abs(new_noise - noise) / noise
@@ -280,37 +274,74 @@ def baseline_noise_estimation(y: np.ndarray) -> Tuple[np.ndarray, float]:
         # checks the difference with the new noise value
         if dnoise <= 0.5:
             noise = new_noise
-            baseline_y = y[baseline_index]
-            noise_found = True
-            break
+            baseline_mask = (dy_abs <= (3 * noise)) & (y[1:] < threshold)
+            baseline_index = np.where(baseline_mask)[0] + 1
+            if baseline_index.size:
+                baseline_index = _remove_non_consecutive_index(baseline_index)
+                noise_found = True
+                break
 
-    # fallback to the maximum noise value found if there was no convergence
-    if not noise_found:
-        noise = max_noise
-        baseline_index = np.where(dy_cumsum <= (np.sqrt(2) * 3 * noise))[0] + 1
-        baseline_y = y[baseline_index]
+    # fallback to the noise value using q = 0.25 if there was no convergence
+    if (not noise_found) or (baseline_index.size == 0):
+        threshold = np.quantile(y, 0.5)
+        noise = mad(dy[y[1:] < threshold]) / np.sqrt(2)
+        baseline_index = np.where(dy_abs <= (3 * noise))[0] + 1
+        # if baseline is still empty, return a constant baseline
+        if baseline_index.size == 0:
+            noise = max(np.finfo(np.float64).eps, mad(y[y < threshold]))
+            baseline = np.ones_like(y) * y.min()
+            return baseline, noise
 
     # append first and last elements if they are not part of the baseline
     # this is a necessary step before interpolation.
-    if baseline_index[0] > 0:
+    baseline_x, baseline_y = _get_baseline_points(y, baseline_index)
+
+    # interpolate baseline to have the same size as y
+    interpolator = interp1d(baseline_x, baseline_y)
+    baseline = interpolator(np.arange(y.size))
+    return baseline, noise
+
+
+def _get_baseline_points(y, ind):
+    """
+    adds first and last points to the baseline.
+
+    """
+    if ind[0] > 0:
         start_x = 0
-        start_y = y[baseline_index[0]]
+        start_y = y[ind[0]]
     else:
         start_x = np.array([], dtype=int)
         start_y = np.array([])
 
-    if baseline_index[-1] < (y.size - 1):
+    if ind[-1] < (y.size - 1):
         end_x = y.size - 1
-        end_y = y[baseline_index[-1]]
+        end_y = y[ind[-1]]
     else:
         end_x = np.array([], dtype=int)
         end_y = np.array([])
-    baseline_x = np.hstack([start_x, baseline_index, end_x])
-    baseline_y = np.hstack([start_y, baseline_y, end_y])
+    baseline_x = np.hstack([start_x, ind, end_x])
+    baseline_y = np.hstack([start_y, y[ind], end_y])
+    return baseline_x, baseline_y
 
-    interpolator = interp1d(baseline_x, baseline_y)
-    baseline = interpolator(np.arange(y.size))
-    return baseline, noise
+
+def _remove_non_consecutive_index(x):
+    """
+    Remove non consecutive values from x. Ignores first and last elements.
+
+    Parameters
+    ----------
+    x: sorted 1-D array of integers.
+
+    Returns
+    -------
+    x_consecutive: array
+    """
+    prev_diff = (x - np.roll(x, 1)) == 1
+    next_diff = (np.roll(x, -1) - x) == 1
+    is_consecutive = prev_diff | next_diff
+    is_consecutive[[0, -1]] = True
+    return x[is_consecutive]
 
 
 def _estimate_params(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
