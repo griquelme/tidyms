@@ -48,7 +48,9 @@ import seaborn as sns
 # TODO: maybe its a good idea to combine export methods into an ExportMethods
 #       object
 # TODO: export datacontainer to metaboanalyst format.
-
+# TODO: include split into dev / control in DataContainer. This should be
+#  done before any kind of data curation to prevent feature leakage.
+# TODO: make sample metadata compatible with ISA format.
 
 class DataContainer(object):
     """
@@ -67,8 +69,12 @@ class DataContainer(object):
         be float and all values should be non negative, but NANs are fine.
     sample_metadata : DataFrame.
         Metadata associated to each sample (eg: sample class). Has the same
-        index as the data_matrix. "class" (standing for sample class) is a
-        required column.
+        index as the data_matrix. `class` (standing for sample class) is a
+        required column. Analytical batch and run order information can be
+        included under the `batch` and `order` columns. Both must be integer
+        numbers, and the run order must be unique for each sample. If the
+        run order is specified in a per-batch fashion, the values will be
+        converted to a unique value.
     feature_metadata : DataFrame.
         Metadata associated to each feature (eg: mass to charge ratio (mz),
         retention time (rt), etc...). The index is equal to the `data_matrix`
@@ -142,36 +148,42 @@ class DataContainer(object):
         """
         validation.validate_data_container(data_matrix, feature_metadata,
                                            sample_metadata, data_path)
-        self.data_matrix = data_matrix
-        self.feature_metadata = feature_metadata
-        self.sample_metadata = sample_metadata
-        self._sample_mask = data_matrix.index
-        self._feature_mask = data_matrix.columns
-        self._original_data = data_matrix.copy()
+
+        # check and convert order and batch information
+        try:
+            order = sample_metadata.pop("order")
+            try:
+                batch = sample_metadata.pop("batch")
+            except KeyError:
+                batch = pd.Series(data=np.ones_like(order.values),
+                                  index=order.index)
+            order = _convert_to_interbatch_order(order, batch)
+            sample_metadata["order"] = order
+            sample_metadata["batch"] = batch
+        except KeyError:
+            pass
+
+        # values are copied to prevent that modifications on the original
+        # objects affect the DataContainer attributes
+        self.data_matrix = data_matrix.copy()
+        self.feature_metadata = feature_metadata.copy()
+        self.sample_metadata = sample_metadata.copy()
+        self._sample_mask = data_matrix.index.copy()
+        self._feature_mask = data_matrix.columns.copy()
         self.data_path = data_path
         self.mapping = mapping
         self.id = data_matrix.index
+        self.plot = None
+
+        # copy back up data for resetting
+        self._original_data_matrix = self.data_matrix.copy()
+        self._original_sample_metadata = self.sample_metadata.copy()
+        self._original_feature_metadata = self.feature_metadata.copy()
 
         # adding methods
         self.metrics = MetricMethods(self)
         self.preprocess = PreprocessMethods(self)
-        self.plot = plot_mode
-
-    @property
-    def plot(self):
-        """plot mode"""
-        return self._plot
-
-    @plot.setter
-    def plot(self, value):
-        """plot mode setter."""
-        if value == "seaborn":
-            self._plot = SeabornPlotMethods(self)
-        elif value == "bokeh":
-            self._plot = BokehPlotMethods(self)
-        else:
-            msg = "`mode` must be seaborn or bokeh"
-            raise ValueError(msg)
+        self.set_plot_mode(plot_mode)
 
     @property
     def data_path(self) -> pd.DataFrame:
@@ -248,7 +260,7 @@ class DataContainer(object):
     
     @property
     def batch(self) -> pd.Series:
-        """pd.Series[str] or pd.Series[int]. Analytical batch number"""
+        """pd.Series[int]. Analytical batch number"""
         try:
             return self._sample_metadata.loc[self._sample_mask, _sample_batch]
         except KeyError:
@@ -256,15 +268,16 @@ class DataContainer(object):
             
     @batch.setter
     def batch(self, value: pd.Series):
-        try:
-            _validate_batch_order(value, self.order)
-        except RunOrderError:
-            pass
-        self._sample_metadata.loc[self._sample_mask, _sample_batch] = value
+
+        self._sample_metadata.loc[self._sample_mask,
+                                  _sample_batch] = value.astype(int)
     
     @property
     def order(self) -> pd.Series:
-        """pd.Series[int] : Run order in which samples were analyzed."""
+        """
+        pd.Series[int] : Run order in which samples were analyzed. It must be
+        an unique integer for each sample.
+        """
         try:
             return self._sample_metadata.loc[self._sample_mask, _sample_order]
         except KeyError:
@@ -272,7 +285,12 @@ class DataContainer(object):
     
     @order.setter
     def order(self, value: pd.Series):
-        self._sample_metadata.loc[self._sample_mask, _sample_order] = value
+        if utils.is_unique(value):
+            self._sample_metadata.loc[self._sample_mask,
+                                      _sample_order] = value.astype(int)
+        else:
+            msg = "order values must be unique"
+            raise ValueError(msg)
 
     def get_available_samples(self) -> pd.Series:
         """
@@ -327,9 +345,6 @@ class DataContainer(object):
             self._feature_mask = self._feature_mask.difference(remove)
         elif axis == "samples":
             self._sample_mask = self._sample_mask.difference(remove)
-        else:
-            msg = "axis should be `columns` or `features`"
-            raise ValueError(msg)
         
     def _is_valid(self, index: Iterable[str], axis: str) -> bool:
         """
@@ -391,25 +406,28 @@ class DataContainer(object):
         reset_mapping: bool
             If True, clears sample classes from the mapping.
         """
-        self._sample_mask = self._original_data.index
-        self._feature_mask = self._original_data.columns
-        self.data_matrix = self._original_data
+        self._sample_mask = self._original_data_matrix.index
+        self._feature_mask = self._original_data_matrix.columns
+        self.data_matrix = self._original_data_matrix
+        self.sample_metadata = self._original_sample_metadata
+        self.feature_metadata = self._original_feature_metadata
         if reset_mapping:
             self.mapping = None
 
-    def get_mapped_classes(self) -> List[str]:
-        """
-        return all classes assigned in the sample type mapping.
-
-        Returns
-        -------
-        process_classes: list of mapped classes.
-        """
-        process_classes = list()
-        for classes in self.mapping.values():
-            if classes is not None:
-                process_classes += classes
-        return process_classes
+    # TODO: test and remove
+    # def get_mapped_classes(self) -> List[str]:
+    #     """
+    #     return all classes assigned in the sample type mapping.
+    #
+    #     Returns
+    #     -------
+    #     process_classes: list of mapped classes.
+    #     """
+    #     process_classes = list()
+    #     for classes in self.mapping.values():
+    #         if classes is not None:
+    #             process_classes += classes
+    #     return process_classes
 
     def select_features(self, mzq: float, rtq: float, mz_tol: float = 0.01,
                         rt_tol: float = 5) -> pd.Index:
@@ -452,7 +470,7 @@ class DataContainer(object):
 
     def sort(self, field: str, axis: str):
         """
-        Sort samples/features using metadata values.
+        Sort samples/features in place using metadata values.
 
         Parameters
         ----------
@@ -487,6 +505,23 @@ class DataContainer(object):
         """
         with open(filename, "wb") as fin:
             pickle.dump(self, fin)
+
+    def set_plot_mode(self, mode: str):
+        """
+        Set the library used to generate plots.
+
+        Parameters
+        ----------
+        mode: {"bokeh", "seaborn"}
+
+        """
+        if mode == "bokeh":
+            self.plot = BokehPlotMethods(self)
+        elif mode == "seaborn":
+            self.plot = SeabornPlotMethods(self)
+        else:
+            msg = "plot mode must be `seaborn` or `bokeh`"
+            raise ValueError(msg)
 
     def add_order_from_csv(self, path: Union[str, TextIO],
                            interbatch_order: bool = True) -> None:
@@ -1250,8 +1285,7 @@ def _convert_to_interbatch_order(order: pd.Series,
     Parameters
     ----------
     order: pandas.Series
-        order and batch must share the same index, be of the same size and of
-        dtype int.
+        order and batch must share the same index, size and be of dtype int.
     batch: pandas.Series
 
     Returns
@@ -1271,8 +1305,7 @@ def _convert_to_interbatch_order(order: pd.Series,
     """
 
     if order.unique().size == order.size:
-        msg = "order values are already unique"
-        raise ValueError(msg)
+        return order
 
     # find a value to add to each batch to make unique and sorted order values
     max_order = order.groupby(batch).max()
@@ -1290,19 +1323,19 @@ def _make_empty_mapping():
     return empty_mapping
 
 
-def _validate_batch_order(batch: pd.Series, order: pd.Series):
-    if batch.dtype != int:
-        msg = "batch must be of integer dtype"
-        raise BatchInformationError(msg)
-    if order.dtype != int:
-        msg = "order must be of integer dtype"
-        raise RunOrderError(msg)
-
-    grouped = order.groupby(batch)
-    for _, batch_order in grouped:
-        if not np.array_equal(batch_order, batch_order.unique()):
-            msg = "order value must be unique for each batch"
-            raise RunOrderError(msg)
+# def _validate_batch_order(batch: pd.Series, order: pd.Series):
+#     if batch.dtype != int:
+#         msg = "batch must be of integer dtype"
+#         raise BatchInformationError(msg)
+#     if order.dtype != int:
+#         msg = "order must be of integer dtype"
+#         raise RunOrderError(msg)
+#
+#     grouped = order.groupby(batch)
+#     for _, batch_order in grouped:
+#         if not np.array_equal(batch_order, batch_order.unique()):
+#             msg = "order value must be unique for each batch"
+#             raise RunOrderError(msg)
 
 
 def _reverse_mapping(mapping):
