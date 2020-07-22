@@ -369,7 +369,7 @@ class MSData:
         mz: Iterable[float]
             Mass-to-charge values to build EICs.
         window: positive number, optional
-            Mass window in absolute units. If None, uses a 0.01  window if the
+            Mass window in absolute units. If None, uses a 0.05  window if the
             `instrument` attribute is qtof or a 0.005 value if the instrument
             is orbitrap.
         accumulator: {"mean", "sum"}
