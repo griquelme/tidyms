@@ -306,3 +306,8 @@ def get_filename(fullpath: str) -> str:
     filename: str`
     """
     return os.path.splitext(os.path.split(fullpath)[1])[0]
+
+
+def is_unique(s: pd.Series):
+    s_unique = s.unique()
+    return (s.size == s_unique.size) and (s.values == s.unique()).all()
