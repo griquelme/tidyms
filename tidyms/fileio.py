@@ -153,11 +153,7 @@ def read_mzmine(data: Union[str, TextIO],
     data_matrix = data_matrix.T
 
     if not isinstance(sample_metadata, pd.DataFrame):
-        sample_metadata = pd.DataFrame(data=sample_metadata)
-        sample_metadata["sample"] += ".raw"
-        sample_metadata["sample"] = (sample_metadata["sample"]
-                                     .str.split(".")
-                                     .apply(lambda x: x[0]))
+        sample_metadata = pd.read_csv(sample_metadata)
         sample_metadata = sample_metadata.set_index("sample")
 
     dc = DataContainer(data_matrix, ft_metadata, sample_metadata)
@@ -209,7 +205,7 @@ def read_xcms(data_matrix: str, feature_metadata: str,
     # TODO : include information from CAMERA package
 
     # sample_metadata
-    sm = pd.read_csv(sample_metadata, sep=sep)
+    sm = pd.read_csv(sample_metadata, sep=sep, index_col="sample")
     sm.index.name = "sample"
     sm = sm.rename(columns={class_column: "class"})
     dc = DataContainer(dm, fm, sm)
