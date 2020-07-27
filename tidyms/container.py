@@ -624,7 +624,8 @@ class MetricMethods:
     def __init__(self, data: DataContainer):
         self.__data = data
     
-    def cv(self, intraclass=True, robust=False):
+    def cv(self, intraclass: bool = True, robust: bool = False,
+           fill_value: float = np.inf):
         """
         Computes the Coefficient of variation defined as the ratio between the
         standard deviation and the mean of each feature.
@@ -634,10 +635,13 @@ class MetricMethods:
         intraclass: True
             if True computes the coefficient of variation for each
             class. Else computes the mean coefficient of variation
-            for all sample classes.
+            for all the classes mapped as `sample` type.
         robust: bool
             If True, computes the relative MAD. Else, computes the Coefficient
             of variation.
+        fill_value: float
+            Value used to replace NaN. np.inf is used to facilitate features
+            with NaN values.
 
         Returns
         -------
@@ -647,18 +651,20 @@ class MetricMethods:
             cv_func = utils.robust_cv
         else:
             cv_func = utils.cv
-        
+
+        # fill value is np.inf to facilitate filtering NaN features
         if intraclass:
             result = (self.__data.data_matrix
                       .groupby(self.__data.classes)
-                      .apply(cv_func))
+                      .apply(cv_func, fill_value=fill_value))
         else:
             if self.__data.mapping[_sample_type] is None:
-                result = cv_func(self.__data.data_matrix)
+                result = cv_func(self.__data.data_matrix, fill_value=fill_value)
             else:
                 sample_class = self.__data.mapping[_sample_type]
                 is_sample_class = self.__data.classes.isin(sample_class)
-                result = cv_func(self.__data.data_matrix[is_sample_class])
+                result = cv_func(self.__data.data_matrix[is_sample_class],
+                                 fill_value=fill_value)
         return result
     
     def dratio(self, robust=False,
@@ -694,11 +700,6 @@ class MetricMethods:
         Metabolomics (2018) 14:72.
 
         """
-        if robust:
-            cv_func = utils.mad
-        else:
-            cv_func = utils.sd
-
         if sample_classes is None:
             sample_classes = self.__data.mapping[_sample_type]
 
@@ -707,10 +708,11 @@ class MetricMethods:
 
         is_sample_class = self.__data.classes.isin(sample_classes)
         is_qc_class = self.__data.classes.isin(qc_classes)
-        sample_variation = cv_func(self.__data.data_matrix[is_sample_class])
-        qc_variation = cv_func(self.__data.data_matrix[is_qc_class])
-        dratio = qc_variation / sample_variation
-        dratio = dratio.fillna(np.inf)
+        sample_data = self.__data.data_matrix[is_sample_class]
+        qc_data = self.__data.data_matrix[is_qc_class]
+        # NaN are filled to inf to make filtration easier.
+        dratio = utils.sd_ratio(qc_data, sample_data, robust=robust,
+                                fill_value=np.inf)
         return dratio
     
     def detection_rate(self, intraclass=True, threshold=0):
@@ -725,14 +727,11 @@ class MetricMethods:
         threshold: float
             Minimum value to consider a feature detected
         """
-        def dr_func(x):
-            """Auxiliar function to compute the detection rate."""
-            return x[x > threshold].count() / x.count()
 
         if intraclass:
             results = (self.__data.data_matrix
                        .groupby(self.__data.classes)
-                       .apply(dr_func))
+                       .apply(utils.detection_rate, threshold=threshold))
         else:
             # TODO: same as CV. check if its better to return a global DR.
             sample_class = self.__data.mapping["sample"]
