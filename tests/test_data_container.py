@@ -347,3 +347,14 @@ def test_set_plot_mode(data_container_with_order):
     with pytest.raises(ValueError):
         data.set_plot_mode("bad-plot-mode")
 
+
+def test_add_run_order_from_csv(tmpdir, data_container_without_order):
+    data = data_container_without_order
+    order_data = pd.DataFrame(data=np.arange(data.data_matrix.shape[0]),
+                              columns=["order"])
+    order_data["sample"] = data.data_matrix.index
+    order_data["batch"] = 1
+    save_path = os.path.join(tmpdir, "order.csv")
+    order_data.to_csv(save_path)
+    data.add_order_from_csv(save_path)
+    assert  True
