@@ -176,8 +176,11 @@ def sample_to_path(samples, path):
 
     Returns
     -------
-    d: dict
+    d : dict
+
     """
+    # TODO: this function should accept and extension parameter to prevent
+    #   files with the same name but invalid extensions from being used
     available_files = os.listdir(path)
     filenames = [os.path.splitext(x)[0] for x in available_files]
     full_path = [os.path.join(path, x) for x in available_files]
@@ -188,31 +191,37 @@ def sample_to_path(samples, path):
     return d
 
     
-def cv(df: pd.DataFrame):
-    """Computes the Coefficient of variation for each column"""
+def cv(df: pd.DataFrame, fill_value: Optional[float] = None) -> pd.Series:
+    """
+    Computes the Coefficient of variation for each column.
+
+    Used by DataContainer objects to compute metrics.
+
+    """
     res = df.std() / df.mean()
-    res = res.fillna(0)
+    if fill_value is not None:
+        res = res.fillna(fill_value)
     return res
 
 
-def sd(df):
-    """
-    Computes the standard deviation for each column. Fill missing values
-    with zero
-    """
-    res = df.std()
-    res = res.fillna(0)
-    return res
+# def sd(df):
+#     """
+#     Computes the standard deviation for each column. Fill missing values
+#     with zero
+#     """
+#     res = df.std()
+#     res = res.fillna(0)
+#     return res
 
 
-def iqr(df):
-    """Computes the inter-quartile range for each column."""
-    res = (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
-    res = res.fillna(0)
-    return res
+# def iqr(df):
+#     """Computes the inter-quartile range for each column."""
+#     res = (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
+#     res = res.fillna(0)
+#     return res
 
 
-def robust_cv(df):
+def robust_cv(df, fill_value: Optional[float] = None):
     """
     Estimation of the coefficient of variation using the MAD and median.
     Assumes a normal distribution.
@@ -221,7 +230,8 @@ def robust_cv(df):
     # 1.4826 is used to estimate sigma in an unbiased way assuming a normal
     # distribution for each feature.
     res = 1.4826 * df.mad() / df.median()
-    res = res.fillna(0)
+    if fill_value is not None:
+        res = res.fillna(fill_value)
     return res
 
 
@@ -233,6 +243,57 @@ def mad(df):
     res = df.mad()
     res = res.fillna(0)
     return res
+
+
+def sd_ratio(df1: pd.DataFrame, df2: pd.DataFrame, robust: bool = False,
+             fill_value: Optional[float] = None) -> pd.Series:
+    """
+    Computes the ratio between the standard deviation of the columns of
+    DataFrame1 and DataFrame2.
+
+    Used to compute the D-Ratio metric. NaN values are filled to np.inf.
+
+    Parameters
+    ----------
+    df1 : DataFrame with shape (n1, m)
+    df2 : DataFrame with shape (n2, m)
+    robust : bool
+        If True uses the MAD as an estimator of the standard deviation. Else
+        computes the sample standard deviation.
+    fill_value : Number used to input NaNs.
+
+    Returns
+    -------
+    ratio : pd.Series
+
+    """
+    if robust:
+        ratio = mad(df1) / mad(df2)
+    else:
+        ratio = df1.std() / df2.std()
+
+    if fill_value is not None:
+        ratio = ratio.fillna(fill_value)
+    return ratio
+
+
+def detection_rate(df: pd.DataFrame, threshold: float = 0.0) -> pd.Series:
+    """
+    Computes the fraction of values in a column above the `threshold`.
+
+    Parameters
+    ----------
+    df : DataFrame
+    threshold : float
+
+    Returns
+    -------
+    dr : pd.Series
+
+    """
+    # dr = df[df > threshold].count() / df.count()
+    dr = (df > threshold).sum().astype(int) / df.shape[0]
+    return dr
 
 
 def _find_closest_sorted(x: np.ndarray,
