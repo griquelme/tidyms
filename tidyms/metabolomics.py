@@ -21,6 +21,9 @@ from scipy.optimize import linear_sum_assignment
 from typing import Optional, Tuple, List, Dict
 
 
+__all__ = ["detect_features", "feature_correspondence", "make_data_container"]
+
+
 def detect_features(path_list: List[str], separation: str = "uplc",
                     instrument: str = "qtof", roi_params: Optional[dict] = None,
                     cwt_params: Optional[dict] = None, verbose: bool = True
