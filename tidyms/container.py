@@ -550,11 +550,7 @@ class DataContainer(object):
         batch = df["batch"].astype(int)
 
         if interbatch_order:
-            try:
                 order = _convert_to_interbatch_order(order, batch)
-            except ValueError:
-                # order is already unique
-                pass
         self.order = order
         self.batch = batch
 
