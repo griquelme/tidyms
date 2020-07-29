@@ -76,7 +76,7 @@ class Reporter(object):
         status: {"before", "after"}
         """
         metrics = dict()
-        metrics["cv"] = dc.metrics.cv(intraclass=False).mean()
+        metrics["cv"] = dc.metrics.cv(intraclass=False, fill_value=0).mean()
         n_samples, n_features = dc.data_matrix.shape
         metrics["features"] = n_features
         metrics["samples"] = n_samples
