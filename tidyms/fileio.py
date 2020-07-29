@@ -211,6 +211,7 @@ def read_xcms(data_matrix: str, feature_metadata: str,
     dc = DataContainer(dm, fm, sm)
     return dc
 
+
 def read_data_matrix(path: Union[str, TextIO, BinaryIO],
                      data_matrix_format: str,
                      sample_metadata: Optional[str] = None
@@ -223,7 +224,7 @@ def read_data_matrix(path: Union[str, TextIO, BinaryIO],
     path: str
         path to the data matrix file.
     data_matrix_format: {"progenesis", "pickle", "mzmine"}
-    sample_metadta : str, file or DataFrame.
+    sample_metadata : str, file or DataFrame.
         Required for mzmine data.
 
     Returns
@@ -239,7 +240,7 @@ def read_data_matrix(path: Union[str, TextIO, BinaryIO],
     elif data_matrix_format == "pickle":
         return read_pickle(path)
     elif data_matrix_format == "mzmine":
-        return  read_mzmine(path, sample_metadata)
+        return read_mzmine(path, sample_metadata)
     else:
         msg = "Invalid Format"
         raise ValueError(msg)
@@ -393,9 +394,9 @@ class MSData:
         return chromatograms
 
     def accumulate_spectra(self, start: Optional[int], end: Optional[int],
-                           subtract: Optional[Tuple[int, int]] = None,
-                           kind: str = "linear", accumulator: str = "sum"
-                           ) -> lcms.MSSpectrum:
+                           subtract_left: Optional[int] = None,
+                           subtract_right: Optional[int] = None,
+                           kind: str = "linear") -> lcms.MSSpectrum:
         """
         accumulates a series of consecutive spectra into a single spectrum.
 
@@ -407,11 +408,12 @@ class MSData:
             Last scan number to accumulate.
         kind: str
             kind of interpolator to use with scipy interp1d.
-        subtract : None or Tuple[int], left, right
-            Scans regions to subtract. `left` must be smaller than `start` and
-            `right` greater than `end`.
-        accumulator : {"sum", "mean"}
-            Accumulation method used to merge the scans.
+        subtract_left : int, optional
+            Scans between `subtract_left` and `start` are subtracted from the
+            accumulated spectrum.
+        subtract_right : int, optional
+            Scans between `subtract_right` and `end` are subtracted from the
+            accumulated spectrum.
 
         Returns
         -------
@@ -420,8 +422,10 @@ class MSData:
         # TODO: accumulate spectra needs to have different behaviours for
         #   centroid and profile data.
         accum_mz, accum_int = \
-            lcms.accumulate_spectra(self.reader, start, end, subtract=subtract,
-                                    kind=kind, accumulator=accumulator)
+            lcms.accumulate_spectra(self.reader, start, end,
+                                    subtract_left=subtract_left,
+                                    subtract_right=subtract_right,
+                                    kind=kind)
         sp = lcms.MSSpectrum(accum_mz, accum_int, mode=self.instrument)
         return sp
 
@@ -655,4 +659,3 @@ def load_dataset(name: str, dataset_type: str = "matrix"):
     except KeyError:
         msg = "{} is not an available data set name".format(name)
         raise ValueError(msg)
-    

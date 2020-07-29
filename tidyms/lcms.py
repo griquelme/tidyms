@@ -15,6 +15,7 @@ import pyopenms
 from scipy.interpolate import interp1d
 from typing import Optional, Iterable, Tuple, Union, List, Callable
 from . import peaks
+from . import validation
 import bokeh.plotting
 from bokeh.palettes import Set3
 from collections import namedtuple
@@ -70,10 +71,11 @@ def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
     mz : iterable[float]
         mz values used to build the EICs.
     start : int, optional
-        first scan to build the chromatogram
+        first scan to build the chromatograms
     end : int, optional
-        last scan to build the chromatogram.
-    window : float.
+        last scan to build the chromatograms. The scan with `number` end is not
+        included in the chromatograms.
+    window : positive number.
                Tolerance to build the EICs.
     accumulator : {"sum", "mean"}
         "mean" divides the intensity in the EIC using the number of points in
@@ -83,11 +85,10 @@ def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
     rt : array of retention times
     eic : array with rows of EICs.
     """
+    nsp = msexp.getNrSpectra()
+
     if not isinstance(mz, np.ndarray):
         mz = np.array(mz)
-    mz_intervals = (np.vstack((mz - window, mz + window))
-                    .T.reshape(mz.size * 2))
-    nsp = msexp.getNrSpectra()
 
     if start is None:
         start = 0
@@ -95,35 +96,42 @@ def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
     if end is None:
         end = nsp
 
+    # validate params
+    params = {"start": start, "end": end, "window": window, "mz": mz,
+              "accumulator": accumulator}
+    validation.validate_make_chromatograms_params(nsp, params)
+
+    # mz_intervals has this shape to be compatible with reduceat
+    mz_intervals = (np.vstack((mz - window, mz + window))
+                    .T.reshape(mz.size * 2))
+
     eic = np.zeros((mz.size, end - start))
     rt = np.zeros(end - start)
     for ksp in range(start, end):
+        # find rt, mz and intensity values of the current scan
         sp = msexp.getSpectrum(ksp)
-        rt[ksp] = sp.getRT()
+        rt[ksp - start] = sp.getRT()
         mz_sp, int_sp = sp.get_peaks()
         ind_sp = np.searchsorted(mz_sp, mz_intervals)
+
         # check if the slices aren't empty
         has_mz = (ind_sp[1::2] - ind_sp[::2]) > 0
         # elements added at the end of mz_sp raise IndexError
         ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
-        eic[:, ksp] = np.where(has_mz, np.add.reduceat(int_sp, ind_sp)[::2], 0)
+        # this function adds the values between two consecutive indices
+        tmp_eic = np.where(has_mz, np.add.reduceat(int_sp, ind_sp)[::2], 0)
         if accumulator == "mean":
             norm = ind_sp[1::2] - ind_sp[::2]
             norm[norm == 0] = 1
-            eic[:, ksp] = eic[:, ksp] / norm
-        elif accumulator == "sum":
-            pass
-        else:
-            msg = "accumulator possible values are `mean` and `sum`."
-            raise ValueError(msg)
+            tmp_eic = tmp_eic / norm
+        eic[:, ksp - start] = tmp_eic
     return rt, eic
 
 
-def accumulate_spectra(msexp: msexperiment, start: int,
-                       end: int, subtract: Optional[Tuple[int, int]] = None,
-                       kind: str = "linear",
-                       accumulator: str = "sum"
-                       ) -> Tuple[np.ndarray, np.ndarray]:
+def accumulate_spectra(msexp: msexperiment, start: int, end: int,
+                       subtract_left: Optional[int] = None,
+                       subtract_right: Optional[int] = None,
+                       kind: str = "linear") -> Tuple[np.ndarray, np.ndarray]:
     """
     accumulates a spectra into a single spectrum.
 
@@ -134,75 +142,64 @@ def accumulate_spectra(msexp: msexperiment, start: int,
         start slice for scan accumulation
     end : int
         end slice for scan accumulation.
+    subtract_left : int, optional
+        Scans between `subtract_left` and `start` are subtracted from the
+        accumulated spectrum.
+    subtract_right : int, optional
+        Scans between `subtract_right` and `end` are subtracted from the
+        accumulated spectrum.
     kind : str
         kind of interpolator to use with scipy interp1d.
-    subtract : None or Tuple[int], left, right
-        Scans regions to substract. `left` must be smaller than `start` and
-        `right` greater than `end`.
-    accumulator : {"sum", "mean"}
 
     Returns
     -------
     accum_mz : array of m/z values
-    accum_int : array of intensities.
+    accum_int : array of cumulative intensities.
     """
-    accumulator_functions = {"sum": np.sum, "mean": np.mean}
-    accumulator = accumulator_functions[accumulator]
+    if subtract_left is None:
+        subtract_left = start
 
-    if subtract is not None:
-        if (subtract[0] > start) or (subtract[-1] < end):
-            raise ValueError("subtract region outside scan region.")
-    else:
-        subtract = (start, end)
+    if subtract_right is None:
+        subtract_right = end
 
-    # interpolate accumulate and substract regions
-    rows = subtract[1] - subtract[0]
-    mz_ref = _get_mz_roi(msexp, subtract)
-    interp_int = np.zeros((rows, mz_ref.size))
-    for krow, scan in zip(range(rows), range(*subtract)):
+    # parameter validation
+    params = {"start": start, "end": end, "subtract_left": subtract_left,
+              "subtract_right": subtract_right, "kind": kind}
+    n_sp = msexp.getNrSpectra()
+    validation.validate_accumulate_spectra_params(n_sp, params)
+
+    # creates a common mz reference value for the scans
+    mz, _ = msexp.getSpectrum(start).get_peaks()
+    accum_mz = _get_uniform_mz(mz)
+    accum_sp = np.zeros_like(accum_mz)
+
+    # interpolates each scan to the reference. Removes values outside the
+    # min and max of the reference.
+    for scan in range(subtract_left, subtract_right):
         mz_scan, int_scan = msexp.getSpectrum(scan).get_peaks()
+        mz_min, mz_max = mz_scan.min(), mz_scan.max()
+        min_ind, max_ind = np.searchsorted(accum_mz, [mz_min, mz_max])
         interpolator = interp1d(mz_scan, int_scan, kind=kind)
-        interp_int[krow, :] = interpolator(mz_ref)
+        tmp_sp = interpolator(accum_mz[min_ind:max_ind])
+        # accumulate scans
+        if (scan < start) or (scan > end):
+            accum_sp[min_ind:max_ind] -= tmp_sp
+        else:
+            accum_sp[min_ind:max_ind] += tmp_sp
 
-    # subtract indices to match interp_int rows
-    start = start - subtract[0]
-    end = end - subtract[0]
-    subtract = 0, subtract[1] - subtract[0]
-
-    accum_int = (accumulator(interp_int[start:end], axis=0)
-                 - accumulator(interp_int[subtract[0]:start], axis=0)
-                 - accumulator(interp_int[end:subtract[1]], axis=0))
-    accum_mz = mz_ref
-
-    return accum_mz, accum_int
+    is_positive_sp = accum_sp > 0
+    accum_mz = accum_mz[is_positive_sp]
+    accum_sp = accum_sp[is_positive_sp]
+    return accum_mz, accum_sp
 
 
-def _get_mz_roi(ms_experiment, scans):
-    """
-    make an mz array with regions of interest in the selected scans.
-
-    Parameters
-    ----------
-    ms_experiment : pyopenms.MSEXperiment, pyopenms.OnDiskMSExperiment
-    scans : tuple[int] : start, end
-
-    Returns
-    -------
-    mz_ref : array
-    """
-    mz_0, _ = ms_experiment.getSpectrum(scans[0]).get_peaks()
-    mz_min = mz_0.min()
-    mz_max = mz_0.max()
-    mz_res = np.diff(mz_0).min()
-    mz_ref = np.arange(mz_min, mz_max, mz_res)
-    roi = np.zeros(mz_ref.size + 1)
-    # +1 used to prevent error due to mz values bigger than mz_max
-    for k in range(*scans):
-        curr_mz, _ = ms_experiment.getSpectrum(k).get_peaks()
-        roi_index = np.searchsorted(mz_ref, curr_mz)
-        roi[roi_index] += 1
-    roi = roi.astype(bool)
-    return mz_ref[roi[:-1]]
+def _get_uniform_mz(mz: np.ndarray):
+    """returns a new uniformly sampled m/z array."""
+    mz_min = mz.min()
+    mz_max = mz.max()
+    mz_res = np.diff(mz).min()
+    uniform_mz = np.arange(mz_min, mz_max, mz_res)
+    return uniform_mz
 
 
 def make_widths_lc(mode: str) -> np.ndarray:
@@ -347,7 +344,7 @@ def get_roi_params(separation: str = "uplc", instrument: str = "qtof"):
     elif separation == "hplc":
         roi_params.update({"max_missing": 1, "min_length": 20})
     else:
-        msg = "valid `mode` are uplc and hplc"
+        msg = "valid `separation` are uplc and hplc"
         raise ValueError(msg)
 
     if instrument == "qtof":
@@ -355,7 +352,7 @@ def get_roi_params(separation: str = "uplc", instrument: str = "qtof"):
     elif instrument == "orbitrap":
         roi_params.update({"tolerance": 0.005})
     else:
-        msg = "valid `ms_mode` are qtof and orbitrap"
+        msg = "valid `instrument` are qtof and orbitrap"
         raise ValueError(msg)
 
     roi_params["mode"] = separation
@@ -389,6 +386,8 @@ def _find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
     match_ind : np.ndarray
         array of indices for the isotopic distribution.
     """
+    # TODO: Remove this function when the isotope finder module is added.
+
     mono_index = find_closest(mz, mz_ft)
     mz_mono = mz[mono_index]
     if abs(mz_mono - mz_ft) > tol:
@@ -430,6 +429,7 @@ def _find_isotopic_distribution(mz: np.ndarray, mz_mono: float,
     best_peaks: numpy.ndarray
 
     """
+    # TODO: Remove this function when the isotope finder module is added.
     best_peaks = np.array([], dtype=int)
     n_peaks = 0
     for q in range(1, q_max + 1):
@@ -716,7 +716,6 @@ class MSSpectrum:
             default_fig_params.update(fig_params)
             fig_params = default_fig_params
 
-
         fig = bokeh.plotting.figure(**fig_params)
         fig.line(self.mz, self.spint, **line_params)
         if self.peaks:
@@ -799,54 +798,6 @@ class Roi(Chromatogram):
             mz_mean[k] = np.average(peak_mz, weights=peak_spint)
             mz_std[k] = peak_mz.std()
         return mz_mean, mz_std
-
-    # def get_peak_params(self, subtract_bl: bool = True,
-    #                     rt_estimation: str = "weighted") -> dict:
-    #     """
-    #     Compute peak parameters using retention time and mass-to-charge ratio
-    #
-    #     Parameters
-    #     ----------
-    #     subtract_bl: bool
-    #         If True subtracts the estimated baseline from the intensity and
-    #         area.
-    #     rt_estimation: {"weighted", "apex"}
-    #         if "weighted", the peak retention time is computed as the weighted
-    #         mean of rt in the extension of the peak. If "apex", rt is
-    #         simply the value obtained after peak picking.
-    #
-    #     Returns
-    #     -------
-    #     peak_params: pandas.DataFrame
-    #     """
-    #     if self.peaks is None:
-    #         msg = "`pick_cwt` method must be runned before using this method"
-    #         raise ValueError(msg)
-    #
-    #     peak_params = {"rt": list(), "intensity": list(), "width": list(),
-    #                    "area": list(), "mz": list(), "mz std": list()}
-    #     for peak in self.peaks:
-    #         tmp = peak.get_peak_params(self.spint, x=self.rt,
-    #                                    subtract_bl=subtract_bl,
-    #                                    center_estimation=rt_estimation)
-    #         tmp["rt"] = tmp.pop("location")
-    #         for k in peak_params:
-    #             if k not in ["mz", "mz std"]:
-    #                 peak_params[k].append(tmp[k])
-    #
-    #         # set mz mean and mz std
-    #         missing = np.isnan(self.mz[peak.start:peak.end])
-    #         if ~missing.all():
-    #             mz_not_missing = self.mz[peak.start:peak.end][~missing]
-    #             sp_not_missing = self.spint[peak.start:peak.end][~missing]
-    #             mz_mean = np.average(mz_not_missing, weights=sp_not_missing)
-    #             mz_std = mz_not_missing.std()
-    #         else:
-    #             mz_mean = np.nan
-    #             mz_std = np.nan
-    #         peak_params["mz"].append(mz_mean)
-    #         peak_params["mz std"].append(mz_std)
-    #     return peak_params
 
 
 class _RoiProcessor:
@@ -1272,8 +1223,7 @@ def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
         mz, spint = sp.get_peaks()
         processor.add(mz, spint, targeted=targeted)
         processor.append_to_roi(rt, targeted=targeted)
-        # this was added during debugging and needs to be removed
-        # assert (np.diff(processor.mz_mean) >= 0).all()
+
     # add roi not completed during last scan
     processor.flag_as_completed()
     processor.append_to_roi(rt)
