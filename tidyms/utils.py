@@ -28,7 +28,8 @@ import os.path
 from typing import Optional, Union
 
 
-def gauss(x: np.ndarray, mu: float, sigma: float, amp: float):
+def gauss(x: np.ndarray, mu: float, sigma: float,
+          amp: float):  # pragma: no cover
     """
     gaussian curve.
 
@@ -47,7 +48,8 @@ def gauss(x: np.ndarray, mu: float, sigma: float, amp: float):
     return gaussian
 
 
-def gaussian_mixture(x: np.ndarray, params: np.ndarray) -> np.ndarray:
+def gaussian_mixture(x: np.ndarray, params: np.ndarray
+                     ) -> np.ndarray:   # pragma: no cover
     """
     Mixture of gaussian curves.
 
@@ -372,3 +374,80 @@ def get_filename(fullpath: str) -> str:
 def is_unique(s: pd.Series):
     s_unique = s.unique()
     return (s.size == s_unique.size) and (s.values == s.unique()).all()
+
+
+class SimulatedExperiment:  # pragma: no cover
+    """
+    Emulates a pyopenms MSExperiment. Used for tests.
+    """
+    def __init__(self, mz_values: np.ndarray, rt_values: np.ndarray,
+                 mz_params: np.ndarray, rt_params: np.ndarray,
+                 noise: Optional[float] = None):
+        """
+        Constructor function
+
+        Parameters
+        ----------
+        mz_values : sorted mz values for each mz scan
+        rt_values : sorted rt values
+        mz_params : array with shape (n, 3)
+             Used to build m/z peaks. Each row is the mean, standard deviation
+             and amplitude in the m/z dimension
+        rt_params : array with shape (n, 3)
+             Used to build rt peaks. Each row is the mean, standard deviation
+             and amplitude in the rt dimension
+        noise : positive number, optional
+            noise level to add to each scan. the noise is modeled as gaussian
+            iid noise in each scan with standard deviation equal to the value
+            used. An offset value is added to make the noise contribution
+            non negative. To make the noise values reproducible, each scan has
+            a seed value associated to generate always the same noise value in
+            a given scan. seed values are generated randomly each time a new
+            object is instantiated.
+
+        """
+        self.mz = mz_values
+        self.mz_array = gaussian_mixture(mz_values, mz_params)
+        self.rt = rt_values
+        self.rt_array = gaussian_mixture(rt_values, rt_params)
+        self.n_scans = rt_values.size
+        self._seeds = None
+        self._noise_level = None
+        if noise is not None:
+            self._seeds = np.random.choice(100000, self.n_scans)
+            self._noise_level = noise
+
+    def getNrSpectra(self):
+        return self.n_scans
+
+    def getSpectrum(self, scan_number: int):
+        is_valid_scan = (0 <= scan_number) and (self.n_scans > scan_number)
+        if not is_valid_scan:
+            msg = "Invalid scan number."
+            raise ValueError(msg)
+        rt = self.rt[scan_number]
+        spint = self.rt_array[:, scan_number][:, np.newaxis] * self.mz_array
+        spint = spint.sum(axis=0)
+        if self._noise_level is not None:
+            np.random.seed(self._seeds[scan_number])
+            noise = np.random.normal(size=self.mz.size, scale=self._noise_level)
+            noise -= noise.min()
+            spint += noise
+        sp = SimulatedSpectrum(self.mz, spint, rt)
+        return sp
+
+
+class SimulatedSpectrum:    # pragma: no cover
+    """
+    Emulates pyopenms Spectrum. Used for tests.
+    """
+    def __init__(self, mz: np.ndarray, spint: np.ndarray, rt: float):
+        self.mz = mz
+        self.spint = spint
+        self.rt = rt
+
+    def getRT(self):
+        return self.rt
+
+    def get_peaks(self):
+        return self.mz, self.spint
