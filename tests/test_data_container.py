@@ -191,7 +191,6 @@ def test_is_valid_invalid_axis(data_container_with_order):
     with pytest.raises(ValueError):
         data._is_valid(samples, "bad_axis")
 
-# TODO: think about how to test data_path and get_available_samples
 
 def test_diagnose_empty(data_container_with_order):
     data = data_container_with_order

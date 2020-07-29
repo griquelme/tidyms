@@ -38,9 +38,31 @@ def batch_corrector_params():
     return params
 
 
+@pytest.fixture
+def make_chromatogram_params():
+    params = {"start": 0, "end": 100, "window": 0.01, "accumulator": "sum",
+              "mz": [120, 150, 180]}
+    return params
+
+
+@pytest.fixture
+def accumulate_spectra_params():
+    params = {"start": 50, "end": 100, "subtract_left": 40,
+              "subtract_right": 110, "kind": "linear"}
+    return params
+
+
+@pytest.fixture
+def cwt_peak_picking_params():
+    params = {"snr": 10, "min_length": 5, "max_distance": 1,
+              "gap_threshold": 1, "estimators": "default", "min_width": 5,
+              "max_width": 10}
+    return  params
+
 ########################################
 #   ~ validate function ~
 ########################################
+
 
 def test_validate(blank_corrector_params):
     validate(blank_corrector_params, blankCorrectorValidator)
@@ -176,3 +198,137 @@ def test_batch_corrector_frac_greater_than_1(batch_corrector_params):
 def test_batch_corrector_bad_interpolator(batch_corrector_params):
     batch_corrector_params["interpolator"] = "cubic"
     assert not batchCorrectorValidator.validate(batch_corrector_params)
+
+
+def test_validate_make_chromatograms_good_params(make_chromatogram_params):
+    params = make_chromatogram_params
+    validate_make_chromatograms_params(200, params)
+    assert True
+
+
+def test_validate_make_chromatograms_empty_mz(make_chromatogram_params):
+    params = make_chromatogram_params
+    params["mz"] = []
+    with pytest.raises(ValueError):
+        validate_make_chromatograms_params(200, params)
+
+
+def test_validate_make_chromatograms_negative_window(make_chromatogram_params):
+    params = make_chromatogram_params
+    params["window"] = -0.01
+    with pytest.raises(ValueError):
+        validate_make_chromatograms_params(200, params)
+
+
+def test_validate_make_chromatograms_bad_accumulator(make_chromatogram_params):
+    params = make_chromatogram_params
+    params["accumulator"] = "invalid_value"
+    with pytest.raises(ValueError):
+        validate_make_chromatograms_params(200, params)
+
+
+def test_validate_make_chromatograms_negative_start(make_chromatogram_params):
+    params = make_chromatogram_params
+    params["start"] = -1
+    with pytest.raises(ValueError):
+        validate_make_chromatograms_params(200, params)
+
+
+def test_validate_make_chromatograms_end_gt_nsp(make_chromatogram_params):
+    params = make_chromatogram_params
+    params["end"] = 200 + 1
+    with pytest.raises(ValueError):
+        validate_make_chromatograms_params(200, params)
+
+
+def test_validate_make_chromatograms_start_gt_end(make_chromatogram_params):
+    params = make_chromatogram_params
+    params["start"] = 50
+    params["end"] = 40
+    with pytest.raises(ValueError):
+        validate_make_chromatograms_params(200, params)
+
+
+def test_accumulate_spectra_good_params(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    validate_accumulate_spectra_params(200, params)
+
+
+def test_accumulate_spectra_negative_start(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    params["start"] = -1
+    with pytest.raises(ValueError):
+        validate_accumulate_spectra_params(200, params)
+
+
+def test_accumulate_spectra_start_gt_end(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    params["start"] = 10
+    params["start"] = 5
+    with pytest.raises(ValueError):
+        validate_accumulate_spectra_params(200, params)
+
+
+def test_accumulate_spectra_end_gt_n_sp(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    params["end"] = 200
+    with pytest.raises(ValueError):
+        validate_accumulate_spectra_params(200, params)
+
+
+def test_accumulate_spectra_end_gt_subtract_right(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    params["end"] = params["subtract_right"] + 1
+    with pytest.raises(ValueError):
+        validate_accumulate_spectra_params(200, params)
+
+
+def test_accumulate_spectra_end_gt_n_sp(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    params["end"] = 200
+    with pytest.raises(ValueError):
+        validate_accumulate_spectra_params(200, params)
+
+
+def test_accumulate_spectra_subtract_left_gt_start(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    params["subtract_left"] = params["start"] + 1
+    with pytest.raises(ValueError):
+        validate_accumulate_spectra_params(200, params)
+
+
+def test_accumulate_spectra_negative_subtract_left(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    params["subtract_left"] = -1
+    with pytest.raises(ValueError):
+        validate_accumulate_spectra_params(200, params)
+
+
+def test_accumulate_spectra_subtract_right_geq_nsp(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    params["subtract_right"] = 200
+    with pytest.raises(ValueError):
+        validate_accumulate_spectra_params(200, params)
+
+
+def test_accumulate_spectra_subtract_right_lt_end(accumulate_spectra_params):
+    params = accumulate_spectra_params
+    params["subtract_right"] = params["end"] - 1
+    with pytest.raises(ValueError):
+        validate_accumulate_spectra_params(200, params)
+
+
+def test_cwt_params_estimators(cwt_peak_picking_params):
+    params = cwt_peak_picking_params
+    validate_cwt_peak_picking_params(params)
+    assert  True
+
+def test_cwt_params_custom_estimators(cwt_peak_picking_params):
+    params = cwt_peak_picking_params
+    estimators = {"baseline": sum, "noise": sum, "loc": sum, "area": sum,
+                  "width": sum}
+    params["estimators"] = estimators
+    validate_cwt_peak_picking_params(params)
+    assert  True
+
+# TODO: test roi schema
