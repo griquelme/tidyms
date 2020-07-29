@@ -16,6 +16,14 @@ def is_callable(field, value, error):
     if not hasattr(value, "__call__"):
         msg = "Must be a string or callable"
         error(field, msg)
+
+
+def is_all_positive(field, value, error):
+    if (value is not None):
+        cond = (value > 0).all()
+        if not cond:
+            msg = "All of the values must be positive"
+            error(field, msg)
 # -----------------------------
 
 
@@ -41,7 +49,7 @@ def validate(params: dict, validator: cerberus.Validator) -> None:
         msg = ""
         for field, e_msgs in validator.errors.items():
             for e_msg in e_msgs:
-                msg += "{} {}\n".format(field, e_msg)
+                msg += "{}: {}\n".format(field, e_msg)
         raise ValueError(msg)
 
 
@@ -56,7 +64,7 @@ class ValidatorWithLowerThan(cerberus.Validator):
         if (other not in self.document) or (self.document[other] is None):
             return False
         if value >= self.document[other]:
-            msg = "{}, must be lower than {}".format(field, other)
+            msg = "{} must be lower than {}".format(field, other)
             self._error(field, msg)
 
     def _validate_lower_or_equal(self, other, field, value):
@@ -239,32 +247,82 @@ batchCorrectorValidator = ValidatorWithLowerThan(batch_corrector_schema)
 # TODO: validate DataContainer using cerberus
 
 
-def make_make_chromatogram_validator(ms_data):
-    n_spectra = ms_data.reader.getNrSpectra()
-    _make_chromatogram_schema = {"window": {"type": "number",
-                                            "nullable": True,
-                                            "is_positive": True},
-                                 "accumulator": {"type": "string",
-                                                 "allowed": ["mean", "sum"]}
-                                 }
-    return ValidatorWithLowerThan(_make_chromatogram_schema)
+def validate_make_roi_params(n_spectra, params):
+    schema = {"tolerance": {"type": "number", "is_positive": True},
+              "max_missing": {"type": "integer", "min": 0},
+              "targeted_mz": {"nullable": True, "check_with": is_all_positive},
+              "start": {"type": "integer", "nullable": True, "min": 0,
+                        "lower_than": "end"},
+              "end": {"type": "integer", "nullable": True,
+                      "max": n_spectra - 1},
+              "multiple_match": {"allowed": ["closest", "reduce"]},
+              "mz_reduce": {"any_of": [{"allowed": ["mean"]},
+                                       {"check_with": is_callable}]},
+              "sp_reduce": {"any_of": [{"allowed": ["mean", "sum"]},
+                                       {"check_with": is_callable}]},
+              "mode": {"allowed": ["hplc", "uplc"]}}
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
 
 
-# validator for  CWT peak picking
-_cwt_schema = {"bl_ratio": {"type": "number",
-                            "is_positive": True},
-               "snr": {"type": "number",
-                       "is_positive": True},
-               "min_width": {"type": "number",
-                             "is_positive": True,
-                             "lower_than": "max_width"},
-               "max_width": {"type": "number",
-                             "is_positive": True},
-               "max_distance": {"type": "integer",
-                                "is_positive": True,
-                                "nullable": True},
-               "min_length": {"type": "integer",
-                              "is_positive": True,
-                              "nullable": True},
-               "gap_thresh": {"type": "integer",
-                              "min": 0}}
+def validate_cwt_peak_picking_params(params):
+
+    estimators = {"anyof": [{"type": "string",
+                             "allowed": ["default", "cwt"]},
+                            {"type": "dict",
+                             "schema": get_peak_picking_estimators_schema()}
+                            ]}
+
+    schema = {"max_distance": {"type": "number", "is_positive": True},
+              "min_length": {"type": "integer", "is_positive": True},
+              "gap_threshold": {"type": "integer", "min": 0},
+              "snr": {"type": "number", "is_positive": True},
+              "min_width": {"type": "number", "is_positive": True,
+                            "lower_than": "max_width"},
+              "max_width": {"type": "number", "is_positive": True},
+              "estimators": estimators
+              }
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
+
+
+def get_peak_picking_estimators_schema():
+    schema = {"baseline": {"check_with": is_callable},
+              "noise": {"check_with": is_callable},
+              "width": {"check_with": is_callable},
+              "area": {"check_with": is_callable},
+              "loc": {"check_with": is_callable}}
+    return schema
+
+
+def validate_peak_picking_estimators(params):
+    schema = get_peak_picking_estimators_schema()
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
+
+
+
+# validator for make_chromatograms
+
+def validate_make_chromatograms_params(n_spectra, params):
+    schema = {"mz": {"empty": False},
+              "window": {"type": "number", "is_positive": True},
+              "accumulator": {"type": "string", "allowed": ["mean", "sum"]},
+              "start": {"type": "integer", "lower_than": "end", "min": 0},
+              "end": {"type": "integer", "max": n_spectra}
+              }
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
+
+
+def validate_accumulate_spectra_params(n_spectra, params):
+    schema = {"start": {"type": "integer", "min": 0, "lower_than": "end"},
+              "end": {"type": "integer", "max": n_spectra - 1,
+                      "lower_or_equal": "subtract_right"},
+              "subtract_left": {"type": "integer", "lower_or_equal": "start",
+                                "min": 0},
+              "subtract_right": {"type": "integer", "max": n_spectra - 1},
+              "kind": {"type": "string"}
+              }
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
