@@ -3,7 +3,7 @@ from bokeh import plotting
 import numpy as np
 plotting.output_file("example.html")
 
-data = ms.fileio.load_dataset("ltr")
+data = ms.fileio.load_dataset("reference-materials")
 
 # search [M+H]+ from trp in the features
 mz = 205.097
@@ -11,6 +11,4 @@ rt = 124
 # get a list of features compatible with the given m/z and rt
 ft_name = data.select_features(mz, rt)
 
-# add order info
-data.order = np.arange(data.data_matrix.shape[0])
 data.plot.feature(ft_name[0])
