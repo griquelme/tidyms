@@ -35,8 +35,3 @@ Documentation
 
 The official documentation is available at **COMPLETE**
 
-License
--------
-
-**ADD A LICENSE**
-
