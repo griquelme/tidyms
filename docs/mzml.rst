@@ -1,7 +1,7 @@
 Converting raw data to mzML format
 ==================================
 
-We recommend using `Proteowizard's msconvert
+We recommend using `msconvert
 <http://proteowizard.sourceforge.net/download.html>`_ to convert raw data
 generated from the different instruments to mzML format. Files can be converted
 from a GUI or from the command line. To convert all the files with names ending
@@ -12,8 +12,8 @@ can be used:
 
     msconvert *.RAW -o my_output_dir
 
-If you are using a Waters instrument with Lockspray correction, the
-:code:`scanEvent` filter can be used to remove the signal from the Lockspray.
+If you are using a Waters instrument with lockspray correction, the
+:code:`scanEvent` filter can be used to remove the signal from the lockspray.
 
 .. code-block:: bat
 

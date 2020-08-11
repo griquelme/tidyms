@@ -11,7 +11,7 @@ analyzing mass spectrometry based metabolomics data sets. It's built on top
 of Numpy, Pandas and scikit-learn. Get started by reading the
 :doc:`installation` instructions and then see an overview of the package in the
 :doc:`quickstart`. You can also see some applications in the example gallery. For
-detailed information about the mskm, you can see the :doc:`api` reference.
+detailed information about tidyms, you can see the :doc:`api` reference.
 
 .. toctree::
    :maxdepth: 2

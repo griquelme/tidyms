@@ -315,7 +315,7 @@ In order to increase the confidence in the results obtained during analysis of
 the data, it's necessary to correct the bias in the data due to sample
 preparation and also remove any features that cannot be measured in an
 analytically robust way [3]_, [4]_. We call this process :term:`data curation`.
-In the MSKM, the data curation is applied using :term:`filtration` and
+In tidyms, the data curation is applied using :term:`filtration` and
 :term:`correction` steps to obtain a robust data matrix. Before applying data
 curation, it's recommended to define a :term:`mapping`. A mapping is a
 dictionary that map a :term:`sample type` to a list of :term:`sample class`. You
@@ -349,7 +349,7 @@ same process method, that accepts a DataContainer and process it in place:
     bc.process(data)
     # remove all features with a prevalence lower than 80 % in all classes.
     pf = ms.filter.PrevalenceFilter(lb=0.8)
-    bc.proces(data)
+    bc.process(data)
 
 Refer to the :doc:`api` to see a list of available Filters and Correctors.
 Often, we want to apply a series of filters and correctors to our data. This
