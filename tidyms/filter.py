@@ -285,7 +285,7 @@ class DuplicateMerger(Processor):
 
     def func(self, dc: DataContainer):
         if self.params["process_classes"] is None:
-            self.params["process_classes"] = dc.mapping[_sample_type]
+            self.params["process_classes"] = dc.mapping[_study_sample_type]
         dc.data_matrix = average_replicates(dc.data_matrix, dc.id,
                                             dc.classes, **self.params)
         dc.sample_metadata = (dc.sample_metadata
@@ -323,8 +323,42 @@ class ClassRemover(Processor):
 
 @register
 class BlankCorrector(Processor):
-    """
+    r"""
     Corrects systematic bias due to sample preparation.
+
+    Parameters
+    ----------
+    corrector_classes : list[str], optional
+        Classes used to generate the blank correction. If None, uses the
+        value from blank in the DataContainer mapping attribute.
+    process_classes :  list[str], optional
+        Classes to be corrected. If None, uses the value from sample in the
+        DataContainer mapping attribute.
+    factor : float
+        factor used to convert values to zero (see notes)
+    mode : {"mean", "max", "lod", "loq"} or callable.
+        Function used to generate the blank correction. If `mode` is mean,
+        the correction is generated as the mean of all blank samples. If
+        max, the correction is generated as the maximum value for each
+        feature in all blank samples. If `mode` is lod, the correction is
+        the mean plus three times the standard deviation of the blanks. If
+        `mode` is loq, the correction is the mean plus ten times the standard
+        deviation.
+    process_blanks : bool
+        If True applies blank correction to blanks also.
+    verbose : bool
+        Shows a message with information after the correction has been
+        applied.
+
+    Notes
+    -----
+    Blank correction is applied for each feature in the following way:
+
+    .. math::
+
+        X_{corrected} = 0 \textrm{ if } X < factor * mode(X_{blank}) \\
+        X_{corrected} = X - mode(X_{blank}) \textrm{ else}
+
     """
     def __init__(self, corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
@@ -332,41 +366,6 @@ class BlankCorrector(Processor):
                  process_blanks: bool = True, verbose=False):
         """
         Constructor for the BlankCorrector.
-
-        Parameters
-        ----------
-        corrector_classes : list[str], optional
-            Classes used to generate the blank correction. If None, uses the
-            value from blank in the DataContainer mapping attribute.
-        process_classes :  list[str], optional
-            Classes to be corrected. If None, uses the value from sample in the
-            DataContainer mapping attribute.
-        factor : float
-            factor used to convert values to zero (see notes)
-        mode : {"mean", "max", "lod", "loq"}, function.
-            Function used to generate the blank correction. If `mode` is mean,
-            the correction is generated as the mean of all blank samples. If
-            max, the correction is generated as the maximum value for each
-            feature in all blank samples. If `mode` is lod, the correction is
-            the mean plus three standard deviations. If `mode` is loq, the
-            correction is the mean plus ten times the standard deviation.
-        process_blanks : bool
-            If True applies blank correction to blanks also.
-        verbose : bool
-            Shows a message with information after the correction has been
-            applied.
-
-        Notes
-        -----
-        Blank correction is applied for each feature in the following way:
-
-        .. math::
-
-            X_{corrected} = 0 if X < factor * mode(X_{blank})
-
-        .. math::
-
-            X_{corrected} = X - mode(X_{blank}) else
 
         """
         super(BlankCorrector, self).__init__(axis=None, mode="transform",
@@ -379,8 +378,8 @@ class BlankCorrector(Processor):
         self.params["mode"] = mode
         self.params["factor"] = factor
         self.params["process_blanks"] = process_blanks
-        self._default_process = _sample_type
-        self._default_correct = _blank_type
+        self._default_process = _study_sample_type
+        self._default_correct = _blank_sample_type
 
         validation.validate(self.params, validation.blankCorrectorValidator)
 
@@ -394,8 +393,34 @@ class PrevalenceFilter(Processor):
     """
     Remove Features detected in a low number of samples.
 
-    The prevalence is defined as the fraction of samples where a given feature
-    has been detected.
+    Parameters
+    ----------
+    process_classes : List[str], optional
+        Classes used to compute prevalence. If None, classes are obtained
+        from sample classes in the DataContainer mapping.
+    lb : Number between 0 and 1
+        Lower bound of acceptance.
+    ub : Number between 0 and 1
+        Upper bound of acceptance. Must be greater or equal than `lb`.
+    threshold : non negative number
+        Minimum intensity to consider a feature as detected.
+    intraclass : bool
+        Whether to evaluate a global prevalence or a per class prevalence.
+        If intraclass is True, the detection rate is computed for each class,
+        and the prevalence is defined as the minimum value for the classes
+        analyzed. If intraclass is False, the prevalence is computed as the
+        detection rate for all the samples that belong to the `process_classes`.
+    verbose : bool
+        Shows a message with information after the correction has been
+        applied.
+
+    Notes
+    -----
+    The prevalence is computed using the detection rate, that is, the fraction
+    of samples where a feature was detected. A feature is considered detected
+    if its value is above a threshold. The `mode` parameter controls how the
+    prevalence is computed.
+
     """
     def __init__(self, process_classes: Optional[List[str]] = None,
                  lb: Number = 0.5, ub: Number = 1,
@@ -404,25 +429,6 @@ class PrevalenceFilter(Processor):
         """
         Constructor of the PrevalenceFilter.
 
-        Parameters
-        ----------
-        process_classes : List[str], optional
-            Classes used to compute prevalence. If None, classes are obtained
-            from sample classes in the DataContainer mapping.
-        lb : float
-            Lower bound of prevalence.
-        ub : float
-            Upper bound of prevalence.
-        threshold : float
-            Minimum intensity to consider a feature as detected.
-        intraclass : bool
-            Whether to evaluate a global prevalence or a per class prevalence.
-            If intraclass is True, prevalence is computed for each class and
-            features in which the prevalence is outside the selected bounds for
-            all classes are removed.
-        verbose : bool
-            Shows a message with information after the correction has been
-            applied.
         """
         super(PrevalenceFilter, self).__init__(axis="features", mode="filter",
                                                verbose=verbose,
@@ -434,8 +440,8 @@ class PrevalenceFilter(Processor):
         self.params["ub"] = ub
         self.params["intraclass"] = intraclass
         self.params["threshold"] = threshold
-        self._default_correct = _sample_type
-        self._default_process = _sample_type
+        self._default_correct = _study_sample_type
+        self._default_process = _study_sample_type
         validation.validate(self.params, validation.prevalenceFilterValidator)
 
     def func(self, dc):
@@ -452,6 +458,24 @@ class DRatioFilter(Processor):
     r"""
     Remove Features with low biological information.
 
+    To use this filter the qc sample type and the study sample type must been
+    specified in the DataContainer mapping.
+
+    Parameters
+    ----------
+    lb: number between 0 and 1
+        Lower bound of acceptance
+    ub: number between 0 and 1
+        Upper bound of acceptance.
+    robust: bool
+        If True uses the MAD to compute the d-ratio. Else uses the standard
+        deviation.
+    verbose : bool
+        Shows a message with information after the correction has been
+        applied.
+
+    Notes
+    -----
     D-Ratio is a metric defined in [1]_ as the quotient between the technical
     and the biological variation of a feature:
 
@@ -460,38 +484,29 @@ class DRatioFilter(Processor):
         D-Ratio = \frac{\sigma_{technical}}
             {\sqrt{\sigma_{technical}^{2} + \sigma_{biological}^{2}}}
 
+    The technical variation is estimated as the dispersion from the QC samples,
+    while the total variation (technical and biological) is estimated from
+    the study samples. Lower D-Ratio values suggest features that are measured
+    in a robust way. A maximum acceptance value of 0.5 is suggested.
+
     References
     ----------
     .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use
         of system suitability and quality control samples in mass spectrometry
         assays applied in untargeted clinical metabolomic studies",
         Metabolomics (2018) 14:72.
+
     """
 
     def __init__(self, lb=0, ub=0.5, robust=False,
                  verbose=False):
         """
-        Constructor of the DRatioFilter. To use this filter the qc sample type
-        and the study sample type must been specified in the DataContainer
-        mapping.
-
-        Parameters
-        ----------
-        lb: float
-            Lower bound of D-ratio. Should be zero
-        ub: float
-            Upper bound of D-ratio. Usually 50% or lower, the lower the better.
-        robust: bool
-        if True uses the MAD to compute the d-ratio. Else uses the standard
-        deviation.
-        verbose : bool
-            Shows a message with information after the correction has been
-            applied.
+        Constructor of the DRatioFilter.
         """
         (super(DRatioFilter, self)
          .__init__(axis="features", mode="filter", verbose=verbose,
                    requirements={"empty": False, "missing": False,
-                                 _qc_type: True, _sample_type: True})
+                                 _qc_sample_type: True, _study_sample_type: True})
          )
         self.name = "D-Ratio Filter"
         self.params["lb"] = lb
@@ -510,34 +525,37 @@ class DRatioFilter(Processor):
 class VariationFilter(Processor):
     """
     Remove features with low reproducibility.
+
+    The reproducibility of the features is evaluated using the Relative standard
+    deviation of each feature in samples of a specific class or classes. By
+    default, the QC samples are analyzed.
+
+    Parameters
+    ----------
+    lb : number between 0 and 1
+        Lower bound of acceptance
+    ub : number between 0 and 1
+        Upper bound of acceptance. Must be greater than `lb`.
+    process_classes: List[str], optional
+        Classes used to evaluate the coefficient of variation. If None,
+        list of classes is taken from the qc sample type from the
+        DataContainer mapping attribute.
+    robust: bool
+        If false uses the mean and standard deviation to compute the cv.
+        Else, the cv is estimated using the MAD and the median of the
+        feature, assuming a normal distribution.
+    intraclass: bool
+        If True, the cv is computed for each class in `process_classes` and
+        then the maximum value is compared against `lb` and `ub`. Else
+        a global cv is computed for all classes in `process_classes`.
+    verbose: bool
+        If True, prints a message
+
     """
     def __init__(self, lb=0, ub=0.25, process_classes=None, robust=False,
                  intraclass=True, verbose=False):
         """
         Constructor of the VariationFilter.
-
-        Parameters
-        ----------
-        lb : float
-            Lower bound for the coefficient of variation. Must be a positive
-            number between zero and one and lower or equal than `ub`.
-        ub : float
-            Upper bound for the coefficient of variation. Must be a positive
-            number between zero and one and greater or equal than `lb`.
-        process_classes: List[str], optional
-            Classes used to evaluate the coefficient of variation. If None,
-            list of classes is taken from the qc sample type from the
-            DataContainer mapping attribute.
-        robust: bool
-            If false uses the mean and standard deviation to compute the cv.
-            Else, the cv is estimated using the MAD and the median of the
-            feature, assuming a normal distribution.
-        intraclass: bool
-            If True, the cv is computed for each class in `process_classes` and
-            then the maximum value is compared against `lb` and `ub`. Else
-            a global cv is computed for all classes in `process_classes`.
-        verbose: bool
-            If True, prints a message
         """
         (super(VariationFilter, self)
          .__init__(axis="features", mode="filter", verbose=verbose,
@@ -549,7 +567,7 @@ class VariationFilter(Processor):
         self.params["process_classes"] = process_classes
         self.params["robust"] = robust
         self.params["intraclass"] = intraclass
-        self._default_process = _qc_type
+        self._default_process = _qc_sample_type
         validation.validate(self.params, validation.variationFilterValidator)
 
     def func(self, dc: DataContainer):
@@ -592,8 +610,8 @@ class _TemplateValidationFilter(Processor):
         self.name = "Batch Template Check"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
-        self._default_process = _sample_type
-        self._default_correct = _qc_type
+        self._default_process = _study_sample_type
+        self._default_correct = _qc_sample_type
         validation.validate(self.params, validation.batchCorrectorValidator)
 
     def func(self, dc: DataContainer):
@@ -680,8 +698,8 @@ class _BatchCorrectorPrevalenceFilter(Processor):
         self.params["process_classes"] = process_classes
         self.params["min_qc_dr"] = min_qc_dr
         self.params["threshold"] = threshold
-        self._default_process = _sample_type
-        self._default_correct = _qc_type
+        self._default_process = _study_sample_type
+        self._default_correct = _qc_sample_type
         validation.validate(self.params, validation.batchCorrectorValidator)
 
     def func(self, dc: DataContainer):
@@ -725,8 +743,8 @@ class _BatchCorrectorProcessor(Processor):
         self.params["n_qc"] = n_qc
         self.params["frac"] = frac
         self.params["process_qc"] = process_qc
-        self._default_process = _sample_type
-        self._default_correct = _qc_type
+        self._default_process = _study_sample_type
+        self._default_correct = _qc_sample_type
         validation.validate(self.params, validation.batchCorrectorValidator)
 
     def func(self, dc: DataContainer):
@@ -934,8 +952,8 @@ class MissingValueError(ValueError):
 
 _requirements_error = {"empty": container.EmptyDataContainerError,
                        "missing": MissingValueError,
-                       _qc_type: MissingMappingInformation,
-                       _blank_type: MissingMappingInformation,
+                       _qc_sample_type: MissingMappingInformation,
+                       _blank_sample_type: MissingMappingInformation,
                        "batch": container.BatchInformationError,
                        "order": container.RunOrderError}
 
