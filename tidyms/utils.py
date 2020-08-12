@@ -135,7 +135,7 @@ def scale(df: pd.DataFrame, method: str) -> pd.DataFrame:
     else:
         msg = "Available methods are `autoscaling`, `rescaling` and `pareto`."
         raise ValueError(msg)
-    # replace nans generated when dividin by zero
+    # replace nans generated when dividing by zero
     scaled[scaled.isna()] = 0
     return scaled
 
@@ -204,23 +204,6 @@ def cv(df: pd.DataFrame, fill_value: Optional[float] = None) -> pd.Series:
     if fill_value is not None:
         res = res.fillna(fill_value)
     return res
-
-
-# def sd(df):
-#     """
-#     Computes the standard deviation for each column. Fill missing values
-#     with zero
-#     """
-#     res = df.std()
-#     res = res.fillna(0)
-#     return res
-
-
-# def iqr(df):
-#     """Computes the inter-quartile range for each column."""
-#     res = (df.quantile(0.75) - df.quantile(0.25)) / df.quantile(0.5)
-#     res = res.fillna(0)
-#     return res
 
 
 def robust_cv(df, fill_value: Optional[float] = None):
@@ -356,19 +339,19 @@ def find_closest(x: np.ndarray, xq: Union[np.ndarray, float, int],
         return sorted_index[closest_index]
 
 
-def get_filename(fullpath: str) -> str:
+def get_filename(full_path: str) -> str:
     """
     get the filename from a full path.
 
     Parameters
     ----------
-    fullpath: str
+    full_path: str
 
     Returns
     -------
     filename: str`
     """
-    return os.path.splitext(os.path.split(fullpath)[1])[0]
+    return os.path.splitext(os.path.split(full_path)[1])[0]
 
 
 def is_unique(s: pd.Series):
