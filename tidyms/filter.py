@@ -603,7 +603,8 @@ class _TemplateValidationFilter(Processor):
                  corrector_classes: Optional[List[str]] = None,
                  verbose: bool = False):
 
-        req = {"empty": False, "missing": False, "order": True, "batch": True}
+        req = {"empty": False, "missing": False, _sample_order: True,
+               _sample_batch: True}
         (super(_TemplateValidationFilter, self)
          .__init__(axis="samples", mode="filter", verbose=verbose,
                    requirements=req))
@@ -689,7 +690,8 @@ class _BatchCorrectorPrevalenceFilter(Processor):
                  corrector_classes: Optional[List[str]] = None,
                  threshold: float = 0.0):
 
-        req = {"empty": False, "missing": False, "order": True, "batch": True}
+        req = {"empty": False, "missing": False, _sample_order: True,
+               _sample_batch: True}
         (super(_BatchCorrectorPrevalenceFilter, self)
          .__init__(axis="features", mode="filter", verbose=verbose,
                    requirements=req))
@@ -733,8 +735,8 @@ class _BatchCorrectorProcessor(Processor):
                                                        requirements={
                                                           "empty": False,
                                                           "missing": False,
-                                                          "order": True,
-                                                          "batch": True}
+                                                          _sample_order: True,
+                                                          _sample_batch: True}
                                                        )
         self.name = "Batch Corrector"
         self.params["corrector_classes"] = corrector_classes
@@ -954,8 +956,8 @@ _requirements_error = {"empty": container.EmptyDataContainerError,
                        "missing": MissingValueError,
                        _qc_sample_type: MissingMappingInformation,
                        _blank_sample_type: MissingMappingInformation,
-                       "batch": container.BatchInformationError,
-                       "order": container.RunOrderError}
+                       _sample_batch: container.BatchInformationError,
+                       _sample_order: container.RunOrderError}
 
 
 # TODO : refactor Processor using the following func prototype:

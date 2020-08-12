@@ -7,6 +7,7 @@ import pandas as pd
 from scipy.interpolate import CubicSpline, interp1d
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from typing import List, Callable, Union, Optional
+from ._names import *
 
 
 def input_na(df: pd.DataFrame, classes: pd.Series, mode: str) -> pd.DataFrame:
@@ -163,8 +164,8 @@ def _generate_batches(df: pd.DataFrame, run_order: pd.Series, batch: pd.Series,
                       classes: pd.Series, corrector_classes: List[str],
                       process_classes: List[str]):
     batch_order = (pd.concat((batch, run_order), axis=1)
-                   .sort_values(["batch", "order"]))
-    grouped = batch_order.groupby("batch")
+                   .sort_values([_sample_batch, _sample_order]))
+    grouped = batch_order.groupby(_sample_batch)
     for n_batch, group in grouped:
         df_batch = df.loc[group.index, :]
         classes_batch = classes[group.index]

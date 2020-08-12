@@ -47,7 +47,7 @@ import seaborn as sns
 # TODO: remove data_path attribute. check with webapp example.
 # TODO: maybe its a good idea to combine export methods into an ExportMethods
 #       object
-# TODO: export datacontainer to metaboanalyst format.
+# TODO: export DataContainer to metaboanalyst format.
 # TODO: include split into dev / control in DataContainer. This should be
 #  done before any kind of data curation to prevent feature leakage.
 # TODO: make sample metadata compatible with ISA format.
@@ -59,7 +59,7 @@ class DataContainer(object):
     The data is separated in three attributes: data_matrix, sample_metadata and
     feature_metadata. Each one is a pandas DataFrame. DataContainers can be
     created, apart from using the constructor, importing data in common formats
-    (such as: XCMS, MZMmine2, Progenesis, etc..) static methods.
+    (such as: XCMS, MZmine2, Progenesis, etc..) static methods.
 
     Attributes
     ----------
@@ -151,15 +151,15 @@ class DataContainer(object):
 
         # check and convert order and batch information
         try:
-            order = sample_metadata.pop("order")
+            order = sample_metadata.pop(_sample_order)
             try:
-                batch = sample_metadata.pop("batch")
+                batch = sample_metadata.pop(_sample_batch)
             except KeyError:
                 batch = pd.Series(data=np.ones_like(order.values),
                                   index=order.index)
             order = _convert_to_interbatch_order(order, batch)
-            sample_metadata["order"] = order
-            sample_metadata["batch"] = batch
+            sample_metadata[_sample_order] = order
+            sample_metadata[_sample_batch] = batch
         except KeyError:
             pass
 
@@ -383,18 +383,18 @@ class DataContainer(object):
         diagnostic = dict()
         diagnostic["empty"] = self.data_matrix.empty
         diagnostic["missing"] = self.data_matrix.isna().any().any()
-        diagnostic[_qc_type] = bool(self.mapping[_qc_type])
-        diagnostic[_blank_type] = bool(self.mapping[_blank_type])
-        diagnostic[_sample_type] = bool(self.mapping[_sample_type])
+        diagnostic[_qc_sample_type] = bool(self.mapping[_qc_sample_type])
+        diagnostic[_blank_sample_type] = bool(self.mapping[_blank_sample_type])
+        diagnostic[_study_sample_type] = bool(self.mapping[_study_sample_type])
         try:
-            diagnostic["order"] = self.order.any()
+            diagnostic[_sample_order] = self.order.any()
         except RunOrderError:
-            diagnostic["order"] = False
+            diagnostic[_sample_order] = False
         
         try:
-            diagnostic["batch"] = self.batch.any()
+            diagnostic[_sample_batch] = self.batch.any()
         except BatchInformationError:
-            diagnostic["batch"] = False
+            diagnostic[_sample_batch] = False
         return diagnostic
    
     def reset(self, reset_mapping: bool = True):
@@ -546,11 +546,11 @@ class DataContainer(object):
 
         """
         df = pd.read_csv(path, index_col="sample")
-        order = df["order"].astype(int)
-        batch = df["batch"].astype(int)
+        order = df[_sample_order].astype(int)
+        batch = df[_sample_batch].astype(int)
 
         if interbatch_order:
-                order = _convert_to_interbatch_order(order, batch)
+            order = _convert_to_interbatch_order(order, batch)
         self.order = order
         self.batch = batch
 
@@ -654,10 +654,10 @@ class MetricMethods:
                       .groupby(self.__data.classes)
                       .apply(cv_func, fill_value=fill_value))
         else:
-            if self.__data.mapping[_sample_type] is None:
+            if self.__data.mapping[_study_sample_type] is None:
                 result = cv_func(self.__data.data_matrix, fill_value=fill_value)
             else:
-                sample_class = self.__data.mapping[_sample_type]
+                sample_class = self.__data.mapping[_study_sample_type]
                 is_sample_class = self.__data.classes.isin(sample_class)
                 result = cv_func(self.__data.data_matrix[is_sample_class],
                                  fill_value=fill_value)
@@ -697,10 +697,10 @@ class MetricMethods:
 
         """
         if sample_classes is None:
-            sample_classes = self.__data.mapping[_sample_type]
+            sample_classes = self.__data.mapping[_study_sample_type]
 
         if qc_classes is None:
-            qc_classes = self.__data.mapping[_qc_type]
+            qc_classes = self.__data.mapping[_qc_sample_type]
 
         is_sample_class = self.__data.classes.isin(sample_classes)
         is_qc_class = self.__data.classes.isin(qc_classes)
@@ -730,7 +730,7 @@ class MetricMethods:
                        .apply(utils.detection_rate, threshold=threshold))
         else:
             # TODO: same as CV. check if its better to return a global DR.
-            sample_class = self.__data.mapping["sample"]
+            sample_class = self.__data.mapping[_study_sample_type]
             is_sample_class = self.__data.classes.isin(sample_class)
             results = self.__data.data_matrix[is_sample_class].apply()
         return results
@@ -770,7 +770,6 @@ class MetricMethods:
         else:
             ind = data.index
 
-
         if normalization:
             data = utils.normalize(data, normalization)
 
@@ -806,7 +805,7 @@ class BokehPlotMethods:
     def __init__(self, data: DataContainer):
         self._data_container = data
 
-    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = "class",
+    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = _sample_class,
                    ignore_classes: Optional[List[str]] = None,
                    show_order: bool = False, scaling: Optional[str] = None,
                    normalization: Optional[str] = None, draw: bool = True,
@@ -860,8 +859,10 @@ class BokehPlotMethods:
             default_scatter_params.update(scatter_params)
             scatter_params = default_scatter_params
 
-        tooltips = [("class", "@class"), ("order", "@order"),
-                    ("batch", "@batch"), ("id", "@id")]
+        tooltips = [(_sample_class, "@{}".format(_sample_class)),
+                    (_sample_order, "@{}".format(_sample_order)),
+                    (_sample_batch, "@{}".format(_sample_batch)),
+                    (_sample_id, "@{}".format(_sample_id))]
         fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
 
         x_name = "PC" + str(x_pc)
@@ -874,12 +875,12 @@ class BokehPlotMethods:
                                              scaling=scaling)
         score = score.join(self._data_container.sample_metadata)
 
-        if hue == "type":
+        if hue == _sample_type:
             rev_map = _reverse_mapping(self._data_container.mapping)
-            score["type"] = score["class"].apply(lambda x: rev_map.get(x))
-            score = score[~pd.isna(score["type"])]
-        elif hue == "batch":
-            score["batch"] = score["batch"].astype(str)
+            score[_sample_type] = score[_sample_class].apply(lambda x: rev_map.get(x))
+            score = score[~pd.isna(score[_sample_type])]
+        elif hue == _sample_batch:
+            score[_sample_batch] = score[_sample_batch].astype(str)
 
         # setup the colors
         unique_values = score[hue].unique().astype(str)
@@ -904,9 +905,10 @@ class BokehPlotMethods:
         fig.xaxis.axis_label_text_font_style = "bold"
 
         if show_order:
-            labels = LabelSet(x=x_name, y=y_name, text='order', level='glyph',
-                              x_offset=3, y_offset=3, source=score,
-                              render_mode='canvas', text_font_size="8pt")
+            labels = LabelSet(x=x_name, y=y_name, text=_sample_order,
+                              level="glyph", x_offset=3, y_offset=3,
+                              source=score, render_mode="canvas",
+                              text_font_size="8pt")
             fig.add_layout(labels)
 
         if draw:
@@ -953,7 +955,7 @@ class BokehPlotMethods:
         if scatter_params is None:
             scatter_params = dict()
 
-        tooltips = [("id", "@feature"), ("m/z", "@mz"),
+        tooltips = [("feature", "@feature"), ("m/z", "@mz"),
                     ("rt", "@rt"), ("charge", "@charge")]
         fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
 
@@ -983,7 +985,9 @@ class BokehPlotMethods:
             bokeh.plotting.show(fig)
         return fig
 
-    def feature(self, ft: str, hue: str = "class", draw: bool = True,
+    def feature(self, ft: str, hue: str = _sample_class,
+                ignore_classes: Optional[List[str]] = None,
+                draw: bool = True,
                 fig_params: Optional[dict] = None,
                 scatter_params: Optional[dict] = None) -> bokeh.plotting.Figure:
         """
@@ -994,6 +998,8 @@ class BokehPlotMethods:
         ft: str
             Feature to plot. Index of feature in `feature_metadata`
         hue: {"class", "type"}
+        ignore_classes : list[str], optional
+            exclude samples from the listed classes in the plot
         draw: bool
             If True calls bokeh.plotting.show on figure.
         fig_params: dict
@@ -1016,14 +1022,22 @@ class BokehPlotMethods:
         if scatter_params is None:
             scatter_params = dict()
 
+        if ignore_classes is None:
+            ignore_classes = list()
+
         source = (self._data_container.sample_metadata
                   .join(self._data_container.data_matrix[ft]))
 
-        if hue == "type":
+        ignore_samples = source[_sample_class].isin(ignore_classes)
+        source = source[~ignore_samples]
+
+        if hue == _sample_type:
             rev_map = _reverse_mapping(self._data_container.mapping)
-            source["type"] = (self._data_container.classes
+            source[_sample_type] = (source[_sample_class]
                               .apply(lambda x: rev_map.get(x)))
-            source = source[~source["type"].isna()]
+            source = source[~source[_sample_type].isna()]
+        elif hue == _sample_batch:
+            source[_sample_batch] = source[_sample_batch].astype(str)
 
         # setup the colors
         unique_values = source[hue].unique().astype(str)
@@ -1033,11 +1047,13 @@ class BokehPlotMethods:
 
         source = ColumnDataSource(source)
 
-        tooltips = [("class", "@class"), ("order", "@order"),
-                    ("batch", "@batch"), ("id", "@id")]
+        tooltips = [(_sample_class, "@{}".format(_sample_class)),
+                    (_sample_order, "@{}".format(_sample_order)),
+                    (_sample_batch, "@{}".format(_sample_batch)),
+                    (_sample_id, "@{}".format(_sample_id))]
         fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
         cmap_factor = factor_cmap(hue, palette, unique_values)
-        fig.scatter(source=source, x="order", y=ft, color=cmap_factor,
+        fig.scatter(source=source, x=_sample_order, y=ft, color=cmap_factor,
                     legend_group=hue, **scatter_params)
 
         fig.xaxis.axis_label = "Run order"
@@ -1060,7 +1076,7 @@ class SeabornPlotMethods(object):
     def __init__(self, data: DataContainer):
         self._data = data
 
-    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = "class",
+    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = _sample_class,
                    ignore_classes: Optional[List[str]] = None,
                    show_order: bool = False,
                    scaling: Optional[str] = None,
@@ -1093,7 +1109,8 @@ class SeabornPlotMethods(object):
 
         Returns
         -------
-        bokeh.plotting.Figure.
+        seaborn.FacetGrid
+
         """
 
         x_name = "PC" + str(x_pc)
@@ -1111,14 +1128,14 @@ class SeabornPlotMethods(object):
         else:
             relplot_params.update(tmp_params)
 
-        if hue == "type":
+        if hue == _sample_type:
             rev_map = _reverse_mapping(self._data.mapping)
-            score["type"] = score["class"].apply(lambda x: rev_map.get(x))
-            score = score[~pd.isna(score["type"])]
-        elif hue == "batch":
-            score["batch"] = score["batch"].astype(str)
-        elif hue == "class":
-            score["class"] = self._data.classes
+            score[_sample_type] = score[_sample_class].apply(lambda s: rev_map.get(s))
+            score = score[~pd.isna(score[_sample_type])]
+        elif hue == _sample_batch:
+            score[_sample_batch] = score[_sample_batch].astype(str)
+        elif hue == _sample_class:
+            score[_sample_class] = self._data.classes
 
         g = sns.relplot(data=score, **relplot_params)
 
@@ -1137,6 +1154,90 @@ class SeabornPlotMethods(object):
         g.ax.set_xlabel(x_label)
         g.ax.set_ylabel(y_label)
         return g
+
+    def pca_loadings(self, x_pc: int = 1, y_pc: int = 2,
+                     ignore_classes: Optional[List[str]] = None,
+                     scaling: Optional[str] = None,
+                     normalization: Optional[str] = None,
+                     relplot_params: Optional[dict] = None):
+        """
+        plots PCA scores using seaborn relplot function.
+
+        Parameters
+        ----------
+        x_pc : int
+            Principal component number to plot along X axis.
+        y_pc : int
+            Principal component number to plot along Y axis.
+        ignore_classes : list[str], optional
+            classes in the data to ignore to build the PCA model.
+        scaling : {`autoscaling`, `rescaling`, `pareto`}, optional
+            scaling method.
+        normalization : {`sum`, `max`, `euclidean`}, optional
+            normalization method
+        relplot_params : dict, optional
+            key-values to pass to relplot function.
+
+        Returns
+        -------
+        seaborn.FacetGrid
+
+        """
+
+        x_name = "PC" + str(x_pc)
+        y_name = "PC" + str(y_pc)
+        n_comps = max(x_pc, y_pc)
+        _, loadings, variance, total_var = \
+            self._data.metrics.pca(n_components=n_comps, scaling=scaling,
+                                   normalization=normalization,
+                                   ignore_classes=ignore_classes)
+
+        tmp_params = {"x": x_name, "y": y_name, "kind": "scatter"}
+        if relplot_params is None:
+            relplot_params = tmp_params
+        else:
+            relplot_params.update(tmp_params)
+
+        g = sns.relplot(data=loadings, **relplot_params)
+
+        # set x and y label
+        x_var = variance[x_name] * 100 / total_var
+        y_var = variance[y_name] * 100 / total_var
+        x_label = "{} ({:.0f} %)".format(x_name, x_var)
+        y_label = "{} ({:.0f} %)".format(y_name, y_var)
+        g.ax.set_xlabel(x_label)
+        g.ax.set_ylabel(y_label)
+        return g
+
+    def feature(self, ft: str, hue: str = _sample_class,
+                ignore_classes: Optional[List[str]] = None,
+                relplot_params: Optional[dict] = None):
+
+        tmp_params = {"x": _sample_order, "y": ft, "hue": hue,
+                      "kind": "scatter"}
+        if relplot_params is None:
+            relplot_params = tmp_params
+        else:
+            relplot_params.update(tmp_params)
+
+        if ignore_classes is None:
+            ignore_classes = list()
+
+        df = (self._data.sample_metadata.join(self._data.data_matrix[ft]))
+        ignore_samples = df[_sample_class].isin(ignore_classes)
+        df = df[~ignore_samples]
+
+        if hue == _sample_type:
+            rev_map = _reverse_mapping(self._data.mapping)
+            df[_sample_type] = (df[_sample_class]
+                                .apply(lambda x: rev_map.get(x)))
+            df = df[~df[_sample_type].isna()]
+        elif hue == _sample_batch:
+            df[_sample_batch] = df[_sample_batch].astype(str)
+        elif hue == _sample_class:
+            df[_sample_class] = df[_sample_class].astype(str)
+
+        g = sns.relplot(data=df, **relplot_params)
 
 
 class PreprocessMethods:
