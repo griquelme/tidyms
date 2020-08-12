@@ -1,25 +1,22 @@
 from tidyms import fileio
-import os
-
-data_path = os.path.join("tests", "data")
 
 
 def test_read_mzmine():
-    data_matrix_path = os.path.join(data_path, "mzmine-data-matrix.csv")
-    sample_metadata_path = os.path.join(data_path, "mzmine-sample-metadata.csv")
-    fileio.read_mzmine(data_matrix_path, sample_metadata_path)
+    data_matrix, _, sample_metadata = \
+        fileio._load_csv_files("mzmine", test_files=True)
+    fileio.read_mzmine(data_matrix, sample_metadata)
     assert True
 
 
 def test_read_progenesis():
-    data_matrix_path = os.path.join(data_path, "progenesis-data-matrix.csv")
-    fileio.read_progenesis(data_matrix_path)
+    # progenesis data is contained in one file
+    data_matrix, _, _ = fileio._load_csv_files("progenesis", test_files=True)
+    fileio.read_progenesis(data_matrix)
     assert True
 
 
 def test_read_xcms():
-    data_matrix_path = os.path.join(data_path, "xcms-data-matrix.tsv")
-    feature_metadata = os.path.join(data_path, "xcms-feature-metadata.tsv")
-    sample_metadata = os.path.join(data_path, "xcms-sample-metadata.tsv")
-    fileio.read_xcms(data_matrix_path, feature_metadata, sample_metadata)
+    data_matrix, feature_metadata, sample_metadata = \
+        fileio._load_csv_files("xcms", test_files=True)
+    fileio.read_xcms(data_matrix, feature_metadata, sample_metadata)
     assert True
