@@ -212,26 +212,26 @@ def test_diagnose_missing(data_container_with_order):
 
 def test_diagnose_qc(data_container_with_order):
     data = data_container_with_order
-    assert data.diagnose()[_qc_type]
+    assert data.diagnose()[_qc_sample_type]
     # remove mapping info
     data.mapping = None
-    assert not data.diagnose()[_qc_type]
+    assert not data.diagnose()[_qc_sample_type]
 
 
 def test_diagnose_blank(data_container_with_order):
     data = data_container_with_order
-    assert data.diagnose()[_blank_type]
+    assert data.diagnose()[_blank_sample_type]
     # remove mapping info
     data.mapping = None
-    assert  not data.diagnose()[_blank_type]
+    assert  not data.diagnose()[_blank_sample_type]
 
 
 def test_diagnose_sample(data_container_with_order):
     data = data_container_with_order
-    assert data.diagnose()[_sample_type]
+    assert data.diagnose()[_study_sample_type]
     # remove mapping info
     data.mapping = None
-    assert  not data.diagnose()[_sample_type]
+    assert  not data.diagnose()[_study_sample_type]
 
 
 def test_diagnose_run_order(data_container_with_order):
