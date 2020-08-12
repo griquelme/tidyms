@@ -207,7 +207,7 @@ def get_outside_bounds_index(data: Union[pd.Series, pd.DataFrame], lb: float,
 def batch_ext(order: pd.Series, batch: pd.Series, classes: pd.Series,
               class_list: List[str], ext: str) -> pd.Series:
     """
-    get minimum/maximum order of samples of classes in class_list. Auxiliar
+    get minimum/maximum order of samples of classes in class_list. Auxiliary
     function to be used with BatchChecker / FeatureCheckerBatchCorrection
     Parameters
     ----------
@@ -218,7 +218,7 @@ def batch_ext(order: pd.Series, batch: pd.Series, classes: pd.Series,
     classes: pandas.Series
         sample classes
     class_list: list[str]
-        classes to be considererd
+        classes to be considered
     ext: {"min", "max"}
         Search for the min/max order in each batch.
 
@@ -297,9 +297,9 @@ def check_qc_prevalence(data_matrix: pd.DataFrame,
 
 def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
                  sample_index: pd.Index, frac: float, interpolator: Callable,
-                 n_qc: Optional[int] = None):
+                 n_qc: Optional[int] = None) -> pd.Series:
     """
-    Applies LOESS-correction interpolation on a feature. Auxilliary function of
+    Applies LOESS-correction interpolation on a feature. Auxiliary function of
     batch_corrector_func
 
     Parameters
@@ -335,7 +335,7 @@ def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
                          sample_classes: List[str],
                          n_qc: Optional[int] = None) -> pd.DataFrame:
     """
-    Applies LOESS correction - interpolation on a single batch. Auxilliary
+    Applies LOESS correction - interpolation on a single batch. Auxiliary
     function of interbatch_correction.
 
     Parameters
@@ -359,8 +359,8 @@ def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
     sample_index = classes.isin(sample_classes)
     sample_index = sample_index[sample_index].index
     df_batch.loc[sample_index, :] = \
-        (df_batch.apply(lambda x: loess_interp(x, order, qc_index, sample_index,
-                                               frac, interpolator, n_qc)))
+        (df_batch.apply(loess_interp, args=(order, qc_index, sample_index,
+                                            frac, interpolator), n_qc=n_qc))
     return df_batch
 
 
@@ -372,7 +372,7 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
                           n_qc: Optional[int] = None,
                           process_qc: bool = True
                           ) -> pd.DataFrame:
-    """
+    r"""
     Correct instrument response drift using LOESS regression [1, 2]
     and center each batch to a common mean.
 
@@ -398,7 +398,7 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
         Number of QCs involved in mean calculation. If None, all QCs are
         involved.
     process_qc : bool
-        If True, applies corection to QC samples.
+        If True, applies correction to QC samples.
 
 
 
@@ -430,7 +430,7 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     .. math::
        m_{i} = \bar{m_{i}} + f(t) + \epsilon
 
-    f(t) is estimated after mean subtraction using Locally weighted scatterplot
+    f(t) is estimated after mean subtraction using Locally weighted scatter plot
     smoothing (LOESS). The optimal fraction of samples for each local
     regression is found using LOOCV.
 
@@ -463,7 +463,6 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
             df_group[classes[df_group.index].isin(process_classes)] - batch_mean
         return df_group
 
-
     global_median = corrected[classes.isin(corrector_classes)].median()
     corrected = corrected.groupby(batch).apply(batch_mean_func)
     corrected.loc[classes.isin(process_classes), :] = \
@@ -471,6 +470,7 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     corrected[corrected < 0] = 0
 
     return corrected
+
 
 def make_sample_blocks(classes: pd.Series, corrector_classes: List[str],
                        process_classes: List[str]):

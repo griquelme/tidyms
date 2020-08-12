@@ -90,7 +90,7 @@ def detect_features(path_list: List[str], separation: str = "uplc",
 
     See Also
     --------
-    MSData : Object used to analyze each sample.
+    fileio.MSData : Object used to analyze each sample.
 
     References
     ----------

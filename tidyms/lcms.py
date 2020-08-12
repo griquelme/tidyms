@@ -22,7 +22,7 @@ from collections import namedtuple
 
 from .utils import find_closest
 
-msexperiment = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
+ms_experiment_type = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
 
 
 def reader(path: str, on_disc: bool = True):
@@ -56,7 +56,7 @@ def reader(path: str, on_disc: bool = True):
     return exp_reader
 
 
-def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
+def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
                        window: float = 0.005, start: Optional[int] = None,
                        end: Optional[int] = None,
                        accumulator: str = "sum"
@@ -67,7 +67,7 @@ def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
 
     Parameters
     ----------
-    msexp : MSExp or OnDiskMSExp.
+    ms_experiment : MSExp or OnDiskMSExp.
     mz : iterable[float]
         mz values used to build the EICs.
     start : int, optional
@@ -85,7 +85,7 @@ def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
     rt : array of retention times
     eic : array with rows of EICs.
     """
-    nsp = msexp.getNrSpectra()
+    nsp = ms_experiment.getNrSpectra()
 
     if not isinstance(mz, np.ndarray):
         mz = np.array(mz)
@@ -101,7 +101,7 @@ def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
               "accumulator": accumulator}
     validation.validate_make_chromatograms_params(nsp, params)
 
-    # mz_intervals has this shape to be compatible with reduceat
+    # mz_intervals has this shape to be compatible with reduce at
     mz_intervals = (np.vstack((mz - window, mz + window))
                     .T.reshape(mz.size * 2))
 
@@ -109,7 +109,7 @@ def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
     rt = np.zeros(end - start)
     for ksp in range(start, end):
         # find rt, mz and intensity values of the current scan
-        sp = msexp.getSpectrum(ksp)
+        sp = ms_experiment.getSpectrum(ksp)
         rt[ksp - start] = sp.getRT()
         mz_sp, int_sp = sp.get_peaks()
         ind_sp = np.searchsorted(mz_sp, mz_intervals)
@@ -128,7 +128,7 @@ def make_chromatograms(msexp: msexperiment, mz: Iterable[float],
     return rt, eic
 
 
-def accumulate_spectra(msexp: msexperiment, start: int, end: int,
+def accumulate_spectra(ms_experiment: ms_experiment_type, start: int, end: int,
                        subtract_left: Optional[int] = None,
                        subtract_right: Optional[int] = None,
                        kind: str = "linear") -> Tuple[np.ndarray, np.ndarray]:
@@ -137,7 +137,7 @@ def accumulate_spectra(msexp: msexperiment, start: int, end: int,
 
     Parameters
     ----------
-    msexp : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
+    ms_experiment : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
     start : int
         start slice for scan accumulation
     end : int
@@ -153,8 +153,8 @@ def accumulate_spectra(msexp: msexperiment, start: int, end: int,
 
     Returns
     -------
-    accum_mz : array of m/z values
-    accum_int : array of cumulative intensities.
+    accumulated_mz : array of m/z values
+    accumulated_int : array of cumulative intensities.
     """
     if subtract_left is None:
         subtract_left = start
@@ -165,32 +165,32 @@ def accumulate_spectra(msexp: msexperiment, start: int, end: int,
     # parameter validation
     params = {"start": start, "end": end, "subtract_left": subtract_left,
               "subtract_right": subtract_right, "kind": kind}
-    n_sp = msexp.getNrSpectra()
+    n_sp = ms_experiment.getNrSpectra()
     validation.validate_accumulate_spectra_params(n_sp, params)
 
     # creates a common mz reference value for the scans
-    mz, _ = msexp.getSpectrum(start).get_peaks()
-    accum_mz = _get_uniform_mz(mz)
-    accum_sp = np.zeros_like(accum_mz)
+    mz, _ = ms_experiment.getSpectrum(start).get_peaks()
+    accumulated_mz = _get_uniform_mz(mz)
+    accumulated_sp = np.zeros_like(accumulated_mz)
 
     # interpolates each scan to the reference. Removes values outside the
     # min and max of the reference.
     for scan in range(subtract_left, subtract_right):
-        mz_scan, int_scan = msexp.getSpectrum(scan).get_peaks()
+        mz_scan, int_scan = ms_experiment.getSpectrum(scan).get_peaks()
         mz_min, mz_max = mz_scan.min(), mz_scan.max()
-        min_ind, max_ind = np.searchsorted(accum_mz, [mz_min, mz_max])
+        min_ind, max_ind = np.searchsorted(accumulated_mz, [mz_min, mz_max])
         interpolator = interp1d(mz_scan, int_scan, kind=kind)
-        tmp_sp = interpolator(accum_mz[min_ind:max_ind])
+        tmp_sp = interpolator(accumulated_mz[min_ind:max_ind])
         # accumulate scans
         if (scan < start) or (scan > end):
-            accum_sp[min_ind:max_ind] -= tmp_sp
+            accumulated_sp[min_ind:max_ind] -= tmp_sp
         else:
-            accum_sp[min_ind:max_ind] += tmp_sp
+            accumulated_sp[min_ind:max_ind] += tmp_sp
 
-    is_positive_sp = accum_sp > 0
-    accum_mz = accum_mz[is_positive_sp]
-    accum_sp = accum_sp[is_positive_sp]
-    return accum_mz, accum_sp
+    is_positive_sp = accumulated_sp > 0
+    accumulated_mz = accumulated_mz[is_positive_sp]
+    accumulated_sp = accumulated_sp[is_positive_sp]
+    return accumulated_mz, accumulated_sp
 
 
 def _get_uniform_mz(mz: np.ndarray):
@@ -908,7 +908,7 @@ class _RoiProcessor:
             k_temp_roi.sp.append(k_sp)
             k_temp_roi.scan.append(self.index)
 
-        # update mz_mean and missings
+        # update mz_mean and missing values
         updated_mean = ((self.mz_mean[match_index] * self.length[match_index]
                          + mz_match) / (self.length[match_index] + 1))
 
@@ -1031,7 +1031,7 @@ def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
     Returns
     ------
     match_index: numpy.ndarray
-        index when of peaks mathing in mz1.
+        index when of peaks matching in mz1.
     mz_match: numpy.ndarray
         values of mz2 that matches with mz1
     sp_match: numpy.ndarray
@@ -1109,9 +1109,9 @@ def tmp_roi_to_roi(tmp_roi: _TempRoi, rt: np.ndarray,
     return roi
 
 
-def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
-             min_length: int, min_intensity: float, multiple_match: str,
-             targeted_mz: Optional[np.ndarray] = None,
+def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
+             max_missing: int, min_length: int, min_intensity: float,
+             multiple_match: str, targeted_mz: Optional[np.ndarray] = None,
              start: Optional[int] = None, end: Optional[int] = None,
              mz_reduce: Union[str, Callable] = "mean",
              sp_reduce: Union[str, Callable] = "sum",
@@ -1122,7 +1122,7 @@ def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
 
     Parameters
     ----------
-    msexp: pyopenms.MSExperiment
+    ms_experiment: pyopenms.MSExperiment
     max_missing : int
         maximum number of missing consecutive values. when a row surpass this
         number the roi is considered as finished and is added to the roi list if
@@ -1200,10 +1200,10 @@ def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
         start = 0
 
     if end is None:
-        end = msexp.getNrSpectra()
+        end = ms_experiment.getNrSpectra()
 
     if targeted_mz is None:
-        mz_seed, _ = msexp.getSpectrum(start).get_peaks()
+        mz_seed, _ = ms_experiment.getSpectrum(start).get_peaks()
         targeted = False
     else:
         mz_seed = targeted_mz
@@ -1218,7 +1218,7 @@ def make_roi(msexp: msexperiment, tolerance: float, max_missing: int,
                               mz_reduce=mz_reduce, sp_reduce=sp_reduce,
                               mode=mode)
     for k_scan in range(start, end):
-        sp = msexp.getSpectrum(k_scan)
+        sp = ms_experiment.getSpectrum(k_scan)
         rt[k_scan - start] = sp.getRT()
         mz, spint = sp.get_peaks()
         processor.add(mz, spint, targeted=targeted)

@@ -19,7 +19,7 @@ def is_callable(field, value, error):
 
 
 def is_all_positive(field, value, error):
-    if (value is not None):
+    if value is not None:
         cond = (value > 0).all()
         if not cond:
             msg = "All of the values must be positive"
@@ -299,7 +299,6 @@ def validate_peak_picking_estimators(params):
     schema = get_peak_picking_estimators_schema()
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
-
 
 
 # validator for make_chromatograms

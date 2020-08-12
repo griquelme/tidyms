@@ -182,8 +182,8 @@ def _process_ridge_lines(cwt_array: np.ndarray, y_peaks: np.ndarray,
 
     for k, (row_ind, col_ind) in enumerate(ridge_lines):
 
-        # sometimes the function to detect ridgelines repeats rows values.
-        # TODO : implement a custom function for ridgeline detection.
+        # sometimes the function to detect ridge lines repeats rows values.
+        # TODO : implement a custom function for ridge line detection.
         row_ind, unique_ind = np.unique(row_ind, return_index=True)
         col_ind = col_ind[unique_ind]
 
@@ -260,7 +260,7 @@ def baseline_noise_estimation(y: np.ndarray) -> Tuple[np.ndarray, float]:
         noise = mad(dy[y[1:] < threshold]) / np.sqrt(2)
 
         # prevent noise equal to zero or nan
-        if np.isnan(noise) or np.isclose(noise, 0) :
+        if np.isnan(noise) or np.isclose(noise, 0):
             noise = np.finfo(np.float64).eps
 
         # detect baseline points
@@ -418,7 +418,7 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
     Parameters
     ----------
     x : sorted array
-    y : array of intenisties
+    y : array of intensities
     widths : array
         Array of widths, in x units. Used as scales to build the wavelet
         array.
@@ -430,7 +430,7 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
     gap_threshold : int
         Maximum number of consecutive missing peaks in a ridge line.
     snr : positive number
-        Signal-to-noise- ratio used to filter peaks. Deined as follows:
+        Signal-to-noise- ratio used to filter peaks. Defined as follows:
 
         .. math::
 
