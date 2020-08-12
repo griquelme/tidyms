@@ -166,7 +166,7 @@ class Processor(Reporter):
     def check_requirements(self, dc: DataContainer):
         dc_status = dc.diagnose()
 
-        # check process and corrector classes in the processor agains values in
+        # check process and corrector classes in the processor against values in
         # the DataContainer
         class_types = ["process_classes", "corrector_classes"]
         for class_type in class_types:
@@ -237,7 +237,7 @@ class Pipeline(Reporter):
     processors: list[Processors]
         A list of processors to apply. Can also contain another Pipeline.
     verbose: bool
-        If True prints a message each time a Proessor is applied.
+        If True prints a message each time a Processor is applied.
     """
     def __init__(self, processors: list, verbose: bool = False):
         _validate_pipeline(processors)
@@ -317,6 +317,8 @@ class ClassRemover(Processor):
                     diff = None
                 else:
                     diff = list(diff)
+            else:
+                diff = None
             dc.mapping[sample_type] = diff
         return remove_samples
 
@@ -506,7 +508,8 @@ class DRatioFilter(Processor):
         (super(DRatioFilter, self)
          .__init__(axis="features", mode="filter", verbose=verbose,
                    requirements={"empty": False, "missing": False,
-                                 _qc_sample_type: True, _study_sample_type: True})
+                                 _qc_sample_type: True,
+                                 _study_sample_type: True})
          )
         self.name = "D-Ratio Filter"
         self.params["lb"] = lb
@@ -624,7 +627,7 @@ class _TemplateValidationFilter(Processor):
                                self.params["process_classes"])
         qc_block_mask = block_type == 0
         sample_block_mask = block_type == 1
-        sample_names = block_number[block_type == 1].index
+        sample_names = block_number[sample_block_mask].index
 
         # check the minimum number of qc samples in a batch
         n_qc = dc.classes[qc_block_mask].groupby(dc.batch).count()
@@ -905,10 +908,10 @@ def read_config(path):
 
 
 def pipeline_from_list(param_list: list, verbose=False):
-    procs = list()
+    processors = list()
     for d in param_list:
-        procs.append(filter_from_dictionary(d))
-    pipeline = Pipeline(procs, verbose)
+        processors.append(filter_from_dictionary(d))
+    pipeline = Pipeline(processors, verbose)
     return pipeline
 
 
@@ -927,8 +930,8 @@ def filter_from_dictionary(d):
 
 
 def sample_name_from_path(path):
-    fname = os.path.split(path)[1]
-    sample_name = os.path.splitext(fname)[0]
+    file_name = os.path.split(path)[1]
+    sample_name = os.path.splitext(file_name)[0]
     return sample_name
 
 
