@@ -8,7 +8,8 @@ from os import getcwd
 from os.path import isdir
 from os.path import join
 import cerberus
-import copy
+
+# TODO: validate DataContainer using cerberus
 
 
 # functions used by check_with
@@ -178,73 +179,74 @@ def validate_data_container(data_matrix, feature_definitions,
         raise FileNotFoundError(msg)
 
 
-blank_corrector_schema = {"corrector_classes": {"type": "list",
-                                                "nullable": True,
-                                                "schema": {"type": "string"}},
-                          "process_classes": {"type": "list",
-                                              "nullable": True,
-                                              "schema": {"type": "string"}},
-                          "mode": {"anyof": [{"type": "string",
-                                              "allowed": ["lod", "loq",
-                                                          "mean", "max"]},
-                                             {"check_with": is_callable}]},
-                          "factor": {"type": "number",
-                                     "is_positive": True},
-                          "process_blanks": {"type": "boolean"}
-                          }
-blankCorrectorValidator = ValidatorWithLowerThan(blank_corrector_schema)
+def validate_blank_corrector_params(params):
+    schema = {
+        "corrector_classes": {"type": "list", "nullable": True,
+                              "schema": {"type": "string"}},
+        "process_classes": {"type": "list", "nullable": True,
+                            "schema": {"type": "string"}},
+        "mode": {"anyof": [{"type": "string",
+                            "allowed": ["lod", "loq", "mean", "max"]},
+                           {"check_with": is_callable}]},
+        "factor": {"type": "number", "is_positive": True},
+        "process_blanks": {"type": "boolean"}
+    }
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
 
 
-prevalence_filter_schema = {"lb": {"type": "number",
-                                   "min": 0,
-                                   "max": 1,
-                                   "lower_or_equal": "ub"},
-                            "ub": {"type": "number",
-                                   "min": 0,
-                                   "max": 1},
-                            "threshold": {"type": "number",
-                                          "min": 0},
-                            "intraclass": {"type": "boolean"}
-                            }
-prevalence_filter_schema["process_classes"] = \
-    blank_corrector_schema["process_classes"]
-
-prevalenceFilterValidator = ValidatorWithLowerThan(prevalence_filter_schema)
+def validate_prevalence_filter_params(params):
+    schema = {
+        "lb": {"type": "number", "min": 0, "max": 1, "lower_or_equal": "ub"},
+        "ub": {"type": "number", "min": 0, "max": 1},
+        "threshold": {"type": "number", "min": 0},
+        "intraclass": {"type": "boolean"},
+        "process_classes": {"type": "list", "nullable": True,
+                            "schema": {"type": "string"}}
+    }
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
 
 
-dratio_filter_schema = {"robust": {"type": "boolean"}}
-dratio_filter_schema["lb"] = prevalence_filter_schema["lb"]
-dratio_filter_schema["ub"] = prevalence_filter_schema["ub"]
-dRatioFilterValidator = ValidatorWithLowerThan(dratio_filter_schema)
+def validate_dratio_filter_params(params):
+    schema = {
+        "robust": {"type": "boolean"},
+        "lb": {"type": "number", "min": 0, "max": 1, "lower_or_equal": "ub"},
+        "ub": {"type": "number", "min": 0, "max": 1}
+    }
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
 
-variation_filter_schema = copy.deepcopy(dratio_filter_schema)
-variation_filter_schema["process_classes"] = \
-    prevalence_filter_schema["process_classes"]
-variation_filter_schema["intraclass"] = prevalence_filter_schema["intraclass"]
-variationFilterValidator = ValidatorWithLowerThan(variation_filter_schema)
 
-batch_corrector_schema = {"min_qc_dr": {"type": "number",
-                                        "is_positive": True,
-                                        "max": 1},
-                          "frac": {"type": "number",
-                                   "is_positive": True,
-                                   "max": 1,
-                                   "nullable": True},
-                          "n_qc": {"type": "integer",
-                                   "nullable": True,
-                                   "is_positive": True},
-                          "interpolator": {"type": "string",
-                                           "allowed": ["splines", "linear"]},
-                          "process_qc": {"type": "boolean"}
-                          }
-batch_corrector_schema["threshold"] = prevalence_filter_schema["threshold"]
-batch_corrector_schema["process_classes"] = \
-    blank_corrector_schema["process_classes"]
-batch_corrector_schema["corrector_classes"] = \
-    blank_corrector_schema["corrector_classes"]
+def validate_variation_filter_params(params):
+    schema = {
+        "robust": {"type": "boolean"},
+        "lb": {"type": "number", "min": 0, "max": 1, "lower_or_equal": "ub"},
+        "ub": {"type": "number", "min": 0, "max": 1},
+        "intraclass": {"type": "boolean"},
+        "process_classes": {"type": "list", "nullable": True,
+                            "schema": {"type": "string"}}
+    }
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
 
-batchCorrectorValidator = ValidatorWithLowerThan(batch_corrector_schema)
-# TODO: validate DataContainer using cerberus
+
+def validate_batch_corrector_params(params):
+    schema = {
+        "min_qc_dr": {"type": "number", "is_positive": True, "max": 1},
+        "frac": {"type": "number", "is_positive": True, "max": 1,
+                 "nullable": True},
+        "n_qc": {"type": "integer", "nullable": True, "is_positive": True},
+        "interpolator": {"type": "string", "allowed": ["splines", "linear"]},
+        "process_qc": {"type": "boolean"},
+        "threshold": {"type": "number", "min": 0},
+        "corrector_classes": {"type": "list", "nullable": True,
+                              "schema": {"type": "string"}},
+        "process_classes": {"type": "list", "nullable": True,
+                            "schema": {"type": "string"}}
+    }
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
 
 
 def validate_make_roi_params(n_spectra, params):

@@ -382,8 +382,7 @@ class BlankCorrector(Processor):
         self.params["process_blanks"] = process_blanks
         self._default_process = _study_sample_type
         self._default_correct = _blank_sample_type
-
-        validation.validate(self.params, validation.blankCorrectorValidator)
+        validation.validate_blank_corrector_params(self.params)
 
     def func(self, dc):
         dc.data_matrix = correct_blanks(dc.data_matrix, dc.classes,
@@ -444,7 +443,7 @@ class PrevalenceFilter(Processor):
         self.params["threshold"] = threshold
         self._default_correct = _study_sample_type
         self._default_process = _study_sample_type
-        validation.validate(self.params, validation.prevalenceFilterValidator)
+        validation.validate_prevalence_filter_params(self.params)
 
     def func(self, dc):
         dr = dc.metrics.detection_rate(intraclass=self.params["intraclass"],
@@ -515,7 +514,7 @@ class DRatioFilter(Processor):
         self.params["lb"] = lb
         self.params["ub"] = ub
         self.params["robust"] = robust
-        validation.validate(self.params, validation.dRatioFilterValidator)
+        validation.validate_dratio_filter_params(self.params)
 
     def func(self, dc: DataContainer):
         lb = self.params["lb"]
@@ -571,7 +570,7 @@ class VariationFilter(Processor):
         self.params["robust"] = robust
         self.params["intraclass"] = intraclass
         self._default_process = _qc_sample_type
-        validation.validate(self.params, validation.variationFilterValidator)
+        validation.validate_variation_filter_params(self.params)
 
     def func(self, dc: DataContainer):
         lb = self.params["lb"]
@@ -616,7 +615,7 @@ class _TemplateValidationFilter(Processor):
         self.params["process_classes"] = process_classes
         self._default_process = _study_sample_type
         self._default_correct = _qc_sample_type
-        validation.validate(self.params, validation.batchCorrectorValidator)
+        validation.validate_batch_corrector_params(self.params)
 
     def func(self, dc: DataContainer):
 
@@ -705,7 +704,7 @@ class _BatchCorrectorPrevalenceFilter(Processor):
         self.params["threshold"] = threshold
         self._default_process = _study_sample_type
         self._default_correct = _qc_sample_type
-        validation.validate(self.params, validation.batchCorrectorValidator)
+        validation.validate_batch_corrector_params(self.params)
 
     def func(self, dc: DataContainer):
         ps = self.params["process_classes"]
@@ -750,7 +749,7 @@ class _BatchCorrectorProcessor(Processor):
         self.params["process_qc"] = process_qc
         self._default_process = _study_sample_type
         self._default_correct = _qc_sample_type
-        validation.validate(self.params, validation.batchCorrectorValidator)
+        validation.validate_batch_corrector_params(self.params)
 
     def func(self, dc: DataContainer):
         dc.data_matrix = \
