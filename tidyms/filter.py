@@ -48,6 +48,8 @@ from typing import Optional, List, Union, Callable
 Number = Union[float, int]
 
 # TODO: replace Processor with Filter and Corrector objects.
+# TODO : refactor Processor using the following func prototype:
+#   func(dc, **self.params)
 
 
 class Reporter(object):
@@ -254,6 +256,11 @@ class Pipeline(Reporter):
         self._record_metrics(dc, "after")
 
 
+# FILTERS maintains a dictionary of filter names to filter instances. This can
+# be used to create filters or pipelines from dictionaries of filter names and
+# parameters. decorating a new filter with the register function add the new
+# filter to FILTERS
+
 FILTERS = dict()
 
 
@@ -370,10 +377,10 @@ class BlankCorrector(Processor):
         Constructor for the BlankCorrector.
 
         """
+        requirements = {"empty": False, "missing": False}
         super(BlankCorrector, self).__init__(axis=None, mode="transform",
                                              verbose=verbose,
-                                             requirements={"empty": False,
-                                                           "missing": False})
+                                             requirements=requirements)
         self.name = "Blank Corrector"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
@@ -385,8 +392,8 @@ class BlankCorrector(Processor):
         validation.validate_blank_corrector_params(self.params)
 
     def func(self, dc):
-        dc.data_matrix = correct_blanks(dc.data_matrix, dc.classes,
-                                        **self.params)
+        dc.data_matrix = \
+            correct_blanks(dc.data_matrix, dc.classes, **self.params)
 
 
 @register
@@ -429,12 +436,11 @@ class PrevalenceFilter(Processor):
                  threshold: Number = 0):
         """
         Constructor of the PrevalenceFilter.
-
         """
+        requirements = {"empty": False, "missing": False}
         super(PrevalenceFilter, self).__init__(axis="features", mode="filter",
                                                verbose=verbose,
-                                               requirements={"empty": False,
-                                                             "missing": False})
+                                               requirements=requirements)
         self.name = "Prevalence Filter"
         self.params["process_classes"] = process_classes
         self.params["lb"] = lb
@@ -504,12 +510,11 @@ class DRatioFilter(Processor):
         """
         Constructor of the DRatioFilter.
         """
-        (super(DRatioFilter, self)
-         .__init__(axis="features", mode="filter", verbose=verbose,
-                   requirements={"empty": False, "missing": False,
-                                 _qc_sample_type: True,
-                                 _study_sample_type: True})
-         )
+        requirements = {"empty": False, "missing": False, _qc_sample_type: True,
+                        _study_sample_type: True}
+        super(DRatioFilter, self).__init__(axis="features", mode="filter",
+                                           verbose=verbose,
+                                           requirements=requirements)
         self.name = "D-Ratio Filter"
         self.params["lb"] = lb
         self.params["ub"] = ub
@@ -559,10 +564,10 @@ class VariationFilter(Processor):
         """
         Constructor of the VariationFilter.
         """
-        (super(VariationFilter, self)
-         .__init__(axis="features", mode="filter", verbose=verbose,
-                   requirements={"empty": False, "missing": False})
-         )
+        requirements = {"empty": False, "missing": False}
+        super(VariationFilter, self).__init__(axis="features", mode="filter",
+                                              verbose=verbose,
+                                              requirements=requirements)
         self.name = "Variation Filter"
         self.params["lb"] = lb
         self.params["ub"] = ub
@@ -605,11 +610,11 @@ class _TemplateValidationFilter(Processor):
                  corrector_classes: Optional[List[str]] = None,
                  verbose: bool = False):
 
-        req = {"empty": False, "missing": False, _sample_order: True,
-               _sample_batch: True}
+        requirements = {"empty": False, "missing": False, _sample_order: True,
+                        _sample_batch: True}
         (super(_TemplateValidationFilter, self)
          .__init__(axis="samples", mode="filter", verbose=verbose,
-                   requirements=req))
+                   requirements=requirements))
         self.name = "Batch Template Check"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
@@ -618,6 +623,7 @@ class _TemplateValidationFilter(Processor):
         validation.validate_batch_corrector_params(self.params)
 
     def func(self, dc: DataContainer):
+        # TODO: create a function in _filter_functions with this code
 
         dc.sort(_sample_order, "samples")
 
@@ -692,11 +698,11 @@ class _BatchCorrectorPrevalenceFilter(Processor):
                  corrector_classes: Optional[List[str]] = None,
                  threshold: float = 0.0):
 
-        req = {"empty": False, "missing": False, _sample_order: True,
-               _sample_batch: True}
+        requirements = {"empty": False, "missing": False, _sample_order: True,
+                        _sample_batch: True}
         (super(_BatchCorrectorPrevalenceFilter, self)
          .__init__(axis="features", mode="filter", verbose=verbose,
-                   requirements=req))
+                   requirements=requirements))
         self.name = "Batch Prevalence Checker"
         self.params["corrector_classes"] = corrector_classes
         self.params["process_classes"] = process_classes
@@ -730,15 +736,12 @@ class _BatchCorrectorProcessor(Processor):
                  n_qc: Optional[int] = None,
                  process_qc: bool = True,
                  verbose: bool = False):
-
+        requirements = {"empty": False, "missing": False, _sample_order: True,
+                        _sample_batch: True}
         super(_BatchCorrectorProcessor, self).__init__(axis=None,
                                                        mode="transform",
                                                        verbose=verbose,
-                                                       requirements={
-                                                          "empty": False,
-                                                          "missing": False,
-                                                          _sample_order: True,
-                                                          _sample_batch: True}
+                                                       requirements=requirements
                                                        )
         self.name = "Batch Corrector"
         self.params["corrector_classes"] = corrector_classes
@@ -752,9 +755,9 @@ class _BatchCorrectorProcessor(Processor):
         validation.validate_batch_corrector_params(self.params)
 
     def func(self, dc: DataContainer):
-        dc.data_matrix = \
-            interbatch_correction(dc.data_matrix, dc.order, dc.batch,
-                                  dc.classes, **self.params)
+        dc.data_matrix = interbatch_correction(dc.data_matrix, dc.order,
+                                               dc.batch, dc.classes,
+                                               **self.params)
 
 
 @register
@@ -960,7 +963,3 @@ _requirements_error = {"empty": container.EmptyDataContainerError,
                        _blank_sample_type: MissingMappingInformation,
                        _sample_batch: container.BatchInformationError,
                        _sample_order: container.RunOrderError}
-
-
-# TODO : refactor Processor using the following func prototype:
-#   func(dc, **self.params)
