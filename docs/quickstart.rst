@@ -260,7 +260,7 @@ through the metrics attribute, which has methods to compute metrics:
 
 .. code-block:: python
 
-    data = ms.fileio.load_dataset("ltr")
+    data = ms.fileio.load_dataset("reference-materials")
     # coefficient of variation
     cv = data.metrics.cv()
 
