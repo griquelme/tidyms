@@ -5,7 +5,7 @@ third party software used to process Mass Spectrometry data.
 Objects
 -------
 MSData: reads raw MS data in the mzML format. Manages Chromatograms and
-MSSpectrum creation. Performs feature detection on centroided data.
+MSSpectrum creation. Performs feature detection on centroid data.
 
 Functions
 ---------
@@ -29,6 +29,7 @@ import pandas as pd
 import os
 from typing import Optional, Iterable, Tuple, Union, List, BinaryIO, TextIO
 from .container import DataContainer
+from ._names import *
 from . import lcms
 from . import validation
 from . import utils
@@ -90,7 +91,7 @@ def read_progenesis(path: Union[str, TextIO]):
 
     # rename sample info
     sample_info.index = data.index
-    sample_info.rename({sample_info.columns[0]: "class"},
+    sample_info.rename({sample_info.columns[0]: _sample_class},
                        axis="columns", inplace=True)
 
     # rename features def
@@ -583,79 +584,127 @@ class MSData:
         return roi_list, feature_data
 
 
-def _get_datasets_path(dataset_type: str = "matrix") -> List[str]:
+# def _get_datasets_path(dataset_type: str = "matrix") -> List[str]:
+#     """
+#     List full path to available data sets.
+#
+#     Parameters
+#     ----------
+#     dataset_type : {"matrix", "raw"}
+#         "matrix" shows available data in matrix form. "raw" lists mzML data
+#         files.
+#
+#     Returns
+#     -------
+#     datasets_path: list[str]
+#     """
+#     module_fullname = __file__
+#     project_path, _ = os.path.split(module_fullname)
+#     project_path, _ = os.path.split(project_path)
+#     data_path = os.path.join(project_path, "datasets", dataset_type)
+#     datasets = os.listdir(data_path)
+#     dataset_path = [os.path.join(data_path, x) for x in datasets]
+#     return dataset_path
+#
+#
+# def get_available_datasets(dataset_type: str = "matrix") -> List[str]:
+#     """
+#     List available datasets
+#
+#     Parameters
+#     ----------
+#     dataset_type : {"matrix", "raw"}
+#         "matrix" shows available data in matrix form. "raw" lists mzML data
+#         files.
+#
+#     Returns
+#     -------
+#     datasets: list[str]
+#     """
+#     dataset_path = _get_datasets_path(dataset_type)
+#
+#     datasets = [utils.get_filename(x) for x in dataset_path]
+#     return datasets
+
+
+def _read_csv_aux(name: str, test_data: bool, **kwargs):
     """
-    List full path to available data sets.
-
-    Parameters
-    ----------
-    dataset_type : {"matrix", "raw"}
-        "matrix" shows available data in matrix form. "raw" lists mzML data
-        files.
-
-    Returns
-    -------
-    datasets_path: list[str]
+    uses pandas read_csv and return None if the csv file is empty
     """
-    module_fullname = __file__
-    project_path, _ = os.path.split(module_fullname)
-    project_path, _ = os.path.split(project_path)
-    data_path = os.path.join(project_path, "datasets", dataset_type)
-    datasets = os.listdir(data_path)
-    dataset_path = [os.path.join(data_path, x) for x in datasets]
-    return dataset_path
+    if test_data:
+        data = open(name)
+    else:
+        data = pd.read_csv(name, index_col=0, **kwargs)
+    return data
 
 
-def get_available_datasets(dataset_type: str = "matrix") -> List[str]:
+def _load_csv_files(name: str, cache: bool = True, test_files: bool = False,
+                    **kwargs):
     """
-    List available datasets
-
-    Parameters
-    ----------
-    dataset_type : {"matrix", "raw"}
-        "matrix" shows available data in matrix form. "raw" lists mzML data
-        files.
-
-    Returns
-    -------
-    datasets: list[str]
-    """
-    dataset_path = _get_datasets_path(dataset_type)
-
-    datasets = [utils.get_filename(x) for x in dataset_path]
-    return datasets
-
-
-def load_dataset(name: str, dataset_type: str = "matrix"):
-    """
-    Load a data set
+    Load csv files into a DataFrame.
 
     Parameters
     ----------
     name : str
         name of an available dataset.
-    dataset_type : str
-        "matrix" shows available data in matrix form. "raw" lists mzML data
-        files.
+    cache : bool
+        If True tries to read the dataset from a local cache.
+    test_files: bool
+        If True, load data from test directory
+    kwargs: additional parameters to pass to the Pandas read_csv function
 
     Returns
     -------
-    data: if dataset_type is matrix, then returns a DataContainer. if the
-    dataset_type is raw, returns a MSData object.
+    data_matrix : DataFrame
+    feature_metadata : DataFrame
+    sample_metadata : DataFrame
     """
-    data_path = _get_datasets_path(dataset_type=dataset_type)
-    datasets = get_available_datasets(dataset_type=dataset_type)
-    try:
-        ind = datasets.index(name)
-        path = data_path[ind]
-        if dataset_type == "raw":
-            data = MSData(path)
-        elif dataset_type == "matrix":
-            data = DataContainer.from_progenesis(path)
-        else:
-            msg = "`dataset_type` must be raw or matrix"
-            raise ValueError(msg)
-        return data
-    except KeyError:
-        msg = "{} is not an available data set name".format(name)
-        raise ValueError(msg)
+
+    if test_files:
+        data_path = "test-data"
+    else:
+        data_path = "datasets"
+
+    cache_path = os.path.join("~", ".tidyms", data_path)
+    cache_path = os.path.expanduser(cache_path)
+    url_path = ""
+
+    dataset_path = os.path.join(cache_path, name)
+    sample_path = os.path.join(dataset_path, "sample.csv")
+    feature_path = os.path.join(dataset_path, "feature.csv")
+    data_matrix_path = os.path.join(dataset_path, "data.csv")
+
+    is_file_found = (os.path.exists(sample_path) and
+                     os.path.exists(feature_path) and
+                     os.path.exists(data_matrix_path))
+
+    if not (cache and is_file_found):
+        # TODO: complete when data is uploaded to Github
+        pass
+
+    sample_metadata = _read_csv_aux(sample_path, test_files, **kwargs)
+    feature_metadata = _read_csv_aux(feature_path, test_files, **kwargs)
+    data_matrix = _read_csv_aux(data_matrix_path, test_files, **kwargs)
+
+    return data_matrix, feature_metadata, sample_metadata
+
+
+def load_dataset(name: str, cache: bool = True) -> DataContainer:
+    """
+    Load example datasets into a DataContainer. Available datasets can be seen
+    using the list_datasets function.
+
+    Parameters
+    ----------
+    name : str
+        name of an available dataset.
+    cache : bool
+        If True tries to read the dataset from a local cache.
+
+    Returns
+    -------
+    dataset : DataContainer
+    """
+    csv_files = _load_csv_files(name, cache)
+    dataset = DataContainer(*csv_files)
+    return dataset
