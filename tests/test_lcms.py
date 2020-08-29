@@ -97,12 +97,21 @@ def test_make_widths_ms():
 
 
 def test_get_lc_cwt_params():
-    params = lcms.get_lc_cwt_params("uplc")
+    params = lcms.get_lc_peak_params("uplc", "cwt")
     validation.validate_cwt_peak_picking_params(params)
-    params = lcms.get_lc_cwt_params("hplc")
+    params = lcms.get_lc_peak_params("hplc", "cwt")
     validation.validate_cwt_peak_picking_params(params)
     with pytest.raises(ValueError):
-        params = lcms.get_lc_cwt_params("invalid_mode")
+        params = lcms.get_lc_peak_params("invalid_mode", "cwt")
+
+
+def test_get_lc_peak_params_max():
+    params = lcms.get_lc_peak_params("uplc", "max")
+    validation.validate_max_peak_picking_params(params)
+    params = lcms.get_lc_peak_params("hplc", "max")
+    validation.validate_max_peak_picking_params(params)
+    with pytest.raises(ValueError):
+        params = lcms.get_lc_peak_params("invalid_mode", "max")
 
 
 def test_get_ms_cwt_params():

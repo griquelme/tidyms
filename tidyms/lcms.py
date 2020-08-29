@@ -16,6 +16,7 @@ from scipy.interpolate import interp1d
 from typing import Optional, Iterable, Tuple, Union, List, Callable
 from . import peaks
 from . import validation
+from . import find_peaks
 import bokeh.plotting
 from bokeh.palettes import Set3
 from collections import namedtuple
@@ -257,35 +258,44 @@ def make_widths_ms(mode: str) -> np.ndarray:
     return widths
 
 
-def get_lc_cwt_params(mode: str) -> dict:
+def get_lc_peak_params(lc_mode: str, method: str) -> dict:
     """
     Return sane default values for performing CWT based peak picking on LC data.
 
     Parameters
     ----------
-    mode : {"hplc", "uplc"}
+    lc_mode : {"hplc", "uplc"}
         HPLC assumes typical experimental conditions for HPLC experiments:
         longer columns with particle size greater than 3 micron. UPLC is for
         data acquired with short columns with particle size lower than 3 micron.
+    method: {"cwt", "max"}
+        Method used for peak picking.
 
     Returns
     -------
-    cwt_params : dict
-        parameters to pass to .peak.pick_cwt function.
-    """
-    cwt_params = {"snr": 10, "min_length": 5, "max_distance": 1,
-                  "gap_threshold": 1, "estimators": "default"}
+    params : dict
+        parameters to pass to the correspondent peak picking function.
 
-    if mode == "hplc":
-        cwt_params["min_width"] = 10
-        cwt_params["max_width"] = 90
-    elif mode == "uplc":
-        cwt_params["min_width"] = 5
-        cwt_params["max_width"] = 60
+    """
+    if method == "cwt":
+        params = {"snr": 10, "min_length": 5, "max_distance": 1,
+                      "gap_threshold": 1, "estimators": "default"}
+    elif method == "max":
+        params = {"min_snr": 10, "min_distance": 3, "min_prominence": 10}
+    else:
+        msg = "valid `methods` are cwt or max."
+        raise ValueError(msg)
+
+    if lc_mode == "hplc":
+        params["min_width"] = 10
+        params["max_width"] = 90
+    elif lc_mode == "uplc":
+        params["min_width"] = 5
+        params["max_width"] = 60
     else:
         msg = "`mode` must be `hplc` or `uplc`"
         raise ValueError(msg)
-    return cwt_params
+    return params
 
 
 def get_ms_cwt_params(mode: str) -> dict:
@@ -482,7 +492,8 @@ class Chromatogram:
         self.spint = spint
         self.peaks = None
 
-    def find_peaks(self, cwt_params: Optional[dict] = None) -> dict:
+    def find_peaks(self, method: str = "cwt",
+                   params: Optional[dict] = None) -> dict:
         """
         Find peaks with the modified version of the cwt algorithm described in
         the CentWave algorithm [1]. Peaks are added to the peaks
@@ -490,9 +501,11 @@ class Chromatogram:
 
         Parameters
         ----------
-        cwt_params : dict
-            key-value parameters to overwrite the defaults in the pick_cwt
-            function. The default are obtained using the mode attribute.
+        method : {"cwt", "max"}.
+            method used for peak picking.
+        params : dict
+            key-value parameters to overwrite the defaults in the peak picking
+            algorithm
 
         Returns
         -------
@@ -502,7 +515,7 @@ class Chromatogram:
         See Also
         --------
         peaks.detect_peaks : peak detection using the CWT algorithm.
-        lcms.get_lc_cwt_params : set default parameters for pick_cwt.
+        lcms.get_lc_peak_params : set default parameters for pick_cwt.
 
         References
         ----------
@@ -511,14 +524,22 @@ class Chromatogram:
             504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
         """
-        default_params = get_lc_cwt_params(self.mode)
+        default_params = get_lc_peak_params(self.mode, method)
 
-        if cwt_params:
-            default_params.update(cwt_params)
+        if params:
+            default_params.update(params)
 
-        widths = make_widths_lc(self.mode)
-        peak_list, peak_params = \
-            peaks.detect_peaks(self.rt, self.spint, widths, **default_params)
+        if method == "cwt":
+            widths = make_widths_lc(self.mode)
+            peak_list, peak_params = \
+                peaks.detect_peaks(self.rt, self.spint, widths,
+                                   **default_params)
+        elif method == "max":
+            peak_list, peak_params = \
+                find_peaks.detect_peaks(self.rt, self.spint, **default_params)
+        else:
+            msg = "`method` must be max or cwt."
+            raise ValueError(msg)
         self.peaks = peak_list
         return peak_params
 
@@ -746,8 +767,10 @@ def _make_empty_temp_roi():
 
 class Roi(Chromatogram):
     """
-    mz traces where a chromatographic peak may be found. Subclassed from
-    Chromatogram. To be used with the detect_features method of MSData.
+    mz traces where a chromatographic peak may be found.
+
+    Subclassed from Chromatogram. To be used with the detect_features method of
+    MSData.
 
     Attributes
     ----------
@@ -766,6 +789,20 @@ class Roi(Chromatogram):
         super(Roi, self).__init__(rt, spint, mode=mode)
         self.mz = mz
         self.first_scan = first_scan
+
+    def _extend(self):
+        """
+        adds a dummy value at the beginning and at the end of the ROI. This
+        is often useful to ensure that ROI obtained from LC-MS values starts and
+        ends at zero.
+
+        """
+        rt_pre = 2 * self.rt[0] - self.rt[1]
+        rt_post = 2 * self.rt[-1] - self.rt[-2]
+        mz_fill = np.nanmean(self.mz)
+        self.rt = np.hstack((rt_pre, self.rt, rt_post))
+        self.spint = np.hstack((0, self.spint, 0))
+        self.mz = np.hstack((mz_fill, self.mz, mz_fill))
 
     def fill_nan(self):
         """
@@ -941,6 +978,7 @@ class _RoiProcessor:
             finished_roi = self.temp_roi_dict.pop(roi_ind)
             if is_valid_roi[ind]:
                 roi = tmp_roi_to_roi(finished_roi, rt, mode=self.mode)
+                roi._extend()
                 self.roi.append(roi)
         if targeted:
             self.n_missing[is_completed] = 0
@@ -1102,7 +1140,7 @@ def tmp_roi_to_roi(tmp_roi: _TempRoi, rt: np.ndarray,
     mz_tmp = np.ones(size) * np.nan
     spint_tmp = mz_tmp.copy()
     tmp_index = np.array(tmp_roi.scan) - tmp_roi.scan[0]
-    rt_tmp = rt[first_scan:(last_scan + 1)]
+    rt_tmp = rt[first_scan:(last_scan + 1)].copy()
     mz_tmp[tmp_index] = tmp_roi.mz
     spint_tmp[tmp_index] = tmp_roi.sp
     roi = Roi(spint_tmp, mz_tmp, rt_tmp, first_scan, mode=mode)
@@ -1124,7 +1162,7 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
     ----------
     ms_experiment: pyopenms.MSExperiment
     max_missing : int
-        maximum number of missing consecutive values. when a row surpass this
+        maximum number of consecutive missing values. when a row surpass this
         number the roi is considered as finished and is added to the roi list if
         it meets the length and intensity criteria.
     min_length : int
@@ -1195,6 +1233,7 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
     .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
         feature detection for high resolution LC/MS. BMC Bioinformatics 9,
         504 (2008). https://doi.org/10.1186/1471-2105-9-504
+
     """
     if start is None:
         start = 0
@@ -1230,10 +1269,25 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
     return processor.roi
 
 
-def detect_roi_peaks(roi: List[Roi],
-                     cwt_params: Optional[dict] = None) -> pd.DataFrame:
-    if cwt_params is None:
-        cwt_params = dict()
+def _detect_roi_peaks(roi: List[Roi], method: str = "cwt",
+                      params: Optional[dict] = None) -> pd.DataFrame:
+    """
+    aux function used to detect features in MSData instance.
+    
+    Parameters
+    ----------
+    roi : Roi
+    method : {"cwt", "max"}
+        method used for the peak picking step.
+    params : params for the peak picking function
+
+    Returns
+    -------
+    DataFrame
+
+    """
+    if params is None:
+        params = dict()
 
     roi_index_list = list()
     peak_index_list = list()
@@ -1243,7 +1297,7 @@ def detect_roi_peaks(roi: List[Roi],
 
     for roi_index, k_roi in enumerate(roi):
         k_roi.fill_nan()
-        k_params = k_roi.find_peaks(cwt_params=cwt_params)
+        k_params = k_roi.find_peaks(method=method, params=params)
         n_features = len(k_params)
         peak_params.extend(k_params)
         k_mz_mean, k_mz_std = k_roi.get_peaks_mz()

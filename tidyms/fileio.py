@@ -475,6 +475,7 @@ class MSData:
         return rt
 
     def detect_features(self, roi_params: Optional[dict] = None,
+                        method: str = "cwt",
                         peaks_params: Optional[dict] = None
                         ) -> Tuple[List[lcms.Roi], pd.DataFrame]:
         """
@@ -483,6 +484,8 @@ class MSData:
 
         Parameters
         ----------
+        method : str, optional
+            method used for peak picking. By default, the CWT algorithm is used.
         roi_params : dict, optional
             Parameters to pass to the make_roi function. Overwrites default
             parameters. See function function documentation for a detailed
@@ -580,7 +583,7 @@ class MSData:
 
         # step 2 and 3: find peaks and build a DataFrame with the parameters
         feature_data = \
-            lcms.detect_roi_peaks(roi_list, cwt_params=peaks_params)
+            lcms._detect_roi_peaks(roi_list, method=method, params=peaks_params)
         return roi_list, feature_data
 
 

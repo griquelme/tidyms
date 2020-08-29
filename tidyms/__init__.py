@@ -11,6 +11,8 @@ Provides
     4. Functions for feature detection and feature correspondence.
 """
 
+__version__ = "0.1"
+
 from . import fileio
 from . import container
 from . import utils
@@ -21,3 +23,4 @@ from .metabolomics import *
 from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum
+from . import find_peaks
