@@ -61,4 +61,5 @@ if __name__ == "__main__":
           classifiers=CLASSIFIERS,
           packages=PACKAGES,
           python_requires=PYTHON_REQUIRES,
-          install_requires=INSTALL_REQUIRES)
+          install_requires=INSTALL_REQUIRES,
+          include_package_data=True)
