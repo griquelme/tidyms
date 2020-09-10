@@ -33,7 +33,6 @@ def detect_features(path_list: List[str], separation: str = "uplc",
 
     Samples are analyzed one at a time using the detect_features method
     of MSData. See this method for a detailed explanation of each parameter.
-    Feature detection is done using the method described in [1]
 
     Parameters
     ----------
@@ -91,12 +90,6 @@ def detect_features(path_list: List[str], separation: str = "uplc",
     See Also
     --------
     fileio.MSData : Object used to analyze each sample.
-
-    References
-    ----------
-    ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-            feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-            504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
     """
     # TODO : check memory for large data sets ( ~ 1000 samples)

@@ -118,8 +118,8 @@ def read_mzmine(data: Union[str, TextIO],
         csv file generated with MZMine.
     sample_metadata : str, file or DataFrame
         csv file with sample metadata. The following columns are required:
-            sample : the same sample names used in `data`
-            class : the sample classes
+        * sample : the same sample names used in `data`
+        * class : the sample classes
         Columns with run order and analytical batch information are optional.
         Must be names "order" and "batch"
 
@@ -539,7 +539,7 @@ class MSData:
         -----
 
         Feature detection is done in three steps using the algorithm described
-        in [1]:
+        in [TR08]_:
 
         1.  Regions of interest (ROI) search: ROI are searched in the data. Each
             ROI consists in m/z traces where a chromatographic peak may be
@@ -561,12 +561,11 @@ class MSData:
 
         References
         ----------
-        ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+        .. [TR08] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
             feature detection for high resolution LC/MS. BMC Bioinformatics 9,
             504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
         """
-
         if self.ms_mode != "centroid":
             msg = "Data must be in centroid mode for feature detection."
             raise ValueError(msg)
@@ -597,12 +596,7 @@ def list_available_datasets(hide_test_data: bool = True) -> List[str]:
 
     Parameters
     ----------
-    hide_test pandas read_csv and return None if the csv file is empty
-    List available example datasets
-
-    Parameters
-    ----------_data : bool
-        include test datasets in the results
+    hide_test_data : bool
 
     Returns
     -------

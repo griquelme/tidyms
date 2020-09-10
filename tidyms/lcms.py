@@ -485,7 +485,7 @@ class Chromatogram:
     def find_peaks(self, cwt_params: Optional[dict] = None) -> dict:
         """
         Find peaks with the modified version of the cwt algorithm described in
-        the CentWave algorithm [1]. Peaks are added to the peaks
+        the centWave algorithm. Peaks are added to the peaks
         attribute of the Chromatogram object.
 
         Parameters
@@ -503,12 +503,6 @@ class Chromatogram:
         --------
         peaks.detect_peaks : peak detection using the CWT algorithm.
         lcms.get_lc_cwt_params : set default parameters for pick_cwt.
-
-        References
-        ----------
-        ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-            feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-            504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
         """
         default_params = get_lc_cwt_params(self.mode)
@@ -1119,6 +1113,7 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
              ) -> List[Roi]:
     """
     Make Region of interest from MS data in centroid mode.
+    Used by MSData to as the first step of the centWave algorithm.
 
     Parameters
     ----------
@@ -1170,11 +1165,9 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
 
     Notes
     -----
-
-    ROI are created as described in [1]_, with some modifications. To create a
-    ROI, m/z values in consecutive scans are connected if they are within the
-    `tolerance`. If there's more than one possible m/z value to connect in the
-    next scan, two different strategies are available, using the
+    To create a ROI, m/z values in consecutive scans are connected if they are
+    within the tolerance`. If there's more than one possible m/z value to
+    connect in the next scan, two different strategies are available, using the
     `multiple_match` parameter: If "closest" is used, then m/z values are
     matched to the closest ones, and the others are used to create new ROI. If
     "reduce" is used, then all values within the tolerance are combined. m/z and
@@ -1190,11 +1183,6 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
 
     If the two conditions are meet, the ROI is added to the list of valid ROI.
 
-    References
-    ----------
-    .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-        504 (2008). https://doi.org/10.1186/1471-2105-9-504
     """
     if start is None:
         start = 0

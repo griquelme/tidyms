@@ -21,6 +21,7 @@ detailed information about tidyms, you can see the :doc:`api` reference.
    Glossary <glossary>
    Installation guide <installation>
    Quickstart <quickstart>
+   Converting files to mzML <mzml>
 
 Indices and tables
 ==================

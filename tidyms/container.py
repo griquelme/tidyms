@@ -668,7 +668,7 @@ class MetricMethods:
                qc_classes: Optional[List[str]] = None) -> pd.Series:
         """
         Computes the D-Ratio using sample variation and quality control
-        variation [1]. This metric is useful to compare technical to biological
+        variation [BD18]. This metric is useful to compare technical to biological
         variation.
         
         Parameters
@@ -690,10 +690,10 @@ class MetricMethods:
 
         References
         ----------
-        .. [1] D.Broadhurst *et al*, "Guidelines and considerations for the use
-        of system suitability and quality control samples in mass spectrometry
-        assays applied in untargeted clinical metabolomic studies",
-        Metabolomics (2018) 14:72.
+        .. [BD18] D.Broadhurst *et al*, "Guidelines and considerations for the use
+            of system suitability and quality control samples in mass spectrometry
+            assays applied in untargeted clinical metabolomic studies",
+            Metabolomics (2018) 14:72.
 
         """
         if sample_classes is None:
