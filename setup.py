@@ -36,6 +36,7 @@ INSTALL_REQUIRES = [
     'cerberus',
     'seaborn',
     'pytest>=5.0'
+    'openpyxl>=3.0'
 ]
 
 if __name__ == "__main__":
