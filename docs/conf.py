@@ -73,3 +73,6 @@ html_static_path = ['_static']
 
 intersphinx_mapping = \
     {'pandas': ('http://pandas.pydata.org/pandas-docs/stable/', None)}
+
+# set index.rst as the master doc
+master_doc = 'index'
