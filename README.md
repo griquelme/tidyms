@@ -33,5 +33,6 @@ The latest release can be installed from PyPI:
 Documentation
 -------------
 
-The official documentation is available at **COMPLETE**
+The official documentation is available at 
+[readthedocs](https://tidyms.readthedocs.io/en/latest/).
 
