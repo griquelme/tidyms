@@ -207,7 +207,7 @@ def read_xcms(data_matrix: str, feature_metadata: str,
     # TODO : include information from CAMERA package
 
     # sample_metadata
-    sm = pd.read_csv(sample_metadata, sep=sep, index_col="sample")
+    sm = pd.read_csv(sample_metadata, sep=sep, index_col=0)
     sm.index.name = "sample"
     sm = sm.rename(columns={class_column: "class"})
     dc = DataContainer(dm, fm, sm)
