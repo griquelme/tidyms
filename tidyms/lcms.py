@@ -360,6 +360,29 @@ def get_roi_params(separation: str = "uplc", instrument: str = "qtof"):
     return roi_params
 
 
+def _get_find_centroid_params(instrument: str):
+    """
+    Set default parameters to find_centroid method using instrument information.
+
+    Parameters
+    ----------
+    instrument : {"qtof", "orbitrap"}
+
+    Returns
+    -------
+    params : dict
+
+    """
+    params = {"snr": 10}
+    if instrument == "qtof":
+        md = 0.01
+    else:
+        # valid values for instrument are qtof or orbitrap
+        md = 0.005
+    params["min_distance"] = md
+    return params
+
+
 def _find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
                                     q: int, n_isotopes: int,
                                     tol: float):
@@ -469,18 +492,28 @@ class Chromatogram:
         mode : {"uplc", "hplc"}, optional
             used to set default parameters in peak picking. If None, `mode` is
             set to uplc.
+
         """
         if mode is None:
-            self.mode = "uplc"
-        elif mode in ["uplc", "hplc"]:
-            self.mode = mode
-        else:
-            msg = "mode must be None, uplc or hplc"
-            raise ValueError(msg)
+            mode = "uplc"
+        self.mode = mode
 
         self.rt = rt
         self.spint = spint
         self.peaks = None
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        valid_values = ["uplc", "hplc"]
+        if value in valid_values:
+            self._mode = value
+        else:
+            msg = "mode must be one of {}".format(valid_values)
+            raise ValueError(msg)
 
     def find_peaks(self, cwt_params: Optional[dict] = None) -> dict:
         """
@@ -533,6 +566,7 @@ class Chromatogram:
         Returns
         -------
         bokeh Figure
+
         """
         default_line_params = {"line_width": 1, "line_color": "black",
                                "alpha": 0.8}
@@ -604,14 +638,23 @@ class MSSpectrum:
         self.peaks = None
 
         if mode is None:
-            self.mode = "qtof"
-        elif mode in ["qtof", "orbitrap"]:
-            self.mode = mode
+            mode = "qtof"
+        self.mode = mode
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        valid_values = ["qtof", "orbitrap"]
+        if value in valid_values:
+            self._mode = value
         else:
-            msg = "mode must be qtof or orbitrap"
+            msg = "mode must be one of {}".format(valid_values)
             raise ValueError(msg)
 
-    def find_centroids(self, snr: float = 10,
+    def find_centroids(self, snr: Optional[float] = None,
                        min_distance: Optional[float] = None
                        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         r"""
@@ -622,9 +665,9 @@ class MSSpectrum:
 
         Parameters
         ----------
-        snr : positive number
+        snr : positive number, optional
             Minimum signal to noise ratio of the peaks. Overwrites values
-            set by mode.
+            set by mode. Default value is 10
         min_distance : positive number, optional
             Minimum distance between consecutive peaks. If None, sets the value
             to 0.01 if the `mode` attribute is qtof. If the `mode` is orbitrap,
@@ -656,18 +699,13 @@ class MSSpectrum:
         peak. If two peaks are closer than `min_distance`, the peaks are merged.
 
         """
-        params = {"snr": snr}
+        params = _get_find_centroid_params(self.mode)
 
         if min_distance is not None:
             params["min_distance"] = min_distance
-        else:
-            if self.mode == "qtof":
-                md = 0.01
-            elif self.mode == "orbitrap":
-                md = 0.005
-            else:
-                raise ValueError
-            params["min_distance"] = md
+
+        if snr is not None:
+            params["snr"] = snr
 
         centroids, area, centroid_index = \
             peaks.find_centroids(self.mz, self.spint, **params)
@@ -764,6 +802,7 @@ class Roi(Chromatogram):
     def fill_nan(self):
         """
         fill missing intensity values using linear interpolation.
+
         """
         missing = np.isnan(self.spint)
         interpolator = interp1d(self.rt[~missing], self.spint[~missing])
@@ -779,14 +818,11 @@ class Roi(Chromatogram):
         -------
         mean_mz : array
         mz_std : array
+
         """
         mz_std = np.zeros(len(self.peaks))
         mz_mean = np.zeros(len(self.peaks))
         for k, peak in enumerate(self.peaks):
-            # missing = np.isnan(self.mz[peak.start:peak.end + 1])
-            # print("wat")
-            # peak_mz = self.mz[peak.start:peak.end + 1][~missing]
-            # peak_spint = self.spint[peak.start:peak.end + 1][~missing]
             peak_mz = self.mz[peak.start:peak.end + 1]
             peak_spint = self.spint[peak.start:peak.end + 1]
             mz_mean[k] = np.average(peak_mz, weights=peak_spint)
@@ -1253,3 +1289,5 @@ def detect_roi_peaks(roi: List[Roi],
     peak_params["peak index"] = peak_index_list
     peak_params = peak_params.dropna(axis=0)
     return peak_params
+
+# TODO: test ROI, test roi processor, test make roi
