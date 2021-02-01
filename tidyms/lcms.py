@@ -19,6 +19,7 @@ from . import validation
 import bokeh.plotting
 from bokeh.palettes import Set3
 from collections import namedtuple
+import warnings
 
 from .utils import find_closest
 
@@ -45,9 +46,12 @@ def reader(path: str, on_disc: bool = True):
         try:
             exp_reader = pyopenms.OnDiscMSExperiment()
             exp_reader.openFile(path)
+            # this checks if OnDiscMSExperiment can be used else switch
+            # to MSExperiment
+            exp_reader.getSpectrum(0)
         except RuntimeError:
             msg = "{} is not an indexed mzML file, switching to MSExperiment"
-            print(msg.format(path))
+            warnings.warn(msg.format(path))
             exp_reader = pyopenms.MSExperiment()
             pyopenms.MzMLFile().load(path, exp_reader)
     else:
@@ -804,6 +808,15 @@ class Roi(Chromatogram):
         fill missing intensity values using linear interpolation.
 
         """
+
+        # if the first or last values are missing, assign an intensity value
+        # of zero. This prevents errors in the interpolation and makes peak
+        # picking to work better.
+        if np.isnan(self.spint[0]):
+            self.spint[0] = 0
+        if np.isnan(self.spint[-1]):
+            self.spint[-1] = 0
+
         missing = np.isnan(self.spint)
         interpolator = interp1d(self.rt[~missing], self.spint[~missing])
         mz_mean = np.nanmean(self.mz)
@@ -1105,6 +1118,8 @@ def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
                 remove = np.arange(index, index + count)
                 remove = np.setdiff1d(remove, closest)
                 rm_index.extend(remove)
+            # fix rm_index to full mz2 size
+            rm_index = np.where(match_mask)[0][rm_index]
             no_match_mask[rm_index] = True
             mz_match[first_index_index] = mz_replace
             sp_match[first_index_index] = spint_replace
