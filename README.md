@@ -30,9 +30,25 @@ The latest release can be installed from PyPI:
     pip install tidyms
 ```
 
+Examples
+--------
+
+Jupyter notebooks with examples are available
+[here](https://github.com/griquelme/tidyms-notebooks).
+
 Documentation
 -------------
 
 The official documentation is available at 
 [readthedocs](https://tidyms.readthedocs.io/en/latest/).
+
+
+Citation
+--------
+
+If you find TidyMS useful, we would appreciate citations:
+
+Riquelme, G.; Zabalegui, N.; Marchi, P.; Jones, C.M.; Monge, M.E. A Python-Based
+Pipeline for Preprocessing LC–MS Data for Untargeted Metabolomics Workflows.
+_Metabolites_ **2020**, 10, 416, doi:10.3390/metabo10100416.
 
