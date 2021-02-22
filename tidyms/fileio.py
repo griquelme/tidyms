@@ -386,7 +386,7 @@ class MSData:
                 window = 0.05
             elif self.instrument == "orbitrap":
                 window = 0.005
-            params["window"] = window
+        params["window"] = window
 
         rt, spint = lcms.make_chromatograms(self.reader, mz, **params)
         chromatograms = list()
