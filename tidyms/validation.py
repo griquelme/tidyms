@@ -258,11 +258,14 @@ def validate_make_roi_params(n_spectra, params):
               "end": {"type": "integer", "nullable": True,
                       "max": n_spectra - 1},
               "multiple_match": {"allowed": ["closest", "reduce"]},
-              "mz_reduce": {"any_of": [{"allowed": ["mean"]},
+              "mz_reduce": {"anyof": [{"allowed": ["mean"]},
                                        {"check_with": is_callable}]},
-              "sp_reduce": {"any_of": [{"allowed": ["mean", "sum"]},
+              "sp_reduce": {"anyof": [{"allowed": ["mean", "sum"]},
                                        {"check_with": is_callable}]},
-              "mode": {"allowed": ["hplc", "uplc"]}}
+              "mode": {"allowed": ["hplc", "uplc"]},
+              "min_intensity": {"type": "number", "is_positive": True},
+              "min_length": {"type": "integer", "is_positive": True}
+              }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
 
