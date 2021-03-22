@@ -181,7 +181,7 @@ def sample_to_path(samples, path):
     d : dict
 
     """
-    # TODO: this function should accept and extension parameter to prevent
+    # TODO: this function should accept an extension parameter to prevent
     #   files with the same name but invalid extensions from being used
     available_files = os.listdir(path)
     filenames = [os.path.splitext(x)[0] for x in available_files]
@@ -365,20 +365,26 @@ class SimulatedExperiment:  # pragma: no cover
     """
     def __init__(self, mz_values: np.ndarray, rt_values: np.ndarray,
                  mz_params: np.ndarray, rt_params: np.ndarray,
-                 noise: Optional[float] = None):
+                 ft_noise: Optional[np.ndarray] = None,
+                 noise: Optional[float] = None, mode: str = "centroid"):
         """
         Constructor function
 
         Parameters
         ----------
-        mz_values : sorted mz values for each mz scan
-        rt_values : sorted rt values
+        mz_values : array
+            sorted mz values for each mz scan, used to build spectra in profile
+            mode.
+        rt_values : array
+            sorted rt values, used to set scan time.
         mz_params : array with shape (n, 3)
              Used to build m/z peaks. Each row is the mean, standard deviation
-             and amplitude in the m/z dimension
+             and amplitude in the m/z dimension.
         rt_params : array with shape (n, 3)
              Used to build rt peaks. Each row is the mean, standard deviation
              and amplitude in the rt dimension
+        ft_noise : array_with shape (n, 2), optional
+            adds noise to mz and rt values
         noise : positive number, optional
             noise level to add to each scan. the noise is modeled as gaussian
             iid noise in each scan with standard deviation equal to the value
@@ -387,18 +393,26 @@ class SimulatedExperiment:  # pragma: no cover
             a seed value associated to generate always the same noise value in
             a given scan. seed values are generated randomly each time a new
             object is instantiated.
+        mode : {"centroid", "profile"}
 
         """
         self.mz = mz_values
-        self.mz_array = gaussian_mixture(mz_values, mz_params)
+        self.mz_params = mz_params
         self.rt = rt_values
-        self.rt_array = gaussian_mixture(rt_values, rt_params)
         self.n_scans = rt_values.size
         self._seeds = None
         self._noise_level = None
-        if noise is not None:
-            self._seeds = np.random.choice(100000, self.n_scans)
-            self._noise_level = noise
+        self.ft_noise = ft_noise
+        self.mode = mode
+        # seeds are used to ensure that each time that a spectra is generated
+        # with get_spectra its values are the same
+        self._seeds = np.random.choice(self.n_scans * 10, self.n_scans)
+        self._noise_level = noise
+
+        if ft_noise is not None:
+            np.random.seed(self._seeds[0])
+            rt_params[0] += np.random.normal(scale=ft_noise[1])
+        self.rt_array = gaussian_mixture(rt_values, rt_params)
 
     def getNrSpectra(self):
         return self.n_scans
@@ -409,14 +423,32 @@ class SimulatedExperiment:  # pragma: no cover
             msg = "Invalid scan number."
             raise ValueError(msg)
         rt = self.rt[scan_number]
-        spint = self.rt_array[:, scan_number][:, np.newaxis] * self.mz_array
-        spint = spint.sum(axis=0)
+
+        # create a mz array for the current scan
+        if self.ft_noise is not None:
+            mz_noise = np.random.normal(scale=self.ft_noise[0])
+            mz_params = self.mz_params.copy()
+            mz_params[:, 0] += mz_noise
+        else:
+            mz_params = self.mz_params
+
+        if self.mode == "centroid":
+            mz = mz_params[:, 0]
+            spint = self.rt_array[:, scan_number] * mz_params[:, 1]
+        elif self.mode == "profile":
+            mz = self.mz
+            mz_array = gaussian_mixture(self.mz, mz_params)
+            spint = self.rt_array[:, scan_number][:, np.newaxis] * mz_array
+            spint = spint.sum(axis=0)
+        else:
+            raise ValueError("valid modes are centroid or profile")
+
         if self._noise_level is not None:
             np.random.seed(self._seeds[scan_number])
-            noise = np.random.normal(size=self.mz.size, scale=self._noise_level)
+            noise = np.random.normal(size=mz.size, scale=self._noise_level)
             noise -= noise.min()
             spint += noise
-        sp = SimulatedSpectrum(self.mz, spint, rt)
+        sp = SimulatedSpectrum(mz, spint, rt)
         return sp
 
 
