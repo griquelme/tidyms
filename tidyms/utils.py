@@ -24,8 +24,13 @@ find_closest(x, xq) : Finds the elements in xq closest to x.
 
 import numpy as np
 import pandas as pd
+from statsmodels.api import OLS, add_constant
+from statsmodels.stats.stattools import jarque_bera, durbin_watson
+from scipy.stats import spearmanr
 import os.path
 from typing import Optional, Union
+
+
 
 
 def gauss(x: np.ndarray, mu: float, sigma: float,
@@ -279,6 +284,35 @@ def detection_rate(df: pd.DataFrame, threshold: float = 0.0) -> pd.Series:
     # dr = df[df > threshold].count() / df.count()
     dr = (df > threshold).sum().astype(int) / df.shape[0]
     return dr
+
+
+def metadata_correlation(y, x, mode: str = "ols"):
+    """
+    Computes correlation metrics between two variables.
+
+    Parameters
+    ----------
+    y : array
+    x : array
+    mode: {"ols", "spearman"}
+        `ols` computes r squared, Jarque-Bera test p-value and Durwin-Watson
+        statistic from the ordinary least squares linear regression. `spearman`
+        computes the spearman rank correlation coefficient.
+
+    Returns
+    -------
+    dict
+
+    """
+    if mode == "ols":
+        ols = OLS(y, add_constant(x)).fit()
+        r2 = ols.rsquared
+        jb = jarque_bera(ols.resid)[1]  # Jarque Bera test p-value
+        dw = durbin_watson(ols.resid)   # Durwin Watson statistic
+        res = {"r2": r2, "DW": dw, "JB": jb}
+    else:
+        res = spearmanr(y, x)[0]
+    return res
 
 
 def _find_closest_sorted(x: np.ndarray,

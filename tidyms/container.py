@@ -292,6 +292,19 @@ class DataContainer(object):
             msg = "order values must be unique"
             raise ValueError(msg)
 
+    @property
+    def dilution(self) -> pd.Series:
+        try:
+            return self._sample_metadata.loc[self._sample_mask,
+                                             _sample_dilution]
+        except KeyError:
+            msg = "No dilution information available."
+            raise DilutionInformationError(msg)
+
+    @dilution.setter
+    def dilution(self, value):
+        self._sample_metadata.loc[self._sample_mask, _sample_dilution] = value
+
     def get_available_samples(self) -> pd.Series:
         """
         Returns the absolute path for each raw data file present in
@@ -386,6 +399,7 @@ class DataContainer(object):
         diagnostic[_qc_sample_type] = bool(self.mapping[_qc_sample_type])
         diagnostic[_blank_sample_type] = bool(self.mapping[_blank_sample_type])
         diagnostic[_study_sample_type] = bool(self.mapping[_study_sample_type])
+        diagnostic[_dilution_qc_type] = bool(self.mapping[_dilution_qc_type])
         try:
             diagnostic[_sample_order] = self.order.any()
         except RunOrderError:
@@ -790,6 +804,44 @@ class MetricMethods:
         variance = pd.Series(data=variance, index=pc_str)
         total_variance = data.var().sum()
         return scores, loadings, variance, total_variance
+
+    def correlation(self, field: str, mode: str = "ols",
+                    classes: Optional[List[str]] = None):
+        """
+        Correlates features with sample metadata properties.
+
+        Parameters
+        ----------
+        field : str
+            A column of `sample_metadata`. Must have a numeric dtype.
+        mode: {"ols", "spearman"}
+            `ols` computes the ordinary least squares linear regression.
+            Computes the Pearson r squared, p-value for the Jarque-Bera test and
+            the Durwin-Watson statistic for each feature. `spearman` computes
+            the spearman rank correlation coefficient for each feature
+        classes: List[str], optional
+            Compute the correlation on the selected classes only. If None,
+            computes the correlation on all samples.
+
+        Returns
+        -------
+        pandas.Series or pandas.DataFrame
+
+        """
+        if mode not in ["ols", "spearman"]:
+            msg = "Valid modes are `ols` or `spearman`"
+            raise ValueError(msg)
+
+        if classes is None:
+            x = self.__data.sample_metadata[field]
+            df = self.__data.data_matrix
+        else:
+            mask = self.__data.classes.isin(classes)
+            x = self.__data.sample_metadata.loc[mask, field]
+            df = self.__data.data_matrix[mask]
+        correlation_aux = lambda y: utils.metadata_correlation(y, x, mode)
+        res = df.apply(correlation_aux, result_type="expand")
+        return res
 
 
 class BokehPlotMethods:
@@ -1357,6 +1409,13 @@ class ClassNameError(Exception):
 class EmptyDataContainerError(Exception):
     """
     Error class raised when remove leaves an empty DataContainer.
+    """
+    pass
+
+
+class DilutionInformationError(Exception):
+    """
+    Error class raised when no dilution factor information has been provided.
     """
     pass
 

@@ -218,6 +218,16 @@ def validate_dratio_filter_params(params):
     validate(params, validator)
 
 
+def validate_dilution_filter_params(params):
+    schema = {
+        "min_corr": {"type": "number", "min": 0, "max": 1},
+        "plim": {"type": "number", "min": 0, "max": 1},
+        "mode": {"allowed": ["ols", "spearman"]}
+    }
+    validator = ValidatorWithLowerThan(schema)
+    validate(params, validator)
+
+
 def validate_variation_filter_params(params):
     schema = {
         "robust": {"type": "boolean"},
