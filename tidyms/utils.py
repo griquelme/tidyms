@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 from statsmodels.api import OLS, add_constant
 from statsmodels.stats.stattools import jarque_bera, durbin_watson
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, median_absolute_deviation
 import os.path
 from typing import Optional, Union
 
@@ -219,7 +219,7 @@ def robust_cv(df, fill_value: Optional[float] = None):
 
     # 1.4826 is used to estimate sigma in an unbiased way assuming a normal
     # distribution for each feature.
-    res = 1.4826 * df.mad() / df.median()
+    res = mad(df) / df.median()
     if fill_value is not None:
         res = res.fillna(fill_value)
     return res
@@ -230,8 +230,10 @@ def mad(df):
     Computes the median absolute deviation for each column. Fill missing
     values with zero.
     """
-    res = df.mad()
-    res = res.fillna(0)
+    if df.shape[0] == 1:
+        res = pd.Series(data=np.nan, index=df.columns)
+    else:
+        res = df.apply(median_absolute_deviation)
     return res
 
 
