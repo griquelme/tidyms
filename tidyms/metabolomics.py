@@ -289,6 +289,14 @@ def make_data_container(feature_data: pd.DataFrame, cluster: pd.Series,
     if fill_na:
         data_matrix = data_matrix.fillna(0)
 
+    # add samples without features as nan rows
+    missing_index = sample_metadata.index.difference(data_matrix.index)
+    # TODO: manage data inputting
+    missing = pd.DataFrame(data=0, index=missing_index,
+                           columns=data_matrix.columns)
+    data_matrix = data_matrix.append(missing)
+    data_matrix = data_matrix.loc[sample_metadata.index, :]
+
     dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
     return dc
 
