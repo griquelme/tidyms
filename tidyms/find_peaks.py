@@ -9,6 +9,7 @@ from scipy.special import erfc
 from typing import List, Optional
 from scipy.stats import median_absolute_deviation as mad
 
+
 class PeakLocation:
     """
     Holds peak information for peak picking and methods for peak parameter
@@ -55,7 +56,7 @@ class PeakLocation:
 
     def get_width(self, x, y, baseline):
         height = (y[self.start:(self.end + 1)] -
-                   baseline[self.start:(self.end + 1)])
+                  baseline[self.start:(self.end + 1)])
         area = cumtrapz(height, x[self.start:(self.end + 1)])
         relative_area = area / area[-1]
         start, end = self.start + np.searchsorted(relative_area, [0.025, 0.975])
@@ -228,11 +229,10 @@ def _find_baseline_points(x, noise):
     ext = np.sort(ext)
 
     # estimate the probability of an interval to be only noise
-    noise_proba = _estimate_noise_proba(x, noise, smoothed, local_min,
-                                        local_max, ext)
+    noise_probability = _estimate_noise_probability(noise, smoothed, ext)
     noise_threshold = 0.05
     # creates a vector with indices where baseline was found
-    baseline_index = _build_baseline_index(x, noise, noise_proba,
+    baseline_index = _build_baseline_index(x, noise, noise_probability,
                                            noise_threshold, ext, local_min)
     return baseline_index
 
@@ -244,20 +244,20 @@ def _smooth(x):
     return smoothed
 
 
-def _estimate_noise_proba(x, noise, smoothed, local_min, local_max, ext):
+def _estimate_noise_probability(noise, smoothed, ext):
     # compute the difference at the start and end of each monotonic interval
     ext_reshape = np.vstack([ext,
                              np.roll(ext, -1)]).T.reshape(ext.size * 2)[:-2]
     delta = (smoothed[np.roll(ext, -1)] - smoothed[ext])[:-1]
     # noise level in each interval
     delta_noise = np.sqrt(np.add.reduceat(noise ** 2, ext_reshape)[::2])
-    noise_proba = erfc(np.abs(delta) / delta_noise)
-    return noise_proba
+    noise_probability = erfc(np.abs(delta) / delta_noise)
+    return noise_probability
 
 
-def _build_baseline_index(x, noise, noise_proba, noise_threshold,
+def _build_baseline_index(x, noise, noise_probability, noise_threshold,
                           ext, local_min):
-    is_signal = noise_proba < noise_threshold
+    is_signal = noise_probability < noise_threshold
     is_signal = is_signal | np.roll(is_signal, 1) | np.roll(is_signal, -1)
     baseline_index = list()
 
@@ -478,16 +478,16 @@ def _filter_prominence(y: np.array, noise: np.array, baseline: np.array,
             is_last_valid_overlap = is_overlap
             new_peak_list.append(left_peak)
         elif is_last_valid_overlap:
-            _merge_peaks(last_valid_peak, left_peak, y)
+            _merge_peaks(last_valid_peak, left_peak)
             # fix_overlap2(y, last_valid_peak, right_peak)
         elif is_overlap:
-            _merge_peaks(right_peak, left_peak, y)
+            _merge_peaks(right_peak, left_peak)
             is_last_valid_overlap = False
         left_peak = right_peak
     return new_peak_list
 
 
-def _merge_peaks(p1: PeakLocation, p2: PeakLocation, y: np.ndarray):
+def _merge_peaks(p1: PeakLocation, p2: PeakLocation):
     p1.start = min(p1.start, p2.start)
     p1.end = max(p1.end, p2.end)
 
