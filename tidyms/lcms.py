@@ -978,7 +978,7 @@ class _RoiProcessor:
             finished_roi = self.temp_roi_dict.pop(roi_ind)
             if is_valid_roi[ind]:
                 roi = tmp_roi_to_roi(finished_roi, rt, mode=self.mode)
-                roi._extend()
+                # roi._extend()
                 self.roi.append(roi)
         if targeted:
             self.n_missing[is_completed] = 0
