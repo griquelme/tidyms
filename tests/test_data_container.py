@@ -94,7 +94,7 @@ def test_mapping_setter(data_container_with_order):
                "blank": ["SV"]}
     expected_mapping = {"sample": ["healthy", "disease"],
                         "blank": ["SV"], "qc": None, "zero": None,
-                        "suitability": None}
+                        "suitability": None, "dqc": None}
     data.mapping = mapping
     assert data.mapping == expected_mapping
 

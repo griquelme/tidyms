@@ -206,7 +206,7 @@ def test_robust_cv_single_row_df(single_row_df):
 def test_robust_cv_valid_data(random_df):
     data = random_df
     cv = utils.robust_cv(data, fill_value=0)
-    cv_test = 1.4826 * data.mad() / data.median()
+    cv_test = utils.mad(data) / data.median()
     cv_test = cv_test.fillna(0)
     assert np.isclose(cv, cv_test).all()
 

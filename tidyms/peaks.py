@@ -453,16 +453,16 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
 
     Notes
     -----
-    Peaks are detected using the CWT algorithm described in [1]. The optimum
+    Peaks are detected using the CWT algorithm described in [DP06]. The optimum
     scale where each peak is detected is the local maximum at the lowest scale
     in the ridge line. If no local maximum was found, the scale with the maximum
     coefficient is chosen. After finding a peak, the extension of the peak
-    is found as described in [2], by finding the nearest local minimum at both
-    sides of the peak, using the wavelet coefficients with the best scale. A
-    peak is represented then by three indices specifying the peak location, peak
-    start and peak end. These three values, together with baseline and noise
-    estimations are used to estimate peak parameters. If the mode used is
-    'default`, the peak parameters are defined as follows:
+    is found by finding the nearest local minimum at both sides of the peak,
+    using the wavelet coefficients with the best scale. A peak is represented
+    then by three indices specifying the peak location, peak start and peak end.
+    These three values, together with baseline and noise estimations are used
+    to estimate peak parameters. If the mode used is 'default`, the peak
+    parameters are defined as follows:
 
         baseline :
             A baseline is built using y values where no peak was detected. These
@@ -516,13 +516,11 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, widths: np.ndarray,
     References
     ----------
 
-    ..  [1] Pan Du, Warren A. Kibbe, Simon M. Lin, Improved peak detection in
+    .. [DP06] Pan Du, Warren A. Kibbe, Simon M. Lin, Improved peak detection in
         mass spectrum by incorporating continuous wavelet transform-based
         pattern matching, Bioinformatics, Volume 22, Issue 17, 1 September 2006,
         Pages 2059–2065, https://doi.org/10.1093/bioinformatics/btl355
-    ..  [2] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-        504 (2008). https://doi.org/10.1186/1471-2105-9-504
+
     """
 
     # Convert to uniform sampling

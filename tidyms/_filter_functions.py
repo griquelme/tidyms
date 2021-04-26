@@ -70,7 +70,7 @@ def average_replicates(data: pd.DataFrame, sample_id: pd.Series,
 
 def correct_blanks(df: pd.DataFrame, classes: pd.Series,
                    corrector_classes: List[str], process_classes: List[str],
-                   factor: float == 1,
+                   factor: float = 1.0,
                    mode: Union[str, Callable] = "mean",
                    process_blanks: bool = True) -> pd.DataFrame:
     """

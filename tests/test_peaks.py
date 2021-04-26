@@ -94,5 +94,4 @@ def test_find_centroids():
     centroid, _, _ = ms.peaks.find_centroids(x, y, 10, 0.01)
 
     # test differences between peak mean and centrois
-    print(np.abs(centroid - x_peaks))
     assert (np.abs(centroid - x_peaks) < 0.0005).all()

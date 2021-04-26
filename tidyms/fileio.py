@@ -34,6 +34,7 @@ from . import lcms
 from . import validation
 from . import utils
 import pickle
+import requests
 
 
 def read_pickle(path: Union[str, BinaryIO]) -> DataContainer:
@@ -117,8 +118,8 @@ def read_mzmine(data: Union[str, TextIO],
         csv file generated with MZMine.
     sample_metadata : str, file or DataFrame
         csv file with sample metadata. The following columns are required:
-            sample : the same sample names used in `data`
-            class : the sample classes
+        * sample : the same sample names used in `data`
+        * class : the sample classes
         Columns with run order and analytical batch information are optional.
         Must be names "order" and "batch"
 
@@ -206,7 +207,7 @@ def read_xcms(data_matrix: str, feature_metadata: str,
     # TODO : include information from CAMERA package
 
     # sample_metadata
-    sm = pd.read_csv(sample_metadata, sep=sep, index_col="sample")
+    sm = pd.read_csv(sample_metadata, sep=sep, index_col=0)
     sm.index.name = "sample"
     sm = sm.rename(columns={class_column: "class"})
     dc = DataContainer(dm, fm, sm)
@@ -385,7 +386,7 @@ class MSData:
                 window = 0.05
             elif self.instrument == "orbitrap":
                 window = 0.005
-            params["window"] = window
+        params["window"] = window
 
         rt, spint = lcms.make_chromatograms(self.reader, mz, **params)
         chromatograms = list()
@@ -541,7 +542,7 @@ class MSData:
         -----
 
         Feature detection is done in three steps using the algorithm described
-        in [1]:
+        in [TR08]_:
 
         1.  Regions of interest (ROI) search: ROI are searched in the data. Each
             ROI consists in m/z traces where a chromatographic peak may be
@@ -563,12 +564,11 @@ class MSData:
 
         References
         ----------
-        ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+        .. [TR08] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
             feature detection for high resolution LC/MS. BMC Bioinformatics 9,
             504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
         """
-
         if self.ms_mode != "centroid":
             msg = "Data must be in centroid mode for feature detection."
             raise ValueError(msg)
@@ -587,114 +587,62 @@ class MSData:
         return roi_list, feature_data
 
 
-# def _get_datasets_path(dataset_type: str = "matrix") -> List[str]:
-#     """
-#     List full path to available data sets.
-#
-#     Parameters
-#     ----------
-#     dataset_type : {"matrix", "raw"}
-#         "matrix" shows available data in matrix form. "raw" lists mzML data
-#         files.
-#
-#     Returns
-#     -------
-#     datasets_path: list[str]
-#     """
-#     module_fullname = __file__
-#     project_path, _ = os.path.split(module_fullname)
-#     project_path, _ = os.path.split(project_path)
-#     data_path = os.path.join(project_path, "datasets", dataset_type)
-#     datasets = os.listdir(data_path)
-#     dataset_path = [os.path.join(data_path, x) for x in datasets]
-#     return dataset_path
-#
-#
-# def get_available_datasets(dataset_type: str = "matrix") -> List[str]:
-#     """
-#     List available datasets
-#
-#     Parameters
-#     ----------
-#     dataset_type : {"matrix", "raw"}
-#         "matrix" shows available data in matrix form. "raw" lists mzML data
-#         files.
-#
-#     Returns
-#     -------
-#     datasets: list[str]
-#     """
-#     dataset_path = _get_datasets_path(dataset_type)
-#
-#     datasets = [utils.get_filename(x) for x in dataset_path]
-#     return datasets
+def _get_cache_path() -> str:
+    cache_path = os.path.join("~", ".tidyms")
+    cache_path = os.path.expanduser(cache_path)
+    return cache_path
 
 
-def _read_csv_aux(name: str, test_data: bool, **kwargs):
+def list_available_datasets(hide_test_data: bool = True) -> List[str]:
     """
-    uses pandas read_csv and return None if the csv file is empty
-    """
-    if test_data:
-        data = open(name)
-    else:
-        data = pd.read_csv(name, index_col=0, **kwargs)
-    return data
-
-
-def _load_csv_files(name: str, cache: bool = True, test_files: bool = False,
-                    **kwargs):
-    """
-    Load csv files into a DataFrame.
+    List available example datasets
 
     Parameters
     ----------
-    name : str
-        name of an available dataset.
-    cache : bool
-        If True tries to read the dataset from a local cache.
-    test_files: bool
-        If True, load data from test directory
-    kwargs: additional parameters to pass to the Pandas read_csv function
+    hide_test_data : bool
 
     Returns
     -------
-    data_matrix : DataFrame
-    feature_metadata : DataFrame
-    sample_metadata : DataFrame
+    datasets: List[str]
     """
+    repo_url = "https://raw.githubusercontent.com/griquelme/tidyms-data/master/"
+    dataset_url = repo_url + "datasets.txt"
+    r = requests.get(dataset_url)
+    datasets = r.text.split()
+    if hide_test_data:
+        datasets = [x for x in datasets if not x.startswith("test")]
+    return datasets
 
-    if test_files:
-        data_path = "test-data"
-    else:
-        data_path = "datasets"
 
-    cache_path = os.path.join("~", ".tidyms", data_path)
-    cache_path = os.path.expanduser(cache_path)
-    url_path = ""
+def _check_dataset_name(name: str):
+    available = list_available_datasets(False)
+    if name not in available:
+        msg = "Invalid dataste name. Available datasets are: {}"
+        msg = msg.format(available)
+        raise ValueError(msg)
 
+
+def _download_dataset(name: str):
+    """Download a dataset from github"""
+    _check_dataset_name(name)
+    cache_path = _get_cache_path()
     dataset_path = os.path.join(cache_path, name)
-    sample_path = os.path.join(dataset_path, "sample.csv")
-    feature_path = os.path.join(dataset_path, "feature.csv")
-    data_matrix_path = os.path.join(dataset_path, "data.csv")
-
-    is_file_found = (os.path.exists(sample_path) and
-                     os.path.exists(feature_path) and
-                     os.path.exists(data_matrix_path))
-
-    if not (cache and is_file_found):
-        # TODO: complete when data is uploaded to Github
-        pass
-
-    sample_metadata = _read_csv_aux(sample_path, test_files, **kwargs)
-    feature_metadata = _read_csv_aux(feature_path, test_files, **kwargs)
-    data_matrix = _read_csv_aux(data_matrix_path, test_files, **kwargs)
-
-    return data_matrix, feature_metadata, sample_metadata
+    if not os.path.exists(dataset_path):
+        os.makedirs(dataset_path)
+    repo_url = "https://raw.githubusercontent.com/griquelme/tidyms-data/master/"
+    dataset_url = repo_url + "/" + name
+    files = ["feature.csv", "sample.csv", "data.csv"]
+    for f in files:
+        file_url = dataset_url + "/" + f
+        r = requests.get(file_url)
+        file_path = os.path.join(dataset_path, f)
+        with open(file_path, "w") as fin:
+            fin.write(r.text)
 
 
-def load_dataset(name: str, cache: bool = True) -> DataContainer:
+def load_dataset(name: str, cache: bool = True, **kwargs) -> DataContainer:
     """
-    Load example datasets into a DataContainer. Available datasets can be seen
+    load example dataset into a DataContainer. Available datasets can be seen
     using the list_datasets function.
 
     Parameters
@@ -703,11 +651,31 @@ def load_dataset(name: str, cache: bool = True) -> DataContainer:
         name of an available dataset.
     cache : bool
         If True tries to read the dataset from a local cache.
+    kwargs: additional parameters to pass to the Pandas read_csv function
 
     Returns
     -------
-    dataset : DataContainer
+    data_matrix : DataFrame
+    feature_metadata : DataFrame
+    sample_metadata : DataFrame
+
     """
-    csv_files = _load_csv_files(name, cache)
-    dataset = DataContainer(*csv_files)
+    cache_path = _get_cache_path()
+    dataset_path = os.path.join(cache_path, name)
+    sample_path = os.path.join(dataset_path, "sample.csv")
+    feature_path = os.path.join(dataset_path, "feature.csv")
+    data_matrix_path = os.path.join(dataset_path, "data.csv")
+
+    is_data_found = (os.path.exists(sample_path) and
+                     os.path.exists(feature_path) and
+                     os.path.exists(data_matrix_path))
+
+    if not (cache and is_data_found):
+        _download_dataset(name)
+        pass
+
+    sample_metadata = pd.read_csv(sample_path, index_col=0, **kwargs)
+    feature_metadata = pd.read_csv(feature_path, index_col=0, **kwargs)
+    data_matrix = pd.read_csv(data_matrix_path, index_col=0, **kwargs)
+    dataset = DataContainer(data_matrix, feature_metadata, sample_metadata)
     return dataset

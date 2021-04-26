@@ -388,17 +388,17 @@ using the :py:meth:`tidyms.DataContainer.reset`
 References
 ----------
 
-..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+.. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
     feature detection for high resolution LC/MS. BMC Bioinformatics 9,
     504 (2008). https://doi.org/10.1186/1471-2105-9-504
-..  [2] Smith, R., Ventura, D., Prince, J.T., LC-MS alignment in theory and
+.. [2] Smith, R., Ventura, D., Prince, J.T., LC-MS alignment in theory and
     practice: a comprehensive algorithmic review, Briefings in Bioinformatics
     16, Issue 1, January 2015, Pages 104–117, https://doi.org/10.1093/bib/bbt080
-..  [3] W B Dunn *et al*, "Procedures for large-scale metabolic profiling of
+.. [3] W B Dunn *et al*, "Procedures for large-scale metabolic profiling of
     serum and plasma using gas chromatography and liquid chromatography
     coupled to mass spectrometry", Nature Protocols volume 6, pages
     1060–1083 (2011).
-..  [4] D Broadhurst *et al*, "Guidelines and considerations for the use of
+.. [4] D Broadhurst *et al*, "Guidelines and considerations for the use of
     system suitability and quality control samples in mass spectrometry assays
     applied in untargeted clinical metabolomic studies.", Metabolomics,
     2018;14(6):72. doi: 10.1007/s11306-018-1367-3

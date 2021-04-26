@@ -20,6 +20,7 @@ from . import find_peaks
 import bokeh.plotting
 from bokeh.palettes import Set3
 from collections import namedtuple
+import warnings
 
 from .utils import find_closest
 
@@ -46,9 +47,12 @@ def reader(path: str, on_disc: bool = True):
         try:
             exp_reader = pyopenms.OnDiscMSExperiment()
             exp_reader.openFile(path)
+            # this checks if OnDiscMSExperiment can be used else switch
+            # to MSExperiment
+            exp_reader.getSpectrum(0)
         except RuntimeError:
             msg = "{} is not an indexed mzML file, switching to MSExperiment"
-            print(msg.format(path))
+            warnings.warn(msg.format(path))
             exp_reader = pyopenms.MSExperiment()
             pyopenms.MzMLFile().load(path, exp_reader)
     else:
@@ -370,6 +374,29 @@ def get_roi_params(separation: str = "uplc", instrument: str = "qtof"):
     return roi_params
 
 
+def _get_find_centroid_params(instrument: str):
+    """
+    Set default parameters to find_centroid method using instrument information.
+
+    Parameters
+    ----------
+    instrument : {"qtof", "orbitrap"}
+
+    Returns
+    -------
+    params : dict
+
+    """
+    params = {"snr": 10}
+    if instrument == "qtof":
+        md = 0.01
+    else:
+        # valid values for instrument are qtof or orbitrap
+        md = 0.005
+    params["min_distance"] = md
+    return params
+
+
 def _find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
                                     q: int, n_isotopes: int,
                                     tol: float):
@@ -479,24 +506,35 @@ class Chromatogram:
         mode : {"uplc", "hplc"}, optional
             used to set default parameters in peak picking. If None, `mode` is
             set to uplc.
+
         """
         if mode is None:
-            self.mode = "uplc"
-        elif mode in ["uplc", "hplc"]:
-            self.mode = mode
-        else:
-            msg = "mode must be None, uplc or hplc"
-            raise ValueError(msg)
+            mode = "uplc"
+        self.mode = mode
 
         self.rt = rt
         self.spint = spint
         self.peaks = None
 
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        valid_values = ["uplc", "hplc"]
+        if value in valid_values:
+            self._mode = value
+        else:
+            msg = "mode must be one of {}".format(valid_values)
+            raise ValueError(msg)
+
+
     def find_peaks(self, method: str = "cwt",
-                   params: Optional[dict] = None) -> dict:
+               params: Optional[dict] = None) -> dict:
         """
         Find peaks with the modified version of the cwt algorithm described in
-        the CentWave algorithm [1]. Peaks are added to the peaks
+        the centWave algorithm. Peaks are added to the peaks
         attribute of the Chromatogram object.
 
         Parameters
@@ -516,12 +554,6 @@ class Chromatogram:
         --------
         peaks.detect_peaks : peak detection using the CWT algorithm.
         lcms.get_lc_peak_params : set default parameters for pick_cwt.
-
-        References
-        ----------
-        ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-            feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-            504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
         """
         default_params = get_lc_peak_params(self.mode, method)
@@ -560,6 +592,7 @@ class Chromatogram:
         Returns
         -------
         bokeh Figure
+
         """
         default_line_params = {"line_width": 1, "line_color": "black",
                                "alpha": 0.8}
@@ -631,14 +664,23 @@ class MSSpectrum:
         self.peaks = None
 
         if mode is None:
-            self.mode = "qtof"
-        elif mode in ["qtof", "orbitrap"]:
-            self.mode = mode
+            mode = "qtof"
+        self.mode = mode
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        valid_values = ["qtof", "orbitrap"]
+        if value in valid_values:
+            self._mode = value
         else:
-            msg = "mode must be qtof or orbitrap"
+            msg = "mode must be one of {}".format(valid_values)
             raise ValueError(msg)
 
-    def find_centroids(self, snr: float = 10,
+    def find_centroids(self, snr: Optional[float] = None,
                        min_distance: Optional[float] = None
                        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         r"""
@@ -649,9 +691,9 @@ class MSSpectrum:
 
         Parameters
         ----------
-        snr : positive number
+        snr : positive number, optional
             Minimum signal to noise ratio of the peaks. Overwrites values
-            set by mode.
+            set by mode. Default value is 10
         min_distance : positive number, optional
             Minimum distance between consecutive peaks. If None, sets the value
             to 0.01 if the `mode` attribute is qtof. If the `mode` is orbitrap,
@@ -683,18 +725,13 @@ class MSSpectrum:
         peak. If two peaks are closer than `min_distance`, the peaks are merged.
 
         """
-        params = {"snr": snr}
+        params = _get_find_centroid_params(self.mode)
 
         if min_distance is not None:
             params["min_distance"] = min_distance
-        else:
-            if self.mode == "qtof":
-                md = 0.01
-            elif self.mode == "orbitrap":
-                md = 0.005
-            else:
-                raise ValueError
-            params["min_distance"] = md
+
+        if snr is not None:
+            params["snr"] = snr
 
         centroids, area, centroid_index = \
             peaks.find_centroids(self.mz, self.spint, **params)
@@ -807,7 +844,17 @@ class Roi(Chromatogram):
     def fill_nan(self):
         """
         fill missing intensity values using linear interpolation.
+
         """
+
+        # if the first or last values are missing, assign an intensity value
+        # of zero. This prevents errors in the interpolation and makes peak
+        # picking to work better.
+        if np.isnan(self.spint[0]):
+            self.spint[0] = 0
+        if np.isnan(self.spint[-1]):
+            self.spint[-1] = 0
+
         missing = np.isnan(self.spint)
         interpolator = interp1d(self.rt[~missing], self.spint[~missing])
         mz_mean = np.nanmean(self.mz)
@@ -822,14 +869,11 @@ class Roi(Chromatogram):
         -------
         mean_mz : array
         mz_std : array
+
         """
         mz_std = np.zeros(len(self.peaks))
         mz_mean = np.zeros(len(self.peaks))
         for k, peak in enumerate(self.peaks):
-            # missing = np.isnan(self.mz[peak.start:peak.end + 1])
-            # print("wat")
-            # peak_mz = self.mz[peak.start:peak.end + 1][~missing]
-            # peak_spint = self.spint[peak.start:peak.end + 1][~missing]
             peak_mz = self.mz[peak.start:peak.end + 1]
             peak_spint = self.spint[peak.start:peak.end + 1]
             mz_mean[k] = np.average(peak_mz, weights=peak_spint)
@@ -1113,6 +1157,8 @@ def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
                 remove = np.arange(index, index + count)
                 remove = np.setdiff1d(remove, closest)
                 rm_index.extend(remove)
+            # fix rm_index to full mz2 size
+            rm_index = np.where(match_mask)[0][rm_index]
             no_match_mask[rm_index] = True
             mz_match[first_index_index] = mz_replace
             sp_match[first_index_index] = spint_replace
@@ -1157,6 +1203,7 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
              ) -> List[Roi]:
     """
     Make Region of interest from MS data in centroid mode.
+    Used by MSData to as the first step of the centWave algorithm.
 
     Parameters
     ----------
@@ -1208,11 +1255,9 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
 
     Notes
     -----
-
-    ROI are created as described in [1]_, with some modifications. To create a
-    ROI, m/z values in consecutive scans are connected if they are within the
-    `tolerance`. If there's more than one possible m/z value to connect in the
-    next scan, two different strategies are available, using the
+    To create a ROI, m/z values in consecutive scans are connected if they are
+    within the tolerance`. If there's more than one possible m/z value to
+    connect in the next scan, two different strategies are available, using the
     `multiple_match` parameter: If "closest" is used, then m/z values are
     matched to the closest ones, and the others are used to create new ROI. If
     "reduce" is used, then all values within the tolerance are combined. m/z and
@@ -1228,12 +1273,15 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
 
     If the two conditions are meet, the ROI is added to the list of valid ROI.
 
+<<<<<<< HEAD
     References
     ----------
     .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
         feature detection for high resolution LC/MS. BMC Bioinformatics 9,
         504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
+=======
+>>>>>>> master
     """
     if start is None:
         start = 0
@@ -1319,3 +1367,5 @@ def _detect_roi_peaks(roi: List[Roi], method: str = "cwt",
     peak_params["peak index"] = peak_index_list
     peak_params = peak_params.dropna(axis=0)
     return peak_params
+
+# TODO: test ROI, test roi processor, test make roi

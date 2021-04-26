@@ -1,5 +1,5 @@
 PACKAGE_NAME = "tidyms"
-VERSION = "0.1"
+VERSION = "0.1.1"
 LICENSE = 'BSD (3-clause)'
 AUTHOR = "Bioanalytical Mass Spectrometry Group at CIBION-CONICET"
 AUTHOR_EMAIL = "griquelme.chm@gmail.com"
@@ -36,6 +36,7 @@ INSTALL_REQUIRES = [
     'cerberus',
     'seaborn',
     'pytest>=5.0'
+    'openpyxl>=3.0'
 ]
 
 if __name__ == "__main__":
@@ -60,4 +61,5 @@ if __name__ == "__main__":
           classifiers=CLASSIFIERS,
           packages=PACKAGES,
           python_requires=PYTHON_REQUIRES,
-          install_requires=INSTALL_REQUIRES)
+          install_requires=INSTALL_REQUIRES,
+          include_package_data=True)

@@ -588,6 +588,76 @@ class VariationFilter(Processor):
         return get_outside_bounds_index(variation, lb, ub)
 
 
+@register
+class DilutionFilter(Processor):
+    """
+    Filter features based on the correlation with a dilution factor.
+
+    In order to use this filter, the dilution column must be specified in the
+    sample_metadata of the DataContainer. Also, the QCs used for the
+    analysis must be specified under the `dqc` key in the DataContainer mapping.
+
+    Parameters
+    ----------
+    min_corr : number between 0 and 1
+        Lower bound for the correlation coefficient.
+    plim : number between 0 and 1
+        p-value limit for the Jarque-Bera test. Used only when mode is `ols`.
+    mode : {"ols", "spearman"}
+        `ols` computes the ordinary least squares linear regression.The r
+        squared from the fit and the p-value from the Jarque-Bera test are used
+        to evaluate the linearity of the signal with the dilution. Features with
+        correlation values lower than `min_corr` or p-values lower than `plim`
+        are removed. `spearman` compares the correlation threshold with the
+        spearman rank correlation coefficient.
+    verbose: bool
+        If True, prints a message
+
+    Notes
+    -----
+    Correlation with the dilution is a measure of the linearity of the response
+    of the feature in the experimental conditions [2].
+
+    References
+    ----------
+    ..  [2] Lewis MR, *et al*, Development and Application of Ultra-Performance
+        Liquid Chromatography-TOF MS for Precision Large Scale Urinary Metabolic
+        Phenotyping. Anal Chem. (2016), 88(18):9004-13.
+        doi: 10.1021/acs.analchem.6b01481
+
+    """
+    def __init__(self, min_corr: float = 0.8, plim: float = 0.1,
+                 mode: str = "ols", verbose: bool = False):
+        """
+        Constructor of the DilutionFilter.
+        """
+        requirements = {"empty": False, "missing": False,
+                        _dilution_qc_type: True}
+        super(DilutionFilter, self).__init__(axis="features", mode="filter",
+                                             verbose=verbose,
+                                             requirements=requirements)
+        self.name = "Dilution Filter"
+        self.params["min_corr"] = min_corr
+        self.params["plim"] = plim
+        self.params["mode"] = mode
+        self._default_process = _qc_sample_type
+        validation.validate_dilution_filter_params(self.params)
+
+    def func(self, dc: DataContainer):
+        mode = self.params["mode"]
+        min_corr = self.params["min_corr"]
+        plim = self.params["plim"]
+        corr = dc.metrics.correlation("dilution", mode=mode,
+                                      classes=dc.mapping[_dilution_qc_type])
+        if mode == "ols":
+            r2_ind = get_outside_bounds_index(corr.loc["r2", :], min_corr, 1)
+            jb_ind = get_outside_bounds_index(corr.loc["JB", :], plim, 1)
+            rm_ind = r2_ind.union(jb_ind)
+        else:
+            rm_ind = get_outside_bounds_index(corr, min_corr, 1)
+        return rm_ind
+
+
 class _TemplateValidationFilter(Processor):
     """
     Checks that process samples in each batch are surrounded by corrector

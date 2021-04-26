@@ -33,7 +33,6 @@ def detect_features(path_list: List[str], separation: str = "uplc",
 
     Samples are analyzed one at a time using the detect_features method
     of MSData. See this method for a detailed explanation of each parameter.
-    Feature detection is done using the method described in [1]
 
     Parameters
     ----------
@@ -91,12 +90,6 @@ def detect_features(path_list: List[str], separation: str = "uplc",
     See Also
     --------
     fileio.MSData : Object used to analyze each sample.
-
-    References
-    ----------
-    ..  [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-            feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-            504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
     """
     # TODO : check memory for large data sets ( ~ 1000 samples)
@@ -295,6 +288,14 @@ def make_data_container(feature_data: pd.DataFrame, cluster: pd.Series,
     data_matrix.columns.name = "feature"
     if fill_na:
         data_matrix = data_matrix.fillna(0)
+
+    # add samples without features as nan rows
+    missing_index = sample_metadata.index.difference(data_matrix.index)
+    # TODO: manage data inputting
+    missing = pd.DataFrame(data=0, index=missing_index,
+                           columns=data_matrix.columns)
+    data_matrix = data_matrix.append(missing)
+    data_matrix = data_matrix.loc[sample_metadata.index, :]
 
     dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
     return dc

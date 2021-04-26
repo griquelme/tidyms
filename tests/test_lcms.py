@@ -1,6 +1,6 @@
 from tidyms import lcms
 from tidyms import validation
-from tidyms.utils import SimulatedExperiment
+from tidyms import utils
 import numpy as np
 import pytest
 
@@ -27,8 +27,8 @@ def simulated_experiment():
     rt_params = rt_params.T
 
     noise_level = 1
-    simexp = SimulatedExperiment(mz, rt, mz_params, rt_params,
-                                 noise=noise_level)
+    simexp = utils.SimulatedExperiment(mz, rt, mz_params, rt_params,
+                                      noise=noise_level, mode="profile")
     return simexp
 
 
@@ -121,3 +121,131 @@ def test_get_ms_cwt_params():
     validation.validate_cwt_peak_picking_params(params)
     with pytest.raises(ValueError):
         params = lcms.get_ms_cwt_params("invalid_mode")
+
+
+def test_get_roi_params():
+    func_params = [("uplc", "qtof"), ("uplc", "orbitrap"), ("hplc", "qtof"),
+              ("hplc", "orbitrap")]
+    n_sp = 100  # dummy value for the validator
+    for separation, instrument in func_params:
+        params = lcms.get_roi_params(separation, instrument)
+        validation.validate_make_roi_params(n_sp, params)
+    assert True
+
+
+def test_get_roi_params_bad_separation():
+    with pytest.raises(ValueError):
+        lcms.get_roi_params("bad-value", "qtof")
+
+
+def test_get_roi_params_bad_instrument():
+    with pytest.raises(ValueError):
+        lcms.get_roi_params("uplc", "bad-value")
+
+
+# Test Chromtatogram object
+
+@pytest.fixture
+def chromatogram_data():
+    rt = np.arange(200)
+    spint = utils.gauss(rt, 50, 2, 100)
+    return rt, spint
+
+def test_chromatogram_creation(chromatogram_data):
+    # test building a chromatogram with default mode
+    rt, spint = chromatogram_data
+    chromatogram = lcms.Chromatogram(rt, spint)
+    assert chromatogram.mode == "uplc"
+
+def test_chromatogram_creation_with_mode(chromatogram_data):
+    rt, spint = chromatogram_data
+    chromatogram = lcms.Chromatogram(rt, spint, mode="hplc")
+    assert chromatogram.mode == "hplc"
+
+
+def test_chromatogram_creation_invalid_mode(chromatogram_data):
+    rt, spint = chromatogram_data
+    with pytest.raises(ValueError):
+        chromatogram = lcms.Chromatogram(rt, spint, mode="invalid-mode")
+
+
+def test_chromatogram_find_peaks(chromatogram_data):
+    chromatogram = lcms.Chromatogram(*chromatogram_data)
+    chromatogram.find_peaks()
+    assert len(chromatogram.peaks) == 1
+
+
+def test_chromatogram_find_peaks_custom_params(chromatogram_data):
+    chromatogram = lcms.Chromatogram(*chromatogram_data)
+    # a min_width greater than the width of the peak is used
+    # the peak list should be empty
+    peak_params = {"min_width": 120}
+    chromatogram.find_peaks(cwt_params=peak_params)
+    assert len(chromatogram.peaks) == 0
+
+
+# Test MSSPectrum
+
+@pytest.fixture
+def ms_data():
+    mz = np.linspace(100, 150, 10000)
+    spint = utils.gauss(mz, 125, 0.005, 100)
+    return mz, spint
+
+
+def test_ms_spectrum_creation(ms_data):
+    sp = lcms.MSSpectrum(*ms_data)
+    assert  sp.mode == "qtof"
+
+
+def test_ms_spectrum_creation_with_mode(ms_data):
+    mode = "orbitrap"
+    sp = lcms.MSSpectrum(*ms_data, mode=mode)
+    assert sp.mode == mode
+
+
+def test_ms_spectrum_creation_invalid_mode(ms_data):
+    with pytest.raises(ValueError):
+        mode = "invalid-mode"
+        sp = lcms.MSSpectrum(*ms_data, mode=mode)
+
+
+def test_find_centroids_qtof(ms_data):
+    sp = lcms.MSSpectrum(*ms_data)
+    # the algorithm is tested on test_peaks.py
+    sp.find_centroids()
+    assert True
+
+
+def test_find_centroids_non_default_parameters(ms_data):
+    sp = lcms.MSSpectrum(*ms_data, mode="orbitrap")
+    sp.find_centroids(snr=10, min_distance=0.003)
+    assert True
+
+
+# Test ROI
+
+@pytest.fixture
+def roi_data():
+    rt = np.arange(200)
+    spint = utils.gauss(rt, 50, 2, 100)
+    mz = np.random.normal(loc=150.0, scale=0.001, size=spint.size)
+    # add some nan values
+    nan_index = [0, 50, 100, 199]
+    spint[nan_index] = np.nan
+    mz[nan_index] = np.nan
+
+    return rt, mz, spint
+
+def test_roi_creation(roi_data):
+    rt, mz, spint = roi_data
+    lcms.Roi(spint, mz, rt, 50)
+    assert True
+
+
+def test_fill_nan(roi_data):
+    rt, mz, spint = roi_data
+    roi = lcms.Roi(spint, mz, rt, 50)
+    roi.fill_nan()
+    has_nan = np.any(np.isnan(roi.mz) & np.isnan(roi.spint))
+    assert not has_nan

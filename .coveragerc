@@ -1,3 +1,8 @@
 [run]
 omit =
     tidyms/validation.py
+
+[report]
+exclude_lines =
+    # ignore plotting functions in the reports
+    def plot
