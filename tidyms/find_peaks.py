@@ -6,8 +6,8 @@ from scipy.interpolate import interp1d
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
 from scipy.special import erfc
-from typing import List, Optional
 from scipy.stats import median_absolute_deviation as mad
+from typing import List, Optional
 
 
 class PeakLocation:
