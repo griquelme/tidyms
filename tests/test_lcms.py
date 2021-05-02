@@ -180,7 +180,7 @@ def test_chromatogram_find_peaks_custom_params(chromatogram_data):
     # a min_width greater than the width of the peak is used
     # the peak list should be empty
     peak_params = {"min_width": 120}
-    chromatogram.find_peaks(cwt_params=peak_params)
+    chromatogram.find_peaks(params=peak_params, method="cwt")
     assert len(chromatogram.peaks) == 0
 
 
@@ -219,7 +219,7 @@ def test_find_centroids_qtof(ms_data):
 
 def test_find_centroids_non_default_parameters(ms_data):
     sp = lcms.MSSpectrum(*ms_data, mode="orbitrap")
-    sp.find_centroids(snr=10, min_distance=0.003)
+    sp.find_centroids(min_snr=10, min_distance=0.003)
     assert True
 
 

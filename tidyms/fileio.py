@@ -476,8 +476,8 @@ class MSData:
         return rt
 
     def detect_features(self, roi_params: Optional[dict] = None,
-                        method: str = "cwt",
-                        peaks_params: Optional[dict] = None
+                        method: str = "max",
+                        peak_params: Optional[dict] = None
                         ) -> Tuple[List[lcms.Roi], pd.DataFrame]:
         """
         Detect features in centroid mode data. Each feature is a chromatographic
@@ -492,7 +492,7 @@ class MSData:
             parameters. See function function documentation for a detailed
             description of each parameter. Default parameters are set using
             the `ms_instrument` and `separation_technique` attributes.
-        peaks_params : dict, optional
+        peak_params : dict, optional
             Parameters to pass to the detect_peaks function. Overwrites
             default parameters. Default values are set using the
             `separation_technique` attribute. See function function
@@ -583,7 +583,7 @@ class MSData:
 
         # step 2 and 3: find peaks and build a DataFrame with the parameters
         feature_data = \
-            lcms._detect_roi_peaks(roi_list, method=method, params=peaks_params)
+            lcms._detect_roi_peaks(roi_list, method=method, params=peak_params)
         return roi_list, feature_data
 
 

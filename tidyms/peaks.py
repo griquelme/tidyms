@@ -1,21 +1,34 @@
 """
 functions and objects used to detect peaks.
+
+Objects
+-------
+
+- PeakLocation : Stores peak location and extension. Computes peak parameters.
+
+Functions
+---------
+- estimate_noise(x) : Estimates noise level in a 1D signal
+- estimate_baseline(x, noise) : Estimates the baseline in a 1D signal
+- detect_peaks(x, y) : Detects peaks in a 1D signal
+- detect_peaks_cwt(x, y) : Detects peaks in a 1D signal using the CWT algorithm
+- find_centroids(x, y) : Computes the centroid and area of peaks in a 1D signal.
+
 """
 
 import numpy as np
+from scipy.integrate import trapz
+from scipy.integrate import cumtrapz
+from scipy.interpolate import interp1d
 from scipy.signal import _peak_finding
 from scipy.signal import find_peaks
 from scipy.signal import argrelmax
 from scipy.signal.wavelets import ricker, cwt
-from scipy.integrate import trapz
-from scipy.interpolate import interp1d
+from scipy.signal.windows import gaussian
+from scipy.special import erfc
 from scipy.stats import median_absolute_deviation as mad
 from typing import Tuple, List, Optional, Union, Callable, Dict
 from .utils import _find_closest_sorted
-from scipy.special import erfc
-from scipy.integrate import cumtrapz
-from scipy.signal.windows import gaussian
-
 _estimator_type = Dict[str, Callable]
 
 
@@ -115,7 +128,16 @@ class PeakLocation:
             snr = self.get_height(y, baseline) / peak_noise
         return snr
 
-    def get_params(self, x, y, noise, baseline):
+    def get_noise_probability(self, y: np.array, noise: np.array):
+        left_noise = (noise[self.start:self.loc + 1] ** 2).sum()
+        right_noise = (noise[self.loc:self.end + 1] ** 2).sum()
+        left = (y[self.loc] - y[self.start]) / np.sqrt(left_noise * 2)
+        right = (y[self.loc] - y[self.end]) / np.sqrt(right_noise * 2)
+        probability = erfc((left, right)).max()
+        return probability
+
+    def get_params(self, x: np.array, y: np.array, noise: np.array,
+                   baseline: np.array):
         params = {"height": self.get_height(y, baseline),
                   "area": self.get_area(x, y, baseline),
                   "loc": self.get_loc(x, y, baseline),
@@ -226,8 +248,8 @@ def estimate_noise(x: np.ndarray, min_slice_size: int = 200,
     """
     noise = np.zeros_like(x)
     slice_size = x.size // n_slices
-    if slice_size < min_slice_size:
-        slice_size = min_slice_size
+    # if slice_size < min_slice_size:
+    #     slice_size = min_slice_size
     start = 0
     while start < x.size:
         end = min(start + slice_size, x.size)
@@ -311,7 +333,7 @@ def _estimate_noise_probability(noise, smoothed, ext):
     delta = (smoothed[np.roll(ext, -1)] - smoothed[ext])[:-1]
     # noise level in each interval
     delta_noise = np.sqrt(np.add.reduceat(noise ** 2, ext_reshape)[::2])
-    noise_probability = erfc(np.abs(delta) / delta_noise)
+    noise_probability = erfc(np.abs(delta) / (delta_noise * np.sqrt(2)))
     return noise_probability
 
 
@@ -350,7 +372,8 @@ def _build_baseline_index(x, noise, noise_probability, noise_threshold, ext):
 # peak picking algorithm
 
 def detect_peaks(x: np.ndarray, y: np.ndarray, noise: Optional[np.array] = None,
-                 baseline: Optional[np.array] = None, min_snr: float = 10,
+                 baseline: Optional[np.array] = None,
+                 peak_probability: float = 0.975,
                  min_prominence: float = 0.1, min_distance: float = 3,
                  smoothing_strength: Optional[float] = None,
                  estimators: Optional[dict] = None,
@@ -368,12 +391,16 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, noise: Optional[np.array] = None,
     baseline: array with the same size as x, optional
         Baseline estimation of y. If None, the baseline is estimated using the
         default method.
-    min_snr : non negative number
-        Minimum signal to noise ratio
+    peak_probability : number between 0 and 1.
+        The probability of  observing similar intensity values from a peak
+        from noise. Higher values reduce the number of peaks detected.
     min_prominence : number between 0 and 1
         Minimum signal prominence, expressed as a fraction of the peak height.
+        Peaks with values under this threshold are removed or merged if they
+        are overlapping with another peak.
     min_distance : positive number
-        Minimum distance between consecutive peaks, in `x` units
+        Minimum distance between consecutive peaks, in `x` units. Peaks closer
+        than this distance are merged.
     smoothing_strength : positive number, optional
         Width of a gaussian used to smooth the signal using convolution. If
         None, no smoothing is applied.
@@ -383,8 +410,8 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, noise: Optional[np.array] = None,
     filters : dict, optional
         A dictionary of parameter names to a tuple of minimum and maximum
         acceptable values. Peaks with parameters outside this range are removed.
-        By default it can filter height, area and width, but it can also filter
-        custom parameters added by `estimators`.
+        By default it can filter snr, height, area and width, but it can also
+        filter custom parameters added by `estimators`.
 
     Returns
     -------
@@ -470,6 +497,7 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, noise: Optional[np.array] = None,
         baseline_index = np.where(np.abs(y - baseline) < noise)[0]
 
     peaks = find_peaks(y)[0]
+    peaks = np.setdiff1d(peaks, baseline_index, assume_unique=True)
     # snr = (y[peaks] - baseline[peaks]) / noise[peaks]
     # snr filter
     # peaks = peaks[snr >= min_snr]
@@ -486,10 +514,11 @@ def detect_peaks(x: np.ndarray, y: np.ndarray, noise: Optional[np.array] = None,
 
     peaks = [PeakLocation(p, s, e) for p, s, e in zip(peaks, start, end)]
     # filter peaks using SNR and prominence. Fix overlap between peaks
-    peaks = _filter_invalid_peaks(y, noise, baseline, peaks, min_prominence,
-                                  min_snr)
+    peaks = _filter_invalid_peaks(y, noise, baseline, peaks, peak_probability,
+                                  min_prominence)
     params = _estimate_peak_parameters(x, y, baseline, noise, peaks, estimators)
     if filters is not None:
+        fill_filter_boundaries(filters)
         peaks, params = _filter_peaks(peaks, params, filters)
 
     return peaks, params
@@ -542,9 +571,10 @@ def _check_is_valid_peak(y: np.array, noise: np.array, baseline: np.array,
 
 
 def _filter_invalid_peaks(y: np.array, noise: np.array, baseline: np.array,
-                          peaks: List[PeakLocation], min_prominence: float,
-                          min_snr: float):
-
+                          peaks: List[PeakLocation], peak_probability: float,
+                          min_prominence: float) -> List[PeakLocation]:
+    # maximum probability of a peak being considered noise
+    p_thresh = 1 - peak_probability
     # a dummy peak appended to analyze all the peaks inside the loop
     peaks.append(PeakLocation(y.size + 1, y.size + 1, y.size + 1))
     new_peak_list = list()
@@ -574,38 +604,47 @@ def _filter_invalid_peaks(y: np.array, noise: np.array, baseline: np.array,
         _fix_overlap(y, left_peak, right_peak)
 
         # check snr and prominence
-        is_valid_peak = _check_is_valid_peak(y, noise, baseline, left_peak,
-                                             min_snr, min_prominence)
+        # is_valid_peak = _check_is_valid_peak(y, noise, baseline, left_peak,
+        #                                      min_snr, min_prominence)
+        # if is_valid_peak:
+        #     if is_last_valid_overlap:
+        #         _fix_overlap(y, last_valid_peak, left_peak)
+        #     last_valid_peak = left_peak
+        #     is_last_valid_overlap = is_overlap
+        #     new_peak_list.append(left_peak)
+        # elif is_last_valid_overlap:
+        #     _merge_peaks(last_valid_peak, left_peak)
+        #     is_last_valid_overlap = is_overlap
+        # elif is_overlap:
+        #     _merge_peaks(right_peak, left_peak)
+        #     is_last_valid_overlap = False
+        # left_peak = right_peak
+        is_valid_proba = left_peak.get_noise_probability(y, noise) <= p_thresh
+        is_valid_prom = left_peak.get_prominence(y, baseline) >= min_prominence
+        # sanity check
+        is_peak = ((y[left_peak.loc] > y[left_peak.start]) and
+                   (y[left_peak.loc] > y[left_peak.end]))
+        is_valid_peak = is_valid_prom and is_valid_proba and is_peak
         if is_valid_peak:
             if is_last_valid_overlap:
                 _fix_overlap(y, last_valid_peak, left_peak)
             last_valid_peak = left_peak
             is_last_valid_overlap = is_overlap
             new_peak_list.append(left_peak)
-        elif is_last_valid_overlap:
-            _merge_peaks(last_valid_peak, left_peak)
-            is_last_valid_overlap = is_overlap
         elif is_overlap:
             _merge_peaks(right_peak, left_peak)
+            # is_last_valid_overlap = False
+        elif is_last_valid_overlap:
+            _merge_peaks(last_valid_peak, left_peak)
             is_last_valid_overlap = False
         left_peak = right_peak
+
     return new_peak_list
 
 
 def _merge_peaks(p1: PeakLocation, p2: PeakLocation):
     p1.start = min(p1.start, p2.start)
     p1.end = max(p1.end, p2.end)
-
-
-def _filter_width(peaks: List[PeakLocation], params: List[dict],
-                  min_width: float, max_width: float):
-    new_params = list()
-    new_peaks = list()
-    for k in range(len(peaks)):
-        if _is_valid_range(params[k]["width"], min_width, max_width):
-            new_peaks.append(peaks[k])
-            new_params.append(params[k])
-    return new_peaks, new_params
 
 
 def _filter_peaks(peak_list: List[PeakLocation], param_list: List[dict],
@@ -639,6 +678,16 @@ def _estimate_peak_parameters(x, y, baseline, noise, peaks, estimators):
             p_params[param] = estimator(x, y, noise, baseline, p)
         params.append(p_params)
     return params
+
+
+def fill_filter_boundaries(filter_dict):
+    for k in filter_dict:
+        lb, ub = filter_dict[k]
+        if lb is None:
+            lb = -np.inf
+        if ub is None:
+            ub = np.inf
+        filter_dict[k] = (lb, ub)
 
 
 # CWT peak picking
@@ -1110,101 +1159,38 @@ def _validate_peak_cwt(peak: PeakLocation, y_peaks: np.ndarray,
     return peak
 
 
-def find_centroids(x: np.ndarray, y: np.ndarray, snr: float,
+def find_centroids(x: np.ndarray, y: np.ndarray, min_snr: float,
                    min_distance: float):
 
     r"""
     Convert peaks to centroid mode.
 
-
     Parameters
     ----------
     x : sorted array
     y : array
-    snr : positive number
+    min_snr : positive number
         Signal to noise ratio
     min_distance : positive number
         Minimum distance between consecutive peaks.
 
     Returns
     -------
-    x_centroid : the centroid of each peak.
-    y_area : area of each peak.
-    peak_index : index of each centroid in the original x array.
+    centroid : sorted array, centroid of the peaks.
+    area : array, area of the peaks.
+    index : array of int, position of the peaks in y.
 
     Notes
     -----
-    Each peak is found a a local maximum in the data. To remove peaks, the
-    SNR of the peak is computed as follows:
-
-    .. math::
-
-        SNR = \frac{peak intensity - baseline}{noise}
-
-    Peak boundaries are
-    defined as the closest local minimum to the peak. The area of each peak
-    is the area between the boundaries, after subtracting the baseline.
+    Uses detect_peaks to build a peak list.
 
     See Also
     --------
-    baseline_noise_estimation
+    detect_peaks
 
     """
-
-    # baseline and noise estimation
-    noise = estimate_noise(y)
-    baseline = estimate_baseline(y, noise)
-    noise = noise.mean()
-    peak_index = argrelmax(y, order=2)[0]
-
-    # filter peaks by baseline and noise
-    yb = y - baseline
-    yb[yb < 0] = 0
-    peak_index = peak_index[(yb[peak_index] / noise) > snr]
-
-    # find peak boundaries: peak boundaries are the
-    # baseline points closest at each side of a peak
-    # bl_index = np.where(yb <= 0)[0]
-    y_min = find_peaks(-y)[0]
-    boundaries = np.searchsorted(y_min, peak_index)
-    boundaries[boundaries < 1] = 1
-    boundaries[boundaries >= y_min.size] = y_min.size - 1
-    start = y_min[boundaries - 1]
-    end = y_min[boundaries] + 1
-
-    # merge close peaks
-    merge_index = np.where(np.diff(x[peak_index]) < min_distance)[0]
-    peak_index[merge_index] = (peak_index[merge_index] +
-                               peak_index[merge_index + 1]) // 2
-    end[merge_index] = end[merge_index + 1]
-    rm_mask = np.ones(shape=peak_index.size, dtype=bool)
-    rm_mask[merge_index + 1] = False
-    peak_index = peak_index[rm_mask]
-    start = start[rm_mask]
-    end = end[rm_mask]
-
-    # find peak area and centroid for each peak
-    x_centroid = np.zeros(peak_index.size)
-    y_area = np.zeros(peak_index.size)
-    for k, ks, ke, in zip(range(boundaries.size), start, end):
-        y_area[k] = trapz(yb[ks:ke], x[ks:ke])
-        try:
-            cent = np.average(x[ks:ke], weights=yb[ks:ke])
-        except ZeroDivisionError:
-            cent = 0
-        x_centroid[k] = cent
-
-    # if the distance between two peaks is smaller than min_dist
-    # conserve only the peak with the greatest area
-    dx_centroid = np.diff(x_centroid)
-    dy_area = np.diff(y_area)
-    rm_index = np.where(dx_centroid < min_distance)[0]
-    rm_index += dy_area[rm_index] < 0
-    rm_mask = np.ones(shape=x_centroid.size, dtype=bool)
-    rm_mask[rm_index] = False
-    rm_mask[x_centroid <= 0] = False    # remove values with zero weight
-    x_centroid = x_centroid[rm_mask]
-    y_area = y_area[rm_mask]
-    peak_index = peak_index[rm_mask]
-
-    return x_centroid, y_area, peak_index
+    peaks, params = detect_peaks(x, y, min_distance=min_distance,
+                                 filters={"snr": (min_snr, None)})
+    index = np.array([x.loc for x in peaks])
+    centroid, area = np.array([[x["loc"], x["area"]] for x in params]).T
+    return centroid, area, index

@@ -26,7 +26,8 @@ __all__ = ["detect_features", "feature_correspondence", "make_data_container"]
 
 def detect_features(path_list: List[str], separation: str = "uplc",
                     instrument: str = "qtof", roi_params: Optional[dict] = None,
-                    cwt_params: Optional[dict] = None, verbose: bool = True
+                    peak_picking_method: str = "max",
+                    peak_params: Optional[dict] = None, verbose: bool = True
                     ) -> Tuple[Dict[str, Roi], pd.DataFrame]:
     """
     Perform feature detection on several samples.
@@ -44,9 +45,11 @@ def detect_features(path_list: List[str], separation: str = "uplc",
     instrument: {"qtof". "orbitrap"}
         MS instrument used for data acquisition. Used to set default values
         of `roi_params`.
+    peak_picking_method : {"max", "cwt"}
+        method used for peak picking. By default, the CWT algorithm is used.
     roi_params: dict, optional
         Set roi detection parameters in MSData detect_features method.
-    cwt_params: dict, optional
+    peak_params: dict, optional
         Set peak detection parameters in MSData detect_features method.
     verbose: bool
         If True prints a message each time a sample is analyzed.
@@ -109,11 +112,14 @@ def detect_features(path_list: List[str], separation: str = "uplc",
         ms_data = MSData(sample_path, ms_mode="centroid",
                          instrument=instrument, separation=separation)
         roi, df = ms_data.detect_features(roi_params=roi_params,
-                                          peaks_params=cwt_params)
+                                          method=peak_picking_method,
+                                          peak_params=peak_params)
         df["sample"] = sample_name
         roi_mapping[sample_name] = roi
         ft_df_list.append(df)
     proto_dm = pd.concat(ft_df_list).reset_index(drop=True)
+    proto_dm["roi index"] = proto_dm["roi index"].astype(int)
+    proto_dm["peak index"] = proto_dm["peak index"].astype(int)
     # TODO: need to check performance for concat when n_samples is large.
     return roi_mapping, proto_dm
 
@@ -382,7 +388,6 @@ def _estimate_n_species_per_cluster(df: pd.DataFrame, cluster: pd. Series,
     def find_n_cluster(x):
         return x.index[np.where(x > min_dr)[0]][-1]
 
-
     sample_per_cluster = (df["sample"].groupby(cluster)
                           .value_counts()
                           .unstack(-1)
@@ -608,6 +613,7 @@ def _get_best_cluster(x, gmm):
     best_cluster = best_cluster[:rows]
     best_cluster = pd.Series(data=best_cluster, index=x.index)
     return best_cluster
+
 
 def _noise_ind(x, n):
     """

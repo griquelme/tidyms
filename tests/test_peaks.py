@@ -31,10 +31,11 @@ def test_one_peak_several_widths(peak_data):
     for w in peak_widths:
         y = ms.utils.gauss(x, peak_loc, w, peak_height)
         y += baseline + noise
-        peaks, params = ms.peaks.detect_peaks(x, y, widths, max_width=60,
-                                              snr=5)
+        peaks, params = ms.peaks.detect_peaks_cwt(x, y, widths, max_width=60,
+                                                  snr=5)
         # the number of peaks should be 1
         # the error in the peak location should be smaller than the peak width
+        print(peaks)
         assert abs(params[0]["loc"] - peak_loc) <= (w + 1)
 
 
@@ -50,8 +51,8 @@ def test_one_peak_several_snr(peak_data):
         y = ms.utils.gauss(x, peak_loc, peak_width, peak_height)
         noise = np.random.normal(size=x.size, scale=n)
         y += baseline + noise
-        peaks, params = ms.peaks.detect_peaks(x, y, widths, max_width=60,
-                                              snr=5)
+        peaks, params = ms.peaks.detect_peaks_cwt(x, y, widths, max_width=60,
+                                                  snr=5)
         if len(peaks) == 0:
             print(n)
         assert len(peaks) == 1
@@ -73,8 +74,8 @@ def test_two_overlapping_peaks(peak_data):
         gm_params = np.array(gm_params)
         y = ms.utils.gaussian_mixture(x, gm_params).sum(axis=0)
         y += baseline + noise
-        peaks, params = ms.peaks.detect_peaks(x, y, widths, max_width=100,
-                                              snr=5, max_distance=1)
+        peaks, params = ms.peaks.detect_peaks_cwt(x, y, widths, max_width=100,
+                                                  snr=5, max_distance=1)
         if len(peaks) == 0:
             print(peak_width, dist, ratio)
         assert len(peaks) <= 2
@@ -94,4 +95,4 @@ def test_find_centroids():
     centroid, _, _ = ms.peaks.find_centroids(x, y, 10, 0.01)
 
     # test differences between peak mean and centrois
-    assert (np.abs(centroid - x_peaks) < 0.0005).all()
+    assert (np.abs(centroid - x_peaks) < 0.001).all()

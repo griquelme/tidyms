@@ -1195,7 +1195,7 @@ class SeabornPlotMethods(object):
             for ind in score.index:
                 x = score.loc[ind, x_name] * 1.01
                 y = score.loc[ind, y_name] * 1.01
-                t = str(self._data.order[ind])
+                t = str(self._data.order[ind].astype(int))
                 g.ax.annotate(t, (x, y))
 
         # set x and y label

@@ -304,11 +304,13 @@ def validate_cwt_peak_picking_params(params):
 def validate_max_peak_picking_params(params):
 
     schema = {"min_distance": {"type": "number", "is_positive": True},
-              "min_snr": {"type": "number", "is_positive": True},
-              "min_prominence": {"type": "number", "is_positive": True},
-              "min_width": {"type": "number", "is_positive": True,
-                            "lower_than": "max_width"},
-              "max_width": {"type": "number", "is_positive": True},
+              "peak_probability": {"type": "number", "min": 0.0, "max": 1.0},
+              "min_prominence": {"type": "number", "min": 0.0, "max": 1.0},
+              "smoothing_strength": {"type": "number", "is_positive": True,
+                                     "nullable": True},
+              "noise": {"nullable": True},
+              "baseline": {"nullable": True},
+              "filters": {"nullable": True},
               "estimators": {"nullable": True}
               }
     validator = ValidatorWithLowerThan(schema)

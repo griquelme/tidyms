@@ -16,7 +16,6 @@ from scipy.interpolate import interp1d
 from typing import Optional, Iterable, Tuple, Union, List, Callable
 from . import peaks
 from . import validation
-from . import find_peaks
 import bokeh.plotting
 from bokeh.palettes import Set3
 from collections import namedtuple
@@ -283,22 +282,30 @@ def get_lc_peak_params(lc_mode: str, method: str) -> dict:
     """
     if method == "cwt":
         params = {"snr": 10, "min_length": 5, "max_distance": 1,
-                      "gap_threshold": 1, "estimators": "default"}
+                  "gap_threshold": 1, "estimators": "default"}
+        if lc_mode == "hplc":
+            params["min_width"] = 10
+            params["max_width"] = 90
+        elif lc_mode == "uplc":
+            params["min_width"] = 4
+            params["max_width"] = 60
+        else:
+            msg = "`mode` must be `hplc` or `uplc`"
+            raise ValueError(msg)
     elif method == "max":
-        params = {"min_snr": 10, "min_distance": 3, "min_prominence": 10}
+        params = {"peak_probability": 0.975, "min_distance": 5,
+                  "min_prominence": 0.1, "smoothing_strength": 1.0}
+        if lc_mode == "hplc":
+            params["filters"] = {"width": (10, 90), "snr": (5, None)}
+        elif lc_mode == "uplc":
+            params["filters"] = {"width": (4, 60), "snr": (5, None)}
+        else:
+            msg = "`mode` must be `hplc` or `uplc`"
+            raise ValueError(msg)
     else:
         msg = "valid `methods` are cwt or max."
         raise ValueError(msg)
 
-    if lc_mode == "hplc":
-        params["min_width"] = 10
-        params["max_width"] = 90
-    elif lc_mode == "uplc":
-        params["min_width"] = 5
-        params["max_width"] = 60
-    else:
-        msg = "`mode` must be `hplc` or `uplc`"
-        raise ValueError(msg)
     return params
 
 
@@ -387,7 +394,7 @@ def _get_find_centroid_params(instrument: str):
     params : dict
 
     """
-    params = {"snr": 10}
+    params = {"min_snr": 10}
     if instrument == "qtof":
         md = 0.01
     else:
@@ -529,9 +536,8 @@ class Chromatogram:
             msg = "mode must be one of {}".format(valid_values)
             raise ValueError(msg)
 
-
-    def find_peaks(self, method: str = "cwt",
-               params: Optional[dict] = None) -> dict:
+    def find_peaks(self, method: str = "max",
+                   params: Optional[dict] = None) -> dict:
         """
         Find peaks with the modified version of the cwt algorithm described in
         the centWave algorithm. Peaks are added to the peaks
@@ -564,11 +570,11 @@ class Chromatogram:
         if method == "cwt":
             widths = make_widths_lc(self.mode)
             peak_list, peak_params = \
-                peaks.detect_peaks(self.rt, self.spint, widths,
-                                   **default_params)
+                peaks.detect_peaks_cwt(self.rt, self.spint, widths,
+                                       **default_params)
         elif method == "max":
             peak_list, peak_params = \
-                find_peaks.detect_peaks(self.rt, self.spint, **default_params)
+                peaks.detect_peaks(self.rt, self.spint, **default_params)
         else:
             msg = "`method` must be max or cwt."
             raise ValueError(msg)
@@ -680,7 +686,7 @@ class MSSpectrum:
             msg = "mode must be one of {}".format(valid_values)
             raise ValueError(msg)
 
-    def find_centroids(self, snr: Optional[float] = None,
+    def find_centroids(self, min_snr: Optional[float] = None,
                        min_distance: Optional[float] = None
                        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         r"""
@@ -691,7 +697,7 @@ class MSSpectrum:
 
         Parameters
         ----------
-        snr : positive number, optional
+        min_snr : positive number, optional
             Minimum signal to noise ratio of the peaks. Overwrites values
             set by mode. Default value is 10
         min_distance : positive number, optional
@@ -730,8 +736,8 @@ class MSSpectrum:
         if min_distance is not None:
             params["min_distance"] = min_distance
 
-        if snr is not None:
-            params["snr"] = snr
+        if min_snr is not None:
+            params["min_snr"] = min_snr
 
         centroids, area, centroid_index = \
             peaks.find_centroids(self.mz, self.spint, **params)
@@ -827,19 +833,47 @@ class Roi(Chromatogram):
         self.mz = mz
         self.first_scan = first_scan
 
-    def _extend(self):
+    def _extend(self, rt: np.array, n: int):
         """
         adds a dummy value at the beginning and at the end of the ROI. This
-        is often useful to ensure that ROI obtained from LC-MS values starts and
-        ends at zero.
+        results in better peak picking results when low intensity peaks are
+        cropped.
 
         """
-        rt_pre = 2 * self.rt[0] - self.rt[1]
-        rt_post = 2 * self.rt[-1] - self.rt[-2]
+        max_int = np.nanmax(self.spint)
         mz_fill = np.nanmean(self.mz)
-        self.rt = np.hstack((rt_pre, self.rt, rt_post))
-        self.spint = np.hstack((0, self.spint, 0))
-        self.mz = np.hstack((mz_fill, self.mz, mz_fill))
+        spint_fill = np.nanmin(self.spint)
+        # drt = self.rt[1] - self.rt[0]
+        roi_rt = list()
+        roi_mz = list()
+        roi_spint = list()
+        extend_roi_beginning = ((np.isnan(self.spint[0]) or
+                                 (self.spint[0] < (0.75 * max_int))))
+        extend_roi_end = (((np.isnan(self.spint[-1])) or
+                          (self.spint[-1] < (0.75 * max_int))))
+
+        # print(self.first_scan, self.rt[0], self.spint[0], max_int)
+        if extend_roi_beginning:
+            n_beginning = min(n, self.first_scan)
+            roi_rt.append(rt[self.first_scan - n_beginning:self.first_scan])
+            roi_mz.append([mz_fill] * n_beginning)
+            roi_spint.append([spint_fill] * n_beginning)
+            # print(roi_rt)
+
+        roi_rt.append(self.rt)
+        roi_spint.append(self.spint)
+        roi_mz.append(self.mz)
+
+        if extend_roi_end:
+            n_end = min(n, rt.size - self.first_scan - self.rt.size)
+            n_roi_end = self.first_scan + self.rt.size
+            roi_rt.append(rt[n_roi_end:n_roi_end + n_end])
+            roi_mz.append([mz_fill] * n_end)
+            roi_spint.append([spint_fill] * n_end)
+
+        self.rt = np.hstack(roi_rt)
+        self.spint = np.hstack(roi_spint)
+        self.mz = np.hstack(roi_mz)
 
     def fill_nan(self):
         """
@@ -1022,7 +1056,7 @@ class _RoiProcessor:
             finished_roi = self.temp_roi_dict.pop(roi_ind)
             if is_valid_roi[ind]:
                 roi = tmp_roi_to_roi(finished_roi, rt, mode=self.mode)
-                # roi._extend()
+                roi._extend(rt, 2)
                 self.roi.append(roi)
         if targeted:
             self.n_missing[is_completed] = 0
@@ -1273,15 +1307,12 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
 
     If the two conditions are meet, the ROI is added to the list of valid ROI.
 
-<<<<<<< HEAD
     References
     ----------
     .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
         feature detection for high resolution LC/MS. BMC Bioinformatics 9,
         504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
-=======
->>>>>>> master
     """
     if start is None:
         start = 0
@@ -1317,7 +1348,7 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
     return processor.roi
 
 
-def _detect_roi_peaks(roi: List[Roi], method: str = "cwt",
+def _detect_roi_peaks(roi: List[Roi], method: str = "max",
                       params: Optional[dict] = None) -> pd.DataFrame:
     """
     aux function used to detect features in MSData instance.
