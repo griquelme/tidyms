@@ -29,7 +29,7 @@ INSTALL_REQUIRES = [
     'numpy>=1.15',
     'pyyaml',
     'statsmodels',
-    'scipy<=1.4.1',
+    'scipy>=1.4.1',
     'scikit-learn>=0.23',
     'bokeh',
     'xlrd>=1.2',
