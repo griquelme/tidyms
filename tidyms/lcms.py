@@ -281,17 +281,17 @@ def get_lc_peak_params(lc_mode: str, method: str) -> dict:
 
     """
     if method == "cwt":
-        params = {"snr": 10, "min_length": 5, "max_distance": 1,
-                  "gap_threshold": 1, "estimators": "default"}
+        find_peaks_params = {"widths": [0.5, 1.0, 1.5], "min_length": 2,
+                             "max_distances": [2, 2, 2],
+                             "wavelet": peaks.gaussian_wavelet}
         if lc_mode == "hplc":
-            params["min_width"] = 10
-            params["max_width"] = 90
+            filters = {"width": (10, 90)}
         elif lc_mode == "uplc":
-            params["min_width"] = 4
-            params["max_width"] = 60
+            filters = {"width": (4, 60)}
         else:
             msg = "`mode` must be `hplc` or `uplc`"
             raise ValueError(msg)
+        filters["snr"] = (5, None)
     elif method == "max":
         params = {"peak_probability": 0.975, "min_distance": 5,
                   "min_prominence": 0.1, "smoothing_strength": 1.0}
@@ -305,7 +305,8 @@ def get_lc_peak_params(lc_mode: str, method: str) -> dict:
     else:
         msg = "valid `methods` are cwt or max."
         raise ValueError(msg)
-
+    params = {"find_peaks_params": find_peaks_params, "filters": filters,
+              "descriptors": None}
     return params
 
 
@@ -537,7 +538,9 @@ class Chromatogram:
             raise ValueError(msg)
 
     def find_peaks(self, method: str = "max",
-                   params: Optional[dict] = None) -> dict:
+                   find_peaks_params: Optional[dict] = None,
+                   descriptors: Optional[dict] = None,
+                   filters: Optional[dict] = None) -> List[dict]:
         """
         Find peaks with the modified version of the cwt algorithm described in
         the centWave algorithm. Peaks are added to the peaks
@@ -547,39 +550,61 @@ class Chromatogram:
         ----------
         method : {"cwt", "max"}.
             method used for peak picking.
-        params : dict
-            key-value parameters to overwrite the defaults in the peak picking
-            algorithm
+        find_peaks_params : dict
+            key-value parameters to pass to the find_peaks function
+        descriptors : dict, optional
+        A dictionary of strings to callables, used to estimate custom parameters
+        on a peak. The function must have the following signature:
+
+        .. code-block:: python
+
+            "estimator_func(x, y, noise, baseline, peak) -> float"
+
+        filters : dict, optional
+            A dictionary of descriptor names to a tuple of minimum and maximum
+            acceptable values. Descriptors outside these range are removed.
+            By default it can filter snr, height, area and width, but it can also
+            filter custom descriptors added by `descriptors`.
 
         Returns
         -------
-        params : dict
-            dictionary of peak parameters
+        params : List[dict]
+            List of peak descriptors
 
         See Also
         --------
         peaks.detect_peaks : peak detection using the CWT algorithm.
-        lcms.get_lc_peak_params : set default parameters for pick_cwt.
+        peaks.get_peak_descriptors: computes peak descriptors.
+        lcms.get_lc_find_peaks_params : get default parameters.
 
         """
         default_params = get_lc_peak_params(self.mode, method)
+        if (find_peaks_params is None) and (method in ["cwt", "max"]):
+            find_peaks_params = default_params["find_peaks_params"]
 
-        if params:
-            default_params.update(params)
-
-        if method == "cwt":
-            widths = make_widths_lc(self.mode)
-            peak_list, peak_params = \
-                peaks.detect_peaks_cwt(self.rt, self.spint, widths,
-                                       **default_params)
-        elif method == "max":
-            peak_list, peak_params = \
-                peaks.detect_peaks(self.rt, self.spint, **default_params)
+        if descriptors is None:
+            descriptors = default_params["descriptors"]
         else:
-            msg = "`method` must be max or cwt."
-            raise ValueError(msg)
+            default_params["descriptors"].update(descriptors)
+            descriptors = default_params["descriptors"]
+
+        if filters is None:
+            filters = default_params["filters"]
+        else:
+            default_params["filters"].update(filters)
+            filters = default_params["filters"]
+
+        noise = peaks.estimate_noise(self.spint)
+        baseline, baseline_index = \
+            peaks.estimate_baseline(self.spint, noise, return_index=True)
+        peak_list = peaks.detect_peaks(self.spint, baseline_index, method,
+                                       find_peaks_params)
+        peak_list, peak_descriptors = \
+            peaks.get_peak_descriptors(self.rt, self.spint, noise, baseline,
+                                       peak_list, descriptors=descriptors,
+                                       filters=filters)
         self.peaks = peak_list
-        return peak_params
+        return peak_descriptors
 
     def plot(self, draw: bool = True, fig_params: Optional[dict] = None,
              line_params: Optional[dict] = None) -> bokeh.plotting.Figure:
@@ -1376,7 +1401,7 @@ def _detect_roi_peaks(roi: List[Roi], method: str = "max",
 
     for roi_index, k_roi in enumerate(roi):
         k_roi.fill_nan()
-        k_params = k_roi.find_peaks(method=method, params=params)
+        k_params = k_roi.find_peaks(method=method, **params)
         n_features = len(k_params)
         peak_params.extend(k_params)
         k_mz_mean, k_mz_std = k_roi.get_peaks_mz()
