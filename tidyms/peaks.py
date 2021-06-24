@@ -210,62 +210,140 @@ class PeakLocation:
         return descriptors
 
 
-# noise and baseline estimation
-
-
-def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
+def detect_peaks(x: np.ndarray, smoothing_strength: Optional[float] = 1.0,
+                 find_peaks_params: Optional[dict] = None
+                 ) -> Tuple[List[PeakLocation], np.ndarray, np.ndarray]:
     r"""
-    Estimates noise in a 1D signal. Assumes that the noise is gaussian iid.
+    Finds peaks in a 1D signal.
 
     Parameters
     ----------
-    x : 1D array
-        The size of x must be at least 4. If the size is smaller, the function
-        will return 0.
-    robust : bool
-        If True, estimates the noise using the median absolute deviation. Else
-        uses the standard deviation.
+    x : array
+    smoothing_strength: positive number, optional
+        Width of a gaussian window used to smooth the signal. If None, no
+        smoothing is applied.
+    find_peaks_params : dict, optional
+        parameters to pass to :py:function:`scipy.signal.find_peaks`.
 
     Returns
     -------
-    noise : non negative number.
+    peaks : List[PeakLocation]
+    noise : array
+    baseline : array
+
+    Notes
+    -----
+    The algorithm for peak finding is as follows:
+
+    1.  Noise is estimated for the signal.
+    2.  Using the noise, each point in the signal is classified as either
+        baseline or signal.
+    3.  Peaks are detected using :py:function:`scipy.signal.find_peaks`. Peaks
+        with a prominence lower than three times the noise or in regions
+        classified as baseline  are removed.
+    4.  For each peak its extension is found by finding the closest baseline
+        point to the left and right.
+    5.  If there are overlapping peaks (i.e. overlapping peak extensions),
+        the extension is fixed by defining a boundary between the peaks as
+        the minimum value between the two peaks.
+
+    See Also
+    --------
+    estimate_noise
+    estimate_baseline
+    PeakLocation
+    get_peak_descriptors
 
     """
-    d2x = np.diff(x, n=2)
-    sorted_index = np.argsort(np.abs(d2x))
-    d2x = d2x[sorted_index]
-    # if d2x follows a normal distribution ~ N(0, 2*sigma), its sample mean
-    # has a normal distribution ~ N(0,  2 * sigma / sqrt(n - 2)) where n is the
-    # size of d2x.
-    # d2x with high absolute values are removed until this the mean of d2x is
-    # lower than its standard deviation.
-    # start at 90th percentile and decrease it in each iteration.
-    # The loop stops at the 20th percentile even if this condition is not meet
-    n_deviations = 3    # dummy values to initialize the loop
-    percentile_counter = 9  # start at 90th percentile
-    noise_std = 0
-    while (n_deviations > 1.0) and (percentile_counter > 2):
-        percentile_index = percentile_counter * d2x.size // 10
-        # the minimum number of elements required to compute the MAD
-        if percentile_index <= 2:
-            break
-        # dev_threshold = 2 / np.sqrt(percentile - 2)
+    noise = estimate_noise(x)
 
-        if robust:
-            noise_std = mad(d2x[:percentile_index], scale="normal")
-            noise_mean = np.median(d2x[:percentile_index])
-        else:
-            noise_std = d2x[:percentile_index].std()
-            noise_mean = d2x[:percentile_index].mean()
+    if smoothing_strength is not None:
+        # xs = smooth(x, gaussian, smoothing_strength)
+        xs = gaussian_filter1d(x, smoothing_strength)
+    else:
+        xs = x
 
-        # if all the values in d2x are equal, noise_std is equal to zero
-        if noise_std > 0:
-            n_deviations = abs(noise_mean / noise_std)
-        else:
-            break
-        percentile_counter -= 1
-    noise = noise_std / 2
-    return noise
+    baseline, baseline_index = estimate_baseline(xs, noise, return_index=True)
+    prominence = 3 * noise
+
+    if find_peaks_params is None:
+        find_peaks_params = {"prominence": prominence, "distance": 3}
+    else:
+        find_peaks_params["prominence"] = prominence
+
+    peaks = find_peaks(xs, **find_peaks_params)[0]
+    peaks = np.setdiff1d(peaks, baseline_index, assume_unique=True)
+
+    start, end = _find_peak_extension(peaks, baseline_index)
+    start, end = _fix_peak_overlap(x, start, peaks, end)
+    start, peaks, end = _normalize_peaks(x, start, peaks, end)
+    peaks = [PeakLocation(s, p, e) for s, p, e in zip(start, peaks, end)]
+    return peaks, noise, baseline
+
+
+def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
+                         baseline: np.ndarray, peaks: List[PeakLocation],
+                         descriptors: Optional[Dict[str, Callable]] = None,
+                         filters: Optional[Dict[str, Tuple]] = None
+                         ) -> Tuple[List[PeakLocation], List[Dict[str, float]]]:
+    """
+    Computes peak descriptors for a list of peaks.
+
+    Parameters
+    ----------
+    x : sorted array
+    y : array with the same size as x
+    noise: array with the same size as x. Noise estimation of y.
+    baseline: array with the same size as x. Baseline estimation of y.
+    peaks : List of peaks obtained with the detect_peaks function
+    descriptors : dict, optional
+        A dictionary of strings to callables, used to estimate custom parameters
+        on a peak. The function must have the following signature:
+
+        .. code-block:: python
+
+            "estimator_func(x, y, noise, baseline, peak) -> float"
+
+    filters : dict, optional
+        A dictionary of descriptor names to a tuple of minimum and maximum
+        acceptable values. To use only minimum/maximum values, use None
+        (e.g. (None, max_value) in the case of using only maximum).Peaks with
+        descriptors outside these ranges are removed. Filters for custom
+        descriptors can be used also.
+
+    Returns
+    -------
+    peaks : List[PeakLocation]
+    descriptors: List[dict]
+        By default, the location, height, area, width and SNR of each peak are
+        computed.
+
+    See Also
+    --------
+    detect_peaks
+    estimate_baseline
+    estimate_noise
+
+    """
+
+    if descriptors is None:
+        descriptors = dict()
+
+    if filters is None:
+        filters = dict()
+    _fill_filter_boundaries(filters)
+
+    valid_peaks = list()
+    descriptor_list = list()
+    for p in peaks:
+        p_descriptors = p.get_descriptors(x, y, noise, baseline)
+        for descriptor, func in descriptors.items():
+            p_descriptors[descriptor] = func(x, y, noise, baseline, p)
+
+        if _has_all_valid_descriptors(p_descriptors, filters):
+            valid_peaks.append(p)
+            descriptor_list.append(p_descriptors)
+    return valid_peaks, descriptor_list
 
 
 def estimate_noise(x: np.ndarray, min_slice_size: int = 200,
@@ -352,12 +430,230 @@ def estimate_baseline(x: np.ndarray, noise: np.ndarray, min_proba: float = 0.05,
         return baseline
 
 
+class InvalidPeaKException(ValueError):
+    """
+    Exception raised when invalid indices are used in the construction of
+    PeakLocation objects.
+
+    """
+    pass
+
+
+def _find_peak_extension(peaks: np.array, baseline_index: np.array
+                         ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Finds the closest baseline points to the left and right of each peak.
+
+    aux function of detect_peaks
+
+    Parameters
+    ----------
+    peaks : array of indices
+    baseline_index : array of indices
+
+    Returns
+    -------
+    start : array
+    end : array
+
+    """
+    ext_index = np.searchsorted(baseline_index, peaks)
+    start = baseline_index[ext_index - 1]
+    end = baseline_index[ext_index] + 1
+    return start, end
+
+
+def _fix_peak_overlap(y: np.ndarray, start: np.ndarray, peaks: np.ndarray,
+                      end: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Fix boundaries of overlapping peaks.
+
+    aux function of detect_peaks
+
+    Parameters
+    ----------
+    y : array
+    start : array
+    peaks : array
+    end : array
+
+    Returns
+    -------
+    start : array
+    end : array
+
+    """
+    local_min = find_peaks(-y)[0]
+    # find overlapping peaks indices
+    overlap_mask = end > np.roll(start, -1)
+    if overlap_mask.size:
+        overlap_mask[-1] = False
+    overlap_index = np.where(overlap_mask)[0]
+    for k in overlap_index:
+        # search local min in the region defined by the overlapping peaks
+        ks, ke = np.searchsorted(local_min, [peaks[k], peaks[k + 1]])
+        k_min = np.argmin(y[local_min[ks:ke]])
+        boundary = local_min[ks + k_min]
+        end[k] = boundary + 1
+        start[k + 1] = boundary
+    return start, end
+
+
+def _normalize_peaks(y: np.ndarray, start: np.ndarray, peaks: np.ndarray,
+                     end: np.ndarray
+                     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Sanity check of peaks.
+
+    Finds the local maximum in the region defined between start and end for each
+    peak. If no maximum is found, the peak is removed. Also, corrects the peak
+    index using this value that can be slightly shifted if smoothing was
+    applied to the signal.
+
+    aux function of detect_peaks.
+
+    Parameters
+    ----------
+    y : array
+    start : array of indices
+    peaks : array of indices
+    end : array of indices
+
+    Returns
+    -------
+    start : array of indices
+    fixed_peaks : array of indices
+    end : array of indices
+
+    """
+    local_max = find_peaks(y)[0]
+    start_index = np.searchsorted(local_max, start)
+    end_index = np.searchsorted(local_max, end, side="right")
+    fixed_peaks = np.zeros_like(peaks)
+    valid_peaks = np.zeros(peaks.size, dtype=bool)
+    for k in range(peaks.size):
+        # search local min in the region defined by the overlapping peaks
+        local_max_slice = y[local_max[start_index[k]:end_index[k]]]
+        if local_max_slice.size > 0:
+            k_max = np.argmax(local_max_slice)
+            new_peak = local_max[start_index[k] + k_max]
+            valid_peaks[k] = (start[k] < new_peak) and (new_peak < end[k])
+            fixed_peaks[k] = new_peak
+    start = start[valid_peaks]
+    end = end[valid_peaks]
+    fixed_peaks = fixed_peaks[valid_peaks]
+    return start, fixed_peaks, end
+
+
+def _fill_filter_boundaries(filter_dict: Dict[str, Tuple]):
+    """
+    Replaces None in the filter boundaries to perform comparisons.
+
+    aux function of get_peak_descriptors
+    """
+    for k in filter_dict:
+        lb, ub = filter_dict[k]
+        if lb is None:
+            lb = -np.inf
+        if ub is None:
+            ub = np.inf
+        filter_dict[k] = (lb, ub)
+
+
+def _has_all_valid_descriptors(peak_descriptors: Dict[str, float],
+                               filters: Dict[str, Tuple[float, float]]) -> bool:
+    """
+    Check that the descriptors of a peak are in a valid range.
+
+    aux function of get_peak_descriptors.
+
+    Parameters
+    ----------
+    peak_descriptors : dict
+        Dictionary from descriptors names to values.
+    filters : dict
+        Dictionary from descriptors names to minimum and maximum acceptable
+        values.
+
+    Returns
+    -------
+    is_valid : bool
+        True if all descriptors are inside the valid ranges.
+
+    """
+    res = True
+    for descriptor, (lb, ub) in filters.items():
+        d = peak_descriptors[descriptor]
+        is_valid = (d >= lb) and (d <= ub)
+        if not is_valid:
+            res = False
+            break
+    return res
+
+
+def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
+    r"""
+    Estimates noise in a 1D signal. Assumes that the noise is gaussian iid.
+
+    aux function of estimate_noise
+
+    Parameters
+    ----------
+    x : 1D array
+        The size of x must be at least 4. If the size is smaller, the function
+        will return 0.
+    robust : bool
+        If True, estimates the noise using the median absolute deviation. Else
+        uses the standard deviation.
+
+    Returns
+    -------
+    noise : non negative number.
+
+    """
+    d2x = np.diff(x, n=2)
+    sorted_index = np.argsort(np.abs(d2x))
+    d2x = d2x[sorted_index]
+    # if d2x follows a normal distribution ~ N(0, 2*sigma), its sample mean
+    # has a normal distribution ~ N(0,  2 * sigma / sqrt(n - 2)) where n is the
+    # size of d2x.
+    # d2x with high absolute values are removed until this the mean of d2x is
+    # lower than its standard deviation.
+    # start at 90th percentile and decrease it in each iteration.
+    # The loop stops at the 20th percentile even if this condition is not meet
+    n_deviations = 3    # dummy values to initialize the loop
+    percentile_counter = 9  # start at 90th percentile
+    noise_std = 0
+    while (n_deviations > 1.0) and (percentile_counter > 2):
+        percentile_index = percentile_counter * d2x.size // 10
+        # the minimum number of elements required to compute the MAD
+        if percentile_index <= 2:
+            break
+        # dev_threshold = 2 / np.sqrt(percentile - 2)
+
+        if robust:
+            noise_std = mad(d2x[:percentile_index], scale="normal")
+            noise_mean = np.median(d2x[:percentile_index])
+        else:
+            noise_std = d2x[:percentile_index].std()
+            noise_mean = d2x[:percentile_index].mean()
+
+        # if all the values in d2x are equal, noise_std is equal to zero
+        if noise_std > 0:
+            n_deviations = abs(noise_mean / noise_std)
+        else:
+            break
+        percentile_counter -= 1
+    noise = noise_std / 2
+    return noise
+
+
 def _find_baseline_points(x: np.ndarray, noise: np.ndarray,
                           min_proba: float) -> np.ndarray:
     """
     Finds points flagged as baseline.
 
-    Aux function to estimate_baseline.
+    Aux function of estimate_baseline.
 
     Parameters
     ----------
@@ -370,10 +666,6 @@ def _find_baseline_points(x: np.ndarray, noise: np.ndarray,
     baseline_index : array of indices.
 
     """
-    # x is smoothed to reduce the number of intervals to compare
-    # smoothed = smooth(x, gaussian, 1)
-    # smoothed = x
-    # find local maxima and minima
     extrema = _find_local_extrema(x)
     # check how likely is that the difference observed in each min-max slice
     # can be attributed to noise.
@@ -386,6 +678,8 @@ def _find_baseline_points(x: np.ndarray, noise: np.ndarray,
 def _find_local_extrema(x: np.ndarray) -> np.ndarray:
     """
     Finds all local minima and maxima in an 1D array.
+
+    aux function of _find_baseline_points.
 
     Parameters
     ----------
@@ -473,7 +767,7 @@ def _build_baseline_index(x: np.ndarray, noise_probability: np.ndarray,
     """
     builds an array with indices of points flagged as baseline.
 
-    Auxiliary function of _find_baseline_points
+    aux function of _find_baseline_points
 
     Returns
     -------
@@ -498,6 +792,21 @@ def _build_baseline_index(x: np.ndarray, noise_probability: np.ndarray,
 def _include_first_and_last_index(x: np.ndarray,
                                   baseline_index: List[np.ndarray]
                                   ) -> np.ndarray:
+    """
+    adds first and last indices of x to the baseline indices.
+
+    aux function of _build_baseline_index
+
+    Parameters
+    ----------
+    x : array
+    baseline_index : array of indices
+
+    Returns
+    -------
+    baseline_index : array of indices
+
+    """
     if len(baseline_index):
         stack = list()
         # include first and last indices
@@ -510,257 +819,3 @@ def _include_first_and_last_index(x: np.ndarray,
     else:
         baseline_index = np.array([0, x.size - 1], dtype=int)
     return baseline_index
-
-
-def detect_peaks(x: np.ndarray, smoothing_strength: Optional[float] = 1.0,
-                 find_peaks_params: Optional[dict] = None
-                 ) -> Tuple[List[PeakLocation], np.ndarray, np.ndarray]:
-    r"""
-    Finds peaks in a 1D signal.
-
-    Parameters
-    ----------
-    x : array
-    smoothing_strength: positive number, optional
-        Width of a gaussian window used to smooth the signal. If None, no
-        smoothing is applied.
-    find_peaks_params : dict, optional
-        parameters to pass to :py:function:`scipy.signal.find_peaks`.
-
-    Returns
-    -------
-    peaks : List[PeakLocation]
-    noise : array
-    baseline : array
-
-    Notes
-    -----
-    The algorithm for peak finding is as follows:
-
-    1.  Noise is estimated for the signal.
-    2.  Using the noise, each point in the signal is classified as either
-        baseline or signal.
-    3.  Peaks are detected using :py:function:`scipy.signal.find_peaks`. Peaks
-        with a prominence lower than three times the noise or in regions
-        classified as baseline  are removed.
-    4.  For each peak its extension is found by finding the closest baseline
-        point to the left and right.
-    5.  If there are overlapping peaks (i.e. overlapping peak extensions),
-        the extension is fixed by defining a boundary between the peaks as
-        the minimum value between the two peaks.
-
-    See Also
-    --------
-    estimate_noise
-    estimate_baseline
-    PeakLocation
-    get_peak_descriptors
-
-    """
-    noise = estimate_noise(x)
-
-    if smoothing_strength is not None:
-        # xs = smooth(x, gaussian, smoothing_strength)
-        xs = gaussian_filter1d(x, smoothing_strength)
-    else:
-        xs = x
-
-    baseline, baseline_index = estimate_baseline(xs, noise, return_index=True)
-    prominence = 3 * noise
-
-    if find_peaks_params is None:
-        find_peaks_params = {"prominence": prominence, "distance": 3}
-    else:
-        find_peaks_params["prominence"] = prominence
-
-    peaks = find_peaks(xs, **find_peaks_params)[0]
-    peaks = np.setdiff1d(peaks, baseline_index, assume_unique=True)
-
-    start, end = _find_peak_extension(peaks, baseline_index)
-    start, end = _fix_peak_overlap(x, start, peaks, end)
-    start, peaks, end = _filter_invalid_peaks(x, start, peaks, end)
-    peaks = [PeakLocation(s, p, e) for s, p, e in zip(start, peaks, end)]
-    return peaks, noise, baseline
-
-
-def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
-                         baseline: np.ndarray, peaks: List[PeakLocation],
-                         descriptors: Optional[Dict[str, Callable]] = None,
-                         filters: Optional[Dict[str, Tuple]] = None
-                         ) -> Tuple[List[PeakLocation], List[Dict[str, float]]]:
-    """
-    Computes peak descriptors for a list of peaks.
-
-    Parameters
-    ----------
-    x : sorted array
-    y : array with the same size as x
-    noise: array with the same size as x. Noise estimation of y.
-    baseline: array with the same size as x. Baseline estimation of y.
-    peaks : List of peaks obtained with the detect_peaks function
-    descriptors : dict, optional
-        A dictionary of strings to callables, used to estimate custom parameters
-        on a peak. The function must have the following signature:
-
-        .. code-block:: python
-
-            "estimator_func(x, y, noise, baseline, peak) -> float"
-
-    filters : dict, optional
-        A dictionary of descriptor names to a tuple of minimum and maximum
-        acceptable values. To use only minimum/maximum values, use None
-        (e.g. (None, max_value) in the case of using only maximum).Peaks with
-        descriptors outside these ranges are removed. Filters for custom
-        descriptors can be used also.
-
-    Returns
-    -------
-    peaks : List[PeakLocation]
-    descriptors: List[dict]
-        By default, the location, height, area, width and SNR of each peak are
-        computed.
-
-    See Also
-    --------
-    detect_peaks
-    estimate_baseline
-    estimate_noise
-
-    """
-
-    if descriptors is None:
-        descriptors = dict()
-
-    if filters is None:
-        filters = dict()
-    _fill_filter_boundaries(filters)
-
-    valid_peaks = list()
-    descriptor_list = list()
-    for p in peaks:
-        p_descriptors = p.get_descriptors(x, y, noise, baseline)
-        for descriptor, func in descriptors.items():
-            p_descriptors[descriptor] = func(x, y, noise, baseline, p)
-
-        if _has_all_valid_descriptors(p_descriptors, filters):
-            valid_peaks.append(p)
-            descriptor_list.append(p_descriptors)
-    return valid_peaks, descriptor_list
-
-
-def _has_all_valid_descriptors(peak_descriptors: Dict[str, float],
-                               filters: Dict[str, Tuple[float, float]]) -> bool:
-    """
-    Check that the descriptors of a peak are in a valid range.
-
-    Parameters
-    ----------
-    peak_descriptors : dict
-        Dictionary from descriptors names to values.
-    filters : dict
-        Dictionary from descriptors names to minimum and maximum acceptable
-        values.
-
-    Returns
-    -------
-    is_valid : bool
-        True if all descriptors are inside the valid ranges.
-
-    """
-    res = True
-    for descriptor, (lb, ub) in filters.items():
-        d = peak_descriptors[descriptor]
-        is_valid = (d >= lb) and (d <= ub)
-        if not is_valid:
-            res = False
-            break
-    return res
-
-
-def _fix_peak_overlap(y: np.ndarray, start: np.ndarray, peaks: np.ndarray,
-                      end: np.ndarray):
-    local_min = find_peaks(-y)[0]
-    # find overlapping peaks indices
-    overlap_mask = end > np.roll(start, -1)
-    if overlap_mask.size:
-        overlap_mask[-1] = False
-    overlap_index = np.where(overlap_mask)[0]
-    for k in overlap_index:
-        # search local min in the region defined by the overlapping peaks
-        ks, ke = np.searchsorted(local_min, [peaks[k], peaks[k + 1]])
-        k_min = np.argmin(y[local_min[ks:ke]])
-        boundary = local_min[ks + k_min]
-        end[k] = boundary + 1
-        start[k + 1] = boundary
-    return start, end
-
-
-def _filter_invalid_peaks(y: np.ndarray, start: np.ndarray, peaks: np.ndarray,
-                          end: np.ndarray
-                          ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Sanity check of peaks.
-
-    Finds the local maximum in the region defined between start and end for each
-    peak. If no maximum is found, the peak is removed. Also, corrects the peak
-    index using this value that can be slightly shifted if smoothing was
-    applied to the signal.
-
-    aux function of detect_peaks.
-
-    Parameters
-    ----------
-    y : array
-    start : array of indices
-    peaks : array of indices
-    end : array of indices
-
-    Returns
-    -------
-    start : array of indices
-    fixed_peaks : array of indices
-    end : array of indices
-
-    """
-    local_max = find_peaks(y)[0]
-    start_index = np.searchsorted(local_max, start)
-    end_index = np.searchsorted(local_max, end, side="right")
-    fixed_peaks = np.zeros_like(peaks)
-    valid_peaks = np.zeros(peaks.size, dtype=bool)
-    for k in range(peaks.size):
-        # search local min in the region defined by the overlapping peaks
-        local_max_slice = y[local_max[start_index[k]:end_index[k]]]
-        if local_max_slice.size > 0:
-            k_max = np.argmax(local_max_slice)
-            new_peak = local_max[start_index[k] + k_max]
-            valid_peaks[k] = (start[k] < new_peak) and (new_peak < end[k])
-            fixed_peaks[k] = new_peak
-    start = start[valid_peaks]
-    end = end[valid_peaks]
-    fixed_peaks = fixed_peaks[valid_peaks]
-    return start, fixed_peaks, end
-
-
-def _find_peak_extension(peaks: np.array, baseline_index: np.array):
-    ext_index = np.searchsorted(baseline_index, peaks)
-    start = baseline_index[ext_index - 1]
-    end = baseline_index[ext_index] + 1
-    return start, end
-
-
-def _fill_filter_boundaries(filter_dict):
-    """
-    Replaces None in the filter boundaries to perform comparisons.
-
-    """
-    for k in filter_dict:
-        lb, ub = filter_dict[k]
-        if lb is None:
-            lb = -np.inf
-        if ub is None:
-            ub = np.inf
-        filter_dict[k] = (lb, ub)
-
-
-class InvalidPeaKException(ValueError):
-    pass
