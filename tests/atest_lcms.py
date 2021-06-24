@@ -70,13 +70,13 @@ def test_make_chromatograms_outside_range_mz(simulated_experiment):
 
 
 def test_accumulate_spectra(simulated_experiment):
-    lcms.accumulate_spectra(simulated_experiment, start=10, end=20)
+    lcms.accumulate_spectra_profile(simulated_experiment, start=10, end=20)
     assert True
 
 
 def test_accumulate_spectra_subtract(simulated_experiment):
-    lcms.accumulate_spectra(simulated_experiment, start=10, end=20,
-                            subtract_left=5, subtract_right=25)
+    lcms.accumulate_spectra_profile(simulated_experiment, start=10, end=20,
+                                    subtract_left=5, subtract_right=25)
     assert True
 
 
