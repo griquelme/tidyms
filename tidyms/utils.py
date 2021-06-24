@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 from statsmodels.api import OLS, add_constant
 from statsmodels.stats.stattools import jarque_bera, durbin_watson
-from scipy.stats import spearmanr, median_absolute_deviation
+from scipy.stats import spearmanr, median_abs_deviation
 import os.path
 from typing import Optional, Union
 
@@ -233,7 +233,7 @@ def mad(df):
     if df.shape[0] == 1:
         res = pd.Series(data=np.nan, index=df.columns)
     else:
-        res = df.apply(median_absolute_deviation)
+        res = df.apply(median_abs_deviation, scale="normal")
     return res
 
 
