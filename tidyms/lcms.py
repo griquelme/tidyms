@@ -10,7 +10,6 @@ Roi
 """
 
 import numpy as np
-import pandas as pd
 import pyopenms
 from scipy.interpolate import interp1d
 from typing import Optional, Iterable, Tuple, Union, List, Callable
@@ -122,7 +121,7 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
         has_mz = (ind_sp[1::2] - ind_sp[::2]) > 0
         # elements added at the end of mz_sp raise IndexError
         ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
-        # this function adds the values between two consecutive indices
+        # this adds the values between two consecutive indices
         tmp_eic = np.where(has_mz, np.add.reduceat(int_sp, ind_sp)[::2], 0)
         if accumulator == "mean":
             norm = ind_sp[1::2] - ind_sp[::2]
@@ -132,10 +131,12 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
     return rt, eic
 
 
-def accumulate_spectra(ms_experiment: ms_experiment_type, start: int, end: int,
-                       subtract_left: Optional[int] = None,
-                       subtract_right: Optional[int] = None,
-                       kind: str = "linear") -> Tuple[np.ndarray, np.ndarray]:
+def accumulate_spectra_profile(ms_experiment: ms_experiment_type,
+                               start: int, end: int,
+                               subtract_left: Optional[int] = None,
+                               subtract_right: Optional[int] = None,
+                               kind: str = "linear"
+                               ) -> Tuple[np.ndarray, np.ndarray]:
     """
     accumulates a spectra into a single spectrum.
 
@@ -159,6 +160,7 @@ def accumulate_spectra(ms_experiment: ms_experiment_type, start: int, end: int,
     -------
     accumulated_mz : array of m/z values
     accumulated_int : array of cumulative intensities.
+
     """
     if subtract_left is None:
         subtract_left = start
@@ -261,9 +263,9 @@ def make_widths_ms(mode: str) -> np.ndarray:
     return widths
 
 
-def get_lc_peak_params(lc_mode: str, method: str) -> dict:
+def get_lc_filter_peak_params(lc_mode: str) -> dict:
     """
-    Return sane default values for performing CWT based peak picking on LC data.
+    Default filters for peaks detected in LC data.
 
     Parameters
     ----------
@@ -271,42 +273,33 @@ def get_lc_peak_params(lc_mode: str, method: str) -> dict:
         HPLC assumes typical experimental conditions for HPLC experiments:
         longer columns with particle size greater than 3 micron. UPLC is for
         data acquired with short columns with particle size lower than 3 micron.
-    method: {"cwt", "max"}
-        Method used for peak picking.
+
+    Returns
+    -------
+    filters : dict
+        filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`.
+
+    """
+    if lc_mode == "hplc":
+        filters = {"width": (10, 90), "snr": (5, None)}
+    elif lc_mode == "uplc":
+        filters = {"width": (4, 60), "snr": (5, None)}
+    else:
+        msg = "`mode` must be `hplc` or `uplc`"
+        raise ValueError(msg)
+    return filters
+
+
+def get_lc_detect_peak_params() -> dict:
+    """
+    Default values for performing peak detection on LC data.
 
     Returns
     -------
     params : dict
-        parameters to pass to the correspondent peak picking function.
-
+        keyword arguments to pass to :py:func:`tidyms.peaks.detect_peaks`
     """
-    if method == "cwt":
-        find_peaks_params = {"widths": [0.5, 1.0, 1.5], "min_length": 2,
-                             "max_distances": [2, 2, 2],
-                             "wavelet": peaks.gaussian_wavelet}
-        if lc_mode == "hplc":
-            filters = {"width": (10, 90)}
-        elif lc_mode == "uplc":
-            filters = {"width": (4, 60)}
-        else:
-            msg = "`mode` must be `hplc` or `uplc`"
-            raise ValueError(msg)
-        filters["snr"] = (5, None)
-    elif method == "max":
-        params = {"peak_probability": 0.975, "min_distance": 5,
-                  "min_prominence": 0.1, "smoothing_strength": 1.0}
-        if lc_mode == "hplc":
-            params["filters"] = {"width": (10, 90), "snr": (5, None)}
-        elif lc_mode == "uplc":
-            params["filters"] = {"width": (4, 60), "snr": (5, None)}
-        else:
-            msg = "`mode` must be `hplc` or `uplc`"
-            raise ValueError(msg)
-    else:
-        msg = "valid `methods` are cwt or max."
-        raise ValueError(msg)
-    params = {"find_peaks_params": find_peaks_params, "filters": filters,
-              "descriptors": None}
+    params = {"smoothing_strength": 1.0}
     return params
 
 
@@ -537,35 +530,23 @@ class Chromatogram:
             msg = "mode must be one of {}".format(valid_values)
             raise ValueError(msg)
 
-    def find_peaks(self, method: str = "max",
-                   find_peaks_params: Optional[dict] = None,
+    def find_peaks(self, detect_peaks_params: Optional[dict] = None,
                    descriptors: Optional[dict] = None,
                    filters: Optional[dict] = None) -> List[dict]:
         """
-        Find peaks with the modified version of the cwt algorithm described in
-        the centWave algorithm. Peaks are added to the peaks
-        attribute of the Chromatogram object.
+        Find peaks and compute peak descriptors.
+
+        Stores the found peaks in the `peaks` attribute and returns the peaks
+        descriptors.
 
         Parameters
         ----------
-        method : {"cwt", "max"}.
-            method used for peak picking.
-        find_peaks_params : dict
-            key-value parameters to pass to the find_peaks function
+        detect_peaks_params : dict, optional
+            parameters to pass to :py:func:`tidyms.peaks.detect_peaks`
         descriptors : dict, optional
-        A dictionary of strings to callables, used to estimate custom parameters
-        on a peak. The function must have the following signature:
-
-        .. code-block:: python
-
-            "estimator_func(x, y, noise, baseline, peak) -> float"
-
+            descriptors to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
         filters : dict, optional
-            A dictionary of descriptor names to a tuple of minimum and maximum
-            acceptable values. Descriptors outside these range are removed.
-            By default it can filter snr, height, area and width, but it can also
-            filter custom descriptors added by `descriptors`.
-
+            filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
         Returns
         -------
         params : List[dict]
@@ -575,30 +556,21 @@ class Chromatogram:
         --------
         peaks.detect_peaks : peak detection using the CWT algorithm.
         peaks.get_peak_descriptors: computes peak descriptors.
-        lcms.get_lc_find_peaks_params : get default parameters.
+        lcms.get_lc_detect_peaks_params : default value for detect_peak_params
+        lcms.get_lc_filter_peaks_params : default value for filters
 
         """
-        default_params = get_lc_peak_params(self.mode, method)
-        if (find_peaks_params is None) and (method in ["cwt", "max"]):
-            find_peaks_params = default_params["find_peaks_params"]
+        if detect_peaks_params is None:
+            detect_peaks_params = get_lc_detect_peak_params()
 
         if descriptors is None:
-            descriptors = default_params["descriptors"]
-        else:
-            default_params["descriptors"].update(descriptors)
-            descriptors = default_params["descriptors"]
+            descriptors = None
 
         if filters is None:
-            filters = default_params["filters"]
-        else:
-            default_params["filters"].update(filters)
-            filters = default_params["filters"]
+            filters = get_lc_filter_peak_params(self.mode)
 
-        noise = peaks.estimate_noise(self.spint)
-        baseline, baseline_index = \
-            peaks.estimate_baseline(self.spint, noise, return_index=True)
-        peak_list = peaks.detect_peaks(self.spint, baseline_index, method,
-                                       find_peaks_params)
+        peak_list, noise, baseline = peaks.detect_peaks(self.spint,
+                                                        **detect_peaks_params)
         peak_list, peak_descriptors = \
             peaks.get_peak_descriptors(self.rt, self.spint, noise, baseline,
                                        peak_list, descriptors=descriptors,
@@ -933,10 +905,12 @@ class Roi(Chromatogram):
         mz_std = np.zeros(len(self.peaks))
         mz_mean = np.zeros(len(self.peaks))
         for k, peak in enumerate(self.peaks):
-            peak_mz = self.mz[peak.start:peak.end + 1]
-            peak_spint = self.spint[peak.start:peak.end + 1]
-            mz_mean[k] = np.average(peak_mz, weights=peak_spint)
-            mz_std[k] = peak_mz.std()
+            # peak_mz = self.mz[peak.start:peak.end].std()
+            # peak_spint = self.spint[peak.start:peak.end + 1]
+            # mz_mean[k] = np.average(peak_mz, weights=peak_spint)
+            # mz_std[k] = peak_mz.std()
+            mz_std[k] = self.mz[peak.start:peak.end].std()
+            mz_mean[k] = peak.get_loc(self.mz, self.spint)
         return mz_mean, mz_std
 
 
@@ -1373,55 +1347,57 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
     return processor.roi
 
 
-def _detect_roi_peaks(roi: List[Roi], method: str = "max",
-                      params: Optional[dict] = None) -> pd.DataFrame:
+def _accumulate_spectra_centroid(ms_experiment: ms_experiment_type, start, end,
+                                 tolerance: float,
+                                 subtract_left: Optional[int] = None,
+                                 subtract_right: Optional[int] = None
+                                 ):
     """
-    aux function used to detect features in MSData instance.
-    
+    accumulates a series of consecutive spectra into a single spectrum.
+
     Parameters
     ----------
-    roi : Roi
-    method : {"cwt", "max"}
-        method used for the peak picking step.
-    params : params for the peak picking function
+    ms_experiment : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
+    start : int
+        start slice for scan accumulation
+    end : int
+        end slice for scan accumulation.
+    tolerance : float
+        m/z tolerance to connect peaks across scans
+    subtract_left : int, optional
+        Scans between `subtract_left` and `start` are subtracted from the
+        accumulated spectrum.
+    subtract_right : int, optional
+        Scans between `subtract_right` and `end` are subtracted from the
+        accumulated spectrum.
 
     Returns
     -------
-    DataFrame
+    accumulated_mz : array of m/z values
+    accumulated_int : array of cumulative intensities.
 
     """
-    if params is None:
-        params = dict()
+    n_spectra = ms_experiment.getNrSpectra()
 
-    roi_index_list = list()
-    peak_index_list = list()
-    mz_mean_list = list()
-    mz_std_list = list()
-    peak_params = list()
+    if subtract_left is None:
+        subtract_left = start
 
-    for roi_index, k_roi in enumerate(roi):
-        k_roi.fill_nan()
-        k_params = k_roi.find_peaks(method=method, **params)
-        n_features = len(k_params)
-        peak_params.extend(k_params)
-        k_mz_mean, k_mz_std = k_roi.get_peaks_mz()
-        roi_index_list.append([roi_index] * n_features)
-        peak_index_list.append(range(n_features))
-        mz_mean_list.append(k_mz_mean)
-        mz_std_list.append(k_mz_std)
+    if subtract_right is None:
+        subtract_right = end
 
-    roi_index_list = np.hstack(roi_index_list)
-    peak_index_list = np.hstack(peak_index_list)
-    mz_mean_list = np.hstack(mz_mean_list)
-    mz_std_list = np.hstack(mz_std_list)
-
-    peak_params = pd.DataFrame(data=peak_params)
-    peak_params = peak_params.rename(columns={"loc": "rt"})
-    peak_params["mz"] = mz_mean_list
-    peak_params["mz std"] = mz_std_list
-    peak_params["roi index"] = roi_index_list
-    peak_params["peak index"] = peak_index_list
-    peak_params = peak_params.dropna(axis=0)
-    return peak_params
-
-# TODO: test ROI, test roi processor, test make roi
+    max_missing = subtract_right - subtract_left + 1
+    params = {"start": start, "end": end, "subtract_left": subtract_left,
+              "subtract_right": subtract_right}
+    validation.validate_accumulate_spectra_params(n_spectra, params)
+    roi = make_roi(ms_experiment, tolerance, max_missing=max_missing,
+                   min_length=1, min_intensity=0.0, multiple_match="reduce",
+                   start=subtract_left, end=subtract_right, mz_reduce="mean",
+                   sp_reduce="sum")
+    mask = np.ones(max_missing)
+    mask[:start - subtract_left] = -1
+    mask[end - subtract_left:] = -1
+    mz = np.array([(x.mz * mask).mean() for x in roi])
+    spint = np.array([(x.spint * mask).sum() for x in roi])
+    mz = mz[spint > 0]
+    spint = mz[spint > 0]
+    return mz, spint
