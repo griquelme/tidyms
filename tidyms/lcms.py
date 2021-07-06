@@ -9,20 +9,120 @@ Roi
 
 """
 
+import bokeh.plotting
 import numpy as np
 import pyopenms
+from collections import namedtuple
 from scipy.interpolate import interp1d
 from typing import Optional, Iterable, Tuple, Union, List, Callable
 from . import peaks
 from . import validation
-import bokeh.plotting
-from collections import namedtuple
-import warnings
 from . import _plot_bokeh
-
 from .utils import find_closest
 
 ms_experiment_type = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
+
+
+class MSSpectrum:
+    """
+    Representation of a Mass Spectrum in profile mode. Manages conversion to
+    centroids and plotting of data.
+
+    Attributes
+    ----------
+    mz : array of m/z values
+    spint : array of intensity values.
+    instrument : str
+        MS instrument type. Used to set default values in peak picking.
+
+    """
+    def __init__(self, mz: np.ndarray, spint: np.ndarray,
+                 instrument: Optional[str] = None):
+        """
+        Constructor of the MSSpectrum.
+
+        Parameters
+        ----------
+        mz: array
+            m/z values.
+        spint: array
+            intensity values.
+
+        """
+        self.mz = mz
+        self.spint = spint
+        self.peaks = None
+
+        if instrument is None:
+            instrument = "qtof"
+        self.instrument = instrument
+
+    @property
+    def instrument(self) -> str:
+        return self._instrument
+
+    @instrument.setter
+    def instrument(self, value):
+        valid_values = ["qtof", "orbitrap"]
+        if value in valid_values:
+            self._instrument = value
+        else:
+            msg = "instrument must be one of {}".format(valid_values)
+            raise ValueError(msg)
+
+    def find_centroids(self, min_snr: Optional[float] = None,
+                       min_distance: Optional[float] = None
+                       ) -> Tuple[np.ndarray, np.ndarray]:
+        r"""
+        Find centroids in the spectrum.
+
+        Parameters
+        ----------
+        min_snr : positive number, optional
+            Minimum signal to noise ratio of the peaks. Overwrites values
+            set by mode. Default value is 10
+        min_distance : positive number, optional
+            Minimum distance between consecutive peaks. If None, sets the value
+            to 0.01 if the `mode` attribute is qtof. If the `mode` is orbitrap,
+            sets the value to 0.005
+
+        Returns
+        -------
+        centroids : array of peak centroids
+        area : array of peak area
+
+        """
+        params = get_find_centroid_params(self.instrument)
+        if min_distance is not None:
+            params["min_distance"] = min_distance
+
+        if min_snr is not None:
+            params["min_snr"] = min_snr
+
+        centroids, area = peaks.find_centroids(self.mz, self.spint, **params)
+        return centroids, area
+
+    def plot(self, draw: bool = True, fig_params: Optional[dict] = None,
+             line_params: Optional[dict] = None) -> bokeh.plotting.Figure:
+        """
+        Plot the spectrum.
+
+        Parameters
+        ----------
+        draw : bool, optional
+            if True run bokeh show function.
+        fig_params : dict
+            key-value parameters to pass into bokeh figure function.
+        line_params : dict
+            key-value parameters to pass into bokeh line function.
+
+        Returns
+        -------
+        bokeh Figure
+        """
+        return _plot_bokeh.plot_ms_spectrum(self.mz, self.spint, draw=draw,
+                                            fig_params=fig_params,
+                                            line_params=line_params)
 
 
 class Chromatogram:
@@ -149,38 +249,106 @@ class Chromatogram:
                                              line_params=line_params)
 
 
-def reader(path: str, on_disc: bool = True):
+class Roi(Chromatogram):
     """
-    Load `path` file into an OnDiskExperiment. If the file is not indexed, load
-    the file.
+    mz traces where a chromatographic peak may be found.
 
-    Parameters
+    Subclassed from Chromatogram. Used for feature detection in LCMS data.
+
+    Attributes
     ----------
-    path : str
-        path to read mzML file from.
-    on_disc : bool
-        if True doesn't load the whole file on memory.
+    rt : array
+        retention time in each scan.
+    spint : array
+        intensity in each scan.
+    mz : array
+        m/z in each scan.
+    first_scan : int
+        first scan in the raw data where the ROI was detected.
 
-    Returns
-    -------
-    pyopenms.OnDiskMSExperiment or pyopenms.MSExperiment
     """
-    if on_disc:
-        try:
-            exp_reader = pyopenms.OnDiscMSExperiment()
-            exp_reader.openFile(path)
-            # this checks if OnDiscMSExperiment can be used else switch
-            # to MSExperiment
-            exp_reader.getSpectrum(0)
-        except RuntimeError:
-            msg = "{} is not an indexed mzML file, switching to MSExperiment"
-            warnings.warn(msg.format(path))
-            exp_reader = pyopenms.MSExperiment()
-            pyopenms.MzMLFile().load(path, exp_reader)
-    else:
-        exp_reader = pyopenms.MSExperiment()
-        pyopenms.MzMLFile().load(path, exp_reader)
-    return exp_reader
+    def __init__(self, spint: np.ndarray, mz: np.ndarray, rt: np.ndarray,
+                 first_scan: int, mode: Optional[str] = None):
+        super(Roi, self).__init__(rt, spint, mode=mode)
+        self.mz = mz
+        self.first_scan = first_scan
+
+    def extend(self, rt: np.array, n: int):
+        """
+        adds a dummy value at the beginning and at the end of the ROI. This
+        results in better peak picking results when low intensity peaks are
+        cropped.
+
+        """
+        max_int = np.nanmax(self.spint)
+        mz_fill = np.nanmean(self.mz)
+        spint_fill = np.nanmin(self.spint)
+        roi_rt = list()
+        roi_mz = list()
+        roi_spint = list()
+        extend_roi_beginning = ((np.isnan(self.spint[0]) or
+                                 (self.spint[0] < (0.75 * max_int))))
+        extend_roi_end = (((np.isnan(self.spint[-1])) or
+                          (self.spint[-1] < (0.75 * max_int))))
+
+        if extend_roi_beginning:
+            n_beginning = min(n, self.first_scan)
+            roi_rt.append(rt[self.first_scan - n_beginning:self.first_scan])
+            roi_mz.append([mz_fill] * n_beginning)
+            roi_spint.append([spint_fill] * n_beginning)
+            # print(roi_rt)
+
+        roi_rt.append(self.rt)
+        roi_spint.append(self.spint)
+        roi_mz.append(self.mz)
+
+        if extend_roi_end:
+            n_end = min(n, rt.size - self.first_scan - self.rt.size)
+            n_roi_end = self.first_scan + self.rt.size
+            roi_rt.append(rt[n_roi_end:n_roi_end + n_end])
+            roi_mz.append([mz_fill] * n_end)
+            roi_spint.append([spint_fill] * n_end)
+
+        self.rt = np.hstack(roi_rt)
+        self.spint = np.hstack(roi_spint)
+        self.mz = np.hstack(roi_mz)
+
+    def fill_nan(self):
+        """
+        fill missing intensity values using linear interpolation.
+
+        """
+
+        # if the first or last values are missing, assign an intensity value
+        # of zero. This prevents errors in the interpolation and makes peak
+        # picking to work better.
+        if np.isnan(self.spint[0]):
+            self.spint[0] = 0
+        if np.isnan(self.spint[-1]):
+            self.spint[-1] = 0
+
+        missing = np.isnan(self.spint)
+        interpolator = interp1d(self.rt[~missing], self.spint[~missing])
+        mz_mean = np.nanmean(self.mz)
+        self.mz[missing] = mz_mean
+        self.spint[missing] = interpolator(self.rt[missing])
+
+    def get_peaks_mz(self):
+        """
+        Computes the weighted mean of the m/z for each peak and the m/z
+        standard deviation
+        Returns
+        -------
+        mean_mz : array
+        mz_std : array
+
+        """
+        mz_std = np.zeros(len(self.peaks))
+        mz_mean = np.zeros(len(self.peaks))
+        for k, peak in enumerate(self.peaks):
+            mz_std[k] = self.mz[peak.start:peak.end].std()
+            mz_mean[k] = peak.get_loc(self.mz, self.spint)
+        return mz_mean, mz_std
 
 
 def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
@@ -262,6 +430,127 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
     return chromatograms
 
 
+def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
+             max_missing: int, min_length: int, min_intensity: float,
+             multiple_match: str, targeted_mz: Optional[np.ndarray] = None,
+             start: Optional[int] = None, end: Optional[int] = None,
+             mz_reduce: Union[str, Callable] = "mean",
+             sp_reduce: Union[str, Callable] = "sum",
+             mode: Optional[str] = None
+             ) -> List[Roi]:
+    """
+    Make Region of interest from MS data in centroid mode.
+    Used by MSData to as the first step of the centWave algorithm.
+
+    Parameters
+    ----------
+    ms_experiment: pyopenms.MSExperiment
+    max_missing : int
+        maximum number of consecutive missing values. when a row surpass this
+        number the roi is considered as finished and is added to the roi list if
+        it meets the length and intensity criteria.
+    min_length : int
+        The minimum length of a roi to be considered valid.
+    min_intensity : float
+        Minimum intensity in a roi to be considered valid.
+    tolerance : float
+        mz tolerance to connect values across scans
+    start : int, optional
+        First scan to analyze. If None starts at scan 0
+    end : int, optional
+        Last scan to analyze. If None, uses the last scan number.
+    multiple_match : {"closest", "reduce"}
+        How to match peaks when there is more than one match. If mode is
+        `closest`, then the closest peak is assigned as a match and the
+        others are assigned to no match. If mode is `reduce`, then unique
+        mz and intensity values are generated using the reduce function in
+        `mz_reduce` and `sp_reduce` respectively.
+    mz_reduce : "mean" or Callable
+        function used to reduce mz values. Can be a function accepting
+        numpy arrays and returning numbers. Only used when `multiple_match`
+        is reduce. See the following prototype:
+
+        .. code-block:: python
+
+            def mz_reduce(mz_match: np.ndarray) -> float:
+                pass
+
+    sp_reduce : {"mean", "sum"} or Callable
+        function used to reduce intensity values. Can be a function accepting
+        numpy arrays and returning numbers. Only used when `multiple_match`
+        is reduce. To use custom functions see the prototype shown on
+        `mz_reduce`.
+    targeted_mz : numpy.ndarray, optional
+        if a list of mz is provided, roi are searched only using this list.
+
+    mode : str, optional
+        mode used to create Roi objects.
+
+    Returns
+    -------
+    roi: list[Roi]
+
+    Notes
+    -----
+    To create a ROI, m/z values in consecutive scans are connected if they are
+    within the tolerance`. If there's more than one possible m/z value to
+    connect in the next scan, two different strategies are available, using the
+    `multiple_match` parameter: If "closest" is used, then m/z values are
+    matched to the closest ones, and the others are used to create new ROI. If
+    "reduce" is used, then all values within the tolerance are combined. m/z and
+    intensity values are combined using the `mz_reduce`  and `sp_reduce`
+    parameters respectively. If no matching value has be found in a scan, a NaN
+    is added to the ROI. If no matching values are found in `max_missing`
+    consecutive scans the ROI is flagged as finished. In this stage, two
+    checks are made before the ROI is considered valid:
+
+    1.  The number of non missing values must be higher than `min_length`.
+    2.  The maximum intensity value in the ROI must be higher than
+        `min_intensity`.
+
+    If the two conditions are meet, the ROI is added to the list of valid ROI.
+
+    References
+    ----------
+    .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
+        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
+        504 (2008). https://doi.org/10.1186/1471-2105-9-504
+
+    """
+    if start is None:
+        start = 0
+
+    if end is None:
+        end = ms_experiment.getNrSpectra()
+
+    if targeted_mz is None:
+        mz_seed, _ = ms_experiment.getSpectrum(start).get_peaks()
+        targeted = False
+    else:
+        mz_seed = targeted_mz
+        targeted = True
+
+    size = end - start
+    rt = np.zeros(size)
+    processor = _RoiMaker(mz_seed, max_missing=max_missing,
+                          min_length=min_length,
+                          min_intensity=min_intensity, tolerance=tolerance,
+                          multiple_match=multiple_match,
+                          mz_reduce=mz_reduce, sp_reduce=sp_reduce,
+                          mode=mode)
+    for k_scan in range(start, end):
+        sp = ms_experiment.getSpectrum(k_scan)
+        rt[k_scan - start] = sp.getRT()
+        mz, spint = sp.get_peaks()
+        processor.add(mz, spint, targeted=targeted)
+        processor.append_to_roi(rt, targeted=targeted)
+
+    # add roi not completed during last scan
+    processor.flag_as_completed()
+    processor.append_to_roi(rt)
+    return processor.roi
+
+
 def accumulate_spectra_profile(ms_experiment: ms_experiment_type,
                                start: int, end: int,
                                subtract_left: Optional[int] = None,
@@ -327,13 +616,61 @@ def accumulate_spectra_profile(ms_experiment: ms_experiment_type,
     return accumulated_mz, accumulated_sp
 
 
-def _get_uniform_mz(mz: np.ndarray):
-    """returns a new uniformly sampled m/z array."""
-    mz_min = mz.min()
-    mz_max = mz.max()
-    mz_res = np.diff(mz).min()
-    uniform_mz = np.arange(mz_min, mz_max, mz_res)
-    return uniform_mz
+def accumulate_spectra_centroid(ms_experiment: ms_experiment_type,
+                                start: int, end: int,
+                                subtract_left: Optional[int] = None,
+                                subtract_right: Optional[int] = None,
+                                tolerance: Optional[float] = None,
+                                ):
+    """
+    accumulates a series of consecutive spectra into a single spectrum.
+
+    Parameters
+    ----------
+    ms_experiment : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
+    start : int
+        start slice for scan accumulation
+    end : int
+        end slice for scan accumulation.
+    tolerance : float
+        m/z tolerance to connect peaks across scans
+    subtract_left : int, optional
+        Scans between `subtract_left` and `start` are subtracted from the
+        accumulated spectrum.
+    subtract_right : int, optional
+        Scans between `subtract_right` and `end` are subtracted from the
+        accumulated spectrum.
+
+    Returns
+    -------
+    accumulated_mz : array of m/z values
+    accumulated_int : array of cumulative intensities.
+
+    """
+    n_spectra = ms_experiment.getNrSpectra()
+
+    if subtract_left is None:
+        subtract_left = start
+
+    if subtract_right is None:
+        subtract_right = end
+
+    max_missing = subtract_right - subtract_left + 1
+    params = {"start": start, "end": end, "subtract_left": subtract_left,
+              "subtract_right": subtract_right}
+    validation.validate_accumulate_spectra_params(n_spectra, params)
+    roi = make_roi(ms_experiment, tolerance, max_missing=max_missing,
+                   min_length=1, min_intensity=0.0, multiple_match="reduce",
+                   start=subtract_left, end=subtract_right, mz_reduce="mean",
+                   sp_reduce="sum")
+    mask = np.ones(max_missing)
+    mask[:start - subtract_left] = -1
+    mask[end - subtract_left:] = -1
+    mz = np.array([(x.mz * mask).mean() for x in roi])
+    spint = np.array([(x.spint * mask).sum() for x in roi])
+    mz = mz[spint > 0]
+    spint = mz[spint > 0]
+    return mz, spint
 
 
 def get_lc_filter_peak_params(lc_mode: str) -> dict:
@@ -439,215 +776,11 @@ def get_find_centroid_params(instrument: str):
     return params
 
 
-class MSSpectrum:
-    """
-    Representation of a Mass Spectrum in profile mode. Manages conversion to
-    centroids and plotting of data.
-
-    Attributes
-    ----------
-    mz : array of m/z values
-    spint : array of intensity values.
-    instrument : str
-        MS instrument type. Used to set default values in peak picking.
-
-    """
-    def __init__(self, mz: np.ndarray, spint: np.ndarray,
-                 instrument: Optional[str] = None):
-        """
-        Constructor of the MSSpectrum.
-
-        Parameters
-        ----------
-        mz: array
-            m/z values.
-        spint: array
-            intensity values.
-
-        """
-        self.mz = mz
-        self.spint = spint
-        self.peaks = None
-
-        if instrument is None:
-            instrument = "qtof"
-        self.instrument = instrument
-
-    @property
-    def instrument(self) -> str:
-        return self._instrument
-
-    @instrument.setter
-    def instrument(self, value):
-        valid_values = ["qtof", "orbitrap"]
-        if value in valid_values:
-            self._instrument = value
-        else:
-            msg = "instrument must be one of {}".format(valid_values)
-            raise ValueError(msg)
-
-    def find_centroids(self, min_snr: Optional[float] = None,
-                       min_distance: Optional[float] = None
-                       ) -> Tuple[np.ndarray, np.ndarray]:
-        r"""
-        Find centroids in the spectrum.
-
-        Parameters
-        ----------
-        min_snr : positive number, optional
-            Minimum signal to noise ratio of the peaks. Overwrites values
-            set by mode. Default value is 10
-        min_distance : positive number, optional
-            Minimum distance between consecutive peaks. If None, sets the value
-            to 0.01 if the `mode` attribute is qtof. If the `mode` is orbitrap,
-            sets the value to 0.005
-
-        Returns
-        -------
-        centroids : array of peak centroids
-        area : array of peak area
-
-        """
-        params = get_find_centroid_params(self.instrument)
-        if min_distance is not None:
-            params["min_distance"] = min_distance
-
-        if min_snr is not None:
-            params["min_snr"] = min_snr
-
-        centroids, area = peaks.find_centroids(self.mz, self.spint, **params)
-        return centroids, area
-
-    def plot(self, draw: bool = True, fig_params: Optional[dict] = None,
-             line_params: Optional[dict] = None) -> bokeh.plotting.Figure:
-        """
-        Plot the spectrum.
-
-        Parameters
-        ----------
-        draw : bool, optional
-            if True run bokeh show function.
-        fig_params : dict
-            key-value parameters to pass into bokeh figure function.
-        line_params : dict
-            key-value parameters to pass into bokeh line function.
-
-        Returns
-        -------
-        bokeh Figure
-        """
-        return _plot_bokeh.plot_ms_spectrum(self.mz, self.spint, draw=draw,
-                                            fig_params=fig_params,
-                                            line_params=line_params)
-
-
 _TempRoi = namedtuple("TempRoi", ["mz", "sp", "scan"])
 
 
 def _make_empty_temp_roi():
     return _TempRoi(mz=list(), sp=list(), scan=list())
-
-
-class Roi(Chromatogram):
-    """
-    mz traces where a chromatographic peak may be found.
-
-    Subclassed from Chromatogram. Used for feature detection in LCMS data.
-
-    Attributes
-    ----------
-    rt : array
-        retention time in each scan.
-    spint : array
-        intensity in each scan.
-    mz : array
-        m/z in each scan.
-    first_scan : int
-        first scan in the raw data where the ROI was detected.
-
-    """
-    def __init__(self, spint: np.ndarray, mz: np.ndarray, rt: np.ndarray,
-                 first_scan: int, mode: Optional[str] = None):
-        super(Roi, self).__init__(rt, spint, mode=mode)
-        self.mz = mz
-        self.first_scan = first_scan
-
-    def extend(self, rt: np.array, n: int):
-        """
-        adds a dummy value at the beginning and at the end of the ROI. This
-        results in better peak picking results when low intensity peaks are
-        cropped.
-
-        """
-        max_int = np.nanmax(self.spint)
-        mz_fill = np.nanmean(self.mz)
-        spint_fill = np.nanmin(self.spint)
-        roi_rt = list()
-        roi_mz = list()
-        roi_spint = list()
-        extend_roi_beginning = ((np.isnan(self.spint[0]) or
-                                 (self.spint[0] < (0.75 * max_int))))
-        extend_roi_end = (((np.isnan(self.spint[-1])) or
-                          (self.spint[-1] < (0.75 * max_int))))
-
-        if extend_roi_beginning:
-            n_beginning = min(n, self.first_scan)
-            roi_rt.append(rt[self.first_scan - n_beginning:self.first_scan])
-            roi_mz.append([mz_fill] * n_beginning)
-            roi_spint.append([spint_fill] * n_beginning)
-            # print(roi_rt)
-
-        roi_rt.append(self.rt)
-        roi_spint.append(self.spint)
-        roi_mz.append(self.mz)
-
-        if extend_roi_end:
-            n_end = min(n, rt.size - self.first_scan - self.rt.size)
-            n_roi_end = self.first_scan + self.rt.size
-            roi_rt.append(rt[n_roi_end:n_roi_end + n_end])
-            roi_mz.append([mz_fill] * n_end)
-            roi_spint.append([spint_fill] * n_end)
-
-        self.rt = np.hstack(roi_rt)
-        self.spint = np.hstack(roi_spint)
-        self.mz = np.hstack(roi_mz)
-
-    def fill_nan(self):
-        """
-        fill missing intensity values using linear interpolation.
-
-        """
-
-        # if the first or last values are missing, assign an intensity value
-        # of zero. This prevents errors in the interpolation and makes peak
-        # picking to work better.
-        if np.isnan(self.spint[0]):
-            self.spint[0] = 0
-        if np.isnan(self.spint[-1]):
-            self.spint[-1] = 0
-
-        missing = np.isnan(self.spint)
-        interpolator = interp1d(self.rt[~missing], self.spint[~missing])
-        mz_mean = np.nanmean(self.mz)
-        self.mz[missing] = mz_mean
-        self.spint[missing] = interpolator(self.rt[missing])
-
-    def get_peaks_mz(self):
-        """
-        Computes the weighted mean of the m/z for each peak and the m/z
-        standard deviation
-        Returns
-        -------
-        mean_mz : array
-        mz_std : array
-
-        """
-        mz_std = np.zeros(len(self.peaks))
-        mz_mean = np.zeros(len(self.peaks))
-        for k, peak in enumerate(self.peaks):
-            mz_std[k] = self.mz[peak.start:peak.end].std()
-            mz_mean[k] = peak.get_loc(self.mz, self.spint)
-        return mz_mean, mz_std
 
 
 class _RoiMaker:
@@ -962,179 +1095,10 @@ def tmp_roi_to_roi(tmp_roi: _TempRoi, rt: np.ndarray,
     return roi
 
 
-def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
-             max_missing: int, min_length: int, min_intensity: float,
-             multiple_match: str, targeted_mz: Optional[np.ndarray] = None,
-             start: Optional[int] = None, end: Optional[int] = None,
-             mz_reduce: Union[str, Callable] = "mean",
-             sp_reduce: Union[str, Callable] = "sum",
-             mode: Optional[str] = None
-             ) -> List[Roi]:
-    """
-    Make Region of interest from MS data in centroid mode.
-    Used by MSData to as the first step of the centWave algorithm.
-
-    Parameters
-    ----------
-    ms_experiment: pyopenms.MSExperiment
-    max_missing : int
-        maximum number of consecutive missing values. when a row surpass this
-        number the roi is considered as finished and is added to the roi list if
-        it meets the length and intensity criteria.
-    min_length : int
-        The minimum length of a roi to be considered valid.
-    min_intensity : float
-        Minimum intensity in a roi to be considered valid.
-    tolerance : float
-        mz tolerance to connect values across scans
-    start : int, optional
-        First scan to analyze. If None starts at scan 0
-    end : int, optional
-        Last scan to analyze. If None, uses the last scan number.
-    multiple_match : {"closest", "reduce"}
-        How to match peaks when there is more than one match. If mode is
-        `closest`, then the closest peak is assigned as a match and the
-        others are assigned to no match. If mode is `reduce`, then unique
-        mz and intensity values are generated using the reduce function in
-        `mz_reduce` and `sp_reduce` respectively.
-    mz_reduce : "mean" or Callable
-        function used to reduce mz values. Can be a function accepting
-        numpy arrays and returning numbers. Only used when `multiple_match`
-        is reduce. See the following prototype:
-
-        .. code-block:: python
-
-            def mz_reduce(mz_match: np.ndarray) -> float:
-                pass
-
-    sp_reduce : {"mean", "sum"} or Callable
-        function used to reduce intensity values. Can be a function accepting
-        numpy arrays and returning numbers. Only used when `multiple_match`
-        is reduce. To use custom functions see the prototype shown on
-        `mz_reduce`.
-    targeted_mz : numpy.ndarray, optional
-        if a list of mz is provided, roi are searched only using this list.
-
-    mode : str, optional
-        mode used to create Roi objects.
-
-    Returns
-    -------
-    roi: list[Roi]
-
-    Notes
-    -----
-    To create a ROI, m/z values in consecutive scans are connected if they are
-    within the tolerance`. If there's more than one possible m/z value to
-    connect in the next scan, two different strategies are available, using the
-    `multiple_match` parameter: If "closest" is used, then m/z values are
-    matched to the closest ones, and the others are used to create new ROI. If
-    "reduce" is used, then all values within the tolerance are combined. m/z and
-    intensity values are combined using the `mz_reduce`  and `sp_reduce`
-    parameters respectively. If no matching value has be found in a scan, a NaN
-    is added to the ROI. If no matching values are found in `max_missing`
-    consecutive scans the ROI is flagged as finished. In this stage, two
-    checks are made before the ROI is considered valid:
-
-    1.  The number of non missing values must be higher than `min_length`.
-    2.  The maximum intensity value in the ROI must be higher than
-        `min_intensity`.
-
-    If the two conditions are meet, the ROI is added to the list of valid ROI.
-
-    References
-    ----------
-    .. [1] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-        504 (2008). https://doi.org/10.1186/1471-2105-9-504
-
-    """
-    if start is None:
-        start = 0
-
-    if end is None:
-        end = ms_experiment.getNrSpectra()
-
-    if targeted_mz is None:
-        mz_seed, _ = ms_experiment.getSpectrum(start).get_peaks()
-        targeted = False
-    else:
-        mz_seed = targeted_mz
-        targeted = True
-
-    size = end - start
-    rt = np.zeros(size)
-    processor = _RoiMaker(mz_seed, max_missing=max_missing,
-                          min_length=min_length,
-                          min_intensity=min_intensity, tolerance=tolerance,
-                          multiple_match=multiple_match,
-                          mz_reduce=mz_reduce, sp_reduce=sp_reduce,
-                          mode=mode)
-    for k_scan in range(start, end):
-        sp = ms_experiment.getSpectrum(k_scan)
-        rt[k_scan - start] = sp.getRT()
-        mz, spint = sp.get_peaks()
-        processor.add(mz, spint, targeted=targeted)
-        processor.append_to_roi(rt, targeted=targeted)
-
-    # add roi not completed during last scan
-    processor.flag_as_completed()
-    processor.append_to_roi(rt)
-    return processor.roi
-
-
-def _accumulate_spectra_centroid(ms_experiment: ms_experiment_type,
-                                 start: int, end: int,
-                                 subtract_left: Optional[int] = None,
-                                 subtract_right: Optional[int] = None,
-                                 tolerance: Optional[float] = None,
-                                 ):
-    """
-    accumulates a series of consecutive spectra into a single spectrum.
-
-    Parameters
-    ----------
-    ms_experiment : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
-    start : int
-        start slice for scan accumulation
-    end : int
-        end slice for scan accumulation.
-    tolerance : float
-        m/z tolerance to connect peaks across scans
-    subtract_left : int, optional
-        Scans between `subtract_left` and `start` are subtracted from the
-        accumulated spectrum.
-    subtract_right : int, optional
-        Scans between `subtract_right` and `end` are subtracted from the
-        accumulated spectrum.
-
-    Returns
-    -------
-    accumulated_mz : array of m/z values
-    accumulated_int : array of cumulative intensities.
-
-    """
-    n_spectra = ms_experiment.getNrSpectra()
-
-    if subtract_left is None:
-        subtract_left = start
-
-    if subtract_right is None:
-        subtract_right = end
-
-    max_missing = subtract_right - subtract_left + 1
-    params = {"start": start, "end": end, "subtract_left": subtract_left,
-              "subtract_right": subtract_right}
-    validation.validate_accumulate_spectra_params(n_spectra, params)
-    roi = make_roi(ms_experiment, tolerance, max_missing=max_missing,
-                   min_length=1, min_intensity=0.0, multiple_match="reduce",
-                   start=subtract_left, end=subtract_right, mz_reduce="mean",
-                   sp_reduce="sum")
-    mask = np.ones(max_missing)
-    mask[:start - subtract_left] = -1
-    mask[end - subtract_left:] = -1
-    mz = np.array([(x.mz * mask).mean() for x in roi])
-    spint = np.array([(x.spint * mask).sum() for x in roi])
-    mz = mz[spint > 0]
-    spint = mz[spint > 0]
-    return mz, spint
+def _get_uniform_mz(mz: np.ndarray):
+    """returns a new uniformly sampled m/z array."""
+    mz_min = mz.min()
+    mz_max = mz.max()
+    mz_res = np.diff(mz).min()
+    uniform_mz = np.arange(mz_min, mz_max, mz_res)
+    return uniform_mz
