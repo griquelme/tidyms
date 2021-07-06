@@ -16,466 +16,13 @@ from typing import Optional, Iterable, Tuple, Union, List, Callable
 from . import peaks
 from . import validation
 import bokeh.plotting
-from bokeh.palettes import Set3
 from collections import namedtuple
 import warnings
+from . import _plot_bokeh
 
 from .utils import find_closest
 
 ms_experiment_type = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
-
-
-def reader(path: str, on_disc: bool = True):
-    """
-    Load `path` file into an OnDiskExperiment. If the file is not indexed, load
-    the file.
-
-    Parameters
-    ----------
-    path : str
-        path to read mzML file from.
-    on_disc : bool
-        if True doesn't load the whole file on memory.
-
-    Returns
-    -------
-    pyopenms.OnDiskMSExperiment or pyopenms.MSExperiment
-    """
-    if on_disc:
-        try:
-            exp_reader = pyopenms.OnDiscMSExperiment()
-            exp_reader.openFile(path)
-            # this checks if OnDiscMSExperiment can be used else switch
-            # to MSExperiment
-            exp_reader.getSpectrum(0)
-        except RuntimeError:
-            msg = "{} is not an indexed mzML file, switching to MSExperiment"
-            warnings.warn(msg.format(path))
-            exp_reader = pyopenms.MSExperiment()
-            pyopenms.MzMLFile().load(path, exp_reader)
-    else:
-        exp_reader = pyopenms.MSExperiment()
-        pyopenms.MzMLFile().load(path, exp_reader)
-    return exp_reader
-
-
-def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
-                       window: float = 0.005, start: Optional[int] = None,
-                       end: Optional[int] = None,
-                       accumulator: str = "sum"
-                       ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Computes extracted ion chromatograms for a list of m/z values from raw
-    data.
-
-    Parameters
-    ----------
-    ms_experiment : MSExp or OnDiskMSExp.
-    mz : iterable[float]
-        mz values used to build the EICs.
-    start : int, optional
-        first scan to build the chromatograms
-    end : int, optional
-        last scan to build the chromatograms. The scan with `number` end is not
-        included in the chromatograms.
-    window : positive number.
-               Tolerance to build the EICs.
-    accumulator : {"sum", "mean"}
-        "mean" divides the intensity in the EIC using the number of points in
-        the window.
-    Returns
-    -------
-    rt : array of retention times
-    eic : array with rows of EICs.
-    """
-    nsp = ms_experiment.getNrSpectra()
-
-    if not isinstance(mz, np.ndarray):
-        mz = np.array(mz)
-
-    if start is None:
-        start = 0
-
-    if end is None:
-        end = nsp
-
-    # validate params
-    params = {"start": start, "end": end, "window": window, "mz": mz,
-              "accumulator": accumulator}
-    validation.validate_make_chromatograms_params(nsp, params)
-
-    # mz_intervals has this shape to be compatible with reduce at
-    mz_intervals = (np.vstack((mz - window, mz + window))
-                    .T.reshape(mz.size * 2))
-
-    eic = np.zeros((mz.size, end - start))
-    rt = np.zeros(end - start)
-    for ksp in range(start, end):
-        # find rt, mz and intensity values of the current scan
-        sp = ms_experiment.getSpectrum(ksp)
-        rt[ksp - start] = sp.getRT()
-        mz_sp, int_sp = sp.get_peaks()
-        ind_sp = np.searchsorted(mz_sp, mz_intervals)
-
-        # check if the slices aren't empty
-        has_mz = (ind_sp[1::2] - ind_sp[::2]) > 0
-        # elements added at the end of mz_sp raise IndexError
-        ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
-        # this adds the values between two consecutive indices
-        tmp_eic = np.where(has_mz, np.add.reduceat(int_sp, ind_sp)[::2], 0)
-        if accumulator == "mean":
-            norm = ind_sp[1::2] - ind_sp[::2]
-            norm[norm == 0] = 1
-            tmp_eic = tmp_eic / norm
-        eic[:, ksp - start] = tmp_eic
-    return rt, eic
-
-
-def accumulate_spectra_profile(ms_experiment: ms_experiment_type,
-                               start: int, end: int,
-                               subtract_left: Optional[int] = None,
-                               subtract_right: Optional[int] = None,
-                               kind: str = "linear"
-                               ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    accumulates a spectra into a single spectrum.
-
-    Parameters
-    ----------
-    ms_experiment : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
-    start : int
-        start slice for scan accumulation
-    end : int
-        end slice for scan accumulation.
-    subtract_left : int, optional
-        Scans between `subtract_left` and `start` are subtracted from the
-        accumulated spectrum.
-    subtract_right : int, optional
-        Scans between `subtract_right` and `end` are subtracted from the
-        accumulated spectrum.
-    kind : str
-        kind of interpolator to use with scipy interp1d.
-
-    Returns
-    -------
-    accumulated_mz : array of m/z values
-    accumulated_int : array of cumulative intensities.
-
-    """
-    if subtract_left is None:
-        subtract_left = start
-
-    if subtract_right is None:
-        subtract_right = end
-
-    # parameter validation
-    params = {"start": start, "end": end, "subtract_left": subtract_left,
-              "subtract_right": subtract_right, "kind": kind}
-    n_sp = ms_experiment.getNrSpectra()
-    validation.validate_accumulate_spectra_params(n_sp, params)
-
-    # creates a common mz reference value for the scans
-    mz, _ = ms_experiment.getSpectrum(start).get_peaks()
-    accumulated_mz = _get_uniform_mz(mz)
-    accumulated_sp = np.zeros_like(accumulated_mz)
-
-    # interpolates each scan to the reference. Removes values outside the
-    # min and max of the reference.
-    for scan in range(subtract_left, subtract_right):
-        mz_scan, int_scan = ms_experiment.getSpectrum(scan).get_peaks()
-        mz_min, mz_max = mz_scan.min(), mz_scan.max()
-        min_ind, max_ind = np.searchsorted(accumulated_mz, [mz_min, mz_max])
-        interpolator = interp1d(mz_scan, int_scan, kind=kind)
-        tmp_sp = interpolator(accumulated_mz[min_ind:max_ind])
-        # accumulate scans
-        if (scan < start) or (scan > end):
-            accumulated_sp[min_ind:max_ind] -= tmp_sp
-        else:
-            accumulated_sp[min_ind:max_ind] += tmp_sp
-
-    is_positive_sp = accumulated_sp > 0
-    accumulated_mz = accumulated_mz[is_positive_sp]
-    accumulated_sp = accumulated_sp[is_positive_sp]
-    return accumulated_mz, accumulated_sp
-
-
-def _get_uniform_mz(mz: np.ndarray):
-    """returns a new uniformly sampled m/z array."""
-    mz_min = mz.min()
-    mz_max = mz.max()
-    mz_res = np.diff(mz).min()
-    uniform_mz = np.arange(mz_min, mz_max, mz_res)
-    return uniform_mz
-
-
-def make_widths_lc(mode: str) -> np.ndarray:
-    """
-    Create an array of widths to use in CWT peak picking of LC data.
-
-    Parameters
-    ----------
-    mode: {"hplc", "uplc"}
-
-    Returns
-    -------
-    widths: array
-    """
-    if mode == "uplc":
-        widths = [np.linspace(0.25, 5, 20), np.linspace(6, 20, 8),
-                  np.linspace(25, 60, 8)]
-        widths = np.hstack(widths)
-    elif mode == "hplc":
-        widths = [np.linspace(1, 10, 20), np.linspace(10, 30, 8),
-                  np.linspace(40, 90, 8)]
-        widths = np.hstack(widths)
-    else:
-        msg = "Valid modes are `hplc` or `uplc`."
-        raise ValueError(msg)
-    return widths
-
-
-def make_widths_ms(mode: str) -> np.ndarray:
-    """
-    Create an array of widths to use in CWT peak picking of MS data.
-
-    Parameters
-    ----------
-    mode : {"qtof", "orbitrap"}
-
-    Returns
-    -------
-    widths : array
-    """
-    if mode == "qtof":
-        min_width = 0.005
-        middle = 0.1
-        max_width = 0.2
-    elif mode == "orbitrap":
-        min_width = 0.0005
-        middle = 0.001
-        max_width = 0.005
-    else:
-        msg = "mode must be `orbitrap` or `qtof`"
-        raise ValueError(msg)
-    # [:-1] prevents repeated value
-    widths = np.hstack((np.linspace(min_width, middle, 20)[:-1],
-                        np.linspace(middle, max_width, 10)))
-    return widths
-
-
-def get_lc_filter_peak_params(lc_mode: str) -> dict:
-    """
-    Default filters for peaks detected in LC data.
-
-    Parameters
-    ----------
-    lc_mode : {"hplc", "uplc"}
-        HPLC assumes typical experimental conditions for HPLC experiments:
-        longer columns with particle size greater than 3 micron. UPLC is for
-        data acquired with short columns with particle size lower than 3 micron.
-
-    Returns
-    -------
-    filters : dict
-        filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`.
-
-    """
-    if lc_mode == "hplc":
-        filters = {"width": (10, 90), "snr": (5, None)}
-    elif lc_mode == "uplc":
-        filters = {"width": (4, 60), "snr": (5, None)}
-    else:
-        msg = "`mode` must be `hplc` or `uplc`"
-        raise ValueError(msg)
-    return filters
-
-
-def get_lc_detect_peak_params() -> dict:
-    """
-    Default values for performing peak detection on LC data.
-
-    Returns
-    -------
-    params : dict
-        keyword arguments to pass to :py:func:`tidyms.peaks.detect_peaks`
-    """
-    params = {"smoothing_strength": 1.0}
-    return params
-
-
-def get_ms_cwt_params(mode: str) -> dict:
-    """
-    Return sane default values for performing CWT based peak picking on MS data.
-
-    Parameters
-    ----------
-    mode : {"qtof", "orbitrap"}
-        qtof assumes a peak width in the range of 0.01-0.05 Da. `orbitrap`
-        assumes a peak width in the range of 0.001-0.005 Da.
-
-    Returns
-    -------
-    cwt_params : dict
-        parameters to pass to .peak.pick_cwt function.
-    """
-    cwt_params = {"snr": 10, "min_length": 5, "gap_threshold": 1,
-                  "estimators": "default"}
-
-    if mode == "qtof":
-        cwt_params["min_width"] = 0.01
-        cwt_params["max_width"] = 0.2
-        cwt_params["max_distance"] = 0.005
-    elif mode == "orbitrap":
-        cwt_params["min_width"] = 0.0005
-        cwt_params["max_width"] = 0.005
-        cwt_params["max_distance"] = 0.0025
-    else:
-        msg = "`mode` must be `qtof` or `orbitrap`"
-        raise ValueError(msg)
-    return cwt_params
-
-
-def get_roi_params(separation: str = "uplc", instrument: str = "qtof"):
-    """
-    Creates a dictionary with recommended parameters for the make_roi function
-    in different use cases.
-
-    Parameters
-    ----------
-    separation : {"uplc", "hplc"}
-        Mode in which the data was acquired. Used to set minimum length of the
-        roi and number of missing values.
-    instrument : {"qtof", "orbitrap"}
-        Type of MS instrument. Used to set the tolerance.
-
-    Returns
-    -------
-    roi_parameters : dict
-    """
-    roi_params = {"min_intensity": 500, "multiple_match": "reduce"}
-
-    if separation == "uplc":
-        roi_params.update({"max_missing": 1, "min_length": 10})
-    elif separation == "hplc":
-        roi_params.update({"max_missing": 1, "min_length": 20})
-    else:
-        msg = "valid `separation` are uplc and hplc"
-        raise ValueError(msg)
-
-    if instrument == "qtof":
-        roi_params.update({"tolerance": 0.01})
-    elif instrument == "orbitrap":
-        roi_params.update({"tolerance": 0.005})
-    else:
-        msg = "valid `instrument` are qtof and orbitrap"
-        raise ValueError(msg)
-
-    roi_params["mode"] = separation
-
-    return roi_params
-
-
-def _get_find_centroid_params(instrument: str):
-    """
-    Set default parameters to find_centroid method using instrument information.
-
-    Parameters
-    ----------
-    instrument : {"qtof", "orbitrap"}
-
-    Returns
-    -------
-    params : dict
-
-    """
-    params = {"min_snr": 10}
-    if instrument == "qtof":
-        md = 0.01
-    else:
-        # valid values for instrument are qtof or orbitrap
-        md = 0.005
-    params["min_distance"] = md
-    return params
-
-
-def _find_isotopic_distribution_aux(mz: np.ndarray, mz_ft: float,
-                                    q: int, n_isotopes: int,
-                                    tol: float):
-    """
-    Finds the isotopic distribution for a given charge state. Auxiliary function
-    to find_isotopic_distribution.
-    Isotopes are searched based on the assumption that the mass difference
-    is due to the presence of a 13C atom.
-
-    Parameters
-    ----------
-    mz : numpy.ndarray
-        List of peaks
-    mz_ft : float
-        Monoisotopic mass
-    q : charge state of the ion
-    n_isotopes : int
-        Number of isotopes to search in the distribution
-    tol: float
-        Mass tolerance, in absolute units
-
-    Returns
-    -------
-    match_ind : np.ndarray
-        array of indices for the isotopic distribution.
-    """
-    # TODO: Remove this function when the isotope finder module is added.
-
-    mono_index = find_closest(mz, mz_ft)
-    mz_mono = mz[mono_index]
-    if abs(mz_mono - mz_ft) > tol:
-        match_ind = np.array([])
-    else:
-        dm = 1.003355
-        mz_theoretic = mz_mono + np.arange(n_isotopes) * dm / q
-        closest_ind = find_closest(mz, mz_theoretic)
-        match_ind = np.where(np.abs(mz[closest_ind] - mz_theoretic) <= tol)[0]
-        match_ind = closest_ind[match_ind]
-    return match_ind
-
-
-def _find_isotopic_distribution(mz: np.ndarray, mz_mono: float,
-                                q_max: int, n_isotopes: int,
-                                tol: float):
-    """
-    Finds the isotopic distribution within charge lower than q_max.
-    Isotopes are searched based on the assumption that the mass difference
-    is due to the presence of a 13C atom. If multiple charge states are
-    compatible with an isotopic distribution, the charge state with the largest
-    number of isotopes detected is kept.
-
-    Parameters
-    ----------
-    mz : numpy.ndarray
-        List of peaks
-    mz_mono : float
-        Monoisotopic mass
-    q_max : int
-        max charge to analyze
-    n_isotopes : int
-        Number of isotopes to search in the distribution
-    tol : float
-        Mass tolerance, in absolute units
-
-    Returns
-    -------
-    best_peaks: numpy.ndarray
-
-    """
-    # TODO: Remove this function when the isotope finder module is added.
-    best_peaks = np.array([], dtype=int)
-    n_peaks = 0
-    for q in range(1, q_max + 1):
-        tmp = _find_isotopic_distribution_aux(mz, mz_mono, q,
-                                              n_isotopes, tol)
-        if tmp.size > n_peaks:
-            best_peaks = tmp
-    return best_peaks
 
 
 class Chromatogram:
@@ -597,43 +144,299 @@ class Chromatogram:
         bokeh Figure
 
         """
-        default_line_params = {"line_width": 1, "line_color": "black",
-                               "alpha": 0.8}
-        cmap = Set3[12]
+        return _plot_bokeh.plot_chromatogram(self.rt, self.spint, self.peaks,
+                                             draw=draw, fig_params=fig_params,
+                                             line_params=line_params)
 
-        if line_params is None:
-            line_params = default_line_params
+
+def reader(path: str, on_disc: bool = True):
+    """
+    Load `path` file into an OnDiskExperiment. If the file is not indexed, load
+    the file.
+
+    Parameters
+    ----------
+    path : str
+        path to read mzML file from.
+    on_disc : bool
+        if True doesn't load the whole file on memory.
+
+    Returns
+    -------
+    pyopenms.OnDiskMSExperiment or pyopenms.MSExperiment
+    """
+    if on_disc:
+        try:
+            exp_reader = pyopenms.OnDiscMSExperiment()
+            exp_reader.openFile(path)
+            # this checks if OnDiscMSExperiment can be used else switch
+            # to MSExperiment
+            exp_reader.getSpectrum(0)
+        except RuntimeError:
+            msg = "{} is not an indexed mzML file, switching to MSExperiment"
+            warnings.warn(msg.format(path))
+            exp_reader = pyopenms.MSExperiment()
+            pyopenms.MzMLFile().load(path, exp_reader)
+    else:
+        exp_reader = pyopenms.MSExperiment()
+        pyopenms.MzMLFile().load(path, exp_reader)
+    return exp_reader
+
+
+def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
+                       window: float = 0.005, start: Optional[int] = None,
+                       end: Optional[int] = None,
+                       accumulator: str = "sum",
+                       chromatogram_mode: Optional[str] = None
+                       ) -> List[Chromatogram]:
+    """
+    Computes extracted ion chromatograms for a list of m/z values.
+
+    Parameters
+    ----------
+    ms_experiment : MSExp or OnDiskMSExp.
+    mz : iterable[float]
+        mz values used to build the EICs.
+    start : int, optional
+        first scan to build the chromatograms
+    end : int, optional
+        last scan to build the chromatograms. The scan with `number` end is not
+        included in the chromatograms.
+    window : positive number.
+               Tolerance to build the EICs.
+    accumulator : {"sum", "mean"}
+        "mean" divides the intensity in the EIC using the number of points in
+        the window.
+    chromatogram_mode : {"uplc", "hplc"}, optional
+        Mode used to create chromatograms
+    Returns
+    -------
+    chromatograms : List of Chromatograms
+
+    """
+    nsp = ms_experiment.getNrSpectra()
+
+    if not isinstance(mz, np.ndarray):
+        mz = np.array(mz)
+
+    if start is None:
+        start = 0
+
+    if end is None:
+        end = nsp
+
+    # validate params
+    params = {"start": start, "end": end, "window": window, "mz": mz,
+              "accumulator": accumulator}
+    validation.validate_make_chromatograms_params(nsp, params)
+
+    # mz_intervals has this shape to be compatible with reduce at
+    mz_intervals = (np.vstack((mz - window, mz + window))
+                    .T.reshape(mz.size * 2))
+
+    eic = np.zeros((mz.size, end - start))
+    rt = np.zeros(end - start)
+    for ksp in range(start, end):
+        # find rt, mz and intensity values of the current scan
+        sp = ms_experiment.getSpectrum(ksp)
+        rt[ksp - start] = sp.getRT()
+        mz_sp, int_sp = sp.get_peaks()
+        ind_sp = np.searchsorted(mz_sp, mz_intervals)
+
+        # check if the slices aren't empty
+        has_mz = (ind_sp[1::2] - ind_sp[::2]) > 0
+        # elements added at the end of mz_sp raise IndexError
+        ind_sp[ind_sp >= int_sp.size] = int_sp.size - 1
+        # this adds the values between two consecutive indices
+        tmp_eic = np.where(has_mz, np.add.reduceat(int_sp, ind_sp)[::2], 0)
+        if accumulator == "mean":
+            norm = ind_sp[1::2] - ind_sp[::2]
+            norm[norm == 0] = 1
+            tmp_eic = tmp_eic / norm
+        eic[:, ksp - start] = tmp_eic
+
+    chromatograms = list()
+    for row in eic:
+        chromatogram = Chromatogram(rt, row, mode=chromatogram_mode)
+        chromatograms.append(chromatogram)
+    return chromatograms
+
+
+def accumulate_spectra_profile(ms_experiment: ms_experiment_type,
+                               start: int, end: int,
+                               subtract_left: Optional[int] = None,
+                               subtract_right: Optional[int] = None,
+                               ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    accumulates a spectra into a single spectrum.
+
+    Parameters
+    ----------
+    ms_experiment : pyopenms.MSExperiment, pyopenms.OnDiskMSExperiment
+    start : int
+        start slice for scan accumulation
+    end : int
+        end slice for scan accumulation.
+    subtract_left : int, optional
+        Scans between `subtract_left` and `start` are subtracted from the
+        accumulated spectrum.
+    subtract_right : int, optional
+        Scans between `subtract_right` and `end` are subtracted from the
+        accumulated spectrum.
+
+    Returns
+    -------
+    accumulated_mz : array of m/z values
+    accumulated_int : array of cumulative intensities.
+
+    """
+    if subtract_left is None:
+        subtract_left = start
+
+    if subtract_right is None:
+        subtract_right = end
+
+    # parameter validation
+    params = {"start": start, "end": end, "subtract_left": subtract_left,
+              "subtract_right": subtract_right}
+    n_sp = ms_experiment.getNrSpectra()
+    validation.validate_accumulate_spectra_params(n_sp, params)
+
+    # creates a common mz reference value for the scans
+    mz, _ = ms_experiment.getSpectrum(start).get_peaks()
+    accumulated_mz = _get_uniform_mz(mz)
+    accumulated_sp = np.zeros_like(accumulated_mz)
+
+    # interpolates each scan to the reference. Removes values outside the
+    # min and max of the reference.
+    for scan in range(subtract_left, subtract_right):
+        mz_scan, int_scan = ms_experiment.getSpectrum(scan).get_peaks()
+        mz_min, mz_max = mz_scan.min(), mz_scan.max()
+        min_ind, max_ind = np.searchsorted(accumulated_mz, [mz_min, mz_max])
+        interpolator = interp1d(mz_scan, int_scan, kind="linear")
+        tmp_sp = interpolator(accumulated_mz[min_ind:max_ind])
+        # accumulate scans
+        if (scan < start) or (scan > end):
+            accumulated_sp[min_ind:max_ind] -= tmp_sp
         else:
-            for params in line_params:
-                default_line_params[params] = line_params[params]
-            line_params = default_line_params
+            accumulated_sp[min_ind:max_ind] += tmp_sp
 
-        default_fig_params = {"aspect_ratio": 1.5}
-        if fig_params is None:
-            fig_params = default_fig_params
-        else:
-            default_fig_params.update(fig_params)
-            fig_params = default_fig_params
+    is_positive_sp = accumulated_sp > 0
+    accumulated_mz = accumulated_mz[is_positive_sp]
+    accumulated_sp = accumulated_sp[is_positive_sp]
+    return accumulated_mz, accumulated_sp
 
-        fig = bokeh.plotting.figure(**fig_params)
-        fig.line(self.rt, self.spint, **line_params)
-        if self.peaks:
-            for k, peak in enumerate(self.peaks):
-                fig.varea(self.rt[peak.start:(peak.end + 1)],
-                          self.spint[peak.start:(peak.end + 1)], 0,
-                          fill_alpha=0.8, fill_color=cmap[k % 12])
-                # k % 12 is used to cycle over the colormap
 
-        #  figure appearance
-        fig.xaxis.axis_label = "Rt [s]"
-        fig.yaxis.axis_label = "intensity [au]"
-        fig.yaxis.axis_label_text_font_style = "bold"
-        fig.yaxis.formatter.precision = 2
-        fig.xaxis.axis_label_text_font_style = "bold"
+def _get_uniform_mz(mz: np.ndarray):
+    """returns a new uniformly sampled m/z array."""
+    mz_min = mz.min()
+    mz_max = mz.max()
+    mz_res = np.diff(mz).min()
+    uniform_mz = np.arange(mz_min, mz_max, mz_res)
+    return uniform_mz
 
-        if draw:
-            bokeh.plotting.show(fig)
-        return fig
+
+def get_lc_filter_peak_params(lc_mode: str) -> dict:
+    """
+    Default filters for peaks detected in LC data.
+
+    Parameters
+    ----------
+    lc_mode : {"hplc", "uplc"}
+        HPLC assumes typical experimental conditions for HPLC experiments:
+        longer columns with particle size greater than 3 micron. UPLC is for
+        data acquired with short columns with particle size lower than 3 micron.
+
+    Returns
+    -------
+    filters : dict
+        filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`.
+
+    """
+    if lc_mode == "hplc":
+        filters = {"width": (10, 90), "snr": (5, None)}
+    elif lc_mode == "uplc":
+        filters = {"width": (4, 60), "snr": (5, None)}
+    else:
+        msg = "`mode` must be `hplc` or `uplc`"
+        raise ValueError(msg)
+    return filters
+
+
+def get_lc_detect_peak_params() -> dict:
+    """
+    Default values for performing peak detection on LC data.
+
+    Returns
+    -------
+    params : dict
+        keyword arguments to pass to :py:func:`tidyms.peaks.detect_peaks`
+    """
+    params = {"smoothing_strength": 1.0}
+    return params
+
+
+def get_roi_params(separation: str = "uplc", instrument: str = "qtof"):
+    """
+    Creates a dictionary with recommended parameters for the make_roi function
+    in different use cases.
+
+    Parameters
+    ----------
+    separation : {"uplc", "hplc"}
+        Mode in which the data was acquired. Used to set minimum length of the
+        roi and number of missing values.
+    instrument : {"qtof", "orbitrap"}
+        Type of MS instrument. Used to set the tolerance.
+
+    Returns
+    -------
+    roi_parameters : dict
+    """
+    roi_params = {"min_intensity": 500, "multiple_match": "reduce"}
+
+    if separation == "uplc":
+        roi_params.update({"max_missing": 1, "min_length": 10})
+    elif separation == "hplc":
+        roi_params.update({"max_missing": 1, "min_length": 20})
+    else:
+        msg = "valid `separation` are uplc and hplc"
+        raise ValueError(msg)
+
+    if instrument == "qtof":
+        roi_params.update({"tolerance": 0.01})
+    elif instrument == "orbitrap":
+        roi_params.update({"tolerance": 0.005})
+    else:
+        msg = "valid `instrument` are qtof and orbitrap"
+        raise ValueError(msg)
+
+    roi_params["mode"] = separation
+
+    return roi_params
+
+
+def get_find_centroid_params(instrument: str):
+    """
+    Set default parameters to find_centroid method using instrument information.
+
+    Parameters
+    ----------
+    instrument : {"qtof", "orbitrap"}
+
+    Returns
+    -------
+    params : dict
+
+    """
+    params = {"min_snr": 10}
+    if instrument == "qtof":
+        md = 0.01
+    else:
+        # valid values for instrument are qtof or orbitrap
+        md = 0.005
+    params["min_distance"] = md
+    return params
 
 
 class MSSpectrum:
@@ -645,12 +448,12 @@ class MSSpectrum:
     ----------
     mz : array of m/z values
     spint : array of intensity values.
-    mode : str
+    instrument : str
         MS instrument type. Used to set default values in peak picking.
 
     """
     def __init__(self, mz: np.ndarray, spint: np.ndarray,
-                 mode: Optional[str] = None):
+                 instrument: Optional[str] = None):
         """
         Constructor of the MSSpectrum.
 
@@ -666,31 +469,28 @@ class MSSpectrum:
         self.spint = spint
         self.peaks = None
 
-        if mode is None:
-            mode = "qtof"
-        self.mode = mode
+        if instrument is None:
+            instrument = "qtof"
+        self.instrument = instrument
 
     @property
-    def mode(self):
-        return self._mode
+    def instrument(self) -> str:
+        return self._instrument
 
-    @mode.setter
-    def mode(self, value):
+    @instrument.setter
+    def instrument(self, value):
         valid_values = ["qtof", "orbitrap"]
         if value in valid_values:
-            self._mode = value
+            self._instrument = value
         else:
-            msg = "mode must be one of {}".format(valid_values)
+            msg = "instrument must be one of {}".format(valid_values)
             raise ValueError(msg)
 
     def find_centroids(self, min_snr: Optional[float] = None,
                        min_distance: Optional[float] = None
-                       ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                       ) -> Tuple[np.ndarray, np.ndarray]:
         r"""
         Find centroids in the spectrum.
-
-        Centroids are found as local maxima above a noise value. See notes for
-        implementation details.
 
         Parameters
         ----------
@@ -706,40 +506,17 @@ class MSSpectrum:
         -------
         centroids : array of peak centroids
         area : array of peak area
-        centroid_index : index of the centroids in `mz`
-
-        Notes
-        -----
-        Peaks are found as local maxima in the signal. To remove low intensity
-        values, a baseline and noise is estimated assuming that y has additive
-        contributions from signal,  baseline and noise:
-
-        .. math::
-
-            y[n] = s[n] + b[n] + \epsilon
-
-        Where :math:`\epsilon \sim N(0, \sigma)`. A peak is valid only if
-
-        .. math::
-
-            \frac{y[n_{peak}] - b[n_{peak}]}{\sigma} \geq SNR
-
-        The extension of the peak is computed as the closest minimum to the
-        peak. If two peaks are closer than `min_distance`, the peaks are merged.
 
         """
-        params = _get_find_centroid_params(self.mode)
-
+        params = get_find_centroid_params(self.instrument)
         if min_distance is not None:
             params["min_distance"] = min_distance
 
         if min_snr is not None:
             params["min_snr"] = min_snr
 
-        centroids, area, centroid_index = \
-            peaks.find_centroids(self.mz, self.spint, **params)
-
-        return centroids, area, centroid_index
+        centroids, area = peaks.find_centroids(self.mz, self.spint, **params)
+        return centroids, area
 
     def plot(self, draw: bool = True, fig_params: Optional[dict] = None,
              line_params: Optional[dict] = None) -> bokeh.plotting.Figure:
@@ -759,43 +536,9 @@ class MSSpectrum:
         -------
         bokeh Figure
         """
-        default_line_params = {"line_width": 1, "line_color": "black",
-                               "alpha": 0.8}
-        cmap = Set3[12]
-
-        if line_params is None:
-            line_params = default_line_params
-        else:
-            for params in line_params:
-                default_line_params[params] = line_params[params]
-            line_params = default_line_params
-
-        default_fig_params = {"aspect_ratio": 1.5}
-        if fig_params is None:
-            fig_params = default_fig_params
-        else:
-            default_fig_params.update(fig_params)
-            fig_params = default_fig_params
-
-        fig = bokeh.plotting.figure(**fig_params)
-        fig.line(self.mz, self.spint, **line_params)
-        if self.peaks:
-            for k, peak in enumerate(self.peaks):
-                fig.varea(self.mz[peak.start:(peak.end + 1)],
-                          self.spint[peak.start:(peak.end + 1)], 0,
-                          fill_alpha=0.8, fill_color=cmap[k % 12])
-                # k % 12 is used to cycle over the colormap
-
-        #  figure appearance
-        fig.xaxis.axis_label = "m/z"
-        fig.yaxis.axis_label = "intensity [au]"
-        fig.yaxis.axis_label_text_font_style = "bold"
-        fig.yaxis.formatter.precision = 2
-        fig.xaxis.axis_label_text_font_style = "bold"
-
-        if draw:
-            bokeh.plotting.show(fig)
-        return fig
+        return _plot_bokeh.plot_ms_spectrum(self.mz, self.spint, draw=draw,
+                                            fig_params=fig_params,
+                                            line_params=line_params)
 
 
 _TempRoi = namedtuple("TempRoi", ["mz", "sp", "scan"])
@@ -809,8 +552,7 @@ class Roi(Chromatogram):
     """
     mz traces where a chromatographic peak may be found.
 
-    Subclassed from Chromatogram. To be used with the detect_features method of
-    MSData.
+    Subclassed from Chromatogram. Used for feature detection in LCMS data.
 
     Attributes
     ----------
@@ -830,7 +572,7 @@ class Roi(Chromatogram):
         self.mz = mz
         self.first_scan = first_scan
 
-    def _extend(self, rt: np.array, n: int):
+    def extend(self, rt: np.array, n: int):
         """
         adds a dummy value at the beginning and at the end of the ROI. This
         results in better peak picking results when low intensity peaks are
@@ -840,7 +582,6 @@ class Roi(Chromatogram):
         max_int = np.nanmax(self.spint)
         mz_fill = np.nanmean(self.mz)
         spint_fill = np.nanmin(self.spint)
-        # drt = self.rt[1] - self.rt[0]
         roi_rt = list()
         roi_mz = list()
         roi_spint = list()
@@ -849,7 +590,6 @@ class Roi(Chromatogram):
         extend_roi_end = (((np.isnan(self.spint[-1])) or
                           (self.spint[-1] < (0.75 * max_int))))
 
-        # print(self.first_scan, self.rt[0], self.spint[0], max_int)
         if extend_roi_beginning:
             n_beginning = min(n, self.first_scan)
             roi_rt.append(rt[self.first_scan - n_beginning:self.first_scan])
@@ -905,18 +645,14 @@ class Roi(Chromatogram):
         mz_std = np.zeros(len(self.peaks))
         mz_mean = np.zeros(len(self.peaks))
         for k, peak in enumerate(self.peaks):
-            # peak_mz = self.mz[peak.start:peak.end].std()
-            # peak_spint = self.spint[peak.start:peak.end + 1]
-            # mz_mean[k] = np.average(peak_mz, weights=peak_spint)
-            # mz_std[k] = peak_mz.std()
             mz_std[k] = self.mz[peak.start:peak.end].std()
             mz_mean[k] = peak.get_loc(self.mz, self.spint)
         return mz_mean, mz_std
 
 
-class _RoiProcessor:
+class _RoiMaker:
     """
-    Class used by make_roi function to generate Roi instances.
+    Helper class used by make_roi to create Roi instances from raw data.
 
     Attributes
     ----------
@@ -1055,7 +791,7 @@ class _RoiProcessor:
             finished_roi = self.temp_roi_dict.pop(roi_ind)
             if is_valid_roi[ind]:
                 roi = tmp_roi_to_roi(finished_roi, rt, mode=self.mode)
-                roi._extend(rt, 2)
+                roi.extend(rt, 2)
                 self.roi.append(roi)
         if targeted:
             self.n_missing[is_completed] = 0
@@ -1328,12 +1064,12 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
 
     size = end - start
     rt = np.zeros(size)
-    processor = _RoiProcessor(mz_seed, max_missing=max_missing,
-                              min_length=min_length,
-                              min_intensity=min_intensity, tolerance=tolerance,
-                              multiple_match=multiple_match,
-                              mz_reduce=mz_reduce, sp_reduce=sp_reduce,
-                              mode=mode)
+    processor = _RoiMaker(mz_seed, max_missing=max_missing,
+                          min_length=min_length,
+                          min_intensity=min_intensity, tolerance=tolerance,
+                          multiple_match=multiple_match,
+                          mz_reduce=mz_reduce, sp_reduce=sp_reduce,
+                          mode=mode)
     for k_scan in range(start, end):
         sp = ms_experiment.getSpectrum(k_scan)
         rt[k_scan - start] = sp.getRT()
@@ -1347,10 +1083,11 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
     return processor.roi
 
 
-def _accumulate_spectra_centroid(ms_experiment: ms_experiment_type, start, end,
-                                 tolerance: float,
+def _accumulate_spectra_centroid(ms_experiment: ms_experiment_type,
+                                 start: int, end: int,
                                  subtract_left: Optional[int] = None,
-                                 subtract_right: Optional[int] = None
+                                 subtract_right: Optional[int] = None,
+                                 tolerance: Optional[float] = None,
                                  ):
     """
     accumulates a series of consecutive spectra into a single spectrum.

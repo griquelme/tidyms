@@ -28,7 +28,7 @@ def simulated_experiment():
 
     noise_level = 1
     simexp = utils.SimulatedExperiment(mz, rt, mz_params, rt_params,
-                                      noise=noise_level, mode="profile")
+                                       noise=noise_level, mode="profile")
     return simexp
 
 
@@ -97,21 +97,21 @@ def test_make_widths_ms():
 
 
 def test_get_lc_cwt_params():
-    params = lcms.get_lc_peak_params("uplc", "cwt")
+    params = lcms.get_lc_detect_peak_params("uplc", "cwt")
     validation.validate_cwt_peak_picking_params(params)
-    params = lcms.get_lc_peak_params("hplc", "cwt")
+    params = lcms.get_lc_detect_peak_params("hplc", "cwt")
     validation.validate_cwt_peak_picking_params(params)
     with pytest.raises(ValueError):
-        params = lcms.get_lc_peak_params("invalid_mode", "cwt")
+        params = lcms.get_lc_detect_peak_params("invalid_mode", "cwt")
 
 
 def test_get_lc_peak_params_max():
-    params = lcms.get_lc_peak_params("uplc", "max")
+    params = lcms.get_lc_detect_peak_params("uplc", "max")
     validation.validate_max_peak_picking_params(params)
-    params = lcms.get_lc_peak_params("hplc", "max")
+    params = lcms.get_lc_detect_peak_params("hplc", "max")
     validation.validate_max_peak_picking_params(params)
     with pytest.raises(ValueError):
-        params = lcms.get_lc_peak_params("invalid_mode", "max")
+        params = lcms.get_lc_detect_peak_params("invalid_mode", "max")
 
 
 def test_get_ms_cwt_params():
@@ -200,14 +200,14 @@ def test_ms_spectrum_creation(ms_data):
 
 def test_ms_spectrum_creation_with_mode(ms_data):
     mode = "orbitrap"
-    sp = lcms.MSSpectrum(*ms_data, mode=mode)
+    sp = lcms.MSSpectrum(*ms_data, instrument=mode)
     assert sp.mode == mode
 
 
 def test_ms_spectrum_creation_invalid_mode(ms_data):
     with pytest.raises(ValueError):
         mode = "invalid-mode"
-        sp = lcms.MSSpectrum(*ms_data, mode=mode)
+        sp = lcms.MSSpectrum(*ms_data, instrument=mode)
 
 
 def test_find_centroids_qtof(ms_data):
@@ -218,7 +218,7 @@ def test_find_centroids_qtof(ms_data):
 
 
 def test_find_centroids_non_default_parameters(ms_data):
-    sp = lcms.MSSpectrum(*ms_data, mode="orbitrap")
+    sp = lcms.MSSpectrum(*ms_data, instrument="orbitrap")
     sp.find_centroids(min_snr=10, min_distance=0.003)
     assert True
 
