@@ -273,41 +273,47 @@ class Roi(Chromatogram):
         self.mz = mz
         self.first_scan = first_scan
 
-    def extend(self, rt: np.array, n: int):
+    def extend(self, n: int):
         """
         adds a dummy value at the beginning and at the end of the ROI. This
         results in better peak picking results when low intensity peaks are
-        cropped.
+        cropped during roi creation.
 
         """
         max_int = np.nanmax(self.spint)
         mz_fill = np.nanmean(self.mz)
-        spint_fill = np.nanmin(self.spint)
         roi_rt = list()
         roi_mz = list()
         roi_spint = list()
-        extend_roi_beginning = ((np.isnan(self.spint[0]) or
-                                 (self.spint[0] < (0.75 * max_int))))
-        extend_roi_end = (((np.isnan(self.spint[-1])) or
-                          (self.spint[-1] < (0.75 * max_int))))
 
-        if extend_roi_beginning:
-            n_beginning = min(n, self.first_scan)
-            roi_rt.append(rt[self.first_scan - n_beginning:self.first_scan])
-            roi_mz.append([mz_fill] * n_beginning)
-            roi_spint.append([spint_fill] * n_beginning)
-            # print(roi_rt)
+        dt = self.rt[1] - self.rt[0]
+
+        # extend roi beginning
+        if np.isnan(self.spint[0]) or (self.spint[0] < (0.75 * max_int)):
+            spint_fill_beginning = np.nanmin(self.spint)
+        else:
+            spint_fill_beginning = np.nanmax(self.spint)
+
+        n_beginning = min(n, self.first_scan)
+        rt_prepend = self.rt[0] + np.arange(-n_beginning, 0) * dt
+        roi_rt.append(rt_prepend[:self.first_scan])
+        roi_mz.append([mz_fill] * n_beginning)
+        roi_spint.append([spint_fill_beginning] * n_beginning)
 
         roi_rt.append(self.rt)
         roi_spint.append(self.spint)
         roi_mz.append(self.mz)
 
-        if extend_roi_end:
-            n_end = min(n, rt.size - self.first_scan - self.rt.size)
-            n_roi_end = self.first_scan + self.rt.size
-            roi_rt.append(rt[n_roi_end:n_roi_end + n_end])
-            roi_mz.append([mz_fill] * n_end)
-            roi_spint.append([spint_fill] * n_end)
+        # extend roi end
+        if np.isnan(self.spint[-1]) or (self.spint[-1] < (0.75 * max_int)):
+            spint_fill_end = np.nanmin(self.spint)
+        else:
+            spint_fill_end = np.nanmax(self.spint)
+
+        rt_append = self.rt[-1] + np.arange(1, n + 1) * dt
+        roi_rt.append(rt_append)
+        roi_mz.append([mz_fill] * n)
+        roi_spint.append([spint_fill_end] * n)
 
         self.rt = np.hstack(roi_rt)
         self.spint = np.hstack(roi_spint)
@@ -434,13 +440,12 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
              max_missing: int, min_length: int, min_intensity: float,
              multiple_match: str, targeted_mz: Optional[np.ndarray] = None,
              start: Optional[int] = None, end: Optional[int] = None,
-             mz_reduce: Union[str, Callable] = "mean",
+             mz_reduce: Union[str, Callable] = None,
              sp_reduce: Union[str, Callable] = "sum",
              mode: Optional[str] = None
              ) -> List[Roi]:
     """
     Make Region of interest from MS data in centroid mode.
-    Used by MSData to as the first step of the centWave algorithm.
 
     Parameters
     ----------
@@ -542,12 +547,12 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
         sp = ms_experiment.getSpectrum(k_scan)
         rt[k_scan - start] = sp.getRT()
         mz, spint = sp.get_peaks()
-        processor.add(mz, spint, targeted=targeted)
-        processor.append_to_roi(rt, targeted=targeted)
+        processor.extend_roi(mz, spint, targeted=targeted)
+        processor.store_completed_roi(rt, targeted=targeted)
 
     # add roi not completed during last scan
     processor.flag_as_completed()
-    processor.append_to_roi(rt)
+    processor.store_completed_roi(rt)
     return processor.roi
 
 
@@ -800,7 +805,7 @@ class _RoiMaker:
     def __init__(self, mz_seed: np.ndarray, max_missing: int = 1,
                  min_length: int = 5, min_intensity: float = 0,
                  tolerance: float = 0.005, multiple_match: str = "closest",
-                 mz_reduce: Union[str, Callable] = "mean",
+                 mz_reduce: Optional[Callable] = None,
                  sp_reduce: Union[str, Callable] = "sum",
                  mode: Optional[str] = None):
         """
@@ -824,13 +829,15 @@ class _RoiMaker:
             others are assigned to no match. If mode is `reduce`, then a unique
             mz and intensity value is generated using the reduce function in
             `mz_reduce` and `spint_reduce` respectively.
-        mz_reduce: str or callable
+        mz_reduce: callable, optional
             function used to reduce mz values. Can be a function accepting
             numpy arrays and returning numbers. Only used when `multiple_match`
             is reduce. See the following prototype:
 
             def mz_reduce(mz_match: np.ndarray) -> float:
                 pass
+
+            If None, m/z values are reduced using the mean.
 
         sp_reduce: str or callable
             function used to reduce spint values. Can be a function accepting
@@ -840,15 +847,11 @@ class _RoiMaker:
         mode: str, optional
             Mode used to create ROI.
         """
-        if len(mz_seed.shape) != 1:
-            msg = "array must be a vector"
-            raise ValueError(msg)
-
         if multiple_match not in ["closest", "reduce"]:
             msg = "Valid modes are closest or reduce"
             raise ValueError(msg)
 
-        if mz_reduce == "mean":
+        if mz_reduce is None:
             self._mz_reduce = np.mean
         else:
             self._mz_reduce = mz_reduce
@@ -860,7 +863,9 @@ class _RoiMaker:
         else:
             self._spint_reduce = sp_reduce
 
-        self.mz_mean = mz_seed.copy()
+        # temporary roi data
+        self.mz_mean = np.unique(mz_seed.copy())
+        # roi index maps the values in mz_mean to a temp roi in temp_roi_dict
         self.roi_index = np.arange(mz_seed.size)
         self.n_missing = np.zeros_like(mz_seed, dtype=int)
         self.max_intensity = np.zeros_like(mz_seed)
@@ -868,6 +873,8 @@ class _RoiMaker:
         self.index = 0
         self.temp_roi_dict = {x: _make_empty_temp_roi() for x in self.roi_index}
         self.roi = list()
+
+        # parameters used to build roi
         self.min_intensity = min_intensity
         self.max_missing = max_missing
         self.min_length = min_length
@@ -875,16 +882,20 @@ class _RoiMaker:
         self.multiple_match = multiple_match
         self.mode = mode
 
-    def add(self, mz: np.ndarray, sp: np.ndarray, targeted: bool = False):
+    def extend_roi(self, mz: np.ndarray, sp: np.ndarray,
+                   targeted: bool = False):
         """
-        Adds new mz and spint values to temporal roi.
+        connects mz values with self.mz_mean to extend existing roi.
+        Non matching mz values are used to create new temporary roi.
+
         """
 
-        # find matching values
+        # find matching and non matching mz values
         match_index, mz_match, sp_match, mz_no_match, sp_no_match = \
             _match_mz(self.mz_mean, mz, sp, self.tolerance,
                       self.multiple_match, self._mz_reduce, self._spint_reduce)
 
+        # extend matching roi
         for k, k_mz, k_sp in zip(match_index, mz_match, sp_match):
             k_temp_roi = self.temp_roi_dict[self.roi_index[k]]
             k_temp_roi.mz.append(k_mz)
@@ -897,35 +908,43 @@ class _RoiMaker:
 
         self.length[match_index] += 1
         self.n_missing += 1
+        # reset missing count for matching roi
         self.n_missing[match_index] = 0
         self.max_intensity[match_index] = \
             np.maximum(self.max_intensity[match_index], sp_match)
+
+        # if there are non matching mz values, use them to build new rois.
+        # in targeted mode, only roi with specified mz values are built
         if not targeted:
             self.mz_mean[match_index] = updated_mean
-            self.extend(mz_no_match, sp_no_match)
+            self.create_new_roi(mz_no_match, sp_no_match)
         self.index += 1
 
-    def append_to_roi(self, rt: np.ndarray, targeted: bool = False):
+    def store_completed_roi(self, rt: np.ndarray, targeted: bool = False):
         """
-        Remove completed ROI. Valid ROI are appended toi roi attribute.
+        store completed ROIs. Valid ROI are appended toi roi attribute.
+        The validity of the ROI is checked based on roi length and minimum
+        intensity.
+
         """
 
         # check completed rois
         is_completed = self.n_missing > self.max_missing
 
-        # the most common case are short rois that must be discarded
+        # length and intensity check
         is_valid_roi = ((self.length >= self.min_length) &
                         (self.max_intensity >= self.min_intensity))
 
-        # add completed roi
+        # add valid roi to roi list
         completed_index = np.where(is_completed)[0]
         for ind in completed_index:
             roi_ind = self.roi_index[ind]
             finished_roi = self.temp_roi_dict.pop(roi_ind)
             if is_valid_roi[ind]:
                 roi = tmp_roi_to_roi(finished_roi, rt, mode=self.mode)
-                roi.extend(rt, 2)
                 self.roi.append(roi)
+
+        # remove completed roi
         if targeted:
             self.n_missing[is_completed] = 0
             self.length[is_completed] = 0
@@ -944,13 +963,14 @@ class _RoiMaker:
             self.roi_index = self.roi_index[~is_completed]
             self.max_intensity = self.max_intensity[~is_completed]
 
-    def extend(self, mz: np.ndarray, sp: np.ndarray):
-        """adds new mz values to mz_mean"""
+    def create_new_roi(self, mz: np.ndarray, sp: np.ndarray):
+        """creates new temporary roi from non matching values"""
+
+        # finds roi index for new temp roi and update metadata
         max_index = self.roi_index.max()
         new_indices = np.arange(mz.size) + max_index + 1
         mz_mean_tmp = np.hstack((self.mz_mean, mz))
         roi_index_tmp = np.hstack((self.roi_index, new_indices))
-        sorted_index = np.argsort(mz_mean_tmp)
         n_missing_tmp = np.zeros_like(new_indices, dtype=int)
         n_missing_tmp = np.hstack((self.n_missing, n_missing_tmp))
         length_tmp = np.ones_like(new_indices, dtype=int)
@@ -958,9 +978,15 @@ class _RoiMaker:
         max_int_tmp = np.zeros_like(new_indices, dtype=float)
         max_int_tmp = np.hstack((self.max_intensity, max_int_tmp))
 
+        # temp roi creation
         for k_index, k_mz, k_sp in zip(new_indices, mz, sp):
             new_roi = _TempRoi(mz=[k_mz], sp=[k_sp], scan=[self.index])
             self.temp_roi_dict[k_index] = new_roi
+
+        # replace new temp roi metadata
+        # roi extension is done using bisection search, all values are sorted
+        # using the mz values
+        sorted_index = np.argsort(mz_mean_tmp)
         self.mz_mean = mz_mean_tmp[sorted_index]
         self.roi_index = roi_index_tmp[sorted_index]
         self.n_missing = n_missing_tmp[sorted_index]
@@ -971,27 +997,11 @@ class _RoiMaker:
         self.n_missing[:] = self.max_missing + 1
 
 
-def _compare_max(old: np.ndarray, new: np.ndarray) -> np.ndarray:
-    """
-    returns the element-wise maximum between old and new
-
-    Parameters
-    ----------
-    old: numpy.ndarray
-    new: numpy.ndarray
-        can have nan
-
-    Returns
-    -------
-    numpy.ndarray
-    """
-    new[np.isnan(new)] = 0
-    return np.maximum(old, new)
-
-
 def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
               tolerance: float, mode: str, mz_reduce: Callable,
-              sp_reduce: Callable):
+              sp_reduce: Callable
+              ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+                         np.ndarray]:
     """
     aux function to add method in _RoiProcessor. Find matched values.
 
@@ -1095,7 +1105,7 @@ def tmp_roi_to_roi(tmp_roi: _TempRoi, rt: np.ndarray,
     return roi
 
 
-def _get_uniform_mz(mz: np.ndarray):
+def _get_uniform_mz(mz: np.ndarray) -> np.ndarray:
     """returns a new uniformly sampled m/z array."""
     mz_min = mz.min()
     mz_max = mz.max()
