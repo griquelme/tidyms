@@ -319,25 +319,36 @@ class Roi(Chromatogram):
         self.spint = np.hstack(roi_spint)
         self.mz = np.hstack(roi_mz)
 
-    def fill_nan(self):
+    def fill_nan(self, fill_value: Optional[float] = None):
         """
-        fill missing intensity values using linear interpolation.
+        Fill missing intensity values using linear interpolation.
+
+        Parameters
+        ----------
+        fill_value : float, optional
+            Missing intensity values are replaced with this value. If None,
+            values are filled using linear interpolation.
 
         """
 
         # if the first or last values are missing, assign an intensity value
         # of zero. This prevents errors in the interpolation and makes peak
         # picking to work better.
+
         if np.isnan(self.spint[0]):
             self.spint[0] = 0
         if np.isnan(self.spint[-1]):
             self.spint[-1] = 0
 
         missing = np.isnan(self.spint)
-        interpolator = interp1d(self.rt[~missing], self.spint[~missing])
         mz_mean = np.nanmean(self.mz)
-        self.mz[missing] = mz_mean
-        self.spint[missing] = interpolator(self.rt[missing])
+        if fill_value is None:
+            interpolator = interp1d(self.rt[~missing], self.spint[~missing])
+            self.mz[missing] = mz_mean
+            self.spint[missing] = interpolator(self.rt[missing])
+        else:
+            self.mz[missing] = mz_mean
+            self.spint[missing] = fill_value
 
     def get_peaks_mz(self):
         """
@@ -361,7 +372,8 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
                        window: float = 0.005, start: Optional[int] = None,
                        end: Optional[int] = None,
                        accumulator: str = "sum",
-                       chromatogram_mode: Optional[str] = None
+                       chromatogram_mode: Optional[str] = None,
+                       ms_level: Optional[int] = None
                        ) -> List[Chromatogram]:
     """
     Computes extracted ion chromatograms for a list of m/z values.
@@ -383,6 +395,8 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
         the window.
     chromatogram_mode : {"uplc", "hplc"}, optional
         Mode used to create chromatograms
+    ms_level : int, optional
+        data level used to build the chromatograms. By default, level 1 is used.
     Returns
     -------
     chromatograms : List of Chromatograms
@@ -399,6 +413,9 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
     if end is None:
         end = nsp
 
+    if ms_level is None:
+        ms_level = 1
+
     # validate params
     params = {"start": start, "end": end, "window": window, "mz": mz,
               "accumulator": accumulator}
@@ -410,9 +427,13 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
 
     eic = np.zeros((mz.size, end - start))
     rt = np.zeros(end - start)
+    rm_scan = list()  # scans to remove based on ms_level
     for ksp in range(start, end):
         # find rt, mz and intensity values of the current scan
         sp = ms_experiment.getSpectrum(ksp)
+        if sp.getMSLevel() != ms_level:
+            rm_scan.append(ksp)
+            continue
         rt[ksp - start] = sp.getRT()
         mz_sp, int_sp = sp.get_peaks()
         ind_sp = np.searchsorted(mz_sp, mz_intervals)
@@ -429,6 +450,9 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
             tmp_eic = tmp_eic / norm
         eic[:, ksp - start] = tmp_eic
 
+    rt = np.delete(rt, rm_scan)
+    eic = np.delete(eic, rm_scan, axis=0)
+
     chromatograms = list()
     for row in eic:
         chromatogram = Chromatogram(rt, row, mode=chromatogram_mode)
@@ -442,7 +466,8 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
              start: Optional[int] = None, end: Optional[int] = None,
              mz_reduce: Union[str, Callable] = None,
              sp_reduce: Union[str, Callable] = "sum",
-             mode: Optional[str] = None
+             mode: Optional[str] = None,
+             ms_level: Optional[int] = None
              ) -> List[Roi]:
     """
     Make Region of interest from MS data in centroid mode.
@@ -487,9 +512,10 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
         `mz_reduce`.
     targeted_mz : numpy.ndarray, optional
         if a list of mz is provided, roi are searched only using this list.
-
     mode : str, optional
         mode used to create Roi objects.
+    ms_level : int, optional
+        data level used to build the chromatograms. By default, level 1 is used.
 
     Returns
     -------
@@ -535,6 +561,9 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
         mz_seed = targeted_mz
         targeted = True
 
+    if ms_level is None:
+        ms_level = 1
+
     size = end - start
     rt = np.zeros(size)
     processor = _RoiMaker(mz_seed, max_missing=max_missing,
@@ -543,16 +572,23 @@ def make_roi(ms_experiment: ms_experiment_type, tolerance: float,
                           multiple_match=multiple_match,
                           mz_reduce=mz_reduce, sp_reduce=sp_reduce,
                           mode=mode)
+
+    rm_scan = list()    # scans from other ms levels
     for k_scan in range(start, end):
+        # print(k_scan)
         sp = ms_experiment.getSpectrum(k_scan)
-        rt[k_scan - start] = sp.getRT()
-        mz, spint = sp.get_peaks()
-        processor.extend_roi(mz, spint, targeted=targeted)
-        processor.store_completed_roi(rt, targeted=targeted)
+        if sp.getMSLevel() == ms_level:
+            rt[k_scan - start] = sp.getRT()
+            mz, spint = sp.get_peaks()
+            processor.extend_roi(mz, spint, targeted=targeted)
+            processor.store_completed_roi(rt, rm_scan, targeted=targeted)
+        else:
+            rm_scan.append(k_scan)
+            processor.update_index()
 
     # add roi not completed during last scan
     processor.flag_as_completed()
-    processor.store_completed_roi(rt)
+    processor.store_completed_roi(rt, rm_scan)
     return processor.roi
 
 
@@ -560,7 +596,7 @@ def accumulate_spectra_profile(ms_experiment: ms_experiment_type,
                                start: int, end: int,
                                subtract_left: Optional[int] = None,
                                subtract_right: Optional[int] = None,
-                               ) -> Tuple[np.ndarray, np.ndarray]:
+                               ) -> MSSpectrum:
     """
     accumulates a spectra into a single spectrum.
 
@@ -580,8 +616,7 @@ def accumulate_spectra_profile(ms_experiment: ms_experiment_type,
 
     Returns
     -------
-    accumulated_mz : array of m/z values
-    accumulated_int : array of cumulative intensities.
+    MSSpectrum
 
     """
     if subtract_left is None:
@@ -618,7 +653,7 @@ def accumulate_spectra_profile(ms_experiment: ms_experiment_type,
     is_positive_sp = accumulated_sp > 0
     accumulated_mz = accumulated_mz[is_positive_sp]
     accumulated_sp = accumulated_sp[is_positive_sp]
-    return accumulated_mz, accumulated_sp
+    return MSSpectrum(accumulated_mz, accumulated_sp)
 
 
 def accumulate_spectra_centroid(ms_experiment: ms_experiment_type,
@@ -626,7 +661,7 @@ def accumulate_spectra_centroid(ms_experiment: ms_experiment_type,
                                 subtract_left: Optional[int] = None,
                                 subtract_right: Optional[int] = None,
                                 tolerance: Optional[float] = None,
-                                ):
+                                ) -> MSSpectrum:
     """
     accumulates a series of consecutive spectra into a single spectrum.
 
@@ -648,8 +683,7 @@ def accumulate_spectra_centroid(ms_experiment: ms_experiment_type,
 
     Returns
     -------
-    accumulated_mz : array of m/z values
-    accumulated_int : array of cumulative intensities.
+    MSSpectrum
 
     """
     n_spectra = ms_experiment.getNrSpectra()
@@ -660,7 +694,8 @@ def accumulate_spectra_centroid(ms_experiment: ms_experiment_type,
     if subtract_right is None:
         subtract_right = end
 
-    max_missing = subtract_right - subtract_left + 1
+    # don't remove any m/z value when detecting rois
+    max_missing = subtract_right - subtract_left
     params = {"start": start, "end": end, "subtract_left": subtract_left,
               "subtract_right": subtract_right}
     validation.validate_accumulate_spectra_params(n_spectra, params)
@@ -668,14 +703,18 @@ def accumulate_spectra_centroid(ms_experiment: ms_experiment_type,
                    min_length=1, min_intensity=0.0, multiple_match="reduce",
                    start=subtract_left, end=subtract_right, mz_reduce="mean",
                    sp_reduce="sum")
+    for r in roi:
+        r.fill_nan(fill_value=0.0)
+
     mask = np.ones(max_missing)
     mask[:start - subtract_left] = -1
     mask[end - subtract_left:] = -1
-    mz = np.array([(x.mz * mask).mean() for x in roi])
+    mz = np.array([x.mz.mean() for x in roi])
     spint = np.array([(x.spint * mask).sum() for x in roi])
-    mz = mz[spint > 0]
-    spint = mz[spint > 0]
-    return mz, spint
+    is_valid_spint = spint > 0
+    mz = mz[is_valid_spint]
+    spint = spint[is_valid_spint]
+    return MSSpectrum(mz, spint)
 
 
 def get_lc_filter_peak_params(lc_mode: str) -> dict:
@@ -918,9 +957,10 @@ class _RoiMaker:
         if not targeted:
             self.mz_mean[match_index] = updated_mean
             self.create_new_roi(mz_no_match, sp_no_match)
-        self.index += 1
+        self.update_index()
 
-    def store_completed_roi(self, rt: np.ndarray, targeted: bool = False):
+    def store_completed_roi(self, rt: np.ndarray, rm_scan: List[int],
+                            targeted: bool = False):
         """
         store completed ROIs. Valid ROI are appended toi roi attribute.
         The validity of the ROI is checked based on roi length and minimum
@@ -941,7 +981,7 @@ class _RoiMaker:
             roi_ind = self.roi_index[ind]
             finished_roi = self.temp_roi_dict.pop(roi_ind)
             if is_valid_roi[ind]:
-                roi = tmp_roi_to_roi(finished_roi, rt, mode=self.mode)
+                roi = tmp_roi_to_roi(finished_roi, rt, rm_scan, mode=self.mode)
                 self.roi.append(roi)
 
         # remove completed roi
@@ -995,6 +1035,9 @@ class _RoiMaker:
 
     def flag_as_completed(self):
         self.n_missing[:] = self.max_missing + 1
+
+    def update_index(self):
+        self.index += 1
 
 
 def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
@@ -1090,7 +1133,7 @@ def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
     return match_index, mz_match, sp_match, mz_no_match, sp_no_match
 
 
-def tmp_roi_to_roi(tmp_roi: _TempRoi, rt: np.ndarray,
+def tmp_roi_to_roi(tmp_roi: _TempRoi, rt: np.ndarray, rm_scan: List[int],
                    mode: Optional[str] = None) -> Roi:
     first_scan = tmp_roi.scan[0]
     last_scan = tmp_roi.scan[-1]
@@ -1098,9 +1141,20 @@ def tmp_roi_to_roi(tmp_roi: _TempRoi, rt: np.ndarray,
     mz_tmp = np.ones(size) * np.nan
     spint_tmp = mz_tmp.copy()
     tmp_index = np.array(tmp_roi.scan) - tmp_roi.scan[0]
-    rt_tmp = rt[first_scan:(last_scan + 1)].copy()
+    rt_tmp = rt[first_scan:last_scan + 1].copy()
     mz_tmp[tmp_index] = tmp_roi.mz
     spint_tmp[tmp_index] = tmp_roi.sp
+    # mz_tmp[tmp_roi.scan] = tmp_roi.mz
+    # spint_tmp[tmp_roi.scan] = tmp_roi.sp
+
+    # remove elements from other ms levels
+    if len(rm_scan):
+        rm_index = get_rm_index(rm_scan, first_scan, last_scan)
+        mz_tmp = np.delete(mz_tmp, rm_index)
+        spint_tmp = np.delete(spint_tmp, rm_index)
+        rt_tmp = np.delete(rt_tmp, rm_index)
+    assert rt_tmp.size == mz_tmp.size
+    assert rt_tmp.size == spint_tmp.size
     roi = Roi(spint_tmp, mz_tmp, rt_tmp, first_scan, mode=mode)
     return roi
 
@@ -1112,3 +1166,11 @@ def _get_uniform_mz(mz: np.ndarray) -> np.ndarray:
     mz_res = np.diff(mz).min()
     uniform_mz = np.arange(mz_min, mz_max, mz_res)
     return uniform_mz
+
+
+def get_rm_index(rm_scan: List[int], first_scan: int, last_scan: int):
+    rm_index = np.array(rm_scan)
+    start, end = np.searchsorted(rm_index, [first_scan, last_scan])
+    res = rm_index[start:end] - first_scan
+    # print(res.size)
+    return res
