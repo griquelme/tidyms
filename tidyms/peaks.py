@@ -4,7 +4,7 @@ functions and objects used to detect peaks.
 Objects
 -------
 
-- PeakLocation : Stores peak location and extension. Computes peak parameters.
+- Peak : Stores peak location and extension. Computes peak parameters.
 
 Functions
 ---------
@@ -26,16 +26,16 @@ from scipy.stats import median_abs_deviation as mad
 from typing import Callable, Dict, List, Optional, Tuple
 
 
-class PeakLocation:
+class Peak:
     """
     Representation of a peak. Computes peak descriptors.
 
     Attributes
     ----------
+    start: int
+        index where the peak begins. Must be smaller than `apex`
     apex: int
         index where the apex of the peak is located. Must be smaller than `end`
-    start: int
-        index where the peak begins. Must be smaller than `loc`
     end: int
         index where the peak ends. Start and end used as slices defines the
         peak region.
@@ -49,18 +49,19 @@ class PeakLocation:
             assert apex < end
         except AssertionError:
             msg = "start must be lower than loc and loc must be lower than end"
-            raise InvalidPeaKException(msg)
+            raise InvalidPeakException(msg)
 
         self.apex = apex
         self.start = start
         self.end = end
 
     def __repr__(self):
-        str_repr = "PeakLocation(start={}, loc={}, end={})"
-        str_repr = str_repr.format(self.start, self.apex, self.end)
+        str_repr = "{}(start={}, apex={}, end={})"
+        name = self.__class__.__name__
+        str_repr = str_repr.format(name, self.start, self.apex, self.end)
         return str_repr
 
-    def get_loc(self, x: np.ndarray, y: np.ndarray):
+    def get_loc(self, x: np.ndarray, y: np.ndarray) -> float:
         """
         Finds the peak location as the weighted average of x using y as weights.
 
@@ -79,7 +80,7 @@ class PeakLocation:
         loc = np.abs(np.average(x[self.start:self.end], weights=weights))
         return loc
 
-    def get_height(self, y: np.ndarray, baseline: np.ndarray):
+    def get_height(self, y: np.ndarray, baseline: np.ndarray) -> float:
         """
         Computes the height of the peak, defined as the difference between the
         value of y and the baseline at the peak apex.
@@ -98,7 +99,8 @@ class PeakLocation:
         height = y[self.apex] - baseline[self.apex]
         return max(0.0, height)
 
-    def get_area(self, x: np.ndarray, y: np.ndarray, baseline: np.ndarray):
+    def get_area(self, x: np.ndarray, y: np.ndarray, baseline: np.ndarray
+                 ) -> float:
         """
         Computes the area in the region defined by the peak.
 
@@ -119,7 +121,7 @@ class PeakLocation:
         area = trapz(baseline_corrected, x[self.start:self.end])
         return max(0.0, area)
 
-    def get_width(self, x: np.ndarray, y, baseline):
+    def get_width(self, x: np.ndarray, y, baseline) -> float:
         """
         Computes the peak width, defined as the region where the 95 % of the
         total peak area is distributed.
@@ -147,7 +149,7 @@ class PeakLocation:
             width = 0.0
         return max(0.0, width)
 
-    def get_extension(self, x: np.ndarray):
+    def get_extension(self, x: np.ndarray) -> float:
         """
         Computes the peak extension, defined as the length of the peak region.
 
@@ -162,7 +164,8 @@ class PeakLocation:
         """
         return x[self.end] - x[self.start]
 
-    def get_snr(self, y: np.array, noise: np.array, baseline: np.array):
+    def get_snr(self, y: np.array, noise: np.array, baseline: np.array
+                ) -> float:
         """
         Computes the peak signal-to-noise ratio, defined as the quotient
         between the peak height and the noise level at the apex.
@@ -187,7 +190,7 @@ class PeakLocation:
         return snr
 
     def get_descriptors(self, x: np.array, y: np.array, noise: np.array,
-                        baseline: np.array):
+                        baseline: np.array) -> Dict[str, float]:
         """
         Computes peak height, area, location, width and SNR.
 
@@ -211,37 +214,48 @@ class PeakLocation:
 
 
 def detect_peaks(x: np.ndarray, smoothing_strength: Optional[float] = 1.0,
-                 find_peaks_params: Optional[dict] = None
-                 ) -> Tuple[List[PeakLocation], np.ndarray, np.ndarray]:
+                 find_peaks_params: Optional[dict] = None,
+                 noise_params: Optional[dict] = None,
+                 baseline_params: Optional[dict] = None
+                 ) -> Tuple[List[Peak], np.ndarray, np.ndarray]:
     r"""
     Finds peaks in a 1D signal.
 
     Parameters
     ----------
     x : array
+        Signal with peaks.
     smoothing_strength: positive number, optional
         Width of a gaussian window used to smooth the signal. If None, no
         smoothing is applied.
     find_peaks_params : dict, optional
-        parameters to pass to :py:function:`scipy.signal.find_peaks`.
+        parameters to pass to :py:func:`scipy.signal.find_peaks`.
+    noise_params : dict, optional
+        parameters to pass to :py:func:`tidyms.peaks.estimate_noise`
+    baseline_params : dict, optional
+        parameters to pass to :py:func:`tidyms.peaks.estimate_baseline`
 
     Returns
     -------
-    peaks : List[PeakLocation]
+    peaks : List[Peak]
+        list of detected peaks
     noise : array
+        noise level estimation for x
     baseline : array
+        baseline estimation for x
 
     Notes
     -----
     The algorithm for peak finding is as follows:
 
     1.  Noise is estimated for the signal.
+    2.  Apply a gaussian filter to the signal.
     2.  Using the noise, each point in the signal is classified as either
         baseline or signal.
-    3.  Peaks are detected using :py:function:`scipy.signal.find_peaks`. Peaks
+    3.  Peaks are detected using :py:func:`scipy.signal.find_peaks`. Peaks
         with a prominence lower than three times the noise or in regions
         classified as baseline  are removed.
-    4.  For each peak its extension is found by finding the closest baseline
+    4.  The extension of each peak is found by finding the closest baseline
         point to the left and right.
     5.  If there are overlapping peaks (i.e. overlapping peak extensions),
         the extension is fixed by defining a boundary between the peaks as
@@ -249,21 +263,25 @@ def detect_peaks(x: np.ndarray, smoothing_strength: Optional[float] = 1.0,
 
     See Also
     --------
-    estimate_noise
-    estimate_baseline
-    PeakLocation
-    get_peak_descriptors
+    estimate_noise : noise estimation for x
+    estimate_baseline : baseline estimation for x
+    Peak : stores peak start, apex and end indices
+    get_peak_descriptors : computes descriptors on a list of Peak objects
 
     """
-    noise = estimate_noise(x)
+    if noise_params is None:
+        noise_params = dict()
+    noise = estimate_noise(x, **noise_params)
 
     if smoothing_strength is not None:
-        # xs = smooth(x, gaussian, smoothing_strength)
         xs = gaussian_filter1d(x, smoothing_strength)
     else:
         xs = x
 
-    baseline, baseline_index = estimate_baseline(xs, noise, return_index=True)
+    if baseline_params is None:
+        baseline_params = dict()
+    baseline_params["return_index"] = True
+    baseline, baseline_index = estimate_baseline(xs, noise, **baseline_params)
     prominence = 3 * noise
 
     if find_peaks_params is None:
@@ -277,28 +295,34 @@ def detect_peaks(x: np.ndarray, smoothing_strength: Optional[float] = 1.0,
     start, end = _find_peak_extension(peaks, baseline_index)
     start, end = _fix_peak_overlap(x, start, peaks, end)
     start, peaks, end = _normalize_peaks(x, start, peaks, end)
-    peaks = [PeakLocation(s, p, e) for s, p, e in zip(start, peaks, end)]
+    peaks = [Peak(s, p, e) for s, p, e in zip(start, peaks, end)]
     return peaks, noise, baseline
 
 
 def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
-                         baseline: np.ndarray, peaks: List[PeakLocation],
+                         baseline: np.ndarray, peaks: List[Peak],
                          descriptors: Optional[Dict[str, Callable]] = None,
                          filters: Optional[Dict[str, Tuple]] = None
-                         ) -> Tuple[List[PeakLocation], List[Dict[str, float]]]:
+                         ) -> Tuple[List[Peak], List[Dict[str, float]]]:
     """
     Computes peak descriptors for a list of peaks.
+
+    By default, the location, height, area, width and SNR of each peak is
+    computed, but custom descriptors can also be included.
 
     Parameters
     ----------
     x : sorted array
     y : array with the same size as x
-    noise: array with the same size as x. Noise estimation of y.
-    baseline: array with the same size as x. Baseline estimation of y.
-    peaks : List of peaks obtained with the detect_peaks function
+        Signal where the peaks were detected.
+    noise: array with the same size as x.
+        Noise estimation of y.
+    baseline: array with the same size as x.
+        Baseline estimation of y.
+    peaks : List[Peaks]
     descriptors : dict, optional
-        A dictionary of strings to callables, used to estimate custom parameters
-        on a peak. The function must have the following signature:
+        A dictionary of strings to callables, used to estimate custom
+        descriptors of a peak. The function must have the following signature:
 
         .. code-block:: python
 
@@ -309,20 +333,18 @@ def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
         acceptable values. To use only minimum/maximum values, use None
         (e.g. (None, max_value) in the case of using only maximum).Peaks with
         descriptors outside these ranges are removed. Filters for custom
-        descriptors can be used also.
+        descriptors can also be used.
 
     Returns
     -------
-    peaks : List[PeakLocation]
+    peaks : List[Peak]
+        filtered list of peaks
     descriptors: List[dict]
-        By default, the location, height, area, width and SNR of each peak are
-        computed.
+        list of descriptors for each peaks.
 
     See Also
     --------
-    detect_peaks
-    estimate_baseline
-    estimate_noise
+    detect_peaks : detects peaks in a 1D signal
 
     """
 
@@ -349,7 +371,7 @@ def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
 def estimate_noise(x: np.ndarray, min_slice_size: int = 200,
                    n_slices: int = 5, robust: bool = True) -> np.ndarray:
     """
-    Estimates the noise in a signal.
+    Estimates the noise level in a signal.
 
     Splits x into several slices and estimates the noise assuming that the
     noise is gaussian iid in each slice. See [ADD LINK] for a detailed
@@ -380,7 +402,7 @@ def estimate_noise(x: np.ndarray, min_slice_size: int = 200,
     start = 0
     while start < x.size:
         end = min(start + slice_size, x.size)
-        if (x.size - end) < (min_slice_size // 2):
+        if (x.size - end) < min_slice_size:
             # prevent short slices at the end of x
             end = x.size
         slice_noise = _estimate_local_noise(x[start:end], robust=robust)
@@ -408,8 +430,9 @@ def estimate_baseline(x: np.ndarray, noise: np.ndarray, min_proba: float = 0.05,
 
     Returns
     -------
-    baseline : array
-    baseline_index = array, only returned if return_index is True
+    baseline : array with the same size as x
+    baseline_index = array
+        baseline indices in x, only returned if return_index is True
 
     """
     # find points that only have contribution from the baseline
@@ -424,16 +447,53 @@ def estimate_baseline(x: np.ndarray, noise: np.ndarray, min_proba: float = 0.05,
     baseline = np.minimum(baseline, x)
 
     if return_index:
-        baseline_index = np.where(np.isclose(x, baseline))[0]
+        baseline_index = np.where((x - baseline) < noise)[0]
         return baseline, baseline_index
     else:
         return baseline
 
 
-class InvalidPeaKException(ValueError):
+def find_centroids(mz: np.ndarray, spint: np.ndarray, min_snr: float,
+                   min_distance: float
+                   ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Finds the centroid of a mass spectrum in profile mode.
+
+    Parameters
+    ----------
+    mz : array
+    spint : array
+    min_snr : positive number
+        Minimum signal-to-noise ratio
+    min_distance : positive number
+        Minimum m/z distance between consecutive centroids
+
+    Returns
+    -------
+    centroid_mz : array
+        centroid m/z of peaks
+    centroid_int : array
+        area of peaks
+
+    """
+    peaks, noise, baseline = detect_peaks(spint)
+    filters = {"snr": (min_snr, None)}
+    peaks, estimators = get_peak_descriptors(mz, spint, noise, baseline, peaks,
+                                             filters=filters)
+    centroids = np.array([[x["loc"], x["area"]] for x in estimators])
+    if centroids.size:
+        centroid_mz, centroid_int = centroids.T
+        centroid_mz, centroid_int = \
+            _merge_close_peaks(centroid_mz, centroid_int, min_distance)
+    else:
+        centroid_mz, centroid_int = np.array([]), np.array([])
+    return centroid_mz, centroid_int
+
+
+class InvalidPeakException(ValueError):
     """
     Exception raised when invalid indices are used in the construction of
-    PeakLocation objects.
+    Peak objects.
 
     """
     pass
@@ -723,10 +783,11 @@ def _estimate_noise_probability(noise: np.ndarray, x: np.ndarray,
     if extrema.size:
         noise_slice = _get_noise_slice_sum_std(noise, extrema[:-1])
         # The difference between maximum and minimum in each slice
-        delta = np.abs(x[np.roll(extrema, -1)] - x[extrema])[:-1]
+        # delta = np.abs(x[np.roll(extrema, -1)] - x[extrema])[:-1]
+        x_sum = _get_signal_sum(x, extrema)
         # here we are computing p(abs(sum noise) > delta) assuming a normal
         # distribution
-        noise_probability = erfc(delta / (noise_slice * np.sqrt(2)))
+        noise_probability = erfc(x_sum / (noise_slice * np.sqrt(2)))
     else:
         # prevents raising an exception when no extrema had been found
         noise_probability = np.array([])
@@ -757,9 +818,19 @@ def _get_noise_slice_sum_std(noise: np.ndarray,
     # consecutive slices, i.e: the sum between of y between extrema[0] and
     # extrema[1], extrema[1] and extrema[2]...
     # The last element is not used
+    # TODO: this should be replaced with a for loop for clarity
     reduce_ind = (np.vstack([extrema, np.roll(extrema + 1, -1)])
                     .T.reshape(extrema.size * 2)[:-1])
     return np.sqrt(np.add.reduceat(noise ** 2, reduce_ind)[::2])
+
+
+def _get_signal_sum(x, extrema):
+    x_sum = np.zeros(extrema.size - 1)
+    for k in range(extrema.size - 1):
+        s, e = extrema[k:k+2]
+        min_x = min(x[s], x[e])
+        x_sum[k] = x[s:e+1].sum() - (e + 1 - s) * min_x
+    return np.abs(x_sum)
 
 
 def _build_baseline_index(x: np.ndarray, noise_probability: np.ndarray,
@@ -819,3 +890,23 @@ def _include_first_and_last_index(x: np.ndarray,
     else:
         baseline_index = np.array([0, x.size - 1], dtype=int)
     return baseline_index
+
+
+def _merge_close_peaks(mz: np.ndarray, spint: np.ndarray,
+                       min_distance: float) -> Tuple[np.ndarray, np.ndarray]:
+    dmz = np.diff(mz)
+    close_index = np.where(dmz < min_distance)[0]
+    while close_index.size > 0:
+        # merge close centroids
+        new_spint = spint[close_index] + spint[close_index + 1]
+        new_mz = (mz[close_index] * spint[close_index] +
+                  mz[close_index + 1] * spint[close_index + 1])
+        new_mz /= new_spint
+        spint[close_index] = new_spint
+        mz[close_index] = new_mz
+        # remove merged centroids
+        mz = np.delete(mz, close_index + 1)
+        spint = np.delete(spint, close_index + 1)
+
+        close_index = np.where(dmz < min_distance)[0]
+    return mz, spint
