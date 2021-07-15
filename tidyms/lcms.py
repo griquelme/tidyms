@@ -7,6 +7,16 @@ Chromatogram
 MSSpectrum
 Roi
 
+Functions
+---------
+make_chromatograms
+make_roi
+accumulate_spectra_profile
+accumulate_spectra_centroid
+get_lc_filter_peak_params
+get_roi_params
+get_find_centroid_params
+
 """
 
 import bokeh.plotting
@@ -14,6 +24,7 @@ import numpy as np
 import pyopenms
 from collections import namedtuple
 from scipy.interpolate import interp1d
+from scipy.ndimage import gaussian_filter1d
 from typing import Optional, Iterable, Tuple, Union, List, Callable
 from . import peaks
 from . import validation
@@ -26,7 +37,7 @@ ms_experiment_type = Union[pyopenms.MSExperiment, pyopenms.OnDiscMSExperiment]
 class MSSpectrum:
     """
     Representation of a Mass Spectrum in profile mode. Manages conversion to
-    centroids and plotting of data.
+    centroid and plotting of data.
 
     Attributes
     ----------
@@ -51,7 +62,6 @@ class MSSpectrum:
         """
         self.mz = mz
         self.spint = spint
-        self.peaks = None
 
         if instrument is None:
             instrument = "qtof"
@@ -119,6 +129,7 @@ class MSSpectrum:
         Returns
         -------
         bokeh Figure
+
         """
         return _plot_bokeh.plot_ms_spectrum(self.mz, self.spint, draw=draw,
                                             fig_params=fig_params,
@@ -127,7 +138,7 @@ class MSSpectrum:
 
 class Chromatogram:
     """
-    Representation of a chromatogram. Manages plotting and peak picking.
+    Representation of a chromatogram. Manages plotting and peak detection.
 
     Attributes
     ----------
@@ -141,7 +152,7 @@ class Chromatogram:
     """
 
     def __init__(self, rt: np.ndarray, spint: np.ndarray,
-                 mode: Optional[str] = None):
+                 mode: str = "uplc"):
         """
         Constructor of the Chromatogram.
 
@@ -156,10 +167,7 @@ class Chromatogram:
             set to uplc.
 
         """
-        if mode is None:
-            mode = "uplc"
         self.mode = mode
-
         self.rt = rt
         self.spint = spint
         self.peaks = None
@@ -177,9 +185,13 @@ class Chromatogram:
             msg = "mode must be one of {}".format(valid_values)
             raise ValueError(msg)
 
-    def find_peaks(self, detect_peaks_params: Optional[dict] = None,
+    def find_peaks(self, smoothing_strength: Optional[float] = 1.0,
                    descriptors: Optional[dict] = None,
-                   filters: Optional[dict] = None) -> List[dict]:
+                   filters: Optional[dict] = None,
+                   noise_params: Optional[dict] = None,
+                   baseline_params: Optional[dict] = None,
+                   find_peaks_params: Optional[dict] = None,
+                   return_signal_estimators: bool = False) -> List[dict]:
         """
         Find peaks and compute peak descriptors.
 
@@ -188,42 +200,84 @@ class Chromatogram:
 
         Parameters
         ----------
-        detect_peaks_params : dict, optional
+        find_peaks_params : dict, optional
             parameters to pass to :py:func:`tidyms.peaks.detect_peaks`
+        smoothing_strength: positive number, optional
+            Width of a gaussian window used to smooth the signal. If None, no
+            smoothing is applied.
         descriptors : dict, optional
             descriptors to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
         filters : dict, optional
             filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
+        noise_params : dict, optional
+            parameters to pass to :py:func:`tidyms.peaks.estimate_noise`
+        baseline_params : dict, optional
+            parameters to pass to :py:func:`tidyms.peaks.estimate_baseline`
+        return_signal_estimators : bool
+            If True, returns a dictionary with the noise, baseline and the
+            smoothed signal
+
         Returns
         -------
         params : List[dict]
             List of peak descriptors
+        estimators : dict
+            a dictionary with the noise, baseline and smoothed signal used
+            inside the function.
+
+        Notes
+        -----
+        Peak detection is done in five steps:
+
+        1. Estimate the noise level.
+        2. Apply a gaussian smoothing to the chromatogram.
+        3. Estimate the baseline.
+        4. Detect peaks in the chromatogram.
+        5. Compute peak descriptors and filter peaks.
 
         See Also
         --------
-        peaks.detect_peaks : peak detection using the CWT algorithm.
+        peaks.estimate_noise : noise estimation of 1D signals
+        peaks.estimate_baseline : baseline estimation of 1D signals
+        peaks.detect_peaks : peak detection of 1D signals.
         peaks.get_peak_descriptors: computes peak descriptors.
-        lcms.get_lc_detect_peaks_params : default value for detect_peak_params
         lcms.get_lc_filter_peaks_params : default value for filters
 
         """
-        if detect_peaks_params is None:
-            detect_peaks_params = get_lc_detect_peak_params()
+        if noise_params is None:
+            noise_params = dict()
 
-        if descriptors is None:
-            descriptors = None
+        if baseline_params is None:
+            baseline_params = dict()
+
+        if find_peaks_params is None:
+            find_peaks_params = dict()
 
         if filters is None:
             filters = get_lc_filter_peak_params(self.mode)
 
-        peak_list, noise, baseline = peaks.detect_peaks(self.spint,
-                                                        **detect_peaks_params)
+        noise = peaks.estimate_noise(self.spint, **noise_params)
+
+        if smoothing_strength is None:
+            x = self.spint
+        else:
+            x = gaussian_filter1d(self.spint, smoothing_strength)
+
+        baseline = peaks.estimate_baseline(x, noise, **baseline_params)
+        peak_list = peaks.detect_peaks(x, noise, baseline, **find_peaks_params)
+
         peak_list, peak_descriptors = \
             peaks.get_peak_descriptors(self.rt, self.spint, noise, baseline,
                                        peak_list, descriptors=descriptors,
                                        filters=filters)
         self.peaks = peak_list
-        return peak_descriptors
+
+        if return_signal_estimators:
+            estimators = {"smoothed": x, "noise": noise, "baseline": baseline}
+            res = peak_descriptors, estimators
+        else:
+            res = peak_descriptors
+        return res
 
     def plot(self, draw: bool = True, fig_params: Optional[dict] = None,
              line_params: Optional[dict] = None) -> bokeh.plotting.Figure:
@@ -251,7 +305,7 @@ class Chromatogram:
 
 class Roi(Chromatogram):
     """
-    mz traces where a chromatographic peak may be found.
+    m/z traces where a chromatographic peak may be found.
 
     Subclassed from Chromatogram. Used for feature detection in LCMS data.
 
@@ -268,7 +322,7 @@ class Roi(Chromatogram):
 
     """
     def __init__(self, spint: np.ndarray, mz: np.ndarray, rt: np.ndarray,
-                 first_scan: int, mode: Optional[str] = None):
+                 first_scan: int, mode: str = None):
         super(Roi, self).__init__(rt, spint, mode=mode)
         self.mz = mz
         self.first_scan = first_scan
@@ -376,7 +430,7 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
                        ms_level: Optional[int] = None
                        ) -> List[Chromatogram]:
     """
-    Computes extracted ion chromatograms for a list of m/z values.
+    Computes extracted ion chromatograms using a list of m/z values.
 
     Parameters
     ----------
@@ -389,7 +443,7 @@ def make_chromatograms(ms_experiment: ms_experiment_type, mz: Iterable[float],
         last scan to build the chromatograms. The scan with `number` end is not
         included in the chromatograms.
     window : positive number.
-               Tolerance to build the EICs.
+        m/z tolerance used to build the EICs.
     accumulator : {"sum", "mean"}
         "mean" divides the intensity in the EIC using the number of points in
         the window.
@@ -742,19 +796,6 @@ def get_lc_filter_peak_params(lc_mode: str) -> dict:
         msg = "`mode` must be `hplc` or `uplc`"
         raise ValueError(msg)
     return filters
-
-
-def get_lc_detect_peak_params() -> dict:
-    """
-    Default values for performing peak detection on LC data.
-
-    Returns
-    -------
-    params : dict
-        keyword arguments to pass to :py:func:`tidyms.peaks.detect_peaks`
-    """
-    params = {"smoothing_strength": 1.0}
-    return params
 
 
 def get_roi_params(separation: str = "uplc", instrument: str = "qtof"):
@@ -1172,5 +1213,4 @@ def get_rm_index(rm_scan: List[int], first_scan: int, last_scan: int):
     rm_index = np.array(rm_scan)
     start, end = np.searchsorted(rm_index, [first_scan, last_scan])
     res = rm_index[start:end] - first_scan
-    # print(res.size)
     return res
