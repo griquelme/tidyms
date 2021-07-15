@@ -6,8 +6,8 @@ from typing import List, Optional
 
 
 def plot_chromatogram(rt: np.ndarray, spint: np.ndarray,
-                      peaks: Optional[List[Peak]] = None,
-                      draw: bool = True, fig_params: Optional[dict] = None,
+                      peaks: Optional[List[Peak]], draw: bool = True,
+                      fig_params: Optional[dict] = None,
                       line_params: Optional[dict] = None
                       ) -> bokeh.plotting.Figure:
     """
@@ -59,6 +59,62 @@ def plot_chromatogram(rt: np.ndarray, spint: np.ndarray,
 
     #  figure appearance
     fig.xaxis.axis_label = "Rt [s]"
+    fig.yaxis.axis_label = "intensity [au]"
+    fig.yaxis.axis_label_text_font_style = "bold"
+    fig.yaxis.formatter.precision = 2
+    fig.xaxis.axis_label_text_font_style = "bold"
+
+    if draw:
+        bokeh.plotting.show(fig)
+    return fig
+
+
+def plot_ms_spectrum(mz: np.ndarray, spint: np.ndarray,
+                     draw: bool = True, fig_params: Optional[dict] = None,
+                     line_params: Optional[dict] = None
+                     ) -> bokeh.plotting.Figure:
+    """
+    Plot a mass spectrum.
+
+    Parameters
+    ----------
+    mz : array
+        array of m/z
+    spint : array
+        array of intensities
+    draw : bool, optional
+        if True run bokeh show function.
+    fig_params : dict
+        key-value parameters to pass into bokeh figure function.
+    line_params : dict
+        key-value parameters to pass into bokeh line function.
+
+    Returns
+    -------
+    bokeh Figure
+    """
+    default_line_params = {"line_width": 1, "line_color": "black",
+                           "alpha": 0.8}
+
+    if line_params is None:
+        line_params = default_line_params
+    else:
+        for params in line_params:
+            default_line_params[params] = line_params[params]
+        line_params = default_line_params
+
+    default_fig_params = {"aspect_ratio": 1.5}
+    if fig_params is None:
+        fig_params = default_fig_params
+    else:
+        default_fig_params.update(fig_params)
+        fig_params = default_fig_params
+
+    fig = bokeh.plotting.figure(**fig_params)
+    fig.line(mz, spint, **line_params)
+
+    #  figure appearance
+    fig.xaxis.axis_label = "m/z"
     fig.yaxis.axis_label = "intensity [au]"
     fig.yaxis.axis_label_text_font_style = "bold"
     fig.yaxis.formatter.precision = 2
