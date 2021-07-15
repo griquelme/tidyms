@@ -14,114 +14,256 @@ import numpy as np
 from .fileio import MSData
 from .container import DataContainer
 from .lcms import Roi
-import os.path
+from . import validation
+from pathlib import Path
 from sklearn.cluster import DBSCAN
 from sklearn import mixture
 from scipy.optimize import linear_sum_assignment
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Union
+from IPython.display import clear_output
 
 
 __all__ = ["detect_features", "feature_correspondence", "make_data_container"]
 
 
-def detect_features(path_list: List[str], separation: str = "uplc",
+def detect_features(path: Union[Path, List[str]], separation: str = "uplc",
                     instrument: str = "qtof", roi_params: Optional[dict] = None,
-                    peak_picking_method: str = "max",
-                    peak_params: Optional[dict] = None, verbose: bool = True
-                    ) -> Tuple[Dict[str, Roi], pd.DataFrame]:
+                    smoothing_strength: Optional[float] = 1.0,
+                    noise_params: Optional[dict] = None,
+                    baseline_params: Optional[dict] = None,
+                    find_peaks_params: Optional[dict] = None,
+                    descriptors: Optional[dict] = None,
+                    filters: Optional[dict] = None,
+                    verbose: bool = True
+                    ) -> Tuple[Dict[str, List[Roi]], pd.DataFrame]:
     """
-    Perform feature detection on several samples.
-
-    Samples are analyzed one at a time using the detect_features method
-    of MSData. See this method for a detailed explanation of each parameter.
+    Perform feature detection on LC-MS centroid samples.
 
     Parameters
     ----------
-    path_list: List[str]
-        List of path to centroided mzML files.
+    path: Path or List[str]
+        Path can be a list of strings of absolute path representations to mzML
+        files in centroid mode or a Path object. Path objects can be used in
+        two ways: It can point to an mzML file or to a directory. in the second
+        case all mzML files inside the directory will be analyzed.
     separation: {"uplc", "hplc"}
         Analytical platform used for separation. Used to set default the values
-        of `cwt_params` and `roi_params`.
+        of `detect_peak_params`, `roi_params` and `filter_params`.
     instrument: {"qtof". "orbitrap"}
-        MS instrument used for data acquisition. Used to set default values
+        MS instrument used for data acquisition. Used to set default value
         of `roi_params`.
-    peak_picking_method : {"max", "cwt"}
-        method used for peak picking. By default, the CWT algorithm is used.
     roi_params: dict, optional
-        Set roi detection parameters in MSData detect_features method.
-    peak_params: dict, optional
-        Set peak detection parameters in MSData detect_features method.
+        parameters to pass to :py:meth:`tidyms.MSData.make_roi`
+    smoothing_strength: positive number, optional
+        Width of a gaussian window used to smooth the ROI. If None, no
+        smoothing is applied.
+    find_peaks_params : dict, optional
+        parameters to pass to :py:func:`tidyms.peaks.detect_peaks`
+    descriptors : dict, optional
+        descriptors to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
+    filters : dict, optional
+        filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
+    noise_params : dict, optional
+        parameters to pass to :py:func:`tidyms.peaks.estimate_noise`
+    baseline_params : dict, optional
+        parameters to pass to :py:func:`tidyms.peaks.estimate_baseline`
+    descriptors : dict, optional
+        pass custom descriptors to :py:func:`tidyms.peaks.get_peak_descriptors`
+    filters : dict, optional
+        pass custom filters to :py:func:`tidyms.peaks.get_peak_descriptors`
     verbose: bool
-        If True prints a message each time a sample is analyzed.
 
     Returns
     -------
-    roi_mapping: dict of sample names to list of ROI
-        ROI for each sample where features were detected. Can be used to
-        visualize each feature.
-    proto_dm: DataFrame
-        A DataFrame with features detected and their associated descriptors.
-        Each feature is a row, each descriptor is a column. The descriptors
-        are:
+    roi_dict: dict
+        dictionary of sample names to a list of ROI.
+    feature_table: DataFrame
+        A Pandas DataFrame where each row is a feature detected in a sample and
+        each column is a feature descriptor. By default the following
+        descriptors are computed:
 
-        mz : m/z of the feature
-            Computed as the weighted mean of the m/z, using as weights the
-            intensity at each time.
-        mz std : standard deviation of the m/z.
-            Computed as the standard deviation of the m/z in the region where
-            the peak was detected.
-        rt : retention time of the feature
-            Computed as the weighted mean of the retention time, using as
-            weights the intensity at each time.
-        width :
+        mz
+            weighted average of the m/z in the peak region.
+        mz std
+            standard deviation of the m/z in the peak region.
+        rt
+            weighted average of the retention time in the peak region.
+        width
             Chromatographic peak width.
-        intensity :
-            Maximum intensity of the chromatographic peak.
-        area :
-            Area of the chromatographic peak.
-        sample :
+        height
+            Height of the chromatographic peak minus the baseline.
+        area
+            Area of the chromatographic peak. minus the baseline area.
+        sample
             The sample name where the feature was detected.
 
         Also, two additional columns have information to search each feature
         in its correspondent Roi:
 
         roi_index :
-            index in `roi_list` where the feature was detected.
+            index in the list of ROI where the feature was detected.
         peak_index :
-            index of the peaks attribute of each Roi associated to the feature.
+            index of the peaks attribute of each ROI associated to the feature.
+
+    Notes
+    -----
+    Features are detected as follows:
+
+    1.  Default parameters for are set based on the values of the parameters
+        `instrument` and `separation`.
+    2.  Regions of interest (ROI) are detected in each sample. See the
+        documentation of :py:meth:`tidyms.fileio.MSData.make_roi` for a detailed
+        description of how ROI are created from raw data.
+    3.  Features (chromatographic peaks) are detected on each ROI. See
+        :py:meth:`tidyms.lcms.Chromatogram.find_peaks` for a detailed
+        description of how peaks are detected and how estimators are computed.
 
     See Also
     --------
-    fileio.MSData : Object used to analyze each sample.
+    fileio.MSData.make_roi : Finds ROIs in a mzML sample.
+    lcms.ROI.find_peaks : Detect peaks and compute peak estimators for a ROI.
 
     """
-    # TODO : check memory for large data sets ( ~ 1000 samples)
-    #  ROI can generate memory problems. In this case
-    #  maybe an alternative is writing the ROI data to disk.
+    # parameter validation
+    # validation.validate_detect_peaks_params(detect_peak_params)
+    validation.validate_descriptors(descriptors)
+    validation.validate_filters(filters)
+    if roi_params is None:
+        roi_params = dict()
 
-    roi_mapping = dict()
-    ft_df_list = list()
+    path_list = _get_path_list(path)
+    roi_dict = dict()
+    ft_table_list = list()
     n_samples = len(path_list)
     for k, sample_path in enumerate(path_list):
-        sample_filename = os.path.split(sample_path)[1]
-        sample_name = os.path.splitext(sample_filename)[0]
+        sample_name = sample_path.stem
+        sample_path_str = str(sample_path)
+        ms_data = MSData(sample_path_str, ms_mode="centroid",
+                         instrument=instrument, separation=separation)
+        k_roi = ms_data.make_roi(**roi_params)
+
         if verbose:
+            clear_output(wait=True)
             msg = "Processing sample {} ({}/{})."
             msg = msg.format(sample_name, k + 1, n_samples)
             print(msg)
-        ms_data = MSData(sample_path, ms_mode="centroid",
-                         instrument=instrument, separation=separation)
-        roi, df = ms_data.detect_features(roi_params=roi_params,
-                                          method=peak_picking_method,
-                                          peak_params=peak_params)
-        df["sample"] = sample_name
-        roi_mapping[sample_name] = roi
-        ft_df_list.append(df)
-    proto_dm = pd.concat(ft_df_list).reset_index(drop=True)
-    proto_dm["roi index"] = proto_dm["roi index"].astype(int)
-    proto_dm["peak index"] = proto_dm["peak index"].astype(int)
-    # TODO: need to check performance for concat when n_samples is large.
-    return roi_mapping, proto_dm
+            print("Searching features in {} ROI...".format(len(k_roi)), end=" ")
+
+        k_table = _build_feature_table(k_roi,
+                                       smoothing_strength=smoothing_strength,
+                                       descriptors=descriptors,
+                                       filters=filters,
+                                       noise_params=noise_params,
+                                       baseline_params=baseline_params,
+                                       find_peaks_params=find_peaks_params)
+
+        if verbose:
+            msg = "Found {} features".format(k_table.shape[0])
+            print(msg)
+        k_table["sample"] = sample_name
+        roi_dict[sample_name] = k_roi
+        ft_table_list.append(k_table)
+    feature_table = pd.concat(ft_table_list).reset_index(drop=True)
+    feature_table["roi index"] = feature_table["roi index"].astype(int)
+    feature_table["peak index"] = feature_table["peak index"].astype(int)
+    return roi_dict, feature_table
+
+
+def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
+    if isinstance(path, str):
+        path = Path(path)
+
+    if isinstance(path, list):
+        path_list = [Path(x) for x in path]
+        for p in path_list:
+            # check if all files in the list exists
+            if not p.is_file():
+                msg = "{} doesn't exist".format(p)
+                raise ValueError(msg)
+    else:
+        if path.is_dir():
+            path_list = list(path.glob("*.mzML"))
+        elif path.is_file():
+            path_list = [path]
+        else:
+            msg = ("Path must be a string or Path object pointing to a "
+                   "directory with mzML files or a list strings with the "
+                   "absolute path to mzML")
+            raise ValueError(msg)
+    return path_list
+
+
+def _build_feature_table(roi: List[Roi],
+                         smoothing_strength: Optional[float] = 1.0,
+                         descriptors: Optional[dict] = None,
+                         filters: Optional[dict] = None,
+                         noise_params: Optional[dict] = None,
+                         baseline_params: Optional[dict] = None,
+                         find_peaks_params: Optional[dict] = None
+                         ) -> pd.DataFrame:
+    """
+    Builds a DataFrame with feature descriptors.
+
+    Parameters
+    ----------
+    roi : List[Roi]
+    find_peaks_params : dict, optional
+            parameters to pass to :py:func:`tidyms.peaks.detect_peaks`
+    smoothing_strength: positive number, optional
+        Width of a gaussian window used to smooth the signal. If None, no
+        smoothing is applied.
+    descriptors : dict, optional
+        descriptors to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
+    filters : dict, optional
+        filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
+    noise_params : dict, optional
+        parameters to pass to :py:func:`tidyms.peaks.estimate_noise`
+    baseline_params : dict, optional
+        parameters to pass to :py:func:`tidyms.peaks.estimate_baseline`
+
+    Returns
+    -------
+    DataFrame
+
+    """
+    roi_index_list = list()
+    peak_index_list = list()
+    mz_mean_list = list()
+    mz_std_list = list()
+    descriptors_list = list()
+
+    for roi_index, k_roi in enumerate(roi):
+        k_roi.extend(2)
+        k_roi.fill_nan()
+        k_params = k_roi.find_peaks(smoothing_strength=smoothing_strength,
+                                    descriptors=descriptors,
+                                    filters=filters,
+                                    noise_params=noise_params,
+                                    baseline_params=baseline_params,
+                                    find_peaks_params=find_peaks_params)
+        n_features = len(k_params)
+        descriptors_list.extend(k_params)
+        k_mz_mean, k_mz_std = k_roi.get_peaks_mz()
+        roi_index_list.append([roi_index] * n_features)
+        peak_index_list.append(range(n_features))
+        mz_mean_list.append(k_mz_mean)
+        mz_std_list.append(k_mz_std)
+
+    roi_index_list = np.hstack(roi_index_list)
+    peak_index_list = np.hstack(peak_index_list)
+    mz_mean_list = np.hstack(mz_mean_list)
+    mz_std_list = np.hstack(mz_std_list)
+
+    ft_table = pd.DataFrame(data=descriptors_list)
+    ft_table = ft_table.rename(columns={"loc": "rt"})
+    ft_table["mz"] = mz_mean_list
+    ft_table["mz std"] = mz_std_list
+    ft_table["roi index"] = roi_index_list
+    ft_table["peak index"] = peak_index_list
+    ft_table = ft_table.dropna(axis=0)
+    ft_table["roi index"] = ft_table["roi index"].astype(int)
+    ft_table["peak index"] = ft_table["peak index"].astype(int)
+    return ft_table
 
 
 def feature_correspondence(feature_data: pd.DataFrame, mz_tolerance: float,
