@@ -274,63 +274,56 @@ def validate_make_roi_params(n_spectra, params):
                                        {"check_with": is_callable}]},
               "mode": {"allowed": ["hplc", "uplc"]},
               "min_intensity": {"type": "number", "is_positive": True},
-              "min_length": {"type": "integer", "is_positive": True}
-              }
-    validator = ValidatorWithLowerThan(schema)
-    validate(params, validator)
-
-
-def validate_cwt_peak_picking_params(params):
-
-    estimators = {"anyof": [{"type": "string",
-                             "allowed": ["default", "cwt"]},
-                            {"type": "dict",
-                             "schema": get_peak_picking_estimators_schema()}
-                            ]}
-
-    schema = {"max_distance": {"type": "number", "is_positive": True},
               "min_length": {"type": "integer", "is_positive": True},
-              "gap_threshold": {"type": "integer", "min": 0},
-              "snr": {"type": "number", "is_positive": True},
-              "min_width": {"type": "number", "is_positive": True,
-                            "lower_than": "max_width"},
-              "max_width": {"type": "number", "is_positive": True},
-              "estimators": estimators
+              "ms_level": {"type": "integer", "min": 0, "nullable": True}
               }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
 
 
-def validate_max_peak_picking_params(params):
+def validate_descriptors(params):
+    schema = {"type": "dict", "keysrules": {"type": "string"},
+              "valuesrules": {"check_with": is_callable}}
+    if params is not None:
+        validator = ValidatorWithLowerThan(schema)
+        validate(params, validator)
 
-    schema = {"min_distance": {"type": "number", "is_positive": True},
-              "peak_probability": {"type": "number", "min": 0.0, "max": 1.0},
-              "min_prominence": {"type": "number", "min": 0.0, "max": 1.0},
-              "smoothing_strength": {"type": "number", "is_positive": True,
-                                     "nullable": True},
-              "noise": {"nullable": True},
-              "baseline": {"nullable": True},
-              "filters": {"nullable": True},
-              "estimators": {"nullable": True}
+
+def validate_filters(params):
+    schema = {"type": "dict", "keysrules": {"type": "string"},
+              "valuesrules": {"type": "list",
+                              "items": [{'type': 'number', "nullable": True},
+                                        {'type': 'number', "nullable": True}]
+                              }
               }
-    validator = ValidatorWithLowerThan(schema)
-    validate(params, validator)
+    if params is not None:
+        validator = ValidatorWithLowerThan(schema)
+        validate(params, validator)
 
 
-def get_peak_picking_estimators_schema():
-    schema = {"baseline": {"check_with": is_callable},
-              "noise": {"check_with": is_callable},
-              "width": {"check_with": is_callable},
-              "area": {"check_with": is_callable},
-              "loc": {"check_with": is_callable}}
-    return schema
-
-
-def validate_peak_picking_estimators(params):
-    schema = get_peak_picking_estimators_schema()
-    validator = ValidatorWithLowerThan(schema)
-    validate(params, validator)
-
+def validate_detect_peaks_params(params):
+    noise_schema = {"min_slice_size": {"is_positive": True, "type": "integer"},
+                    "n_slices": {"is_positive": True, "type": "integer"}
+                    }
+    baseline_schema = {"min_proba": {"is_positive": True, "max": 1.0,
+                                     "type": "number"}
+                       }
+    schema = \
+        {"noise_params": {"type": "dict",
+                          "schema": noise_schema,
+                          "nullable": True
+                          },
+         "baseline_params": {"type": "dict",
+                             "schema": baseline_schema,
+                             "nullable": True
+                             },
+         "smoothing_strength": {"type": "number",
+                                "nullable": True,
+                                "is_positive": True}
+         }
+    if params is not None:
+        validator = ValidatorWithLowerThan(schema)
+        validate(params, validator)
 
 # validator for make_chromatograms
 
@@ -347,11 +340,11 @@ def validate_make_chromatograms_params(n_spectra, params):
 
 def validate_accumulate_spectra_params(n_spectra, params):
     schema = {"start": {"type": "integer", "min": 0, "lower_than": "end"},
-              "end": {"type": "integer", "max": n_spectra - 1,
+              "end": {"type": "integer", "max": n_spectra,
                       "lower_or_equal": "subtract_right"},
               "subtract_left": {"type": "integer", "lower_or_equal": "start",
                                 "min": 0},
-              "subtract_right": {"type": "integer", "max": n_spectra - 1},
+              "subtract_right": {"type": "integer", "max": n_spectra},
               "kind": {"type": "string"}
               }
     validator = ValidatorWithLowerThan(schema)
