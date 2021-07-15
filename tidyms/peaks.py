@@ -19,7 +19,6 @@ import numpy as np
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
 from scipy.interpolate import interp1d
-from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 from scipy.special import erfc
 from scipy.stats import median_abs_deviation as mad
@@ -104,6 +103,9 @@ class Peak:
         """
         Computes the area in the region defined by the peak.
 
+        If the baseline area is greater than the peak area, the area is set
+        to zero.
+
         Parameters
         ----------
         x : sorted array
@@ -112,8 +114,7 @@ class Peak:
 
         Returns
         -------
-        area : positive number. If the baseline area is greater than the peak
-            area, the area is set to zero.
+        area : positive number.
 
         """
         baseline_corrected = (y[self.start:self.end] -
@@ -213,11 +214,8 @@ class Peak:
         return descriptors
 
 
-def detect_peaks(x: np.ndarray, smoothing_strength: Optional[float] = 1.0,
-                 find_peaks_params: Optional[dict] = None,
-                 noise_params: Optional[dict] = None,
-                 baseline_params: Optional[dict] = None
-                 ) -> Tuple[List[Peak], np.ndarray, np.ndarray]:
+def detect_peaks(x: np.ndarray, noise: np.ndarray, baseline: np.ndarray,
+                 find_peaks_params: Optional[dict] = None) -> List[Peak]:
     r"""
     Finds peaks in a 1D signal.
 
@@ -225,63 +223,49 @@ def detect_peaks(x: np.ndarray, smoothing_strength: Optional[float] = 1.0,
     ----------
     x : array
         Signal with peaks.
-    smoothing_strength: positive number, optional
-        Width of a gaussian window used to smooth the signal. If None, no
-        smoothing is applied.
+    noise : array with the same size as x
+        Noise level of x.
+    baseline : array with the same size as x
+        Baseline estimation of x
     find_peaks_params : dict, optional
         parameters to pass to :py:func:`scipy.signal.find_peaks`.
-    noise_params : dict, optional
-        parameters to pass to :py:func:`tidyms.peaks.estimate_noise`
-    baseline_params : dict, optional
-        parameters to pass to :py:func:`tidyms.peaks.estimate_baseline`
 
     Returns
     -------
     peaks : List[Peak]
         list of detected peaks
-    noise : array
-        noise level estimation for x
-    baseline : array
-        baseline estimation for x
 
     Notes
     -----
     The algorithm for peak finding is as follows:
 
-    1.  Noise is estimated for the signal.
-    2.  Apply a gaussian filter to the signal.
-    2.  Using the noise, each point in the signal is classified as either
-        baseline or signal.
-    3.  Peaks are detected using :py:func:`scipy.signal.find_peaks`. Peaks
+    1.  Peaks are detected using :py:func:`scipy.signal.find_peaks`. Peaks
         with a prominence lower than three times the noise or in regions
         classified as baseline  are removed.
-    4.  The extension of each peak is found by finding the closest baseline
-        point to the left and right.
-    5.  If there are overlapping peaks (i.e. overlapping peak extensions),
+    2.  Points from :math:`x` are considered baseline is the following
+        condition is meet:
+
+        .. math::
+            |x[k] - b[k]| < e[k]
+
+        where :math:`b` is the baseline and :math:`e` is the noise. If a
+        detected peak is classified as baseline is removed.
+    3.  The extension of each peak is found by finding the closest baseline
+        point to its left and right.
+    4.  If there are overlapping peaks (i.e. overlapping peak extensions),
         the extension is fixed by defining a boundary between the peaks as
         the minimum value between the two peaks.
 
     See Also
     --------
-    estimate_noise : noise estimation for x
-    estimate_baseline : baseline estimation for x
+    estimate_noise : estimates noise in a 1D signal
+    estimate_baseline : estimates the baseline in a 1D signal
     Peak : stores peak start, apex and end indices
     get_peak_descriptors : computes descriptors on a list of Peak objects
 
     """
-    if noise_params is None:
-        noise_params = dict()
-    noise = estimate_noise(x, **noise_params)
 
-    if smoothing_strength is not None:
-        xs = gaussian_filter1d(x, smoothing_strength)
-    else:
-        xs = x
-
-    if baseline_params is None:
-        baseline_params = dict()
-    baseline_params["return_index"] = True
-    baseline, baseline_index = estimate_baseline(xs, noise, **baseline_params)
+    baseline_index = np.where((x - baseline) < noise)[0]
     prominence = 3 * noise
 
     if find_peaks_params is None:
@@ -289,14 +273,15 @@ def detect_peaks(x: np.ndarray, smoothing_strength: Optional[float] = 1.0,
     else:
         find_peaks_params["prominence"] = prominence
 
-    peaks = find_peaks(xs, **find_peaks_params)[0]
+    peaks = find_peaks(x, **find_peaks_params)[0]
+    # remove peaks close to baseline level
     peaks = np.setdiff1d(peaks, baseline_index, assume_unique=True)
 
     start, end = _find_peak_extension(peaks, baseline_index)
     start, end = _fix_peak_overlap(x, start, peaks, end)
     start, peaks, end = _normalize_peaks(x, start, peaks, end)
     peaks = [Peak(s, p, e) for s, p, e in zip(start, peaks, end)]
-    return peaks, noise, baseline
+    return peaks
 
 
 def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
@@ -411,8 +396,8 @@ def estimate_noise(x: np.ndarray, min_slice_size: int = 200,
     return noise
 
 
-def estimate_baseline(x: np.ndarray, noise: np.ndarray, min_proba: float = 0.05,
-                      return_index=False):
+def estimate_baseline(x: np.ndarray, noise: np.ndarray,
+                      min_proba: float = 0.05) -> np.ndarray:
     """
     Computes the baseline of a 1D signal.
 
@@ -425,14 +410,10 @@ def estimate_baseline(x: np.ndarray, noise: np.ndarray, min_proba: float = 0.05,
     x : non empty 1D array
     noise : array obtained with estimate noise
     min_proba : number between 0 and 1
-    return_index : bool
-        If True returns the indices of elements flagged as baseline
 
     Returns
     -------
     baseline : array with the same size as x
-    baseline_index = array
-        baseline indices in x, only returned if return_index is True
 
     """
     # find points that only have contribution from the baseline
@@ -445,12 +426,7 @@ def estimate_baseline(x: np.ndarray, noise: np.ndarray, min_proba: float = 0.05,
 
     # prevents that interpolated points have higher values than x.
     baseline = np.minimum(baseline, x)
-
-    if return_index:
-        baseline_index = np.where((x - baseline) < noise)[0]
-        return baseline, baseline_index
-    else:
-        return baseline
+    return baseline
 
 
 def find_centroids(mz: np.ndarray, spint: np.ndarray, min_snr: float,
@@ -476,7 +452,9 @@ def find_centroids(mz: np.ndarray, spint: np.ndarray, min_snr: float,
         area of peaks
 
     """
-    peaks, noise, baseline = detect_peaks(spint)
+    noise = estimate_noise(spint)
+    baseline = estimate_baseline(spint, noise)
+    peaks = detect_peaks(spint, noise, baseline)
     filters = {"snr": (min_snr, None)}
     peaks, estimators = get_peak_descriptors(mz, spint, noise, baseline, peaks,
                                              filters=filters)
