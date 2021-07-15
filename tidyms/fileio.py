@@ -27,14 +27,15 @@ Roi
 import numpy as np
 import pandas as pd
 import os
-from typing import Optional, Iterable, Tuple, Union, List, BinaryIO, TextIO
+from typing import Optional, Iterable, Callable, Union, List, BinaryIO, TextIO
 from .container import DataContainer
 from ._names import *
 from . import lcms
 from . import validation
-from . import utils
 import pickle
 import requests
+import warnings
+import pyopenms
 
 
 def read_pickle(path: Union[str, BinaryIO]) -> DataContainer:
@@ -129,16 +130,16 @@ def read_mzmine(data: Union[str, TextIO],
 
     """
     df = pd.read_csv(data)
-    colnames = pd.Series(df.columns)
+    col_names = pd.Series(df.columns)
     sample_mask = ~df.columns.str.startswith("row")
 
     # remove filename extensions
-    colnames = colnames.str.split(".").apply(lambda x: x[0])
+    col_names = col_names.str.split(".").apply(lambda x: x[0])
     # remove "row " in columns
-    colnames = colnames.str.replace("row ", "")
-    colnames = colnames.str.replace("Peak area", "")
-    colnames = colnames.str.strip()
-    df.columns = colnames
+    col_names = col_names.str.replace("row ", "")
+    col_names = col_names.str.replace("Peak area", "")
+    col_names = col_names.str.strip()
+    df.columns = col_names
     df = df.rename(columns={"m/z": "mz", "retention time": "rt"})
     ft_metadata = df.loc[:, ["mz", "rt"]]
 
@@ -252,7 +253,7 @@ class MSData:
     """
     Container object for raw MS data.
 
-    Manages chromatogram creation, spectra creation and feature detection.
+    Manages chromatogram, roi and spectra creation.
 
     Attributes
     ----------
@@ -261,16 +262,15 @@ class MSData:
     ms_mode : {"centroid", "profile"}
         The mode in which the MS data is stored. If None, mode is guessed, but
         it's recommended to supply the mode in the constructor.
-    instrument : {"qtof". "orbitrap"}, optional
+    instrument : {"qtof". "orbitrap"}
         The MS instrument type used to acquire the experimental data.
-    separation : {"uplc", "hplc"}, optional
+    separation : {"uplc", "hplc"}
         The separation technique used before MS analysis.
 
     """
 
-    def __init__(self, path: str, ms_mode: Optional[str] = None,
-                 instrument: Optional[str] = None,
-                 separation: Optional[str] = None):
+    def __init__(self, path: str, ms_mode: str = "centroid",
+                 instrument: str = "qtof", separation: str = "uplc"):
         """
         Constructor for MSData
 
@@ -278,56 +278,62 @@ class MSData:
         ----------
         path : str
             Path to a mzML file.
-        ms_mode : {"centroid", "profile"}, optional
-            Mode of the MS data. if None, the data mode is guessed, but it's
-            better to provide a mode. The `ms_mode` is used to set default
-            parameters on the methods.
-        instrument : {"qtof", "orbitrap"}, optional
+        ms_mode : {"centroid", "profile"}
+            Mode of the MS data.
+        instrument : {"qtof", "orbitrap"}
             MS instrument type used for data acquisition. Used to set default
             parameters in the methods.
-        separation: {"uplc", "hplc"}, optional
+        separation: {"uplc", "hplc"}
             Type of separation technique used in the experiment. Used to set
             default parameters in the methods.
 
         """
-        self.reader = lcms.reader(path, on_disc=True)
+        self.reader = _reader(path, on_disc=True)
         self.ms_mode = ms_mode
-        if separation is None:
-            self.separation = "uplc"
-        elif separation in ["uplc", "hplc"]:
-            self.separation = separation
-        else:
-            msg = "`separation` must be uplc or hplc"
-            raise ValueError(msg)
-            # TODO : the option None should be possible for DI experiments.
-        if instrument is None:
-            self.instrument = "qtof"
-        elif instrument in ["qtof", "orbitrap"]:
-            self.instrument = instrument
-        else:
-            msg = "`instrument` must be qtof or orbitrap"
-            raise ValueError(msg)
+        self.instrument = instrument
+        self.separation = separation
 
     @property
     def ms_mode(self) -> str:
-        return self._mode
+        return self._ms_mode
 
     @ms_mode.setter
     def ms_mode(self, value: Optional[str]):
-        if value is None:
-            if self._is_centroided():
-                self._mode = "centroid"
-            else:
-                self._mode = "profile"
-        elif value in ["centroid", "profile"]:
-            self._mode = value
+        if value in ["centroid", "profile"]:
+            self._ms_mode = value
         else:
             msg = "mode must be `centroid` or `profile`"
             raise ValueError(msg)
 
+    @property
+    def instrument(self) -> str:
+        return self._instrument
+
+    @instrument.setter
+    def instrument(self, value: str):
+        valid_instruments = ["qtof", "orbitrap"]
+        if value in valid_instruments:
+            self._instrument = value
+        else:
+            msg = "`instrument` must be any of {}".format(valid_instruments)
+            raise ValueError(msg)
+
+    @property
+    def separation(self) -> str:
+        return self._separation
+
+    @separation.setter
+    def separation(self, value: str):
+        valid_separation = ["uplc", "hplc"]
+        if value in valid_separation:
+            self._separation = value
+        else:
+            msg = "`separation` must be any of {}".format(valid_separation)
+            raise ValueError(msg)
+
     def make_tic(self, mode: str = "tic") -> lcms.Chromatogram:
         """
-        Make a total ion chromatogram.
+        Makes a total ion chromatogram.
 
         Parameters
         ----------
@@ -335,8 +341,7 @@ class MSData:
 
         Returns
         -------
-        rt: np.ndarray
-        tic: np.ndarray
+        tic : lcms.Chromatogram
         """
         if mode == "tic":
             reduce = np.sum
@@ -354,14 +359,13 @@ class MSData:
             rt[k_scan] = sp.getRT()
             _, spint = sp.get_peaks()
             tic[k_scan] = reduce(spint)
-        return lcms.Chromatogram(rt, tic, None)
+        return lcms.Chromatogram(rt, tic, self.separation)
 
     def make_chromatograms(self, mz: List[float],
                            window: Optional[float] = None,
                            accumulator: str = "sum") -> List[lcms.Chromatogram]:
         """
-        Computes the Extracted Ion Chromatogram for a list mass-to-charge
-        values.
+        Computes the Extracted Ion Chromatogram for a list m/z values.
 
         Parameters
         ----------
@@ -388,17 +392,12 @@ class MSData:
                 window = 0.005
         params["window"] = window
 
-        rt, spint = lcms.make_chromatograms(self.reader, mz, **params)
-        chromatograms = list()
-        for row in range(spint.shape[0]):
-            tmp = lcms.Chromatogram(rt, spint[row, :], mode=self.separation)
-            chromatograms.append(tmp)
-        return chromatograms
+        return lcms.make_chromatograms(self.reader, mz, **params)
 
-    def accumulate_spectra(self, start: Optional[int], end: Optional[int],
+    def accumulate_spectra(self, start: int, end: int,
                            subtract_left: Optional[int] = None,
-                           subtract_right: Optional[int] = None,
-                           kind: str = "linear") -> lcms.MSSpectrum:
+                           subtract_right: Optional[int] = None
+                           ) -> lcms.MSSpectrum:
         """
         accumulates a series of consecutive spectra into a single spectrum.
 
@@ -408,8 +407,6 @@ class MSData:
             First scan number to accumulate
         end: int
             Last scan number to accumulate.
-        kind: str
-            kind of interpolator to use with scipy interp1d.
         subtract_left : int, optional
             Scans between `subtract_left` and `start` are subtracted from the
             accumulated spectrum.
@@ -420,30 +417,18 @@ class MSData:
         Returns
         -------
         MSSpectrum
+
         """
-        # TODO: accumulate spectra needs to have different behaviours for
-        #   centroid and profile data.
-        accum_mz, accum_int = \
-            lcms.accumulate_spectra(self.reader, start, end,
-                                    subtract_left=subtract_left,
-                                    subtract_right=subtract_right,
-                                    kind=kind)
-        sp = lcms.MSSpectrum(accum_mz, accum_int, mode=self.instrument)
+        if self.ms_mode == "profile":
+            sp = lcms.accumulate_spectra_profile(self.reader, start, end,
+                                                 subtract_left=subtract_left,
+                                                 subtract_right=subtract_right)
+        else:
+            tolerance = lcms.get_roi_params(self.instrument)["tolerance"]
+            sp = lcms.accumulate_spectra_centroid(self.reader, start, end,
+                                                  subtract_left, subtract_right,
+                                                  tolerance=tolerance)
         return sp
-
-    def _is_centroided(self) -> bool:
-        """
-        Hack to guess if the data is centroided.
-
-        Returns
-        -------
-        bool
-
-        """
-        mz, spint = self.reader.getSpectrum(0).get_peaks()
-        dmz = np.diff(mz)
-        # if the data is in profile mode, mz values are going to be closer.
-        return dmz.min() > 0.008
 
     def get_spectrum(self, scan: int) -> lcms.MSSpectrum:
         """
@@ -457,12 +442,13 @@ class MSData:
         Returns
         -------
         MSSpectrum
+
         """
         scan = int(scan)  # this prevents a bug in pyopenms with numpy int types
         mz, sp = self.reader.getSpectrum(scan).get_peaks()
         return lcms.MSSpectrum(mz, sp)
 
-    def get_rt(self):
+    def get_rt(self) -> np.ndarray:
         """
         Gets the retention time vector for the experiment.
 
@@ -475,92 +461,106 @@ class MSData:
         rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
         return rt
 
-    def detect_features(self, roi_params: Optional[dict] = None,
-                        method: str = "max",
-                        peak_params: Optional[dict] = None
-                        ) -> Tuple[List[lcms.Roi], pd.DataFrame]:
+    def make_roi(self, tolerance: Optional[float] = None,
+                 max_missing: Optional[int] = None,
+                 min_length: Optional[int] = None,
+                 min_intensity: Optional[float] = None,
+                 multiple_match: str = "reduce",
+                 mz_reduce: Union[str, Callable] = None,
+                 sp_reduce: Union[str, Callable] = "sum",
+                 start: Optional[int] = None, end: Optional[int] = None,
+                 targeted_mz: Optional[np.ndarray] = None,
+                 ms_level: Optional[int] = None) -> List[lcms.Roi]:
         """
-        Detect features in centroid mode data. Each feature is a chromatographic
-        peak represented by m/z, rt, peak area and peak width values.
+        Builds regions of interest from raw data.
 
         Parameters
         ----------
-        method : str, optional
-            method used for peak picking. By default, the CWT algorithm is used.
-        roi_params : dict, optional
-            Parameters to pass to the make_roi function. Overwrites default
-            parameters. See function function documentation for a detailed
-            description of each parameter. Default parameters are set using
-            the `ms_instrument` and `separation_technique` attributes.
-        peak_params : dict, optional
-            Parameters to pass to the detect_peaks function. Overwrites
-            default parameters. Default values are set using the
-            `separation_technique` attribute. See function function
-            documentation for a detailed description of each parameter.
+        tolerance : positive number, optional
+            m/z tolerance to connect values across scans
+        max_missing : non negative integer, optional
+            maximum number of consecutive missing values. when a ROI surpass
+            this number the ROI is flagged as finished and is added to the
+            ROI list if it meets the length and intensity criteria.
+        min_length : positive integer, optional
+            The minimum length of a roi to be considered valid.
+        min_intensity : non negative number
+            Minimum intensity in a ROI to be considered valid.
+        start : int, optional
+            First scan to analyze. If None starts at scan 0
+        end : int, optional
+            Last scan to analyze. If None, uses the last scan number.
+        multiple_match : {"closest", "reduce"}
+            How to match peaks when there is more than one match. If `closest`
+            is used, then the closest peak is assigned as a match and the
+            others are used to create a new ROI. If `reduce` is used, then
+            unique m/z and intensity values are generated using the reduce
+            function in `mz_reduce` and `sp_reduce` respectively.
+        mz_reduce : "mean" or Callable
+            function used to reduce m/z values. It Can be any function accepting
+            numpy arrays and returning numbers. Used only when `multiple_match`
+            is set to "reduce". See the following prototype:
+
+            .. code-block:: python
+
+                def mz_reduce(mz_match: np.ndarray) -> float:
+                    pass
+
+        sp_reduce : {"mean", "sum"} or Callable
+            function used to reduce intensity values. It Can be any function
+            accepting numpy arrays and returning numbers. Only used when
+            `multiple_match` is set to "reduce". See the prototype shown on
+            `mz_reduce`.
+        targeted_mz : numpy.ndarray, optional
+            A list of m/z values to perform a targeted ROI creation. If this
+            value is provided, only ROI with these m/z values will be created.
+        ms_level : int, optional
+            data level used to build the chromatograms. By default, level 1 is
+            used.
+
+        Notes
+        -----
+
+        ROIs are built using the method described in [TR08]_ with slight
+        modifications.
+
+        A ROI is modelled as a combination of three arrays with the same size:
+        m/z, intensity and time. ROIs are created and extended connecting
+        m/z values across successive scans using the following method:
+
+        1.  The m/z values in The first scan are used to initialize a list of
+            ROI. If `targeted_mz` is used, the ROI are initialized using this
+            list.
+        2.  m/z values from the next scan extend the ROIs if they are closer
+            than `tolerance` to the mean m/z of the ROI. Values that don't match
+            any ROI are used to create new ROIs and are appended to the ROI
+            list (only if `targeted_mz` is not used).
+        3.  If more than one m/z value is within the tolerance threshold,
+            m/z and intensity values are computed according to the
+            `multiple_match` strategy.
+        4.  If a ROI can't be extended with any m/z value from the new scan,
+            it is extended using NaNs.
+        5.  If the last `max_missing` values of a ROI are NaN, the ROI is
+            flagged as finished. If the maximum intensity of a finished ROI
+            is greater than `min_intensity` and the number of points is greater
+            than `min_length`, then the ROI is flagged as valid. Otherwise, the
+            ROI is discarded.
+        6.  Repeat from step 2 until no more scans are available.
 
         Returns
         -------
         roi_list : list[Roi]
             A list with the detected regions of interest.
-        feature_data : DataFrame
-            A DataFrame with features detected and their associated descriptors.
-            Each feature is a row, each descriptor is a column. The descriptors
-            are:
-
-            mz :
-                Mean m/z of the feature.
-            mz std :
-                standard deviation of the m/z. Computed as the standard
-                deviation of the m/z in the region where the peak was detected.
-            rt :
-                retention time of the feature, computed as the weighted mean
-                of the retention time, using as weights the intensity at each
-                time.
-            width :
-                Chromatographic peak width.
-            intensity :
-                Maximum intensity of the chromatographic peak.
-            area :
-                Area of the chromatographic peak.
-
-
-            Also, two additional columns have information to search each feature
-            in its correspondent Roi:
-
-            roi_index :
-                index in `roi_list` where the feature was detected.
-            peak_index :
-                index of the peaks attribute of each Roi associated to the
-                feature.
 
         Raises
         ------
         ValueError
             If the data is not in centroid mode.
 
-        Notes
-        -----
-
-        Feature detection is done in three steps using the algorithm described
-        in [TR08]_:
-
-        1.  Regions of interest (ROI) search: ROI are searched in the data. Each
-            ROI consists in m/z traces where a chromatographic peak may be
-            found. It has the detected mz and intensity associated to each scan
-            and the time where it was detected.
-        2.  Chromatographic peak detection: For each ROI, chromatographic peaks
-            are searched. Each chromatographic peak is a feature.
-            Several descriptors associated to each feature are computed.
-        3.  Features are organized in a DataFrame, where each row is a
-            feature and each column is a feature descriptor.
-
         See Also
         --------
-        lcms.make_roi : Function used to search ROIs.
         lcms.Roi : Representation of a ROI.
-        peaks.pick_cwt : Function used to detect chromatographic peaks.
-        lcms.get_lc_cwt_params : Creates default parameters for peak picking.
-        lcms.get_roi_params : Creates default parameters for roi search.
+        lcms.get_make_roi_params : get default parameters for the function
 
         References
         ----------
@@ -570,21 +570,57 @@ class MSData:
 
         """
         if self.ms_mode != "centroid":
-            msg = "Data must be in centroid mode for feature detection."
+            msg = "Data must be in centroid mode to create ROIs."
             raise ValueError(msg)
 
-        # step 1: detect ROI
-        tmp_roi_params = lcms.get_roi_params(self.separation,
-                                             self.instrument)
-        if roi_params is not None:
-            tmp_roi_params.update(roi_params)
-        roi_params = tmp_roi_params
+        params = {"tolerance": tolerance, "max_missing": max_missing,
+                  "min_length": min_length, "min_intensity": min_intensity,
+                  "multiple_match": multiple_match, "mz_reduce": mz_reduce,
+                  "sp_reduce": sp_reduce, "start": start, "end": end,
+                  "targeted_mz": targeted_mz, "mode": self.separation,
+                  "ms_level": ms_level}
+        params = {k: v for k, v in params.items() if v is not None}
+        roi_params = lcms.get_roi_params(self.separation, self.instrument)
+        roi_params.update(params)
+        n_spectra = self.reader.getNrSpectra()
+        validation.validate_make_roi_params(n_spectra, roi_params)
         roi_list = lcms.make_roi(self.reader, **roi_params)
+        return roi_list
 
-        # step 2 and 3: find peaks and build a DataFrame with the parameters
-        feature_data = \
-            lcms._detect_roi_peaks(roi_list, method=method, params=peak_params)
-        return roi_list, feature_data
+
+def _reader(path: str, on_disc: bool = True):
+    """
+    Load `path` file into an OnDiskExperiment. If the file is not indexed, load
+    the file.
+
+    Parameters
+    ----------
+    path : str
+        path to read mzML file from.
+    on_disc : bool
+        if True doesn't load the whole file on memory.
+
+    Returns
+    -------
+    pyopenms.OnDiskMSExperiment or pyopenms.MSExperiment
+
+    """
+    if on_disc:
+        try:
+            exp_reader = pyopenms.OnDiscMSExperiment()
+            exp_reader.openFile(path)
+            # this checks if OnDiscMSExperiment can be used else switch
+            # to MSExperiment
+            exp_reader.getSpectrum(0)
+        except RuntimeError:
+            msg = "{} is not an indexed mzML file, switching to MSExperiment"
+            warnings.warn(msg.format(path))
+            exp_reader = pyopenms.MSExperiment()
+            pyopenms.MzMLFile().load(path, exp_reader)
+    else:
+        exp_reader = pyopenms.MSExperiment()
+        pyopenms.MzMLFile().load(path, exp_reader)
+    return exp_reader
 
 
 def _get_cache_path() -> str:
@@ -617,7 +653,7 @@ def list_available_datasets(hide_test_data: bool = True) -> List[str]:
 def _check_dataset_name(name: str):
     available = list_available_datasets(False)
     if name not in available:
-        msg = "Invalid dataste name. Available datasets are: {}"
+        msg = "Invalid dataset name. Available datasets are: {}"
         msg = msg.format(available)
         raise ValueError(msg)
 
