@@ -398,6 +398,7 @@ def is_unique(s: pd.Series):
 class SimulatedExperiment:  # pragma: no cover
     """
     Emulates a pyopenms MSExperiment. Used for tests.
+
     """
     def __init__(self, mz_values: np.ndarray, rt_values: np.ndarray,
                  mz_params: np.ndarray, rt_params: np.ndarray,
@@ -462,6 +463,7 @@ class SimulatedExperiment:  # pragma: no cover
 
         # create a mz array for the current scan
         if self.ft_noise is not None:
+            np.random.seed(self._seeds[scan_number])
             mz_noise = np.random.normal(scale=self.ft_noise[0])
             mz_params = self.mz_params.copy()
             mz_params[:, 0] += mz_noise
@@ -471,13 +473,11 @@ class SimulatedExperiment:  # pragma: no cover
         if self.mode == "centroid":
             mz = mz_params[:, 0]
             spint = self.rt_array[:, scan_number] * mz_params[:, 1]
-        elif self.mode == "profile":
+        else:
             mz = self.mz
             mz_array = gaussian_mixture(self.mz, mz_params)
             spint = self.rt_array[:, scan_number][:, np.newaxis] * mz_array
             spint = spint.sum(axis=0)
-        else:
-            raise ValueError("valid modes are centroid or profile")
 
         if self._noise_level is not None:
             np.random.seed(self._seeds[scan_number])
@@ -502,3 +502,7 @@ class SimulatedSpectrum:    # pragma: no cover
 
     def get_peaks(self):
         return self.mz, self.spint
+
+    def getMSLevel(self):
+        return 1
+
