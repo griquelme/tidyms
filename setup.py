@@ -35,8 +35,9 @@ INSTALL_REQUIRES = [
     'xlrd>=1.2',
     'cerberus',
     'seaborn',
-    'pytest>=5.0'
-    'openpyxl>=3.0'
+    'pytest>=5.0',
+    'openpyxl>=3.0',
+    'requests',
 ]
 
 if __name__ == "__main__":
