@@ -23,4 +23,3 @@ from .metabolomics import *
 from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum
-from . import find_peaks
