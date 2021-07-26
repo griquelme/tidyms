@@ -275,7 +275,8 @@ def validate_make_roi_params(n_spectra, params):
               "mode": {"allowed": ["hplc", "uplc"]},
               "min_intensity": {"type": "number", "is_positive": True},
               "min_length": {"type": "integer", "is_positive": True},
-              "ms_level": {"type": "integer", "min": 0, "nullable": True}
+              "ms_level": {"type": "integer", "min": 0, "nullable": True},
+              "pad": {"type": "integer", "min": 0, "nullable": True}
               }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
@@ -327,25 +328,40 @@ def validate_detect_peaks_params(params):
 
 # validator for make_chromatograms
 
-def validate_make_chromatograms_params(n_spectra, params):
+
+def validate_make_chromatograms_params(n_spectra, mz, window, start, end,
+                                       accumulator, chromatogram_mode,
+                                       ms_level):
+    params = {"start": start, "end": end, "window": window, "mz": mz,
+              "accumulator": accumulator, "ms_level": ms_level,
+              "chromatogram_mode": chromatogram_mode}
+
     schema = {"mz": {"empty": False},
               "window": {"type": "number", "is_positive": True},
               "accumulator": {"type": "string", "allowed": ["mean", "sum"]},
               "start": {"type": "integer", "lower_than": "end", "min": 0},
-              "end": {"type": "integer", "max": n_spectra}
+              "end": {"type": "integer", "max": n_spectra},
+              "ms_level": {"type": "integer", "min": 1},
+              "chromatogram_mode": {"type": "string",
+                                    "allowed": ["uplc", "hplc"]}
               }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
 
 
-def validate_accumulate_spectra_params(n_spectra, params):
+def validate_accumulate_spectra_params(n_spectra, start, end, subtract_left,
+                                       subtract_right, ms_level):
+    params = {"start": start, "end": end, "subtract_left": subtract_left,
+              "subtract_right": subtract_right, "ms_level": ms_level}
     schema = {"start": {"type": "integer", "min": 0, "lower_than": "end"},
               "end": {"type": "integer", "max": n_spectra,
                       "lower_or_equal": "subtract_right"},
               "subtract_left": {"type": "integer", "lower_or_equal": "start",
-                                "min": 0},
-              "subtract_right": {"type": "integer", "max": n_spectra},
-              "kind": {"type": "string"}
+                                "min": 0, "nullable": True},
+              "subtract_right": {"type": "integer", "max": n_spectra,
+                                 "nullable": True},
+              "kind": {"type": "string"},
+              "ms_level": {"type": "integer", "min": 1}
               }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
