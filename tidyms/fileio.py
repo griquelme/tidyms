@@ -263,9 +263,11 @@ class MSData:
         The mode in which the MS data is stored. If None, mode is guessed, but
         it's recommended to supply the mode in the constructor.
     instrument : {"qtof". "orbitrap"}
-        The MS instrument type used to acquire the experimental data.
+        The MS instrument type used to acquire the experimental data. Used to
+        set default parameters in the methods.
     separation : {"uplc", "hplc"}
-        The separation technique used before MS analysis.
+        The separation technique used before MS analysis.  Used to
+        set default parameters in the methods.
 
     """
 
@@ -331,39 +333,31 @@ class MSData:
             msg = "`separation` must be any of {}".format(valid_separation)
             raise ValueError(msg)
 
-    def make_tic(self, mode: str = "tic") -> lcms.Chromatogram:
+    def make_tic(self, kind: str = "tic", ms_level: int = 1
+                 ) -> lcms.Chromatogram:
         """
         Makes a total ion chromatogram.
 
         Parameters
         ----------
-        mode: {"tic", "bpi"}
+        kind: {"tic", "bpi"}
+            `tic` computes the total ion chromatogram. `bpi` computes the base
+            peak chromatogram.
+        ms_level : positive int
+            data level used to build the chromatograms. By default, level 1 is
+            used.
 
         Returns
         -------
         tic : lcms.Chromatogram
-        """
-        if mode == "tic":
-            reduce = np.sum
-        elif mode == "bpi":
-            reduce = np.max
-        else:
-            msg = "valid modes are tic or bpi"
-            raise ValueError(msg)
 
-        n_scan = self.reader.getNrSpectra()
-        rt = np.zeros(n_scan)
-        tic = np.zeros(n_scan)
-        for k_scan in range(n_scan):
-            sp = self.reader.getSpectrum(k_scan)
-            rt[k_scan] = sp.getRT()
-            _, spint = sp.get_peaks()
-            tic[k_scan] = reduce(spint)
-        return lcms.Chromatogram(rt, tic, self.separation)
+        """
+        return lcms.make_tic(self.reader, kind, self.separation, ms_level)
 
     def make_chromatograms(self, mz: List[float],
                            window: Optional[float] = None,
-                           accumulator: str = "sum") -> List[lcms.Chromatogram]:
+                           accumulator: str = "sum",
+                           ms_level: int = 1) -> List[lcms.Chromatogram]:
         """
         Computes the Extracted Ion Chromatogram for a list m/z values.
 
@@ -377,26 +371,34 @@ class MSData:
             is orbitrap.
         accumulator: {"mean", "sum"}
             accumulator function used to in each scan.
+        ms_level : positive int
+            data level used to build the chromatograms. By default, level 1 is
+            used.
 
         Returns
         -------
         chromatograms : list[Chromatograms]
 
         """
-        # parameter validation
-        params = {"accumulator": accumulator}
         if window is None:
             if self.instrument == "qtof":
                 window = 0.05
             elif self.instrument == "orbitrap":
                 window = 0.005
-        params["window"] = window
 
-        return lcms.make_chromatograms(self.reader, mz, **params)
+        n_sp = self.reader.getNrSpectra()
+        validation.validate_make_chromatograms_params(
+            n_sp, mz, window, 0, n_sp, accumulator, self.separation, ms_level)
+
+        return lcms.make_chromatograms(self.reader, mz, window=window,
+                                       chromatogram_mode=self.separation,
+                                       accumulator=accumulator,
+                                       ms_level=ms_level)
 
     def accumulate_spectra(self, start: int, end: int,
                            subtract_left: Optional[int] = None,
-                           subtract_right: Optional[int] = None
+                           subtract_right: Optional[int] = None,
+                           ms_level: int = 1
                            ) -> lcms.MSSpectrum:
         """
         accumulates a series of consecutive spectra into a single spectrum.
@@ -413,18 +415,34 @@ class MSData:
         subtract_right : int, optional
             Scans between `subtract_right` and `end` are subtracted from the
             accumulated spectrum.
+        ms_level : int
+            data level used to build the chromatograms. By default, level 1 is
+            used.
 
         Returns
         -------
         MSSpectrum
 
         """
+        n_sp = self.reader.getNrSpectra()
+        if subtract_right is None:
+            subtract_right = end
+
+        if subtract_left is None:
+            subtract_left = start
+
+        validation.validate_accumulate_spectra_params(
+            n_sp, start, end, subtract_left, subtract_right, ms_level)
+
         if self.ms_mode == "profile":
             sp = lcms.accumulate_spectra_profile(self.reader, start, end,
                                                  subtract_left=subtract_left,
-                                                 subtract_right=subtract_right)
+                                                 subtract_right=subtract_right,
+                                                 ms_level=ms_level,
+                                                 instrument=self.instrument)
         else:
-            tolerance = lcms.get_roi_params(self.instrument)["tolerance"]
+            roi_params = lcms.get_roi_params(self.separation, self.instrument)
+            tolerance = roi_params["tolerance"]
             sp = lcms.accumulate_spectra_centroid(self.reader, start, end,
                                                   subtract_left, subtract_right,
                                                   tolerance=tolerance)
@@ -448,17 +466,29 @@ class MSData:
         mz, sp = self.reader.getSpectrum(scan).get_peaks()
         return lcms.MSSpectrum(mz, sp)
 
-    def get_rt(self) -> np.ndarray:
+    def get_rt(self, ms_level: Optional[int] = None) -> np.ndarray:
         """
         Gets the retention time vector for the experiment.
 
         Returns
         -------
-        rt: np.ndarray
+        rt : np.ndarray
+        ms_level : int, optional
+            data level to use. If None return a retention time array for all
+            levels.
 
         """
         nsp = self.reader.getNrSpectra()
-        rt = np.array([self.reader.getSpectrum(k).getRT() for k in range(nsp)])
+        rt = np.zeros(nsp)
+        level = np.zeros(nsp, dtype=bool)
+        for k in range(nsp):
+            sp = self.reader.getSpectrum(k)
+            rt[k] = sp.getRT()
+            if ms_level is not None:
+                level[k] = (sp.getMSLevel() == ms_level)
+
+        if ms_level is not None:
+            rt = rt[level]
         return rt
 
     def make_roi(self, tolerance: Optional[float] = None,
@@ -470,6 +500,7 @@ class MSData:
                  sp_reduce: Union[str, Callable] = "sum",
                  start: Optional[int] = None, end: Optional[int] = None,
                  targeted_mz: Optional[np.ndarray] = None,
+                 pad: Optional[int] = None,
                  ms_level: Optional[int] = None) -> List[lcms.Roi]:
         """
         Builds regions of interest from raw data.
@@ -490,6 +521,10 @@ class MSData:
             First scan to analyze. If None starts at scan 0
         end : int, optional
             Last scan to analyze. If None, uses the last scan number.
+        pad: int, optional
+            Pad dummy values to the left and right of the ROI. This produces
+            better peak picking results when searching low intensity peaks in a
+            ROI.
         multiple_match : {"closest", "reduce"}
             How to match peaks when there is more than one match. If `closest`
             is used, then the closest peak is assigned as a match and the
@@ -578,7 +613,7 @@ class MSData:
                   "multiple_match": multiple_match, "mz_reduce": mz_reduce,
                   "sp_reduce": sp_reduce, "start": start, "end": end,
                   "targeted_mz": targeted_mz, "mode": self.separation,
-                  "ms_level": ms_level}
+                  "ms_level": ms_level, "pad": pad}
         params = {k: v for k, v in params.items() if v is not None}
         roi_params = lcms.get_roi_params(self.separation, self.instrument)
         roi_params.update(params)
