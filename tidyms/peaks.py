@@ -496,6 +496,7 @@ def _find_peak_extension(peaks: np.array, baseline_index: np.array
 
     """
     ext_index = np.searchsorted(baseline_index, peaks)
+    ext_index[ext_index >= baseline_index.size] = baseline_index.size - 1
     start = baseline_index[ext_index - 1]
     end = baseline_index[ext_index] + 1
     return start, end
