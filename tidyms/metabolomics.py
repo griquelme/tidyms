@@ -44,7 +44,7 @@ def detect_features(path: Union[Path, List[str]], separation: str = "uplc",
     path: Path or List[str]
         Path can be a list of strings of absolute path representations to mzML
         files in centroid mode or a Path object. Path objects can be used in
-        two ways: It can point to an mzML file or to a directory. in the second
+        two ways: It can point to a mzML file or to a directory. in the second
         case all mzML files inside the directory will be analyzed.
     separation: {"uplc", "hplc"}
         Analytical platform used for separation. Used to set default the values
@@ -109,14 +109,14 @@ def detect_features(path: Union[Path, List[str]], separation: str = "uplc",
     -----
     Features are detected as follows:
 
-    1.  Default parameters for are set based on the values of the parameters
+    1.  Default parameters are set based on the values of the parameters
         `instrument` and `separation`.
     2.  Regions of interest (ROI) are detected in each sample. See the
         documentation of :py:meth:`tidyms.fileio.MSData.make_roi` for a detailed
         description of how ROI are created from raw data.
     3.  Features (chromatographic peaks) are detected on each ROI. See
         :py:meth:`tidyms.lcms.Chromatogram.find_peaks` for a detailed
-        description of how peaks are detected and how estimators are computed.
+        description of how peaks are detected and how descriptors are computed.
 
     See Also
     --------
@@ -233,7 +233,6 @@ def _build_feature_table(roi: List[Roi],
     descriptors_list = list()
 
     for roi_index, k_roi in enumerate(roi):
-        k_roi.extend(2)
         k_roi.fill_nan()
         k_params = k_roi.find_peaks(smoothing_strength=smoothing_strength,
                                     descriptors=descriptors,
