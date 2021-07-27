@@ -30,7 +30,8 @@ from scipy.stats import spearmanr, median_abs_deviation
 import os.path
 from typing import Optional, Union
 
-
+data_type = Union[pd.DataFrame, pd.Series]
+reduced_type = Union[pd.Series, float]
 
 
 def gauss(x: np.ndarray, mu: float, sigma: float,
@@ -198,7 +199,7 @@ def sample_to_path(samples, path):
     return d
 
     
-def cv(df: pd.DataFrame, fill_value: Optional[float] = None) -> pd.Series:
+def cv(df: data_type, fill_value: Optional[float] = None) -> reduced_type:
     """
     Computes the Coefficient of variation for each column.
 
@@ -206,12 +207,12 @@ def cv(df: pd.DataFrame, fill_value: Optional[float] = None) -> pd.Series:
 
     """
     res = df.std() / df.mean()
-    if fill_value is not None:
-        res = res.fillna(fill_value)
+    res = _fill_na(res, fill_value)
     return res
 
 
-def robust_cv(df, fill_value: Optional[float] = None):
+def robust_cv(df: data_type, fill_value: Optional[float] = None
+              ) -> reduced_type:
     """
     Estimation of the coefficient of variation using the MAD and median.
     Assumes a normal distribution.
@@ -220,20 +221,24 @@ def robust_cv(df, fill_value: Optional[float] = None):
     # 1.4826 is used to estimate sigma in an unbiased way assuming a normal
     # distribution for each feature.
     res = mad(df) / df.median()
-    if fill_value is not None:
-        res = res.fillna(fill_value)
+    res = _fill_na(res, fill_value)
     return res
 
 
-def mad(df):
+def mad(df: data_type) -> reduced_type:
     """
     Computes the median absolute deviation for each column. Fill missing
     values with zero.
     """
-    if df.shape[0] == 1:
-        res = pd.Series(data=np.nan, index=df.columns)
+    # for dataframes with only one row a series of nan is returned. This is
+    # to return the same value as std.
+    if isinstance(df, pd.DataFrame):
+        if df.shape[0] == 1:
+            res = pd.Series(data=np.nan, index=df.columns)
+        else:
+            res = df.apply(median_abs_deviation, scale="normal")
     else:
-        res = df.apply(median_abs_deviation, scale="normal")
+        res = median_abs_deviation(df, scale="normal")
     return res
 
 
@@ -243,7 +248,7 @@ def sd_ratio(df1: pd.DataFrame, df2: pd.DataFrame, robust: bool = False,
     Computes the ratio between the standard deviation of the columns of
     DataFrame1 and DataFrame2.
 
-    Used to compute the D-Ratio metric. NaN values are filled to np.inf.
+    Used to compute the D-Ratio metric.
 
     Parameters
     ----------
@@ -263,13 +268,11 @@ def sd_ratio(df1: pd.DataFrame, df2: pd.DataFrame, robust: bool = False,
         ratio = mad(df1) / mad(df2)
     else:
         ratio = df1.std() / df2.std()
-
-    if fill_value is not None:
-        ratio = ratio.fillna(fill_value)
+    ratio = _fill_na(ratio, fill_value)
     return ratio
 
 
-def detection_rate(df: pd.DataFrame, threshold: float = 0.0) -> pd.Series:
+def detection_rate(df: data_type, threshold: float = 0.0) -> reduced_type:
     """
     Computes the fraction of values in a column above the `threshold`.
 
@@ -283,8 +286,12 @@ def detection_rate(df: pd.DataFrame, threshold: float = 0.0) -> pd.Series:
     dr : pd.Series
 
     """
-    # dr = df[df > threshold].count() / df.count()
-    dr = (df > threshold).sum().astype(int) / df.shape[0]
+    if isinstance(df, pd.DataFrame):
+        n = df.shape[0]
+    else:
+        n = df.size
+
+    dr = (df > threshold).sum().astype(int) / n
     return dr
 
 
@@ -314,6 +321,18 @@ def metadata_correlation(y, x, mode: str = "ols"):
         res = {"r2": r2, "DW": dw, "JB": jb}
     else:
         res = spearmanr(y, x)[0]
+    return res
+
+
+def _fill_na(s: reduced_type, fill_value: Optional[float]):
+    if fill_value is None:
+        res = s
+    elif isinstance(s, pd.Series):
+        res = s.fillna(fill_value)
+    elif pd.isna(s):
+        res = fill_value
+    else:
+        res = s
     return res
 
 
