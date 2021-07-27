@@ -99,7 +99,7 @@ m/z values across successive scans using the following method:
 5.  If there are more than :code:`max_missing` consecutive NaN in a ROI, then
     the ROI is flagged as completed. If the maximum intensity of a completed ROI
     is greater than :code:`min_intensity` and the number of points is greater
-    than `min_length`, then the ROI is flagged as valid. Otherwise, the ROI is
+    than :code:`min_length`, then the ROI is flagged as valid. Otherwise, the ROI is
     discarded.
 6.  Repeat from step 2 until no more new scans are available.
 
@@ -226,8 +226,8 @@ area, height, width and SNR.
 
 Finally, :code:`filters` can be used to filter peaks according to a specific
 range for each descriptor. This parameter takes a dictionary of descriptor
-names to a tuple minimum and maximum values. If a descriptor has values outside
-this range, the peak is removed. For example, we can filter peaks with a
+names to a tuple of minimum and maximum values. If a descriptor has values
+outside this range, the peak is removed. For example, we can filter peaks with a
 signal-to-noise ratio lower than 50 in the following way:
 
 .. code-block:: python
@@ -248,7 +248,6 @@ can be used to detect peaks:
 
     >>> roi = roi_list[70]      # select a ROI from the list
     >>> roi.fill_nan()      # fill missing values in the ROI
-    >>> roi.extend(2)
     >>> peak_descriptors = roi.find_peaks()
     >>> peak_descriptors
     [{'height': 79848.54, 'area': 310080.0, 'loc': 336.12, 'width': 11.32,
@@ -278,27 +277,27 @@ the peak picking process.
 Noise estimation
 ----------------
 
-To estimate the noise and baseline, the signal :math:`x[n]` is modelled as three
-additive components:
+To estimate the noise and baseline, the discrete signal :math:`x[n]` is modelled
+as three additive components:
 
 .. math::
     x[n] = s[n] + b[n] + e[n]
 
-:math:`s[n]` is the peak component, and is deterministic, non negative and small
-except in a region where peaks are present. The baseline :math:`b[n]` is a
+:math:`s` is the peak component, and is deterministic, non negative and small
+except in a region where peaks are present. The baseline :math:`b` is a
 smooth slow changing function. The noise term :math:`e[n]` is assumed to be iid
 samples from a gaussian distribution :math:`e[n] \sim N(0, \sigma)`.
 
-If we consider the second finite difference of :math:`x`, :math:`y`:
+If we consider the second finite difference of :math:`x[n]`, :math:`y[n]`:
 
 .. math::
     y[n] = x[n] - 2 x[n-1] + x[n-2]
 
 As :math:`b` is a slow changing function we can ignore its contribution. We
 expect that the contribution from :math:`s` in the peak region is greater than
-the noise contribution, but if we ignore these regions and focus on regions
-where :math:`s` is small we can say that most of the variation in :math:`y` is
-due to the noise:
+the noise contribution, but if we ignore higher values of :math:`y` we can focus
+on regions where :math:`s` is small we can say that most of the variation in
+:math:`y` is due to the noise:
 
 .. math::
     y[n] \approx (e[n] - 2 e[n-1] + e[n-2])
@@ -312,18 +311,21 @@ used can be summarized in the following steps:
 2.  Set :math:`p=90`, the percentile of the data to evaluate.
 3.  compute :math:`y_{p}` the p-th percentile of the absolute value of
     :math:`y`.
-4.  Compute the mean :math:`\overline{y}` an standard deviation
+4.  Compute the mean :math:`\overline{y}` and standard deviation
     :math:`S_{y}` of :math:`y` restricted to elements with an absolute
     value lower than :math:`y_{p}`. This removes the contribution of :math:`s`.
 5.  If :math:`|\overline{y}| \leq S_{y}` or :math:`p \leq 20` then the noise
     level is :math:`\sigma = 0.5 S_{y}`. Else decrease :math:`p` by 10 and go
     back to step 3.
 
+The noise estimation is clearly biased if we don't remove completely the
+contribution from :math:`s`, but it gives a good enough approximation to remove
+noisy peaks.
 
 Baseline  estimation
 --------------------
 
-Baseline estimation is done using a very simple approach: first, every point
+Baseline estimation is done with the following approach: first, every point
 in :math:`x` is classified as signal if a peak can potentially be found in the
 region or as or as baseline otherwise. Then, the baseline is estimated for the
 whole signal by interpolating baseline points.
@@ -339,7 +341,7 @@ and :math:`k` are the indices defining one such interval, then the sum of
 .. math::
     \sum_{i=j}^{k}x[i] = \sum_{i=j}^{k} s[i] + b[i] + e[i]
 
-If :math:`l = k - j` is he length of the interval, and if we assume that
+If :math:`l = k - j` is the length of the interval, and if we assume that
 :math:`b` is constant in the interval we can write:
 
 .. math::

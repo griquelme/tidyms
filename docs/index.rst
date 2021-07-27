@@ -17,11 +17,11 @@ detailed information about tidyms, you can see the :doc:`api` reference.
    :maxdepth: 2
    :caption: Contents:
 
-   API Reference <api>
    Glossary <glossary>
    Installation guide <installation>
    Quickstart <quickstart>
-   Converting files to mzML <mzml>
+   Tutorials <tutorials>
+   API Reference <api>
 
 Indices and tables
 ==================

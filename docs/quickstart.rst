@@ -10,7 +10,7 @@ Mass Spectrometry (MS) data, but it's functionality was mostly thought to be
 used with data from LC-MS metabolomics experiments. It uses the
 `pyopenms <https://www.openms.de/>`_ package to read raw data in the mzML
 format and `Numpy <https://numpy.org/>`_, `Pandas <https://pandas.pydata.org/>`_
-and `scikit-learn <https://scikit-learn.org>`_ to process and analyze data.
+and `scikit-learn <https://scikit-learn.org>`_ for data processing and analysis.
 Some of the functionality that offers is:
 
 *   creating chromatograms and accumulated spectra from raw data.
@@ -105,7 +105,7 @@ Reading raw data
 
 In the majority of cases, chromatograms and spectra are going to be created
 from experimental data. Working with raw data can be done using the
-:class:`tidyms.MSData` object, which reads data in the mzML
+:class:`tidyms.MSData` object, which reads files in the mzML
 format and can be used to extract information from raw data. You can read
 :doc:`this tutorial <mzml>` on how to convert experimental data from
 proprietary, instrument-specific formats to mzML. The following code snippet
@@ -179,11 +179,11 @@ perform feature detection, an implementation based on the centWave algorithm
 [2]_ is used. This algorithm detects chromatographic peaks using **samples in
 centroid mode** in two steps:
 
-1.  Region Of Interest (ROI) are searched in the whole experiment. A ROI is a
+1.  Search Region Of Interest (ROI) in the whole experiment. A ROI is a
     time window in an experiment where a m/z trace is found. ROIs are built
     connecting m/z values across scans within a given m/z tolerance.
-2.  Chromatographic peaks are detected on each ROI. A feature table is built
-    with several descriptors associated with each peak, such as  mean m/z, m/z
+2.  Find chromatographic peaks on each ROI. A feature table is built
+    using several descriptors associated with each peak: mean m/z, m/z
     standard deviation, mean rt, intensity, area and width.
 
 feature detection is available through the :func:`tidyms.detect_features`
@@ -202,6 +202,7 @@ directory are used.
 :func:`tidyms.detect_features` can be customized and extended in several ways.
 A detailed guide explaining how feature detection is done and customization can
 be found :doc:`here<peak-picking>`
+
 
 Feature correspondence
 ----------------------
