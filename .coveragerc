@@ -6,3 +6,5 @@ omit =
 exclude_lines =
     # ignore plotting functions in the reports
     def plot
+    pragma: no cover
+    def __repr__
