@@ -36,7 +36,7 @@ extensions = [
     'IPython.sphinxext.ipython_directive',
     'IPython.sphinxext.ipython_console_highlighting',
     'bokeh.sphinxext.bokeh_plot',
-    # 'matplotlib.sphinxext.plot_directive',
+    'matplotlib.sphinxext.plot_directive',
     # 'gallery_generator',
     'numpydoc'
 ]
@@ -60,19 +60,16 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'alabaster'
+html_theme = 'sphinx_rtd_theme'
 
-html_theme_options = {"fixed_sidebar": True,
-                      "page_width": "950px"}
-
-# html_theme = "press"
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
 
 intersphinx_mapping = \
-    {'pandas': ('http://pandas.pydata.org/pandas-docs/stable/', None)}
+    {'pandas': ('http://pandas.pydata.org/pandas-docs/stable/', None),
+     'scipy': ('https://docs.scipy.org/doc/scipy/reference/', None)}
 
 # set index.rst as the master doc
 master_doc = 'index'
