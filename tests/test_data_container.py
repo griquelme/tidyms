@@ -6,12 +6,6 @@ import pytest
 import os
 
 
-def test_data_path_setter_invalid_path(data_container_with_order):
-    data = data_container_with_order
-    with pytest.raises(FileNotFoundError):
-        data.data_path = "invalid_path"
-
-
 def test_class_getter(data_container_with_order):
     data = data_container_with_order
     class_series = pd.Series(data=data.classes, index=data.classes.index)
