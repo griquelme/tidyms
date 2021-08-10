@@ -804,6 +804,7 @@ class _BatchCorrectorProcessor(Processor):
                  frac: Optional[float] = None,
                  interpolator: str = "splines",
                  n_qc: Optional[int] = None,
+                 method: str = "multiplicative",
                  process_qc: bool = True,
                  verbose: bool = False):
         requirements = {"empty": False, "missing": False, _sample_order: True,
@@ -819,6 +820,7 @@ class _BatchCorrectorProcessor(Processor):
         self.params["interpolator"] = interpolator
         self.params["n_qc"] = n_qc
         self.params["frac"] = frac
+        self.params["method"] = method
         self.params["process_qc"] = process_qc
         self._default_process = _study_sample_type
         self._default_correct = _qc_sample_type
@@ -853,6 +855,8 @@ class BatchCorrector(Pipeline):
         feature is estimated using LOOCV.
     interpolator : {"splines", "linear"}
         Interpolator used to estimate the correction for each sample.
+    method : {"additive", "multiplicative"}
+        Method used to model the variation in samples.
     corrector_classes : list[str], optional
         list of classes used to generate the correction. If None uses
         QC sample types from the mapping.
@@ -949,6 +953,7 @@ class BatchCorrector(Pipeline):
                  first_n_qc: Optional[int] = None,
                  threshold: float = 0, frac: Optional[float] = None,
                  interpolator: str = "splines",
+                 method: str = "multiplicative",
                  corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
                  verbose: bool = False):
@@ -967,7 +972,7 @@ class BatchCorrector(Pipeline):
             _BatchCorrectorProcessor(corrector_classes=corrector_classes,
                                      process_classes=process_classes, frac=frac,
                                      interpolator=interpolator, verbose=verbose,
-                                     n_qc=first_n_qc)
+                                     n_qc=first_n_qc, method=method)
         pipeline = [checker, prevalence, corrector]
         super(BatchCorrector, self).__init__(pipeline, verbose=verbose)
         self.name = "Batch Corrector"

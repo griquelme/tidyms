@@ -159,7 +159,7 @@ def validate_sample_metadata(df):
 
 
 def validate_data_container(data_matrix, feature_definitions,
-                            sample_info, data_path):
+                            sample_info):
     validate_data_matrix(data_matrix)
     validate_feature_metadata(feature_definitions)
     validate_sample_metadata(sample_info)
@@ -172,11 +172,6 @@ def validate_data_container(data_matrix, feature_definitions,
         msg = "feature names should be equal in data matrix and feature " \
               "definitions."
         raise ValueError(msg)
-    # path validation
-    if (data_path is not None) and not isdir(data_path):
-        full_path = join(getcwd(), data_path)
-        msg = "{} not found".format(full_path)
-        raise FileNotFoundError(msg)
 
 
 def validate_blank_corrector_params(params):
@@ -253,7 +248,8 @@ def validate_batch_corrector_params(params):
         "corrector_classes": {"type": "list", "nullable": True,
                               "schema": {"type": "string"}},
         "process_classes": {"type": "list", "nullable": True,
-                            "schema": {"type": "string"}}
+                            "schema": {"type": "string"}},
+        "method": {"allowed": ["additive", "multiplicative"], "type": "string"}
     }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)

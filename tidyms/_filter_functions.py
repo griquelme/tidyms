@@ -297,7 +297,8 @@ def check_qc_prevalence(data_matrix: pd.DataFrame,
 
 def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
                  sample_index: pd.Index, frac: float, interpolator: Callable,
-                 n_qc: Optional[int] = None) -> pd.Series:
+                 n_qc: Optional[int] = None, method: str = "multiplicative"
+                 ) -> pd.Series:
     """
     Applies LOESS-correction interpolation on a feature. Auxiliary function of
     batch_corrector_func
@@ -313,19 +314,35 @@ def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
     interpolator: Callable
     n_qc: int, optional
     Number of QCs involved in mean calculation. If None, all QCs are involved.
-
+    method : {"multiplicative", "additive"}
+        Method used to model variation.
     Returns
     -------
     pd.Series
     """
     if n_qc is None:
         n_qc = qc_index.size
+
     qc_median = ft_data[qc_index[:n_qc]].median()
-    qc_loess = _loocv_loess(order[qc_index],
-                            ft_data[qc_index] - qc_median,
-                            interpolator, frac=frac)
+    qc_loess = _loocv_loess(order[qc_index], ft_data[qc_index], interpolator,
+                            frac=frac)
     interp = interpolator(order[qc_index], qc_loess)
-    ft_data[sample_index] -= interp(order[sample_index])
+
+    if method == "additive":
+        bias = interp(order[sample_index]) - qc_median
+        ft_data[sample_index] -= bias
+    elif method == "multiplicative":
+        qc_smooth = interp(order[sample_index])
+        # smoothed values close to zero can become negative. As we are using
+        # a multiplicative correction, this prevents changing signs while
+        # applying the correction
+        qc_smooth[qc_smooth < 0] = 0
+        factor = qc_median / qc_smooth
+        factor[np.isnan(factor)] = 1.0   # corrects zero division
+        ft_data[sample_index] *= factor
+    else:
+        msg = "Valid methods are `additive` or `multiplicative`."
+        raise ValueError(msg)
     return ft_data
 
 
@@ -333,7 +350,8 @@ def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
                          classes: pd.Series, frac: float,
                          interpolator: Callable, qc_classes: List[str],
                          sample_classes: List[str],
-                         n_qc: Optional[int] = None) -> pd.DataFrame:
+                         n_qc: Optional[int] = None,
+                         method: str = "multiplicative") -> pd.DataFrame:
     """
     Applies LOESS correction - interpolation on a single batch. Auxiliary
     function of interbatch_correction.
@@ -349,6 +367,8 @@ def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
     sample_classes: list[str]
     n_qc: int, optional
     Number of QCs involved in mean calculation. If None, all QCs are involved.
+    method : {"multiplicative", "additive"}
+        Method used to model variation.
 
     Returns
     -------
@@ -359,8 +379,10 @@ def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
     sample_index = classes.isin(sample_classes)
     sample_index = sample_index[sample_index].index
     df_batch.loc[sample_index, :] = \
-        (df_batch.apply(loess_interp, args=(order, qc_index, sample_index,
-                                            frac, interpolator), n_qc=n_qc))
+        (df_batch.apply(loess_interp,
+                        args=(order, qc_index, sample_index, frac,
+                              interpolator),
+                        n_qc=n_qc, method=method))
     return df_batch
 
 
@@ -370,7 +392,8 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
                           frac: Optional[float] = None,
                           interpolator: Optional[str] = "splines",
                           n_qc: Optional[int] = None,
-                          process_qc: bool = True
+                          process_qc: bool = True,
+                          method: str = "multiplicative"
                           ) -> pd.DataFrame:
     r"""
     Correct instrument response drift using LOESS regression [1, 2]
@@ -399,8 +422,8 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
         involved.
     process_qc : bool
         If True, applies correction to QC samples.
-
-
+    method : {"multiplicative", "additive"}
+        Method used to model variation.
 
     Returns
     -------
@@ -449,7 +472,8 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
         return batch_corrector_func(df_group, order[df_group.index],
                                     classes[df_group.index], frac,
                                     interp_func, corrector_classes,
-                                    process_classes, n_qc=n_qc)
+                                    process_classes, n_qc=n_qc,
+                                    method=method)
 
     # intra batch correction
     corrected = df.groupby(batch).apply(corrector_helper)
