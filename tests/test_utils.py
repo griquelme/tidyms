@@ -39,12 +39,23 @@ def create_random_file_name():
 def test_normalize_sum(random_df):
     data = random_df
     normalized = utils.normalize(data, "sum")
+
+    # check max index
+    didx = data.idxmax(axis=1)
+    nidx = normalized.idxmax(axis=1)
+    assert (didx == nidx).all()
+    # check that each row sums 1
     assert np.isclose(normalized.sum(axis=1).values, 1).all()
 
 
 def test_normalize_max(random_df):
     data = random_df
     normalized = utils.normalize(data, "max")
+    # check max index
+    didx = data.idxmax(axis=1)
+    nidx = normalized.idxmax(axis=1)
+    assert (didx == nidx).all()
+    # check max equals to 1
     assert np.isclose(normalized.max(axis=1).values, 1).all()
 
 
@@ -177,7 +188,7 @@ def test_sample_to_path(tmpdir):
 
 def test_cv_single_row_df(single_row_df):
     data = single_row_df
-    # nans are converted to inf, all values should be inf
+    # with one row the std is nan
     assert utils.cv(data).isna().all()
 
 
@@ -195,6 +206,27 @@ def test_cv_all_zeros():
     data = pd.DataFrame(data)
     cv = utils.cv(data)
     assert cv.isna().all()
+
+
+def test_cv_fill_na():
+    fill = 1
+    data = np.zeros((100, 200))
+    data = pd.DataFrame(data)
+    cv = utils.cv(data, fill_value=fill)
+    assert (cv == fill).all()
+
+
+def test_cv_series():
+    data = pd.Series(np.random.normal(size=100, loc=1))
+    cv = utils.cv(data)
+    assert np.isclose(cv, data.std() / data.mean())
+
+
+def test_cv_series_fill_na():
+    fill = 1
+    data = pd.Series(np.zeros(100))
+    cv = utils.cv(data, fill_value=fill)
+    assert np.isclose(cv, fill)
 
 
 def test_robust_cv_single_row_df(single_row_df):
@@ -216,6 +248,28 @@ def test_robust_cv_all_zeros():
     data = pd.DataFrame(data)
     cv = utils.robust_cv(data)
     assert cv.isna().all()
+
+
+def test_robust_cv_fill_na():
+    fill = 1
+    data = np.zeros((100, 200))
+    data = pd.DataFrame(data)
+    cv = utils.robust_cv(data, fill_value=fill)
+    assert (cv == fill).all()
+
+
+def test_robust_cv_series():
+    data = pd.Series(np.random.normal(size=100, loc=1))
+    cv = utils.robust_cv(data)
+    test_cv = utils.median_abs_deviation(data, scale="normal") / data.median()
+    assert np.isclose(cv, test_cv)
+
+
+def test_robust_cv_series_fill_na():
+    fill = 1
+    data = pd.Series(np.zeros(100))
+    cv = utils.robust_cv(data, fill_value=fill)
+    assert np.isclose(cv, fill)
 
 
 def test_sd_ratio(random_df):
