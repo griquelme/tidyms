@@ -103,7 +103,7 @@ def read_progenesis(path: Union[str, TextIO]):
                   inplace=True)
     ft_def = ft_def.astype({"rt": float, "mz": float})
     ft_def["rt"] = ft_def["rt"] * 60
-    validation.validate_data_container(data, ft_def, sample_info, None)
+    validation.validate_data_container(data, ft_def, sample_info)
     dc = DataContainer(data, ft_def, sample_info)
     return dc
 
