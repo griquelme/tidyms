@@ -122,7 +122,6 @@ class DataContainer(object):
     def __init__(self, data_matrix: pd.DataFrame,
                  feature_metadata: pd.DataFrame,
                  sample_metadata: pd.DataFrame,
-                 data_path: Optional[str] = None,
                  mapping: Optional[dict] = None,
                  plot_mode: str = "bokeh"):
         
@@ -139,15 +138,13 @@ class DataContainer(object):
         feature_metadata : pandas.DataFrame.
             DataFrame with features names as indices. mz and rt are required
             columns.
-        data_path : str.
-            path to raw Data. Files must have the same name as each sample.
         mapping : dict or None
             if dict, set each sample class to sample type.
         plot_mode : {"seaborn", "bokeh"}
             The package used to generate plots with the plot methods
         """
         validation.validate_data_container(data_matrix, feature_metadata,
-                                           sample_metadata, data_path)
+                                           sample_metadata)
 
         # check and convert order and batch information
         try:
@@ -170,7 +167,6 @@ class DataContainer(object):
         self.sample_metadata = sample_metadata.copy()
         self._sample_mask = data_matrix.index.copy()
         self._feature_mask = data_matrix.columns.copy()
-        self.data_path = data_path
         self.mapping = mapping
         self.id = data_matrix.index
         self.plot = None
@@ -184,25 +180,6 @@ class DataContainer(object):
         self.metrics = MetricMethods(self)
         self.preprocess = PreprocessMethods(self)
         self.set_plot_mode(plot_mode)
-
-    @property
-    def data_path(self) -> pd.DataFrame:
-        """str : path where raw data is stored."""
-        return self._data_path
-    
-    @data_path.setter
-    def data_path(self, path: str):
-        """
-        sets raw data path, search for available samples and adds them to
-        sample information.
-        """
-        if path is not None:
-            path_mapping = utils.sample_to_path(self.data_matrix.index, path)
-            self._sample_metadata.loc[self._sample_mask, _raw_path] = \
-                self.sample_metadata.index.map(path_mapping)
-            self._data_path = path
-        else:
-            self._data_path = None
     
     @property
     def data_matrix(self) -> pd.DataFrame:
@@ -1290,6 +1267,7 @@ class SeabornPlotMethods(object):
             df[_sample_class] = df[_sample_class].astype(str)
 
         g = sns.relplot(data=df, **relplot_params)
+        return g
 
 
 class PreprocessMethods:
