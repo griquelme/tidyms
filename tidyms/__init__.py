@@ -19,6 +19,7 @@ from . import utils
 from . import peaks
 from . import filter
 from . import lcms
+from . import simulation
 from .metabolomics import *
 from .container import DataContainer
 from .fileio import MSData
