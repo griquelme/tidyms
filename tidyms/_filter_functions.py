@@ -7,36 +7,37 @@ import pandas as pd
 from scipy.interpolate import CubicSpline, interp1d
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from typing import List, Callable, Union, Optional
+from .utils import mad
 from ._names import *
 
 
-def input_na(df: pd.DataFrame, classes: pd.Series, mode: str) -> pd.DataFrame:
-    """
-    Fill missing values.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-    classes: ps.Series
-    mode : {'zero', 'mean', 'min'}
-    
-    Returns
-    -------
-    filled : pd.DataFrame    
-    """
-    if mode == "zero":
-        return df.fillna(0)
-    elif mode == "mean":
-        return (df.groupby(classes)
-                .apply(lambda x: x.fillna(x.mean()))
-                .droplevel(0))
-    elif mode == "min":
-        return (df.groupby(classes)
-                .apply(lambda x: x.fillna(x.min()))
-                .droplevel(0))
-    else:
-        msg = "mode should be `zero`, `mean` or `min`"
-        raise ValueError(msg)
+# def input_na(df: pd.DataFrame, classes: pd.Series, mode: str) -> pd.DataFrame:
+#     """
+#     Fill missing values.
+#
+#     Parameters
+#     ----------
+#     df : pd.DataFrame
+#     classes: ps.Series
+#     mode : {'zero', 'mean', 'min'}
+#
+#     Returns
+#     -------
+#     filled : pd.DataFrame
+#     """
+#     if mode == "zero":
+#         return df.fillna(0)
+#     elif mode == "mean":
+#         return (df.groupby(classes)
+#                 .apply(lambda x: x.fillna(x.mean()))
+#                 .droplevel(0))
+#     elif mode == "min":
+#         return (df.groupby(classes)
+#                 .apply(lambda x: x.fillna(x.min()))
+#                 .droplevel(0))
+#     else:
+#         msg = "mode should be `zero`, `mean` or `min`"
+#         raise ValueError(msg)
 
 
 def average_replicates(data: pd.DataFrame, sample_id: pd.Series,
@@ -70,9 +71,9 @@ def average_replicates(data: pd.DataFrame, sample_id: pd.Series,
 
 def correct_blanks(df: pd.DataFrame, classes: pd.Series,
                    corrector_classes: List[str], process_classes: List[str],
-                   factor: float = 1.0,
+                   factor: float = 1.0, robust: bool = True,
                    mode: Union[str, Callable] = "mean",
-                   process_blanks: bool = True) -> pd.DataFrame:
+                   process_blanks: bool = False) -> pd.DataFrame:
     """
     Correct samples using blanks.
 
@@ -98,10 +99,17 @@ def correct_blanks(df: pd.DataFrame, classes: pd.Series,
         Data with applied correction
 
     """
+    if robust:
+        mean_func = lambda x: x.median()
+        std_func = mad
+    else:
+        mean_func = lambda x: x.mean()
+        std_func = lambda x: x.std()
+
     corrector = {"max": lambda x: x.max(),
-                 "mean": lambda x: x.mean(),
-                 "lod": lambda x: x.mean() + 3 * x.std(),
-                 "loq": lambda x: x.mean() + 10 * x.std()}
+                 "mean": lambda x: mean_func,
+                 "lod": lambda x: mean_func(x) + 3 * std_func(x),
+                 "loq": lambda x: mean_func(x) + 10 * std_func(x)}
     if hasattr(mode, "__call__"):
         corrector = mode
     else:
@@ -479,18 +487,23 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     corrected = df.groupby(batch).apply(corrector_helper)
 
     # inter batch mean alignment
-
     def batch_mean_func(df_group):
         batch_mean = (df_group[classes[df_group.index].isin(corrector_classes)]
                       .mean())
-        df_group[classes[df_group.index].isin(process_classes)] = \
-            df_group[classes[df_group.index].isin(process_classes)] - batch_mean
+        process_mask = classes[df_group.index].isin(process_classes)
+        if method == "additive":
+            df_group[process_mask] -= batch_mean
+        else:
+            df_group[process_mask] /= batch_mean
         return df_group
 
     global_median = corrected[classes.isin(corrector_classes)].median()
     corrected = corrected.groupby(batch).apply(batch_mean_func)
-    corrected.loc[classes.isin(process_classes), :] = \
-        corrected.loc[classes.isin(process_classes), :] + global_median
+    process_mask = classes.isin(process_classes)
+    if method == "additive":
+        corrected.loc[process_mask, :] += global_median
+    else:
+        corrected.loc[process_mask, :] *= global_median
     corrected[corrected < 0] = 0
 
     return corrected

@@ -184,6 +184,7 @@ def validate_blank_corrector_params(params):
                             "allowed": ["lod", "loq", "mean", "max"]},
                            {"check_with": is_callable}]},
         "factor": {"type": "number", "is_positive": True},
+        "robust": {"type": "boolean"},
         "process_blanks": {"type": "boolean"}
     }
     validator = ValidatorWithLowerThan(schema)

@@ -78,7 +78,9 @@ class Reporter(object):
         status: {"before", "after"}
         """
         metrics = dict()
-        metrics["cv"] = dc.metrics.cv(intraclass=False, fill_value=0).mean()
+        metrics["cv"] = (dc.metrics.cv(groupby="class", fill_value=0)
+                         .median()
+                         .median())
         n_samples, n_features = dc.data_matrix.shape
         metrics["features"] = n_features
         metrics["samples"] = n_samples
@@ -303,9 +305,17 @@ class DuplicateMerger(Processor):
 class ClassRemover(Processor):
     """
     Remove samples from the specified classes.
+
+    Parameters
+    ----------
+    classes: list
+        List of classes to remove.
+
     """
     def __init__(self, classes: List[str]):
-        super(ClassRemover, self).__init__(axis="samples", mode="filter")
+        requirements = {"empty": False, "missing": False}
+        super(ClassRemover, self).__init__(axis="samples", mode="filter",
+                                           requirements=requirements)
         self.name = "Class Remover"
         if classes is None:
             self.params["classes"] = list()
@@ -372,12 +382,14 @@ class BlankCorrector(Processor):
     def __init__(self, corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
                  mode: Union[str, Callable] = "lod", factor: float = 1,
+                 robust: bool = True,
                  process_blanks: bool = True, verbose=False):
         """
         Constructor for the BlankCorrector.
 
         """
-        requirements = {"empty": False, "missing": False}
+        requirements = {"empty": False, "missing": False,
+                        _blank_sample_type: True}
         super(BlankCorrector, self).__init__(axis=None, mode="transform",
                                              verbose=verbose,
                                              requirements=requirements)
@@ -387,6 +399,7 @@ class BlankCorrector(Processor):
         self.params["mode"] = mode
         self.params["factor"] = factor
         self.params["process_blanks"] = process_blanks
+        self.params["robust"] = robust
         self._default_process = _study_sample_type
         self._default_correct = _blank_sample_type
         validation.validate_blank_corrector_params(self.params)
@@ -452,7 +465,11 @@ class PrevalenceFilter(Processor):
         validation.validate_prevalence_filter_params(self.params)
 
     def func(self, dc):
-        dr = dc.metrics.detection_rate(intraclass=self.params["intraclass"],
+        if self.params["intraclass"]:
+            groupby = "class"
+        else:
+            groupby = None
+        dr = dc.metrics.detection_rate(groupby=groupby,
                                        threshold=self.params["threshold"])
         dr = dr.loc[self.params["process_classes"], :]
         lb = self.params["lb"]
@@ -580,8 +597,11 @@ class VariationFilter(Processor):
     def func(self, dc: DataContainer):
         lb = self.params["lb"]
         ub = self.params["ub"]
-        variation = dc.metrics.cv(intraclass=self.params["intraclass"],
-                                  robust=self.params["robust"])
+        if self.params["intraclass"]:
+            groupby = "class"
+        else:
+            groupby = None
+        variation = dc.metrics.cv(groupby=groupby, robust=self.params["robust"])
         if self.params["intraclass"]:
             variation = variation.loc[self.params["process_classes"], :]
 
@@ -863,6 +883,8 @@ class BatchCorrector(Pipeline):
     process_classes : list[str], optional
         list of classes used to correct. If None uses
         sample sample types from the mapping.
+    scale_blanks : bool
+        If True, scale blanks across batches.
     verbose : bool
         If True a message is shown after processing the data matrix.
 
@@ -887,7 +909,7 @@ class BatchCorrector(Pipeline):
 
     In order to apply this correction, several checks needs to be made. First,
     the QC template is checked and samples that cannot be corrected are removed.
-    A study sample is valid if it is surrounded by a quality control sample.
+    A study sample is valid if it is surrounded by QC samples.
     This is a necessary step because the correction for the study samples is
     built using interpolation. It's recommended to have three QC samples at the
     beginning and at the end of each batch. See [1] for recommendations on
@@ -934,7 +956,7 @@ class BatchCorrector(Pipeline):
     After these two checks, the remaining samples and features are suitable
     for LOESS batch correction. A final consideration is how to estimate the
     :math:`\bar{m_{k}}` for each feature. This value is usually computed as the
-    mean or median of the QC values in a batch, but ff the temporal bias becomes
+    mean or median of the QC values in a batch, but if the temporal bias becomes
     stronger as more samples are analyzed, a better estimation of
     :math:`\bar{m_{k}}` can be obtained using the average of the first samples
     analyzed in a batch. To this end, the `n_qc` parameter controls how many
@@ -956,6 +978,7 @@ class BatchCorrector(Pipeline):
                  method: str = "multiplicative",
                  corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
+                 scale_blanks: bool = True,
                  verbose: bool = False):
 
         checker = \
