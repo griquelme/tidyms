@@ -332,6 +332,11 @@ def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
         n_qc = qc_index.size
 
     qc_median = ft_data[qc_index[:n_qc]].median()
+    # if there are several 0 values the median may be 0, this prevent against
+    # such cases
+    if np.isclose(qc_median, 0.0):
+        qc_median = ft_data[qc_index[:n_qc]].mean()
+
     qc_loess = _loocv_loess(order[qc_index], ft_data[qc_index], interpolator,
                             frac=frac)
     interp = interpolator(order[qc_index], qc_loess)
@@ -344,9 +349,11 @@ def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
         # smoothed values close to zero can become negative. As we are using
         # a multiplicative correction, this prevents changing signs while
         # applying the correction
-        qc_smooth[qc_smooth < 0] = 0
-        factor = qc_median / qc_smooth
-        factor[np.isnan(factor)] = 1.0   # corrects zero division
+        if qc_median <= 0.0:
+            factor = 0 * qc_smooth
+        else:
+            qc_smooth[qc_smooth <= 0] = qc_median
+            factor = qc_median / qc_smooth
         ft_data[sample_index] *= factor
     else:
         msg = "Valid methods are `additive` or `multiplicative`."
@@ -490,11 +497,13 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     def batch_mean_func(df_group):
         batch_mean = (df_group[classes[df_group.index].isin(corrector_classes)]
                       .mean())
-        process_mask = classes[df_group.index].isin(process_classes)
+        is_process_sample = classes[df_group.index].isin(process_classes)
         if method == "additive":
-            df_group[process_mask] -= batch_mean
+            df_group[is_process_sample] -= batch_mean
         else:
-            df_group[process_mask] /= batch_mean
+            batch_mean[batch_mean <= 0] = np.nan
+            df_group[is_process_sample] /= batch_mean
+            df_group.fillna(0)
         return df_group
 
     global_median = corrected[classes.isin(corrector_classes)].median()
