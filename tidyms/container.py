@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Objects used to store and manage metabolomics data
 
@@ -25,6 +24,7 @@ constructor:
   party software (XCMS, MZMine2, etc...)
 - Performing Feature correspondence algorithm on features detected from raw
   data (not implemented yet...)
+
 """
 
 from . import utils
@@ -44,14 +44,6 @@ from bokeh.models import LabelSet
 import seaborn as sns
 
 
-# TODO: remove data_path attribute. check with webapp example.
-# TODO: maybe its a good idea to combine export methods into an ExportMethods
-#       object
-# TODO: export DataContainer to metaboanalyst format.
-# TODO: include split into dev / control in DataContainer. This should be
-#  done before any kind of data curation to prevent feature leakage.
-# TODO: make sample metadata compatible with ISA format.
-
 class DataContainer(object):
     """
     Container object that stores processed metabolomics data.
@@ -59,7 +51,7 @@ class DataContainer(object):
     The data is separated in three attributes: data_matrix, sample_metadata and
     feature_metadata. Each one is a pandas DataFrame. DataContainers can be
     created, apart from using the constructor, importing data in common formats
-    (such as: XCMS, MZmine2, Progenesis, etc..) static methods.
+    (such as: XCMS, MZMine2, Progenesis, etc..) static methods.
 
     Attributes
     ----------
@@ -89,7 +81,6 @@ class DataContainer(object):
     metrics : methods to compute common feature metrics.
     plot : methods to plot features.
     preprocess : methods to perform common preprocessing tasks.
-    data_path
     id
     batch
     order
@@ -117,6 +108,7 @@ class DataContainer(object):
     MetricMethods
     PlotMethods
     PreprocessMethods
+
     """
 
     def __init__(self, data_matrix: pd.DataFrame,
@@ -142,6 +134,7 @@ class DataContainer(object):
             if dict, set each sample class to sample type.
         plot_mode : {"seaborn", "bokeh"}
             The package used to generate plots with the plot methods
+
         """
         validation.validate_data_container(data_matrix, feature_metadata,
                                            sample_metadata)
@@ -282,19 +275,6 @@ class DataContainer(object):
     def dilution(self, value):
         self._sample_metadata.loc[self._sample_mask, _sample_dilution] = value
 
-    def get_available_samples(self) -> pd.Series:
-        """
-        Returns the absolute path for each raw data file present in
-        data_path.
-        
-        Returns
-        -------
-        available_samples : pd.Series
-            Pandas series with absolute path for each available file.
-        """
-        available_samples = self.sample_metadata[_raw_path].dropna()
-        return available_samples
-
     def is_valid_class_name(self, test_class: Union[str, List[str]]) -> bool:
         """
         Check if at least one sample class is`class_name`.
@@ -306,6 +286,7 @@ class DataContainer(object):
         Returns
         -------
         is_valid : bool
+
         """
         valid_classes = self.classes.unique()
         if isinstance(test_class, str):
@@ -325,6 +306,7 @@ class DataContainer(object):
         remove : Iterable[str]
             List of sample/feature names to remove.
         axis : {"features", "samples"}
+
         """
         
         if not self._is_valid(remove, axis):
@@ -345,6 +327,7 @@ class DataContainer(object):
         index: list[str]
             List of feature/sample names to check.
         axis: {"samples", "features"}
+
         """
         ind = pd.Index(index)
         if axis == "features":
@@ -368,6 +351,7 @@ class DataContainer(object):
             is True if there are NANs in the data matrix;  "order" is True
             if there is run order information for the samples; "batch" is True
             if there is batch number information associated to the samples.
+
         """
         
         diagnostic = dict()
@@ -404,21 +388,6 @@ class DataContainer(object):
         self.feature_metadata = self._original_feature_metadata
         if reset_mapping:
             self.mapping = None
-
-    # TODO: test and remove
-    # def get_mapped_classes(self) -> List[str]:
-    #     """
-    #     return all classes assigned in the sample type mapping.
-    #
-    #     Returns
-    #     -------
-    #     process_classes: list of mapped classes.
-    #     """
-    #     process_classes = list()
-    #     for classes in self.mapping.values():
-    #         if classes is not None:
-    #             process_classes += classes
-    #     return process_classes
 
     def select_features(self, mzq: float, rtq: float, mz_tol: float = 0.01,
                         rt_tol: float = 5) -> pd.Index:
@@ -596,80 +565,68 @@ class MetricMethods:
 
     Methods
     -------
-    cv(intraclass=True, robust=False): Computes the coefficient of variation for
-    each feature.
-    dratio(robust=False, sample_classes=None, qc_classes=None): Computes the
-    D-Ratio of features, a metric used to compare technical to biological
-    variation.
-    detection_rate(intraclass=True, threshold=0): Computes the ratio of samples
-    where a features was detected.
-    pca(n_components=2, normalization=None, scaling=None): Computes the PCA
-    scores, loadings and  PC variance.
+    cv: Computes the coefficient of variation for each feature.
+    dratio: Computes the D-Ratio of features, a metric used to compare technical
+    to biological variation.
+    detection_rate: Computes the ratio of samples where a features was detected.
+    pca: Computes the PCA scores, loadings and  PC variance.
 
     """
     
     def __init__(self, data: DataContainer):
         self.__data = data
     
-    def cv(self, intraclass: bool = True, robust: bool = False,
-           fill_value: float = np.inf):
+    def cv(self, groupby: Union[str, List[str], None] = "class",
+           robust: bool = False, fill_value: float = np.inf):
         """
-        Computes the Coefficient of variation defined as the ratio between the
-        standard deviation and the mean of each feature.
+        Computes the Coefficient of variation for each feature.
+
+        The coefficient of variation is the quotient between the standard
+        deviation and the mean of a feature.
         
         Parameters
         ----------
-        intraclass: True
-            if True computes the coefficient of variation for each
-            class. Else computes the mean coefficient of variation
-            for all the classes mapped as `sample` type.
+        groupby: str, List[str] or None
+            If groupby isa column or a list of columns of sample metadata, the
+            values of CV are computed on a per group basis. If None, the CV
+            is computed for all samples in the data.
         robust: bool
             If True, computes the relative MAD. Else, computes the Coefficient
             of variation.
         fill_value: float
-            Value used to replace NaN. np.inf is used to facilitate features
-            with NaN values.
+            Value used to replace NaN. By default, NaNs are replaced by np.inf.
 
         Returns
         -------
-        result: pd.Series or pd.DataFrame
+        pd.Series or pd.DataFrame
+
         """
         if robust:
             cv_func = utils.robust_cv
         else:
             cv_func = utils.cv
 
-        # fill value is np.inf to facilitate filtering NaN features
-        if intraclass:
-            result = (self.__data.data_matrix
-                      .groupby(self.__data.classes)
+        if groupby is not None:
+            if isinstance(groupby, str):
+                by = self.__data.sample_metadata[groupby]
+            else:
+                by = [self.__data.sample_metadata[x] for x in groupby]
+            result = (self.__data.data_matrix.groupby(by)
                       .apply(cv_func, fill_value=fill_value))
         else:
-            if self.__data.mapping[_study_sample_type] is None:
-                result = cv_func(self.__data.data_matrix, fill_value=fill_value)
-            else:
-                sample_class = self.__data.mapping[_study_sample_type]
-                is_sample_class = self.__data.classes.isin(sample_class)
-                result = cv_func(self.__data.data_matrix[is_sample_class],
-                                 fill_value=fill_value)
+            result = cv_func(self.__data.data_matrix, fill_value=fill_value)
         return result
-    
-    def dratio(self, robust=False,
-               sample_classes: Optional[List[str]] = None,
-               qc_classes: Optional[List[str]] = None) -> pd.Series:
+
+    def dratio(self, robust=False) -> pd.Series:
         """
-        Computes the D-Ratio using sample variation and quality control
-        variation [BD18]. This metric is useful to compare technical to biological
+        Computes the ratio between the sample variation and the quality control
         variation.
+
+        The D-Ratio is useful to compare technical to biological variation and
+        non informative features.
         
         Parameters
         ----------
-        sample_classes: list[str], optional
-            classes used to estimate biological variation. If None, uses
-            values from sample_type in sample mapping
-        qc_classes: list[str], optional
-            classes used to estimate technical variation. If None, uses
-            values from qc_type in sample mapping
         robust: bool
             If True, uses MAD to compute the D-ratio. Else, uses standard
             deviation.
@@ -679,19 +636,16 @@ class MetricMethods:
         dr : pd.Series:
             D-Ratio for each feature
 
-        References
-        ----------
-        .. [BD18] D.Broadhurst *et al*, "Guidelines and considerations for the use
-            of system suitability and quality control samples in mass spectrometry
-            assays applied in untargeted clinical metabolomic studies",
-            Metabolomics (2018) 14:72.
-
         """
-        if sample_classes is None:
-            sample_classes = self.__data.mapping[_study_sample_type]
+        if self.__data.mapping[_study_sample_type] is None:
+            msg = "Study sample classes not specified in the sample mapping"
+            raise ValueError(msg)
+        sample_classes = self.__data.mapping[_study_sample_type]
 
-        if qc_classes is None:
-            qc_classes = self.__data.mapping[_qc_sample_type]
+        if self.__data.mapping[_qc_sample_type] is None:
+            msg = "QC class not specified in the sample mapping"
+            raise ValueError(msg)
+        qc_classes = self.__data.mapping[_qc_sample_type]
 
         is_sample_class = self.__data.classes.isin(sample_classes)
         is_qc_class = self.__data.classes.isin(qc_classes)
@@ -702,30 +656,33 @@ class MetricMethods:
                                 fill_value=np.inf)
         return dratio
     
-    def detection_rate(self, intraclass=True, threshold=0):
+    def detection_rate(self, groupby: Union[str, List[str], None] = "class",
+                       threshold=0):
         """
         Computes the fraction of samples where a feature was detected.
         
         Parameters
         ----------
-        intraclass: bool
-            if True, computes the detection rate for each class, else
-            computes the mean detection rate
-        threshold: float
+        groupby : str, List[str] or None
+            If groupby isa column or a list of columns of sample metadata, the
+            values of CV are computed on a per group basis. If None, the CV
+            is computed for all samples in the data.
+        threshold : float
             Minimum value to consider a feature detected
-        """
 
-        if intraclass:
-            results = (self.__data.data_matrix
-                       .groupby(self.__data.classes)
-                       .apply(utils.detection_rate, threshold=threshold))
+        """
+        if groupby is not None:
+            if isinstance(groupby, str):
+                by = self.__data.sample_metadata[groupby]
+            else:
+                by = [self.__data.sample_metadata[x] for x in groupby]
+            result = (self.__data.data_matrix.groupby(by)
+                      .apply(utils.detection_rate, threshold=threshold))
         else:
-            # TODO: same as CV. check if its better to return a global DR.
-            sample_class = self.__data.mapping[_study_sample_type]
-            is_sample_class = self.__data.classes.isin(sample_class)
-            results = self.__data.data_matrix[is_sample_class].apply()
-        return results
-    
+            result = (self.__data.data_matrix
+                      .apply(utils.detection_rate, threshold=threshold))
+        return result
+
     def pca(self, n_components: Optional[int] = 2,
             normalization: Optional[str] = None,
             scaling: Optional[str] = None,
@@ -761,20 +718,19 @@ class MetricMethods:
         else:
             ind = data.index
 
-        if normalization:
+        if normalization is not None:
             data = utils.normalize(data, normalization)
 
-        if scaling:
+        if scaling is not None:
             data = utils.scale(data, scaling)
 
         pca = PCA(n_components=n_components)
         scores = pca.fit_transform(data)
+        n_components = pca.n_components_    # effective number of pc
         loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
         variance = pca.explained_variance_
         pc_str = ["PC" + str(x) for x in range(1, n_components + 1)]
-        scores = pd.DataFrame(data=scores,
-                              index=ind,
-                              columns=pc_str)
+        scores = pd.DataFrame(data=scores, index=ind, columns=pc_str)
         loadings = pd.DataFrame(data=loadings,
                                 index=self.__data.data_matrix.columns,
                                 columns=pc_str)
@@ -821,7 +777,7 @@ class MetricMethods:
         return res
 
 
-class BokehPlotMethods:
+class BokehPlotMethods:  # pragma: no cover
     """
     Methods to plot data from a DataContainer. Generates Bokeh Figures.
 
@@ -906,7 +862,8 @@ class BokehPlotMethods:
 
         if hue == _sample_type:
             rev_map = _reverse_mapping(self._data_container.mapping)
-            score[_sample_type] = score[_sample_class].apply(lambda x: rev_map.get(x))
+            score[_sample_type] = (score[_sample_class]
+                                   .apply(lambda x: rev_map.get(x)))
             score = score[~pd.isna(score[_sample_type])]
         elif hue == _sample_batch:
             score[_sample_batch] = score[_sample_batch].astype(str)
@@ -1063,7 +1020,7 @@ class BokehPlotMethods:
         if hue == _sample_type:
             rev_map = _reverse_mapping(self._data_container.mapping)
             source[_sample_type] = (source[_sample_class]
-                              .apply(lambda x: rev_map.get(x)))
+                                    .apply(lambda x: rev_map.get(x)))
             source = source[~source[_sample_type].isna()]
         elif hue == _sample_batch:
             source[_sample_batch] = source[_sample_batch].astype(str)
@@ -1097,7 +1054,7 @@ class BokehPlotMethods:
         return fig
 
 
-class SeabornPlotMethods(object):
+class SeabornPlotMethods(object):   # pragma: no cover
     """
     Methods to plot feature data from a DataContainer using Matplotlib/Seaborn.
     """
@@ -1159,7 +1116,8 @@ class SeabornPlotMethods(object):
 
         if hue == _sample_type:
             rev_map = _reverse_mapping(self._data.mapping)
-            score[_sample_type] = score[_sample_class].apply(lambda s: rev_map.get(s))
+            score[_sample_type] = (score[_sample_class]
+                                   .apply(lambda s: rev_map.get(s)))
             score = score[~pd.isna(score[_sample_type])]
         elif hue == _sample_batch:
             score[_sample_batch] = score[_sample_batch].astype(str)
@@ -1456,21 +1414,6 @@ def _make_empty_mapping():
     return empty_mapping
 
 
-# def _validate_batch_order(batch: pd.Series, order: pd.Series):
-#     if batch.dtype != int:
-#         msg = "batch must be of integer dtype"
-#         raise BatchInformationError(msg)
-#     if order.dtype != int:
-#         msg = "order must be of integer dtype"
-#         raise RunOrderError(msg)
-#
-#     grouped = order.groupby(batch)
-#     for _, batch_order in grouped:
-#         if not np.array_equal(batch_order, batch_order.unique()):
-#             msg = "order value must be unique for each batch"
-#             raise RunOrderError(msg)
-
-
 def _reverse_mapping(mapping):
     rev_map = dict()
     for k, v in mapping.items():
@@ -1478,7 +1421,3 @@ def _reverse_mapping(mapping):
             for class_value in v:
                 rev_map[class_value] = k
     return rev_map
-
-
-# TODO: subclass DataContainer into  NMRDataContainer and MSDataContainer
-#  (add DI, LC)
