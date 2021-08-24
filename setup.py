@@ -35,10 +35,10 @@ INSTALL_REQUIRES = [
     'xlrd',
     'cerberus',
     'seaborn',
-    'requests',
+    'ipython'
     'pytest',
     'openpyxl',
-    'ipython'
+    'requests',
 ]
 
 if __name__ == "__main__":
