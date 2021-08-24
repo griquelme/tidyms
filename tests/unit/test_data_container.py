@@ -85,9 +85,9 @@ def test_is_valid_class_name_several_invalid_names(data_container_with_order):
 def test_mapping_setter(data_container_with_order):
     data = data_container_with_order
     mapping = {"sample": ["healthy", "disease"],
-               "blank": ["SV"]}
+               "blank": ["blank"]}
     expected_mapping = {"sample": ["healthy", "disease"],
-                        "blank": ["SV"], "qc": None, "zero": None,
+                        "blank": ["blank"], "qc": None, "zero": None,
                         "suitability": None, "dqc": None}
     data.mapping = mapping
     assert data.mapping == expected_mapping
@@ -132,7 +132,7 @@ def test_remove_empty_sample_list(data_container_with_order):
 def test_remove_correct_samples(data_container_with_order):
     data = data_container_with_order
     samples = data.data_matrix.index.copy()
-    rm_samples = ["sample 1", "sample 2"]
+    rm_samples = data.data_matrix.index[[3, 4]]
     data.remove(rm_samples, "samples")
     assert data.data_matrix.index.equals(samples.difference(rm_samples))
 
@@ -140,7 +140,7 @@ def test_remove_correct_samples(data_container_with_order):
 def test_remove_correct_features(data_container_with_order):
     data = data_container_with_order
     features = data.data_matrix.columns.copy()
-    rm_features = ["FT01", "FT02"]
+    rm_features = data.data_matrix.columns[[1, 2]]
     data.remove(rm_features, "features")
     assert data.data_matrix.columns.equals(features.difference(rm_features))
     
@@ -225,7 +225,7 @@ def test_diagnose_sample(data_container_with_order):
     assert data.diagnose()[_study_sample_type]
     # remove mapping info
     data.mapping = None
-    assert  not data.diagnose()[_study_sample_type]
+    assert not data.diagnose()[_study_sample_type]
 
 
 def test_diagnose_run_order(data_container_with_order):
@@ -235,7 +235,7 @@ def test_diagnose_run_order(data_container_with_order):
 
 def test_diagnose_invalid_run_order(data_container_without_order):
     data = data_container_without_order
-    assert  not data.diagnose()["order"]
+    assert not data.diagnose()["order"]
 
 
 def test_diagnose_batch(data_container_with_order):
@@ -265,9 +265,6 @@ def test_reset(data_container_with_order):
 
     # reset data and compare again
     data.reset()
-    # reset removes batch and order information it they weren't added during
-    # construction of the DataContainer
-    original_sm = original_sm.drop(columns=["order", "batch"])
 
     assert data.data_matrix.equals(original_dm)
     assert data.feature_metadata.equals(original_fm)
@@ -350,4 +347,164 @@ def test_add_run_order_from_csv(tmpdir, data_container_without_order):
     save_path = os.path.join(tmpdir, "order.csv")
     order_data.to_csv(save_path)
     data.add_order_from_csv(save_path)
-    assert  True
+    assert True
+
+
+# test metrics
+
+def test_metrics_cv_no_groupby(data_container_with_order):
+    data = data_container_with_order
+    cv = data.metrics.cv(groupby=None)
+    assert cv.size == data.data_matrix.shape[1]
+
+
+def test_metrics_cv_groupby_class(data_container_with_order):
+    data = data_container_with_order
+    cv = data.metrics.cv(groupby="class")
+    n_class = data.classes.unique().size
+    n_ft = data.data_matrix.shape[1]
+    assert cv.shape == (n_class, n_ft)
+
+
+def test_metrics_cv_groupby_multiple_columns(data_container_with_order):
+    data = data_container_with_order
+    cv = data.metrics.cv(groupby=["class", "batch"])
+    n_batch = data.batch.unique().size
+    n_class = data.classes.unique().size
+    n_ft = data.data_matrix.shape[1]
+    assert cv.shape == (n_class * n_batch, n_ft)
+
+
+def test_metrics_cv_robust(data_container_with_order):
+    data = data_container_with_order
+    cv = data.metrics.cv(groupby="class", robust=True)
+    n_class = data.classes.unique().size
+    n_ft = data.data_matrix.shape[1]
+    assert cv.shape == (n_class, n_ft)
+
+
+def test_metrics_dratio(data_container_with_order):
+    data = data_container_with_order
+    dratio = data.metrics.dratio()
+    assert dratio.size == data.data_matrix.shape[1]
+
+
+def test_metrics_dratio_robust(data_container_with_order):
+    data = data_container_with_order
+    dratio = data.metrics.dratio(robust=True)
+    assert dratio.size == data.data_matrix.shape[1]
+
+
+def test_metrics_dratio_no_sample_mapping(data_container_with_order):
+    data = data_container_with_order
+    data.mapping["sample"] = None
+    with pytest.raises(ValueError):
+        data.metrics.dratio()
+
+
+def test_metrics_dratio_no_qc_mapping(data_container_with_order):
+    data = data_container_with_order
+    data.mapping["qc"] = None
+    with pytest.raises(ValueError):
+        data.metrics.dratio()
+
+
+def test_metrics_detection_rate_no_grouping(data_container_with_order):
+    data = data_container_with_order
+    dr = data.metrics.detection_rate(groupby=None)
+    assert dr.size == data.data_matrix.shape[1]
+
+
+def test_metrics_detection_rate_group_class(data_container_with_order):
+    data = data_container_with_order
+    n_class = data.classes.unique().size
+    n_ft = data.data_matrix.shape[1]
+    dr = data.metrics.detection_rate(groupby="class")
+    assert dr.shape == (n_class, n_ft)
+
+
+def test_metrics_detection_rate_group_multiple(data_container_with_order):
+    data = data_container_with_order
+    n_class = data.classes.unique().size
+    n_batch = data.batch.unique().size
+    n_ft = data.data_matrix.shape[1]
+    dr = data.metrics.detection_rate(groupby=["class", "batch"])
+    assert dr.shape == (n_class * n_batch, n_ft)
+
+
+def test_metrics_pca(data_container_with_order):
+    data = data_container_with_order
+    scores, loadings, pc_variance, total_variance = \
+        data.metrics.pca(n_components=None)
+    # shape check for scores and loadings
+    assert scores.shape[0] == data.data_matrix.shape[0]
+    assert loadings.shape[0] == data.data_matrix.shape[1]
+    # check variance calculation
+    assert np.isclose(pc_variance.sum(), total_variance)
+
+
+def test_metrics_pca_n_components(data_container_with_order):
+    n_comp = 3
+    data = data_container_with_order
+    scores, loadings, pc_variance, total_variance = \
+        data.metrics.pca(n_components=n_comp)
+    # shape check for scores and loadings
+    assert scores.shape[1] == n_comp
+    assert scores.shape[0] == data.data_matrix.shape[0]
+    assert loadings.shape[0] == data.data_matrix.shape[1]
+
+
+def test_metrics_pca_normalization(data_container_with_order):
+    n_comp = 2
+    data = data_container_with_order
+    scores, loadings, pc_variance, total_variance = \
+        data.metrics.pca(n_components=n_comp, normalization="sum")
+    # shape check for scores and loadings
+    assert scores.shape[1] == n_comp
+    assert scores.shape[0] == data.data_matrix.shape[0]
+    assert loadings.shape[0] == data.data_matrix.shape[1]
+
+
+def test_metrics_pca_scaling(data_container_with_order):
+    n_comp = 2
+    data = data_container_with_order
+    scores, loadings, pc_variance, total_variance = \
+        data.metrics.pca(n_components=n_comp, scaling="autoscaling")
+    # shape check for scores and loadings
+    assert scores.shape[1] == n_comp
+    assert scores.shape[0] == data.data_matrix.shape[0]
+    assert loadings.shape[0] == data.data_matrix.shape[1]
+
+
+def test_metrics_pca_ignore_classes(data_container_with_order):
+    n_comp = 2
+    data = data_container_with_order
+    scores, loadings, pc_variance, total_variance = \
+        data.metrics.pca(n_components=n_comp, ignore_classes=["blank"])
+    # shape check for scores and loadings
+    assert scores.shape[1] == n_comp
+    assert loadings.shape[0] == data.data_matrix.shape[1]
+
+def test_metrics_correlation_spearman(data_container_with_order):
+    data = data_container_with_order
+    r = data.metrics.correlation("order", mode="spearman")
+    assert r.size == data.data_matrix.shape[1]
+
+
+def test_metrics_correlation_ols(data_container_with_order):
+    data = data_container_with_order
+    r = data.metrics.correlation("order", mode="ols")
+    assert r.shape[1] == data.data_matrix.shape[1]
+
+
+def test_metrics_correlation_class(data_container_with_order):
+    data = data_container_with_order
+    r = data.metrics.correlation("order", mode="ols",
+                                 classes=["healthy", "disease"])
+    assert r.shape[1] == data.data_matrix.shape[1]
+
+
+def test_metrics_correlation_invalid_mode(data_container_with_order):
+    data = data_container_with_order
+    with pytest.raises(ValueError):
+        data.metrics.correlation("order", mode="invalid-mode")
