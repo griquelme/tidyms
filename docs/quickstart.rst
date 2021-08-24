@@ -6,17 +6,18 @@ Quickstart
 ==========
 
 TidyMS [1]_ is a Python package that provides tools to process and analyze
-Mass Spectrometry (MS) data, but it's functionality was mostly thought to be
-used with data from LC-MS metabolomics experiments. It uses the
-`pyopenms <https://www.openms.de/>`_ package to read raw data in the mzML
-format and `Numpy <https://numpy.org/>`_, `Pandas <https://pandas.pydata.org/>`_
-and `scikit-learn <https://scikit-learn.org>`_ for data processing and analysis.
+Mass Spectrometry (MS) data. . Although suited for general use, it’s
+functionality was mostly intended to be used with data from LC-MS metabolomics
+experiments.It uses the `pyopenms <https://www.openms.de/>`_ package to read raw
+data in the mzML format and `Numpy <https://numpy.org/>`_,
+`Pandas <https://pandas.pydata.org/>`_ and
+`scikit-learn <https://scikit-learn.org>`_ for data processing and analysis.
 Some of the functionality that offers is:
 
-*   creating chromatograms and accumulated spectra from raw data.
+*   creation of chromatograms and accumulated spectra from raw data.
 *   :term:`Feature detection<feature detection>` and
-    :term:`feature correspondence` in metabolomics data sets.
-*   Read processed data from other mass spectrometry processing software
+    :term:`feature correspondence` in metabolomics datasets.
+*   read processed data from other mass spectrometry processing software
     (XCMS, mzmine2, etc...).
 *   A container object to manage metabolomics data.
 *   :term:`Data curation<data curation>` of untargeted metabolomics data sets
@@ -24,10 +25,10 @@ Some of the functionality that offers is:
 *   Interactive data visualization using `bokeh <https://bokeh.org/>`_, or
     publication quality plots using `seaborn <https://seaborn.pydata.org/>`_.
 
-In the rest of this guide, we show different use cases for the TidyMS package.
-A basic knowledge of MS and metabolomics is assumed, but you can look at the
-:doc:`glossary` section to see the concepts used in this guide. Installation
-instructions are available :doc:`here<installation>`.
+In the rest of this guide, we will show different use cases for the TidyMS
+package. A basic knowledge of MS and metabolomics is assumed, but you can look
+up in the :doc:`glossary` the concepts used in this guide.
+Installation instructions are available :doc:`here<installation>`.
 
 Creating chromatograms
 ----------------------
@@ -61,7 +62,7 @@ plotting or peak picking:
     :source-position: none
 
 The :meth:`tidyms.Chromatogram.find_peaks` method returns a list of descriptors
-for each peak detected:
+for each detected peak:
 
 .. code-block:: python
 
@@ -127,7 +128,7 @@ usage of the MSData object:
         ftp.retrbinary("RETR " + filename, fin.write)
     ftp.close()
 
-Total Ion Chromatograms (TIC), or Base Peak intensity (BPI) chromatograms can
+Total Ion Chromatograms (TIC) and Base Peak intensity (BPI) chromatograms can
 be created using :meth:`tidyms.MSData.make_tic`, which returns a
 :class:`tidyms.Chromatogram` object.
 
@@ -141,7 +142,7 @@ Specifying the instrument type used and the separation technique on the
 constructor, provides a reasonable set of default values for each method
 according to the analytical platform being used.
 
-Extracted ion chromatograms are created with
+Extracted ion chromatograms (EIC) are created with
 :meth:`tidyms.MSData.make_chromatograms`, which accepts a list of m/z values and
 return a list of :class:`tidyms.Chromatogram`:
 
@@ -174,7 +175,7 @@ Feature detection
 Feature detection is the first step performed in untargeted metabolomics to
 build a :term:`data matrix` from raw data. In LC-MS based metabolomics, a
 feature is usually defined as a chromatographic peak. Feature detection in LC-MS
-is then then process of finding chromatographic peaks in a sample. In order to
+is then the process of finding chromatographic peaks in a sample. In order to
 perform feature detection, an implementation based on the centWave algorithm
 [2]_ is used. This algorithm detects chromatographic peaks using **samples in
 centroid mode** in two steps:
@@ -186,7 +187,7 @@ centroid mode** in two steps:
     using several descriptors associated with each peak: mean m/z, m/z
     standard deviation, mean rt, intensity, area and width.
 
-feature detection is available through the :func:`tidyms.detect_features`
+Feature detection is available through the :func:`tidyms.detect_features`
 function which returns a dictionary that maps sample names to a list of ROI
 detected on each sample and a Pandas DataFrame where each row is a feature
 and each column is a descriptor.
@@ -200,7 +201,7 @@ strings or a Path object. If a path to a directory is used, all mzML in the
 directory are used.
 
 :func:`tidyms.detect_features` can be customized and extended in several ways.
-A detailed guide explaining how feature detection is done and customization can
+A detailed guide explaining how feature detection and customization are done can
 be found :doc:`here<peak-picking>`
 
 
@@ -212,7 +213,7 @@ used with caution**
 
 Before performing any kind of statistical comparison between samples, features
 in the different samples must be matched. This process is known as feature
-correspondence and can be quite complex due to the difference in the m/z and
+correspondence and can be quite complex due to differences in the m/z and
 rt values obtained for the same species on different samples [3]_. We use a
 cluster based approach to perform feature correspondence [1]_. An example
 of feature correspondence can be found in the notebook :code:`Application 1`
@@ -265,8 +266,8 @@ Plotting feature data
 ---------------------
 
 Visualization of the data can be done in a similar way using the plot
-attribute, which has methods to generate common used plots, for example a PCA
-scores plot can be easily plot:
+attribute, which has methods to generate commonly used plots, for example a PCA
+scores plot can be easily plotted:
 
 .. code-block:: python
 
@@ -292,14 +293,14 @@ The intensity of a feature, as function of the run order can also be plotted:
 Data curation
 -------------
 
-In order to increase the confidence in the results obtained during analysis of
-the data, it's necessary to correct the bias in the data due to sample
+In order to increase confidence in the results obtained during data analysis,
+it's necessary to correct the bias in the data due to sample
 preparation and also remove any features that cannot be measured in an
 analytically robust way [4]_, [5]_. We call this process :term:`data curation`.
-In tidyms, the data curation is applied using :term:`filtration` and
+In TidyMS, the data curation is applied using :term:`filtration` and
 :term:`correction` steps to obtain a robust data matrix. Before applying data
 curation, it's recommended to define a :term:`mapping`. A mapping is a
-dictionary that map a :term:`sample type` to a list of :term:`sample class`. You
+dictionary that maps a sample type to a list of sample classes. You
 can still use the Filters and Correctors without setting a mapping, but defining
 one makes work easier, as it's used to set a default behaviour for the different
 Filters and Correctors that are used for data curation. These default values are
@@ -319,9 +320,9 @@ classes in your data and assign it to the mapping attribute of your data:
     data.mapping = mapping
 
 Once the mapping is set, we can quickly perform data curation. In this example,
-we are going to apply a :term:`blank correction` and a
-:term:`prevalence filter` to our data. All Filters and Correctors share the
-same process method, that accepts a DataContainer and process it in place:
+we apply a :term:`blank correction` and a :term:`prevalence filter` to our data.
+All Filters and Correctors share the same process method, that accepts a
+DataContainer and process it in place:
 
 .. code-block:: python
 

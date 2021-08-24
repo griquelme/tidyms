@@ -13,8 +13,8 @@ step.
 Feature detection can be defined as the process of detecting interesting
 characteristics in data to solve a specific problem. In LC-MS datasets, features
 are usually defined as chromatographic peaks, and can be described by retention
-time, m/z, peak area, among other descriptors. In TidyMS, feature detection is
-done using an approach similar to the one described by Tautenhahn *et al* in
+time, m/z and peak area, among other descriptors. In TidyMS, feature detection is
+done by using an approach similar to the one described by Tautenhahn *et al* in
 [1]_, but with some modifications. Loosely, the algorithm can be described
 in two steps:
 
@@ -39,7 +39,7 @@ that can be downloaded from Metabolights using the following code:
         ftp.retrbinary("RETR " + filename, fin.write)
     ftp.close()
 
-The complete process of feature detection can be made easily using
+The complete process of feature detection can be easily made using
 :py:func:`tidyms.detect_features`, which performs feature detection on several
 samples and returns a dictionary of sample names to a list of ROI created
 from each sample and a Pandas DataFrame with the descriptors (see the table
@@ -73,7 +73,7 @@ ROI creation
 
 ROI are similar to chromatograms but with two differences: information related
 to the m/z value used in each scan is included and the traces are defined only
-where the m/z values were detected.
+where m/z values were detected.
 
 ..  plot:: plots/roi-definition.py
     :caption:   A ROI is defined by three arrays storing information related to
@@ -84,8 +84,8 @@ centroid mode using :py:meth:`tidyms.fileio.MSData.make_roi`, which implements
 the strategy described in [1]_. ROIs are created and extended connecting close
 m/z values across successive scans using the following method:
 
-1.  The m/z values in the first scan are used to initialize a list of ROI.
-2.  m/z values from the next scan are used to extend the ROIs in the ROI list if
+1.  m/z values in the first scan are used to initialize a list of ROI.
+2.  m/z values from the next scan are used to extend ROIs in the ROI list if
     they are closer than :code:`tolerance` to the mean m/z of a ROI. m/z values
     that don't match any ROI are used to create new ROIs and are appended to the
     ROI list.
@@ -93,7 +93,7 @@ m/z values across successive scans using the following method:
     intensity values are computed according to the :code:`multiple_match`
     strategy. Two strategies are available: merge multiple peaks into an
     average peak or use only the closest peak to extend the ROI and create
-    new ROI with the others.
+    new ROIs with the others.
 4.  If a ROI can't be extended with any m/z value from the new scan, it is
     extended using NaNs.
 5.  If there are more than :code:`max_missing` consecutive NaN in a ROI, then
@@ -125,20 +125,20 @@ Peak detection
 In the first release of TidyMS, peak picking worked using a modified version of
 the CWT algorithm, described in [2]_. In chromatographic data, and in particular
 in untargeted datasets, optimizing the parameters to cover the majority of peaks
-present in the data can be a tricky process. Some of the problems that can
+present in the data can be a tricky process. Some of the problems that may
 appear while using the CWT algorithm are:
 
-1.  When a lot of peak overlap occurs, sometimes peaks are missing. This is
+1.  sometimes when a lot of peak overlap occurs, peaks are missing. This is
     because peaks are identified as local maximum in the ridge lines from the
     wavelet transform. If the widths selected don't have the adequate
-    resolution, this local maximum may not be found. Also, it is possible to to
+    resolution, this local maximum may not be found. Also, it is possible to
     have more than one local maximum in a given ridgeline, which causes to
     select one of them using ad hoc rules.
 2.  The Ricker wavelet is the most used wavelet to detect peaks, as it has been
     demonstrated to work very with gaussian peaks. In LC-MS data, is common to
     find peaks with a certain degree of asymmetry (eg. peak tailing). Using the
     Ricker wavelet in these cases, results in a wrong estimation of the peak
-    extension, which in turns result in bad estimates for the peak area.
+    extension, which in turn results in bad estimates for the peak area.
 3.  The interaction between the parameters in the CWT algorithm is rather
     complex, and sometimes it is not very clear how they affect the peak picking
     process. The user must have a clear knowledge of the wavelet transform to
@@ -171,7 +171,7 @@ This is done in five steps:
     point to its left and right.
 5.  If there are overlapping peaks (i.e. overlapping peak extensions),
     the extension is fixed by defining a boundary between the peaks as
-    the minimum value between the two.
+    the minimum value between the apex of the two peaks.
 
 ..  plot:: plots/peak-definition.py
     :caption: Peak start, apex and end.
@@ -283,10 +283,11 @@ as three additive components:
 .. math::
     x[n] = s[n] + b[n] + e[n]
 
-:math:`s` is the peak component, and is deterministic, non negative and small
-except in a region where peaks are present. The baseline :math:`b` is a
-smooth slow changing function. The noise term :math:`e[n]` is assumed to be iid
-samples from a gaussian distribution :math:`e[n] \sim N(0, \sigma)`.
+:math:`s` is the peak component, which is deterministic, non negative and small
+except regions where peaks are present. The baseline :math:`b` is a
+smooth slow changing function. The noise term :math:`e[n]` is assumed to be
+independent and identically distributed (iid) samples from a gaussian
+distribution :math:`e[n] \sim N(0, \sigma)`.
 
 If we consider the second finite difference of :math:`x[n]`, :math:`y[n]`:
 
@@ -318,7 +319,7 @@ used can be summarized in the following steps:
     level is :math:`\sigma = 0.5 S_{y}`. Else decrease :math:`p` by 10 and go
     back to step 3.
 
-The noise estimation is clearly biased if we don't remove completely the
+The noise estimation is clearly biased if we don't completely remove the
 contribution from :math:`s`, but it gives a good enough approximation to remove
 noisy peaks.
 
@@ -330,18 +331,18 @@ in :math:`x` is classified as signal if a peak can potentially be found in the
 region or as or as baseline otherwise. Then, the baseline is estimated for the
 whole signal by interpolating baseline points.
 
-The main task of baseline estimation is then this classification process. To do
-this, all local extrema in the signal are searched (including first and last
-points). Then, we take all closed intervals defined between consecutive local
-maxima and minima (or viceversa) and try to evaluate if there is a significant
-contribution to the signal coming from :math:`s` in each interval. If :math:`j`
-and :math:`k` are the indices defining one such interval, then the sum of
-:math:`x` in the interval is:
+The main task of baseline estimation is then to perform this classification
+process. To do this, all local extrema in the signal are searched (including
+first and last points). Then, we take all closed intervals defined between
+consecutive local maxima and minima (or viceversa) and try to evaluate if there
+is a significant contribution to the signal coming from :math:`s` in each
+interval. If :math:`j` and :math:`k` are the indices defining one such interval,
+then the sum of :math:`x` in the interval is:
 
 .. math::
     \sum_{i=j}^{k}x[i] = \sum_{i=j}^{k} s[i] + b[i] + e[i]
 
-If :math:`l = k - j` is the length of the interval, and if we assume that
+If :math:`l = k - j` is the length of the interval, and assuming that
 :math:`b` is constant in the interval we can write:
 
 .. math::
@@ -351,11 +352,11 @@ If :math:`l = k - j` is the length of the interval, and if we assume that
 .. math::
     a = \sum_{i=j}^{k} x[i] - x[j] = \sum_{i=j}^{k} s[i] - s[j] + e_{sum}
 
-Where :math:`e_{sum} \sim N(0, \sqrt{2l}\sigma)` (We know :math:`\sigma` from
-the noise estimation). We can get an idea of the contribution of :math:`s` using
-the value of :math:`a` as follows: If the signal term is contributing to
+Where :math:`e_{sum} \sim N(0, \sqrt{2l}\sigma)` (we know :math:`\sigma` from
+the noise estimation). We can get an idea of the contribution of :math:`s` by
+using the value of :math:`a` as follows: If the signal term is contributing to
 :math:`a`, then the probability of obtaining a value greater than :math:`a`
-from the noise is going to be small. This can be computed in the following way:
+from noise is going to be small. This can be computed in the following way:
 
 .. math::
     P(|e_{sum}| > |a|)= \textrm{erfc} \left (\frac{|a|}{2\sqrt{l}\sigma}
@@ -364,7 +365,7 @@ from the noise is going to be small. This can be computed in the following way:
 An interval is classified as baseline if this probability is greater than 0.05.
 
 ..  plot:: plots/peak_detection_baseline_example.py
-    :caption: Peak detection and baseline baseline estimation in noisy signals.
+    :caption: Peak detection and baseline estimation in noisy signals.
 
 References
 ----------

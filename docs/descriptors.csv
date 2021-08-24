@@ -1,11 +1,11 @@
 Descriptor,Meaning
-height,height of the peak relative to the baseline
-area,area of the peak minus the baseline area
+height,peak height relative to the baseline
+area,peak area minus the baseline area
 rt,weighted average of the retention time in the peak region
 mz,weighted average of the m/z in the peak region
-width,"width of the peak, computed as the region where the 95 % of the peak area is distributed."
-snr,"Signal-to-noise ratio of the peak, defined as the quotient between the peak height and the noise level."
-mz std,standard deviation of the m/z in the peak region.
-roi index,index that points to the ROI where the peak was detected.
-peak index,index that points to the Peak object in the peak attribute of the ROI.
-sample,Name of the sample where the feature was detected.
+width,"peak width, computed as the region where the 95 % of the peak area is distributed"
+snr,"peak signal-to-noise ratio, defined as the quotient between the peak height and the noise level"
+mz std,standard deviation of the m/z in the peak region
+roi index,index that points to the ROI where the peak was detected
+peak index,index that points to the Peak object in the peak attribute of the ROI
+sample,name of the sample where the feature was detected
