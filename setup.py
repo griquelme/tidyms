@@ -21,22 +21,24 @@ CLASSIFIERS = [
 
 PACKAGES = ["tidyms"]
 
-PYTHON_REQUIRES = ">=3.6"
+PYTHON_REQUIRES = ">=3.8"
 
 INSTALL_REQUIRES = [
-    'pandas>=1.2',
-    'pyopenms>=2.4',
-    'numpy>=1.20',
+    'pandas',
+    'pyopenms',
+    'numpy',
     'pyyaml',
     'statsmodels',
-    'scipy>=1.6.1',
-    'scikit-learn>=0.23',
-    'bokeh>=1.4',
+    'scipy',
+    'scikit-learn',
+    'bokeh',
     'xlrd',
     'cerberus',
     'seaborn',
-    'pytest>=5.0'
-    'openpyxl>=3.0'
+    'requests',
+    'pytest',
+    'openpyxl',
+    'ipython'
 ]
 
 if __name__ == "__main__":
