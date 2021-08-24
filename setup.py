@@ -1,5 +1,5 @@
 PACKAGE_NAME = "tidyms"
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 LICENSE = 'BSD (3-clause)'
 AUTHOR = "Bioanalytical Mass Spectrometry Group at CIBION-CONICET"
 AUTHOR_EMAIL = "griquelme.chm@gmail.com"
@@ -24,15 +24,15 @@ PACKAGES = ["tidyms"]
 PYTHON_REQUIRES = ">=3.6"
 
 INSTALL_REQUIRES = [
-    'pandas>=1.0',
+    'pandas>=1.2',
     'pyopenms>=2.4',
-    'numpy>=1.15',
+    'numpy>=1.20',
     'pyyaml',
     'statsmodels',
-    'scipy>=1.4.1',
+    'scipy>=1.6.1',
     'scikit-learn>=0.23',
-    'bokeh',
-    'xlrd>=1.2',
+    'bokeh>=1.4',
+    'xlrd',
     'cerberus',
     'seaborn',
     'pytest>=5.0'
@@ -43,8 +43,8 @@ if __name__ == "__main__":
     from setuptools import setup
     from sys import version_info
 
-    if version_info[:2] < (3, 6):
-        msg = "tidyms requires Python >= 3.6."
+    if version_info[:2] < (3, 8):
+        msg = "tidyms requires Python >= 3.8."
         raise RuntimeError(msg)
 
     setup(name=PACKAGE_NAME,
