@@ -4,15 +4,21 @@ Validation functions for Filter, Pipelines and DataContainer
 
 
 import warnings
+from functools import wraps
+from inspect import getfullargspec
 from os import getcwd
 from os.path import isdir
 from os.path import join
 import cerberus
+from typing import Callable
 
 # TODO: validate DataContainer using cerberus
 
 
 # functions used by check_with
+import numpy as np
+
+
 def is_callable(field, value, error):
     if not hasattr(value, "__call__"):
         msg = "Must be a string or callable"
@@ -28,7 +34,7 @@ def is_all_positive(field, value, error):
 # -----------------------------
 
 
-def validate(params: dict, validator: cerberus.Validator) -> None:
+def validate(params: dict, validator: cerberus.Validator) -> dict:
     """
     Function used to validate parameters.
 
@@ -39,19 +45,20 @@ def validate(params: dict, validator: cerberus.Validator) -> None:
 
     Returns
     -------
-    None
+    dict: Validated and normalized parameters
 
     Raises
     ------
     ValueError: if any of the parameters are invalid.
     """
-    pass_validation = validator.validate(params)
-    if not pass_validation:
+    validated = validator.validated(params)
+    if not validated:
         msg = ""
         for field, e_msgs in validator.errors.items():
             for e_msg in e_msgs:
                 msg += "{}: {}\n".format(field, e_msg)
         raise ValueError(msg)
+    return validated
 
 
 class ValidatorWithLowerThan(cerberus.Validator):
@@ -256,29 +263,6 @@ def validate_batch_corrector_params(params):
     validate(params, validator)
 
 
-def validate_make_roi_params(n_spectra, params):
-    schema = {"tolerance": {"type": "number", "is_positive": True},
-              "max_missing": {"type": "integer", "min": 0},
-              "targeted_mz": {"nullable": True, "check_with": is_all_positive},
-              "start": {"type": "integer", "nullable": True, "min": 0,
-                        "lower_than": "end"},
-              "end": {"type": "integer", "nullable": True,
-                      "max": n_spectra - 1},
-              "multiple_match": {"allowed": ["closest", "reduce"]},
-              "mz_reduce": {"anyof": [{"allowed": ["mean"]},
-                                       {"check_with": is_callable}]},
-              "sp_reduce": {"anyof": [{"allowed": ["mean", "sum"]},
-                                       {"check_with": is_callable}]},
-              "mode": {"allowed": ["hplc", "uplc"]},
-              "min_intensity": {"type": "number", "is_positive": True},
-              "min_length": {"type": "integer", "is_positive": True},
-              "ms_level": {"type": "integer", "min": 0, "nullable": True},
-              "pad": {"type": "integer", "min": 0, "nullable": True}
-              }
-    validator = ValidatorWithLowerThan(schema)
-    validate(params, validator)
-
-
 def validate_descriptors(params):
     schema = {"type": "dict", "keysrules": {"type": "string"},
               "valuesrules": {"check_with": is_callable}}
@@ -323,42 +307,296 @@ def validate_detect_peaks_params(params):
         validator = ValidatorWithLowerThan(schema)
         validate(params, validator)
 
-# validator for make_chromatograms
+
+def spectra_iterator_schema(ms_data):
+    n_spectra = ms_data.get_n_spectra()
+    schema = {
+        "ms_level": {
+            "type": "integer",
+            "min": 1,
+        },
+        "start": {
+            "type": "integer",
+            "min": 0,
+            "lower_than": "end",
+        },
+        "end": {
+            "type": "integer",
+            "max": n_spectra,
+            "nullable": True,
+            "default": n_spectra
+        },
+        "start_time": {
+            "type": "number",
+            "min": 0.0,
+            "lower_than": "end_time",
+        },
+        "end_time": {
+            "type": "number",
+            "nullable": True,
+        }
+    }
+
+    defaults = spectra_iterator_defaults(ms_data)
+    set_defaults(schema, defaults)
+    return schema
 
 
-def validate_make_chromatograms_params(n_spectra, mz, window, start, end,
-                                       accumulator, chromatogram_mode,
-                                       ms_level):
-    params = {"start": start, "end": end, "window": window, "mz": mz,
-              "accumulator": accumulator, "ms_level": ms_level,
-              "chromatogram_mode": chromatogram_mode}
-
-    schema = {"mz": {"empty": False},
-              "window": {"type": "number", "is_positive": True},
-              "accumulator": {"type": "string", "allowed": ["mean", "sum"]},
-              "start": {"type": "integer", "lower_than": "end", "min": 0},
-              "end": {"type": "integer", "max": n_spectra},
-              "ms_level": {"type": "integer", "min": 1},
-              "chromatogram_mode": {"type": "string",
-                                    "allowed": ["uplc", "hplc"]}
-              }
-    validator = ValidatorWithLowerThan(schema)
-    validate(params, validator)
+def spectra_iterator_defaults(ms_data):
+    return dict()
 
 
-def validate_accumulate_spectra_params(n_spectra, start, end, subtract_left,
-                                       subtract_right, ms_level):
-    params = {"start": start, "end": end, "subtract_left": subtract_left,
-              "subtract_right": subtract_right, "ms_level": ms_level}
-    schema = {"start": {"type": "integer", "min": 0, "lower_than": "end"},
-              "end": {"type": "integer", "max": n_spectra,
-                      "lower_or_equal": "subtract_right"},
-              "subtract_left": {"type": "integer", "lower_or_equal": "start",
-                                "min": 0, "nullable": True},
-              "subtract_right": {"type": "integer", "max": n_spectra,
-                                 "nullable": True},
-              "kind": {"type": "string"},
-              "ms_level": {"type": "integer", "min": 1}
-              }
-    validator = ValidatorWithLowerThan(schema)
-    validate(params, validator)
+def make_chromatogram_schema(ms_data) -> dict:
+
+    n_spectra = ms_data.get_n_spectra()
+
+    schema = {
+        "mz": {
+            "empty": False,
+            "coerce": np.array,
+        },
+        "window": {
+            "type": "number",
+            "is_positive": True,
+            "nullable": True
+        },
+        "accumulator": {
+            "type": "string",
+            "allowed": ["mean", "sum"]
+        },
+        "ms_level": {
+            "type": "integer",
+            "min": 1,
+        },
+        "start": {
+            "type": "integer",
+            "min": 0,
+            "lower_than": "end",
+        },
+        "end": {
+            "type": "integer",
+            "max": n_spectra,
+            "nullable": True,
+            "default": n_spectra
+        },
+        "start_time": {
+            "type": "number",
+            "min": 0.0,
+            "lower_than": "end_time",
+        },
+        "end_time": {
+            "type": "number",
+            "nullable": True,
+        }
+    }
+
+    defaults = make_chromatogram_defaults(ms_data)
+    set_defaults(schema, defaults)
+    return schema
+
+
+def make_chromatogram_defaults(ms_data):
+    instrument = ms_data.instrument
+
+    if instrument == "qtof":
+        window = 0.05
+    else:   # orbitrap
+        window = 0.01
+
+    defaults = {
+        "window": {"default": window}
+    }
+    return defaults
+
+
+def make_roi_schema(ms_data):
+    n_spectra = ms_data.get_n_spectra()
+    schema = {
+        "tolerance": {
+            "type": "number",
+            "is_positive": True,
+        },
+        "max_missing": {
+            "type": "integer",
+            "min": 0,
+        },
+        "targeted_mz": {
+            "nullable": True,
+            "check_with": is_all_positive
+        },
+        "multiple_match": {
+            "allowed": ["closest", "reduce"]
+        },
+        "mz_reduce": {
+            "anyof": [
+                {"allowed": ["mean"]},
+                {"check_with": is_callable}
+            ]
+        },
+        "sp_reduce": {
+            "anyof": [
+                {"allowed": ["mean", "sum"]},
+                {"check_with": is_callable}
+            ]
+        },
+        "min_intensity": {
+            "type": "number",
+            "is_positive": True,
+            "nullable": True
+        },
+        "min_length": {
+            "type": "integer",
+            "is_positive": True,
+            "nullable": True,
+        },
+        "pad": {
+            "type": "integer",
+            "min": 0,
+            "nullable": True,
+        },
+        "ms_level": {
+            "type": "integer",
+            "min": 1,
+        },
+        "start": {
+            "type": "integer",
+            "min": 0,
+            "lower_than": "end",
+        },
+        "end": {
+            "type": "integer",
+            "max": n_spectra,
+            "nullable": True,
+            "default": n_spectra
+        },
+        "start_time": {
+            "type": "number",
+            "min": 0.0,
+            "lower_than": "end_time",
+        },
+        "end_time": {
+            "type": "number",
+            "nullable": True,
+        }
+    }
+    defaults = make_roi_defaults(ms_data)
+    set_defaults(schema, defaults)
+    return schema
+
+
+def make_roi_defaults(ms_data):
+    separation = ms_data.separation
+    instrument = ms_data.instrument
+
+    if instrument == "qtof":
+        tolerance = 0.01
+    else:   # orbitrap
+        tolerance = 0.005
+
+    if separation == "uplc":
+        min_length = 10
+    else:   # hplc
+        min_length = 20
+
+    defaults = {
+        "pad": {
+            "default": 2
+        },
+        "max_missing": {
+            "default": 1
+        },
+        "min_length": {
+            "default": min_length
+        },
+        "tolerance": {
+            "default": tolerance
+        },
+    }
+
+    return defaults
+
+
+def accumulate_spectra_schema(ms_data):
+
+    n_spectra = ms_data.get_n_spectra()
+
+    schema = {
+        "start": {
+            "type": "integer",
+            "min": 0,
+            "lower_than": "end"
+        },
+        "end": {
+            "type": "integer",
+            "max": n_spectra,
+            "lower_or_equal": "subtract_right"
+        },
+        "subtract_left": {
+            "type": "integer",
+            "lower_or_equal": "start",
+            "min": 0,
+            "nullable": True,
+            "default_setter": lambda doc: doc["start"]
+        },
+        "subtract_right": {
+            "type": "integer",
+            "max": n_spectra,
+            "nullable": True,
+            "default_setter": lambda doc: doc["end"]
+        },
+        "kind": {
+            "type": "string"
+        },
+        "ms_level": {
+            "type": "integer",
+            "min": 1
+        }
+    }
+    # no default functions is necessary, defaults can be obtained from
+    # start and end
+    return schema
+
+
+def set_defaults(schema: dict, defaults: dict):
+    for k, v in schema.items():
+        if k in defaults:
+            if "anyof" in v:
+                # TODO: add code for anyof case
+                pass
+            else:
+                v.update(defaults[k])
+
+
+def validated_ms_data(schema_getter: Callable):
+    """
+    Validates input for MSData methods and set default values based on
+    the `instrument` and `separation` attributes.
+
+    Parameters
+    ----------
+    schema_getter : callable
+        Function that returns the schema used for validation. The function must
+        take the MSData object as the only argument.
+
+    Returns
+    -------
+
+    """
+
+    def validator_wrapper(func):
+        @wraps(func)
+        def func_wrapper(*args, **kwargs):
+            # build a dictionary with input
+            func_argspec = getfullargspec(func)
+            func_argnames = func_argspec.args[1:]    # we don't need self
+            params = dict(zip(func_argnames, args[1:]))
+            params.update(kwargs)
+            ms_data = args[0]
+            # get schema and defaults
+            schema = schema_getter(ms_data)
+            # validate input
+            validator = ValidatorWithLowerThan(schema)
+            validated = validate(params, validator)
+            return func(ms_data, **validated)
+        return func_wrapper
+    return validator_wrapper
