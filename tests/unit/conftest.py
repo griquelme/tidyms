@@ -2,11 +2,17 @@ import pandas as pd
 
 from tidyms.simulation import simulate_dataset
 from tidyms.container import DataContainer
+from tidyms import fileio
 import numpy as np
 import pytest
 
 
 # simulated data used for tests
+def pytest_configure(config):
+    datasets = fileio.list_available_datasets(False)
+    for d in datasets:
+        fileio._download_dataset(d)
+
 
 @pytest.fixture
 def data_container_with_order():
