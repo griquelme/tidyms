@@ -4,8 +4,8 @@ third party software used to process Mass Spectrometry data.
 
 Objects
 -------
-MSData: reads raw MS data in the mzML format. Manages Chromatograms and
-MSSpectrum creation. Performs feature detection on centroid data.
+MSData: reads raw MS data in the mzML format. Creates Chromatograms, ROI and
+MSSpectrum from ra data.
 
 Functions
 ---------
@@ -24,18 +24,20 @@ DataContainer
 Roi
 """
 
+import os
+import pickle
+import requests
+from typing import Optional, Callable, Union, List, BinaryIO, TextIO, Tuple
+from typing import Generator
 import numpy as np
 import pandas as pd
-import os
-from typing import Optional, Iterable, Callable, Union, List, BinaryIO, TextIO
+from scipy.interpolate import interp1d
 from .container import DataContainer
 from ._names import *
 from . import lcms
-from . import validation
-import pickle
-import requests
-import warnings
-import pyopenms
+from . import validation as v
+from .utils import get_cache_path, gaussian_mixture, find_closest
+from ._mzml import build_offset_list, get_spectrum, get_chromatogram
 
 
 def read_pickle(path: Union[str, BinaryIO]) -> DataContainer:
@@ -103,7 +105,7 @@ def read_progenesis(path: Union[str, TextIO]):
                   inplace=True)
     ft_def = ft_def.astype({"rt": float, "mz": float})
     ft_def["rt"] = ft_def["rt"] * 60
-    validation.validate_data_container(data, ft_def, sample_info)
+    v.validate_data_container(data, ft_def, sample_info)
     dc = DataContainer(data, ft_def, sample_info)
     return dc
 
@@ -251,46 +253,33 @@ def read_data_matrix(path: Union[str, TextIO, BinaryIO],
 
 class MSData:
     """
-    Container object for raw MS data.
+    Reader object for raw MS data.
 
     Manages chromatogram, roi and spectra creation.
 
     Attributes
     ----------
-    reader : pyopenms.OnDiscExperiment or pyopenms.MSExperiment
-        pyopenms object used to read raw data.
-    ms_mode : {"centroid", "profile"}
-        The mode in which the MS data is stored. If None, mode is guessed, but
-        it's recommended to supply the mode in the constructor.
-    instrument : {"qtof". "orbitrap"}
+    path : str
+        Path to a mzML file.
+    ms_mode : {"centroid", "profile"}, default="centroid"
+        The mode in which the MS data is stored.
+    instrument : {"qtof". "orbitrap"}, default="qtof"
         The MS instrument type used to acquire the experimental data. Used to
         set default parameters in the methods.
-    separation : {"uplc", "hplc"}
-        The separation technique used before MS analysis.  Used to
+    separation : {"uplc", "hplc"}, default="uplc"
+        The separation technique used before MS analysis. Used to
         set default parameters in the methods.
 
     """
 
     def __init__(self, path: str, ms_mode: str = "centroid",
                  instrument: str = "qtof", separation: str = "uplc"):
-        """
-        Constructor for MSData
+        sp_offset, chrom_offset, index_offset = build_offset_list(path)
+        self._spectra_offset = sp_offset
+        self._chromatogram_offset = chrom_offset
+        self._index_offset = index_offset
+        self.path = path
 
-        Parameters
-        ----------
-        path : str
-            Path to a mzML file.
-        ms_mode : {"centroid", "profile"}
-            Mode of the MS data.
-        instrument : {"qtof", "orbitrap"}
-            MS instrument type used for data acquisition. Used to set default
-            parameters in the methods.
-        separation: {"uplc", "hplc"}
-            Type of separation technique used in the experiment. Used to set
-            default parameters in the methods.
-
-        """
-        self.reader = _reader(path, on_disc=True)
         self.ms_mode = ms_mode
         self.instrument = instrument
         self.separation = separation
@@ -304,8 +293,8 @@ class MSData:
         if value in ["centroid", "profile"]:
             self._ms_mode = value
         else:
-            msg = "mode must be `centroid` or `profile`"
-            raise ValueError(msg)
+            msg = "mode must be `centroid` or `profile`. Got `{}`."
+            raise ValueError(msg.format(value))
 
     @property
     def instrument(self) -> str:
@@ -317,7 +306,8 @@ class MSData:
         if value in valid_instruments:
             self._instrument = value
         else:
-            msg = "`instrument` must be any of {}".format(valid_instruments)
+            msg = "`instrument` must be `orbitrap` or `qtof`. Got `{}`."
+            msg = msg.format(value)
             raise ValueError(msg)
 
     @property
@@ -333,120 +323,53 @@ class MSData:
             msg = "`separation` must be any of {}".format(valid_separation)
             raise ValueError(msg)
 
-    def make_tic(self, kind: str = "tic", ms_level: int = 1
-                 ) -> lcms.Chromatogram:
+    def get_n_chromatograms(self) -> int:
         """
-        Makes a total ion chromatogram.
-
-        Parameters
-        ----------
-        kind: {"tic", "bpi"}
-            `tic` computes the total ion chromatogram. `bpi` computes the base
-            peak chromatogram.
-        ms_level : positive int
-            data level used to build the chromatograms. By default, level 1 is
-            used.
+        Get the chromatogram count in the file
 
         Returns
         -------
-        tic : lcms.Chromatogram
+        n_chromatograms : int
 
         """
-        return lcms.make_tic(self.reader, kind, self.separation, ms_level)
+        return len(self._chromatogram_offset)
 
-    def make_chromatograms(self, mz: List[float],
-                           window: Optional[float] = None,
-                           accumulator: str = "sum",
-                           ms_level: int = 1) -> List[lcms.Chromatogram]:
+    def get_n_spectra(self) -> int:
         """
-        Computes the Extracted Ion Chromatogram for a list m/z values.
-
-        Parameters
-        ----------
-        mz: Iterable[float]
-            Mass-to-charge values to build EICs.
-        window: positive number, optional
-            Mass window in absolute units. If None, uses a 0.05  window if the
-            `instrument` attribute is qtof or a 0.005 value if the instrument
-            is orbitrap.
-        accumulator: {"mean", "sum"}
-            accumulator function used to in each scan.
-        ms_level : positive int
-            data level used to build the chromatograms. By default, level 1 is
-            used.
+        Get the spectra count in the file
 
         Returns
         -------
-        chromatograms : list[Chromatograms]
+        n_spectra : int
 
         """
-        if window is None:
-            if self.instrument == "qtof":
-                window = 0.05
-            elif self.instrument == "orbitrap":
-                window = 0.005
+        return len(self._spectra_offset)
 
-        n_sp = self.reader.getNrSpectra()
-        validation.validate_make_chromatograms_params(
-            n_sp, mz, window, 0, n_sp, accumulator, self.separation, ms_level)
-
-        return lcms.make_chromatograms(self.reader, mz, window=window,
-                                       chromatogram_mode=self.separation,
-                                       accumulator=accumulator,
-                                       ms_level=ms_level)
-
-    def accumulate_spectra(self, start: int, end: int,
-                           subtract_left: Optional[int] = None,
-                           subtract_right: Optional[int] = None,
-                           ms_level: int = 1
-                           ) -> lcms.MSSpectrum:
+    def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
         """
-        accumulates a series of consecutive spectra into a single spectrum.
+        Get the nth chromatogram stored in the file.
 
         Parameters
         ----------
-        start: int
-            First scan number to accumulate
-        end: int
-            Last scan number to accumulate.
-        subtract_left : int, optional
-            Scans between `subtract_left` and `start` are subtracted from the
-            accumulated spectrum.
-        subtract_right : int, optional
-            Scans between `subtract_right` and `end` are subtracted from the
-            accumulated spectrum.
-        ms_level : int
-            data level used to build the chromatograms. By default, level 1 is
-            used.
+        n : int
 
         Returns
         -------
-        MSSpectrum
+        name : str
+        chromatogram : lcms.Chromatogram
 
         """
-        n_sp = self.reader.getNrSpectra()
-        if subtract_right is None:
-            subtract_right = end
-
-        if subtract_left is None:
-            subtract_left = start
-
-        validation.validate_accumulate_spectra_params(
-            n_sp, start, end, subtract_left, subtract_right, ms_level)
-
-        if self.ms_mode == "profile":
-            sp = lcms.accumulate_spectra_profile(self.reader, start, end,
-                                                 subtract_left=subtract_left,
-                                                 subtract_right=subtract_right,
-                                                 ms_level=ms_level,
-                                                 instrument=self.instrument)
-        else:
-            roi_params = lcms.get_roi_params(self.separation, self.instrument)
-            tolerance = roi_params["tolerance"]
-            sp = lcms.accumulate_spectra_centroid(self.reader, start, end,
-                                                  subtract_left, subtract_right,
-                                                  tolerance=tolerance)
-        return sp
+        chrom_data = get_chromatogram(
+            self.path,
+            self._spectra_offset,
+            self._chromatogram_offset,
+            self._index_offset,
+            n
+        )
+        name = chrom_data["name"]
+        chromatogram = lcms.Chromatogram(
+            chrom_data["time"], chrom_data["spint"], mode=self.separation)
+        return name, chromatogram
 
     def get_spectrum(self, scan: int) -> lcms.MSSpectrum:
         """
@@ -462,100 +385,372 @@ class MSData:
         MSSpectrum
 
         """
-        scan = int(scan)  # this prevents a bug in pyopenms with numpy int types
-        mz, sp = self.reader.getSpectrum(scan).get_peaks()
-        return lcms.MSSpectrum(mz, sp)
+        sp_data = get_spectrum(
+            self.path,
+            self._spectra_offset,
+            self._chromatogram_offset,
+            self._index_offset,
+            scan
+        )
+        return lcms.MSSpectrum(**sp_data)
 
-    def get_rt(self, ms_level: Optional[int] = None) -> np.ndarray:
+    @v.validated_ms_data(v.spectra_iterator_schema)
+    def get_spectra_iterator(
+            self,
+            ms_level: int = 1,
+            start: int = 0,
+            end: Optional[int] = None,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None
+    ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
         """
-        Gets the retention time vector for the experiment.
+        Yields the spectra in the file.
+
+        Parameters
+        ----------
+        ms_level : int, default=1
+            Use data from this ms level.
+        start : int, default=0
+            Starts iteration at this scan number.
+        end : int or None, default=None
+            Ends iteration at this scan number. By default, uses all scans.
+        start_time : float, default=0.0
+            Ignore scans with acquisition times lower than this value.
+        end_time : float or None, default=None
+            Ignore scans with acquisition times higher than this value.
+
+        Yields
+        ------
+        scan_number: int
+        spectrum : lcms.MSSpectrum
+
+        """
+        for k in range(start, end):
+            sp = self.get_spectrum(k)
+            is_valid_level = ms_level == sp.ms_level
+            is_valid_time = ((start_time <= sp.time) and
+                             ((end_time is None) or (end_time > sp.time)))
+            if is_valid_level and is_valid_time:
+                yield k, sp
+
+    @v.validated_ms_data(v.make_chromatogram_schema)
+    def make_chromatograms(
+            self,
+            mz: np.ndarray,
+            window: Optional[float] = None,
+            accumulator: str = "sum",
+            ms_level: int = 1,
+            start: int = 0,
+            end: Optional[int] = None,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None,
+    ) -> List[lcms.Chromatogram]:
+        """
+        Computes extracted ion chromatograms using a list of m/z values.
+
+        Parameters
+        ----------
+        mz : array
+            m/z values used to build the EICs.
+        window : positive number or None, default=None
+            m/z tolerance used to build the EICs. If ``self.instrument`` is
+            ``"qtof"``, the default value is ``0.05``. If ``self.instrument`` is
+            ``"orbitrap"`` the default value is ``0.005``.
+        accumulator : {"sum", "mean"}, default="sum"
+            Mode used to accumulate the values inside the m/z window. ``"sum"``
+            computes the total intensity inside the window. ``"mean"`` divides
+            the total intensity using the number of points inside the window.
+        ms_level : int, default=1
+            ms level used to build the chromatograms.
+        start : int, default=0
+            Create chromatograms starting at this scan number.
+        end : int or None, default=None
+            End chromatograms at this scan number. By default, uses all scans.
+        start_time : float, default=0.0
+            include scans starting at this acquisition time.
+        end_time : float or None, default=None
+            Stops when the acquisition time is higher than this value.
+
+        Returns
+        -------
+        chromatograms : List of Chromatograms
+
+        """
+        n_sp = self.get_n_spectra()
+
+        # mz_intervals has this shape to be compatible with reduce at
+        mz_intervals = (np.vstack((mz - window, mz + window))
+                        .T.reshape(mz.size * 2))
+
+        eic = np.zeros((mz.size, n_sp))
+        rt = np.zeros(n_sp)
+        valid_index = list()
+        sp_iterator = self.get_spectra_iterator(
+            ms_level, start, end, start_time, end_time)
+        for scan, sp in sp_iterator:
+            valid_index.append(scan)
+            rt[scan] = sp.time
+            sp_size = sp.mz.size
+
+            # prevents error when working with empty spectra
+            if sp_size == 0:
+                continue
+
+            # values for each eic in the current scan
+            ind_sp = np.searchsorted(sp.mz, mz_intervals)  # slices for each eic
+            has_mz = (ind_sp[1::2] - ind_sp[::2]) > 0  # find non-empty slices
+            # elements added at the end of mz_sp raise IndexError
+            ind_sp[ind_sp >= sp_size] = sp_size - 1
+            # this adds the values between two consecutive indices
+            tmp_eic = np.where(
+                has_mz, np.add.reduceat(sp.spint, ind_sp)[::2], 0)
+            if accumulator == "mean":
+                norm = ind_sp[1::2] - ind_sp[::2]
+                norm[norm == 0] = 1
+                tmp_eic = tmp_eic / norm
+            eic[:, scan] = tmp_eic
+        valid_index = np.array(valid_index)
+        rt = rt[valid_index]
+        eic = eic[:, valid_index]
+
+        chromatograms = list()
+        for row in eic:
+            chromatogram = lcms.Chromatogram(
+                rt.copy(), row, mode=self.separation)
+            chromatograms.append(chromatogram)
+        return chromatograms
+
+    def make_tic(self,
+                 kind: str = "tic",
+                 ms_level: int = 1,
+                 start: int = 0,
+                 end: Optional[int] = None,
+                 start_time: float = 0.0,
+                 end_time: Optional[float] = None,
+                 ) -> lcms.Chromatogram:
+        """
+        Creates a total ion chromatogram.
+
+        Parameters
+        ----------
+        kind: {"tic", "bpi"}, default="tic"
+            `tic` computes the total ion chromatogram. `bpi` computes the base
+            peak chromatogram.
+        ms_level : int, default=1
+            ms level used to build the chromatogram.
+        start : int, default=0
+            Create the chromatogram starting at this scan
+        end : int or None, default=None
+            End chromatograms at this scan. By default, use all scans.
+        start_time : float, default=0.0
+            include scans starting at this acquisition time.
+        end_time : float or None, default=None
+            Stops when the acquisition time is higher than this value. If None,
+            it doesn't filter scans by time.
+
+        Returns
+        -------
+        chromatograms : lcms.Chromatograms
+
+        """
+        if kind == "tic":
+            reduce = np.sum
+        elif kind == "bpi":
+            reduce = np.max
+        else:
+            msg = "valid modes are tic or bpi"
+            raise ValueError(msg)
+
+        n_scan = self.get_n_spectra()
+        rt = np.zeros(n_scan)
+        tic = np.zeros(n_scan)
+        valid_index = list()
+        # it is not possible to know a priori how many scans of each level are
+        # available in a given file without iterating over it. valid_index holds
+        # the index related to the selected level and is used to remove scans
+        # from other levels.
+        sp_iterator = self.get_spectra_iterator(
+            ms_level, start, end, start_time, end_time)
+        for scan, sp in sp_iterator:
+            valid_index.append(scan)
+            rt[scan] = sp.time
+            if sp.spint.size:
+                tic[scan] = reduce(sp.spint)
+            else:
+                tic[scan] = 0
+        tic = tic[valid_index]
+        rt = rt[valid_index]
+        return lcms.Chromatogram(rt, tic, self.separation)
+
+    @v.validated_ms_data(v.accumulate_spectra_schema)
+    def accumulate_spectra(
+        self,
+        start: int,
+        end: int,
+        subtract_left: Optional[int] = None,
+        subtract_right: Optional[int] = None,
+        ms_level: int = 1
+    ) -> lcms.MSSpectrum:
+        """
+        accumulates a series of consecutive spectra into a single spectrum.
+
+        Parameters
+        ----------
+        start: int
+            Start accumulating scans at this scan number.
+        end: int
+            Ends accumulation at this scan number. Scans in the range
+            [start:end) are used
+        subtract_left : int or None, default=None
+            Scans in the range [subtract_left:start) are subtracted from the
+            accumulated spectrum. If ``None``, don't subtract anything.
+        subtract_right : int, or None, default=None
+            Scans in the range [end:subtract_right) are subtracted from the
+            accumulated spectrum. If ``None``, don't subtract anything.
+        ms_level : int, default=1
+            ms level used to build the accumulated spectrum.
+
+        Returns
+        -------
+        MSSpectrum
+
+        """
+        if self.ms_mode == "centroid":
+            sp = self._accumulate_spectra_centroid(
+                start, end, subtract_left, subtract_right, ms_level)
+        else:   # profile
+            sp = self._accumulate_spectra_profile(
+                start, end, subtract_left, subtract_right, ms_level)
+        return sp
+
+    def get_rt(
+            self,
+            start: int = 0,
+            end: Optional[int] = None,
+            ms_level: int = 1,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None
+    ) -> np.ndarray:
+        """
+        Gets the retention time array for the experiment.
+
+        Parameters
+        ----------
+        start : int, default=0
+            include values starting from this scan number.
+        end : int or None, default=None
+            include values until this scan number. If None, ends after the last
+            scan.
+        ms_level : int, default=1
+            Use scans from this ms level.
+        start_time : float, default=0.0
+            Use scans with acquisition time greater than this value.
+        end_time : float or None, defaults=None
+            If specified, includes scans with acquisition times lower than
+            this value.
 
         Returns
         -------
         rt : np.ndarray
+
         ms_level : int, optional
-            data level to use. If None return a retention time array for all
+            data level to use. If None returns a retention time array for all
             levels.
 
         """
-        nsp = self.reader.getNrSpectra()
-        rt = np.zeros(nsp)
-        level = np.zeros(nsp, dtype=bool)
-        for k in range(nsp):
-            sp = self.reader.getSpectrum(k)
-            rt[k] = sp.getRT()
-            if ms_level is not None:
-                level[k] = (sp.getMSLevel() == ms_level)
+        sp_iter = self.get_spectra_iterator(
+            ms_level, start, end, start_time, end_time)
+        rt = list()
+        for _, sp in sp_iter:
+            rt.append(sp.time)
+        return np.array(rt)
 
-        if ms_level is not None:
-            rt = rt[level]
-        return rt
-
-    def make_roi(self, tolerance: Optional[float] = None,
-                 max_missing: Optional[int] = None,
-                 min_length: Optional[int] = None,
-                 min_intensity: Optional[float] = None,
-                 multiple_match: str = "reduce",
-                 mz_reduce: Union[str, Callable] = None,
-                 sp_reduce: Union[str, Callable] = "sum",
-                 start: Optional[int] = None, end: Optional[int] = None,
-                 targeted_mz: Optional[np.ndarray] = None,
-                 pad: Optional[int] = None,
-                 ms_level: Optional[int] = None) -> List[lcms.Roi]:
+    @v.validated_ms_data(v.make_roi_schema)
+    def make_roi(
+        self,
+        tolerance: Optional[float] = None,
+        max_missing: Optional[int] = None,
+        min_length: Optional[int] = None,
+        min_intensity: float = 0.0,
+        multiple_match: str = "reduce",
+        mz_reduce: Union[str, Callable] = "mean",
+        sp_reduce: Union[str, Callable] = "sum",
+        targeted_mz: Optional[np.ndarray] = None,
+        pad: Optional[int] = None,
+        ms_level: int = 1,
+        start: int = 0,
+        end: Optional[int] = None,
+        start_time: float = 0.0,
+        end_time: Optional[float] = None
+    ) -> List[lcms.Roi]:
         """
         Builds regions of interest from raw data.
 
+        See the Notes for a detailed description of the algorithm used.
+
         Parameters
         ----------
-        tolerance : positive number, optional
-            m/z tolerance to connect values across scans
-        max_missing : non negative integer, optional
-            maximum number of consecutive missing values. when a ROI surpass
-            this number the ROI is flagged as finished and is added to the
-            ROI list if it meets the length and intensity criteria.
-        min_length : positive integer, optional
-            The minimum length of a roi to be considered valid.
-        min_intensity : non negative number
-            Minimum intensity in a ROI to be considered valid.
-        start : int, optional
-            First scan to analyze. If None starts at scan 0
-        end : int, optional
-            Last scan to analyze. If None, uses the last scan number.
-        pad: int, optional
+        tolerance : positive number or None, default=None
+            m/z tolerance to connect values across scans. If None, the value is
+            set based on the value of ``self.instrument``. If
+            ``self.instrument`` is ``"qtof"``, the tolerance is ``0.01``. If
+            ``self.instrument`` is ``"orbitrap"``, the tolerance is ``0.005``
+        max_missing : non-negative integer or None, default=None
+            maximum number of consecutive missing values in a valid  ROI. If
+            ``None``, the value is set to ``1``.
+        min_length : positive integer or None, default=None
+            The minimum length of a valid ROI. If, ``None``, the value is set
+            based on ``self.separation``. If ``self.separation`` is ``"uplc"``,
+            the value is set to ``10``. If ``self.separation`` is ``"hplc"``,
+            the value is set to ``20``.
+        min_intensity : non-negative number , default=0.0
+            Minimum intensity in a valid ROI.
+        pad: int or None, default=None
             Pad dummy values to the left and right of the ROI. This produces
             better peak picking results when searching low intensity peaks in a
-            ROI.
-        multiple_match : {"closest", "reduce"}
-            How to match peaks when there is more than one match. If `closest`
-            is used, then the closest peak is assigned as a match and the
-            others are used to create a new ROI. If `reduce` is used, then
+            ROI. Using None set the value to ``2`` if ``self.separation`` is
+            ``"uplc"`` or ``"hplc"``.
+        multiple_match : {"closest", "reduce"}, default="reduce"
+            How peaks are matched when there is more than one valid match. If
+            ``"closest"`` is used, the closest peak is assigned as a match and
+            the others are used to create new ROIs. If ``"reduce"`` is used,
             unique m/z and intensity values are generated using the reduce
             function in `mz_reduce` and `sp_reduce` respectively.
-        mz_reduce : "mean" or Callable
-            function used to reduce m/z values. It Can be any function accepting
-            numpy arrays and returning numbers. Used only when `multiple_match`
-            is set to "reduce". See the following prototype:
+        mz_reduce : "mean" or Callable, default="mean"
+            Function used to reduce m/z values. If ``"mean"`` is used, the mean
+            value of all valid m/z is used. Any function that accepts numpy
+            arrays and return numbers can be used. Used only when
+            `multiple_match` is set to ``"reduce"``. See the following
+            prototype:
 
             .. code-block:: python
 
                 def mz_reduce(mz_match: np.ndarray) -> float:
                     pass
 
-        sp_reduce : {"mean", "sum"} or Callable
-            function used to reduce intensity values. It Can be any function
-            accepting numpy arrays and returning numbers. Only used when
-            `multiple_match` is set to "reduce". See the prototype shown on
-            `mz_reduce`.
-        targeted_mz : numpy.ndarray, optional
+        sp_reduce : {"mean", "sum"} or Callable, default="sum"
+            Function used to reduce intensity values. ``"mean"`` computes the
+            mean intensity and ``"sum"`` computes the total intensity. Any
+            function that accepts numpy arrays and return numbers can be used.
+            Only used when `multiple_match` is set to ``"reduce"``. See the
+            prototype shown on `mz_reduce`.
+        targeted_mz : numpy.ndarray or None, default=None
             A list of m/z values to perform a targeted ROI creation. If this
             value is provided, only ROI with these m/z values will be created.
-        ms_level : int, optional
-            data level used to build the chromatograms. By default, level 1 is
-            used.
+        ms_level : int, default=1
+            ms level used to build the ROI.
+        start : int, default=0
+            Create ROI starting at this scan
+        end : int or None, default=None
+            Stop ROI creation at this scan. If None, stops after the last scan
+            in the file.
+        start_time : float, default=0.0
+            Use scans starting at this acquisition time.
+        end_time : float or None, default=None
+            Stops when the acquisition time is higher than this value.
 
         Notes
         -----
-
         ROIs are built using the method described in [TR08]_ with slight
         modifications.
 
@@ -584,7 +779,7 @@ class MSData:
 
         Returns
         -------
-        roi_list : list[Roi]
+        roi : list[Roi]
             A list with the detected regions of interest.
 
         Raises
@@ -595,7 +790,6 @@ class MSData:
         See Also
         --------
         lcms.Roi : Representation of a ROI.
-        lcms.get_make_roi_params : get default parameters for the function
 
         References
         ----------
@@ -604,64 +798,276 @@ class MSData:
             504 (2008). https://doi.org/10.1186/1471-2105-9-504
 
         """
+
         if self.ms_mode != "centroid":
-            msg = "Data must be in centroid mode to create ROIs."
+            msg = "Data must be in centroid mode to use this method."
             raise ValueError(msg)
 
-        params = {"tolerance": tolerance, "max_missing": max_missing,
-                  "min_length": min_length, "min_intensity": min_intensity,
-                  "multiple_match": multiple_match, "mz_reduce": mz_reduce,
-                  "sp_reduce": sp_reduce, "start": start, "end": end,
-                  "targeted_mz": targeted_mz, "mode": self.separation,
-                  "ms_level": ms_level, "pad": pad}
-        params = {k: v for k, v in params.items() if v is not None}
-        roi_params = lcms.get_roi_params(self.separation, self.instrument)
-        roi_params.update(params)
-        n_spectra = self.reader.getNrSpectra()
-        validation.validate_make_roi_params(n_spectra, roi_params)
-        roi_list = lcms.make_roi(self.reader, **roi_params)
-        return roi_list
+        if targeted_mz is None:
+            mz_seed = self.get_spectrum(start).mz
+            targeted = False
+        else:
+            mz_seed = targeted_mz
+            targeted = True
+
+        rt = np.zeros(self.get_n_spectra())
+        processor = lcms.RoiMaker(
+            mz_seed,
+            max_missing=max_missing,
+            min_length=min_length,
+            min_intensity=min_intensity,
+            tolerance=tolerance,
+            multiple_match=multiple_match,
+            mz_reduce=mz_reduce,
+            sp_reduce=sp_reduce,
+            targeted=targeted
+        )
+
+        scans = list()  # scan number used in to build ROI
+        sp_iterator = self.get_spectra_iterator(
+            ms_level,
+            start,
+            end,
+            start_time,
+            end_time
+        )
+        for scan, sp in sp_iterator:
+            rt[scan] = sp.time
+            scans.append(scan)
+            processor.extend_roi(sp.mz, sp.spint, scan)
+            processor.store_completed_roi()
+
+        # add roi not completed during the last scan
+        processor.flag_as_completed()
+        processor.store_completed_roi()
+
+        # extend roi, find rt of each roi and convert to Roi objects
+        roi = processor.process_completed_roi(scans, rt, pad, self.separation)
+        return roi
+
+    def _accumulate_spectra_centroid(
+        self,
+        start: int,
+        end: int,
+        subtract_left: int,
+        subtract_right: int,
+        ms_level: int = 1
+    ) -> lcms.MSSpectrum:
+        """
+        accumulates a series of consecutive spectra into a single spectrum.
+
+        auxiliary method for accumulate_spectra.
+
+        """
+        # don't remove any m/z value when detecting rois
+        max_missing = subtract_right - subtract_left
+
+        roi = self.make_roi(
+            max_missing=max_missing,
+            min_length=1,
+            start=subtract_left,
+            end=subtract_right,
+            ms_level=ms_level
+        )
+
+        mz = np.zeros(len(roi))
+        spint = mz.copy()
+
+        # set subtract values to negative
+        for k, r in enumerate(roi):
+            accum_mask = - np.ones(r.scan.size)
+            accum_start, accum_end = np.searchsorted(r.scan, [start, end])
+            accum_mask[accum_start:accum_end] = 1
+            mz[k] = np.nanmean(r.mz)
+            spint[k] = np.nansum(r.spint * accum_mask)
+
+        # remove negative values
+        pos_values = spint > 0
+        mz = mz[pos_values]
+        spint = spint[pos_values]
+
+        # sort values
+        sorted_index = np.argsort(mz)
+        mz = mz[sorted_index]
+        spint = spint[sorted_index]
+
+        sp = lcms.MSSpectrum(
+            mz, spint, ms_level=ms_level, instrument=self.instrument)
+        return sp
+
+    def _accumulate_spectra_profile(
+        self,
+        start: int,
+        end: int,
+        subtract_left: int,
+        subtract_right: int,
+        ms_level: int = 1,
+    ) -> lcms.MSSpectrum:
+        """
+        aux method for accumulate_spectra.
+
+        """
+        # The spectra are accumulated in two steps:
+        #
+        #  1.  iterate through scans to build a grid of m/z values for the
+        #      accumulated spectra.
+        #  2.  A second iteration is done to interpolate the intensity in each
+        #      scan to the m/z grid and generate the accumulated spectrum.
+        #
+        #  This process is done in two steps to avoid storing the intensity
+        #  values from each scan until the grid is built.
+
+        accum_mz = None
+        # m/z tol. A small value is used to prevent distortions in the results
+        tol = 0.00005
+        sp_iter = self.get_spectra_iterator(
+            ms_level,
+            subtract_left,
+            subtract_right
+        )
+        # first iteration. Builds a grid of m/z values for the accumulated
+        # spectrum. The grid is extended using new m/z values that appear
+        # in each new scan
+        for scan, sp in sp_iter:
+            if accum_mz is None:
+                accum_mz = sp.mz
+            ind = find_closest(accum_mz, sp.mz)
+            no_match = np.abs(accum_mz[ind] - sp.mz) > tol
+            accum_mz = np.sort(np.hstack((accum_mz, sp.mz[no_match])))
+
+        accum_sp = np.zeros_like(accum_mz)
+        sp_iter = self.get_spectra_iterator(
+            ms_level,
+            subtract_left,
+            subtract_right
+        )
+
+        for scan, sp in sp_iter:
+            interpolator = interp1d(sp.mz, sp.spint, fill_value=0.0)
+            if (scan < start) or (scan > end):
+                sign = -1
+            else:
+                sign = 1
+            accum_sp += interpolator(accum_mz) * sign
+
+        # set negative values that may result from subtraction to zero
+        is_positive_sp = accum_sp > 0
+        accum_mz = accum_mz[is_positive_sp]
+        accum_sp = accum_sp[is_positive_sp]
+
+        res = lcms.MSSpectrum(
+            accum_mz,
+            accum_sp,
+            instrument=self.instrument,
+            ms_level=ms_level,
+            is_centroid=False
+        )
+        return res
 
 
-def _reader(path: str, on_disc: bool = True):
+class SimulatedMSData(MSData):  # pragma: no cover
     """
-    Load `path` file into an OnDiskExperiment. If the file is not indexed, load
-    the file.
-
-    Parameters
-    ----------
-    path : str
-        path to read mzML file from.
-    on_disc : bool
-        if True doesn't load the whole file on memory.
-
-    Returns
-    -------
-    pyopenms.OnDiskMSExperiment or pyopenms.MSExperiment
+    Emulates a MSData using simulated data. Used for tests.
 
     """
-    if on_disc:
-        try:
-            exp_reader = pyopenms.OnDiscMSExperiment()
-            exp_reader.openFile(path)
-            # this checks if OnDiscMSExperiment can be used else switch
-            # to MSExperiment
-            exp_reader.getSpectrum(0)
-        except RuntimeError:
-            msg = "{} is not an indexed mzML file, switching to MSExperiment"
-            warnings.warn(msg.format(path))
-            exp_reader = pyopenms.MSExperiment()
-            pyopenms.MzMLFile().load(path, exp_reader)
-    else:
-        exp_reader = pyopenms.MSExperiment()
-        pyopenms.MzMLFile().load(path, exp_reader)
-    return exp_reader
+    def __init__(self, mz_values: np.ndarray, rt_values: np.ndarray,
+                 mz_params: np.ndarray, rt_params: np.ndarray,
+                 ft_noise: Optional[np.ndarray] = None,
+                 noise: Optional[float] = None, ms_mode: str = "centroid",
+                 separation: str = "uplc", instrument: str = "qtof"):
+        """
+        Constructor function
 
+        Parameters
+        ----------
+        mz_values : array
+            sorted mz values for each mz scan, used to build spectra in profile
+            mode.
+        rt_values : array
+            sorted rt values, used to set scan time.
+        mz_params : array with shape (n, 3)
+             Used to build m/z peaks. Each row is the mean, standard deviation
+             and amplitude in the m/z dimension.
+        rt_params : array with shape (n, 3)
+             Used to build rt peaks. Each row is the mean, standard deviation
+             and amplitude in the rt dimension
+        ft_noise : array_with shape (n, 2), optional
+            adds noise to mz and rt values
+        noise : positive number, optional
+            noise level to add to each scan. the noise is modeled as gaussian
+            iid noise in each scan with standard deviation equal to the value
+            used. An offset value is added to make the noise contribution
+            non-negative. To make the noise values reproducible, each scan has
+            a seed value associated to generate always the same noise value in
+            a given scan. seed values are generated randomly each time a new
+            object is instantiated.
 
-def _get_cache_path() -> str:
-    cache_path = os.path.join("~", ".tidyms")
-    cache_path = os.path.expanduser(cache_path)
-    return cache_path
+        """
+        # MSData params
+        self._spectra_offset = None
+        self._chromatogram_offset = None
+        self._index_offset = None
+        self.path = None
+
+        self.ms_mode = ms_mode
+        self.instrument = instrument
+        self.separation = separation
+
+        # simulation params
+        self.mz = mz_values
+        self.mz_params = mz_params
+        self.rt = rt_values
+        self.n_scans = rt_values.size
+        self._seeds = None
+        self._noise_level = None
+        self.ft_noise = ft_noise
+        # seeds are used to ensure that each time that a spectra is generated
+        # with get_spectra its values are the same
+        self._seeds = np.random.choice(self.n_scans * 10, self.n_scans)
+        self._noise_level = noise
+
+        if ft_noise is not None:
+            np.random.seed(self._seeds[0])
+            rt_params[0] += np.random.normal(scale=ft_noise[1])
+        self.rt_array = gaussian_mixture(rt_values, rt_params)
+
+    def get_n_spectra(self):
+        return self.n_scans
+
+    def get_spectrum(self, scan_number: int):
+        is_valid_scan = (0 <= scan_number) and (self.n_scans > scan_number)
+        if not is_valid_scan:
+            msg = "Invalid scan number."
+            raise ValueError(msg)
+        rt = self.rt[scan_number]
+
+        # create a mz array for the current scan
+        if self.ft_noise is not None:
+            np.random.seed(self._seeds[scan_number])
+            mz_noise = np.random.normal(scale=self.ft_noise[0])
+            mz_params = self.mz_params.copy()
+            mz_params[:, 0] += mz_noise
+        else:
+            mz_params = self.mz_params
+
+        if self.ms_mode == "centroid":
+            mz = mz_params[:, 0]
+            spint = self.rt_array[:, scan_number] * mz_params[:, 1]
+        else:
+            mz = self.mz
+            mz_array = gaussian_mixture(self.mz, mz_params)
+            spint = self.rt_array[:, scan_number][:, np.newaxis] * mz_array
+            spint = spint.sum(axis=0)
+
+        if self._noise_level is not None:
+            np.random.seed(self._seeds[scan_number])
+            noise = np.random.normal(size=mz.size, scale=self._noise_level)
+            noise -= noise.min()
+            spint += noise
+        sp = lcms.MSSpectrum(
+            mz, spint, time=rt, ms_level=1, instrument=self.instrument,
+            is_centroid=(self.ms_mode == "centroid"))
+        return sp
 
 
 def list_available_datasets(hide_test_data: bool = True) -> List[str]:
@@ -694,9 +1100,9 @@ def _check_dataset_name(name: str):
 
 
 def _download_dataset(name: str):
-    """Download a dataset from github"""
+    """Download a dataset from GitHub"""
     _check_dataset_name(name)
-    cache_path = _get_cache_path()
+    cache_path = get_cache_path()
     dataset_path = os.path.join(cache_path, name)
     if not os.path.exists(dataset_path):
         os.makedirs(dataset_path)
@@ -731,7 +1137,7 @@ def load_dataset(name: str, cache: bool = True, **kwargs) -> DataContainer:
     sample_metadata : DataFrame
 
     """
-    cache_path = _get_cache_path()
+    cache_path = get_cache_path()
     dataset_path = os.path.join(cache_path, name)
     sample_path = os.path.join(dataset_path, "sample.csv")
     feature_path = os.path.join(dataset_path, "feature.csv")
