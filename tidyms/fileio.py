@@ -36,7 +36,7 @@ from .container import DataContainer
 from ._names import *
 from . import lcms
 from . import validation as v
-from .utils import get_cache_path, gaussian_mixture, find_closest
+from .utils import get_tidyms_path, gaussian_mixture, find_closest
 from ._mzml import build_offset_list, get_spectrum, get_chromatogram
 
 
@@ -1102,7 +1102,7 @@ def _check_dataset_name(name: str):
 def _download_dataset(name: str):
     """Download a dataset from GitHub"""
     _check_dataset_name(name)
-    cache_path = get_cache_path()
+    cache_path = get_tidyms_path()
     dataset_path = os.path.join(cache_path, name)
     if not os.path.exists(dataset_path):
         os.makedirs(dataset_path)
@@ -1137,7 +1137,7 @@ def load_dataset(name: str, cache: bool = True, **kwargs) -> DataContainer:
     sample_metadata : DataFrame
 
     """
-    cache_path = get_cache_path()
+    cache_path = get_tidyms_path()
     dataset_path = os.path.join(cache_path, name)
     sample_path = os.path.join(dataset_path, "sample.csv")
     feature_path = os.path.join(dataset_path, "feature.csv")

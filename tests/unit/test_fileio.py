@@ -1,6 +1,6 @@
 from tidyms import fileio
 from tidyms.lcms import Chromatogram
-from tidyms.utils import get_cache_path
+from tidyms.utils import get_tidyms_path
 import os
 import pytest
 import numpy as np
@@ -11,7 +11,7 @@ mz_list = np.array([200, 250, 300, 420, 450])
 
 def test_read_mzmine():
     dataset_name = "test-mzmine"
-    cache_path = get_cache_path()
+    cache_path = get_tidyms_path()
     data_path = os.path.join(cache_path, dataset_name)
     data_matrix_path = os.path.join(data_path, "data.csv")
     sample_metadata_path = os.path.join(data_path, "sample.csv")
@@ -26,7 +26,7 @@ def test_read_mzmine():
 def test_read_progenesis():
     # progenesis data is contained in one file
     dataset_name = "test-progenesis"
-    cache_path = get_cache_path()
+    cache_path = get_tidyms_path()
     data_path = os.path.join(cache_path, dataset_name)
     data_matrix_path = os.path.join(data_path, "data.csv")
     try:
@@ -39,7 +39,7 @@ def test_read_progenesis():
 
 def test_read_xcms():
     dataset_name = "test-xcms"
-    cache_path = get_cache_path()
+    cache_path = get_tidyms_path()
     data_path = os.path.join(cache_path, dataset_name)
     data_matrix_path = os.path.join(data_path, "data.csv")
     sample_metadata_path = os.path.join(data_path, "sample.csv")
@@ -56,7 +56,7 @@ def test_read_xcms():
 
 @pytest.fixture
 def centroid_mzml():
-    cache_path = get_cache_path()
+    cache_path = get_tidyms_path()
     dataset_name = "test-raw-data"
     filename = "centroid-data-zlib-indexed-compressed.mzML"
     data_path = os.path.join(cache_path, dataset_name, filename)
@@ -66,7 +66,7 @@ def centroid_mzml():
 
 @pytest.fixture
 def profile_mzml():
-    cache_path = get_cache_path()
+    cache_path = get_tidyms_path()
     filename = "profile-data-zlib-indexed-compressed.mzML"
     data_path = os.path.join(cache_path, "test-raw-data", filename)
     ms_data = fileio.MSData(data_path, ms_mode="profile")
@@ -89,7 +89,7 @@ def test_read_compressed_indexed_mzml(centroid_mzml):
 
 
 def test_read_uncompressed_indexed_mzml():
-    cache_path = get_cache_path()
+    cache_path = get_tidyms_path()
     filename = "centroid-data-indexed-uncompressed.mzML"
     data_path = os.path.join(cache_path, "test-raw-data", filename)
     ms_data = fileio.MSData(data_path)
@@ -108,7 +108,7 @@ def test_read_uncompressed_indexed_mzml():
 
 
 def test_read_compressed_no_index_mzml():
-    cache_path = get_cache_path()
+    cache_path = get_tidyms_path()
     filename = "centroid-data-zlib-no-index-compressed.mzML"
     data_path = os.path.join(cache_path, "test-raw-data", filename)
     ms_data = fileio.MSData(data_path)
