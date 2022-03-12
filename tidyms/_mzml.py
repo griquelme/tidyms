@@ -19,6 +19,26 @@ from typing import Dict, List, Tuple
 from xml.etree.ElementTree import fromstring
 from xml.etree.ElementTree import Element
 
+# Rationale for the implementation:
+# mzML files can have typical sizes that span from 50 MiB to more than 1000 MiB.
+# mzML files are basically xml files with the acquired data and metadata
+# associated with the acquisition conditions. The data is inside <spectrum> and
+# <chromatogram> elements.  From the expected file sizes, it is clear that
+# loading the entire file in memory is not desirable.
+# There are tools to parse xml files in an incremental way (such as iterparse
+# inside the xml module), but the problem with this approach is that accessing a
+# specific scan in the file turns out to be rather slow.
+# Indexed mzML files have an <indexedmzML> tag that allows to search in a fast
+# way the location of spectrum and chromatogram tags.
+# Taking advantage of this information, this module search spectrum and
+# chromatogram elements and only loads the part associated with the selected
+# spectrum or chromatogram.
+# The function build_offset_list creates the list of offsets associated with
+# chromatograms and spectra using the information in <indexedmzML>. In the
+# case of non-indexed files, the offset list is built from scratch.
+# The functions get_spectrum and get_chromatogram takes the offset information
+# and extracts the relevant data from each spectrum/chromatogram.
+
 
 # mzml specification:
 # https://www.psidev.info/mzML
