@@ -62,7 +62,7 @@ class Peak:
 
     def get_loc(self, x: np.ndarray, y: np.ndarray) -> float:
         """
-        Finds the peak location as the weighted average of x using y as weights.
+        Finds the peak location in x, using y as weights.
 
         Parameters
         ----------
@@ -122,7 +122,8 @@ class Peak:
         area = trapz(baseline_corrected, x[self.start:self.end])
         return max(0.0, area)
 
-    def get_width(self, x: np.ndarray, y, baseline) -> float:
+    def get_width(self, x: np.ndarray, y: np.ndarray, baseline: np.ndarray
+                  ) -> float:
         """
         Computes the peak width, defined as the region where the 95 % of the
         total peak area is distributed.
@@ -204,7 +205,8 @@ class Peak:
 
         Returns
         -------
-        descriptors: a dictionary from descriptor names to values.
+        descriptors: dict
+            A mapping of descriptor names to descriptor values.
         """
         descriptors = {"height": self.get_height(y, baseline),
                        "area": self.get_area(x, y, baseline),
@@ -214,8 +216,12 @@ class Peak:
         return descriptors
 
 
-def detect_peaks(x: np.ndarray, noise: np.ndarray, baseline: np.ndarray,
-                 find_peaks_params: Optional[dict] = None) -> List[Peak]:
+def detect_peaks(
+        x: np.ndarray,
+        noise: np.ndarray,
+        baseline: np.ndarray,
+        find_peaks_params: Optional[dict] = None
+) -> List[Peak]:
     r"""
     Finds peaks in a 1D signal.
 
@@ -227,7 +233,7 @@ def detect_peaks(x: np.ndarray, noise: np.ndarray, baseline: np.ndarray,
         Noise level of x.
     baseline : array with the same size as x
         Baseline estimation of x
-    find_peaks_params : dict, optional
+    find_peaks_params : dict or None, default=None
         parameters to pass to :py:func:`scipy.signal.find_peaks`.
 
     Returns
@@ -284,11 +290,15 @@ def detect_peaks(x: np.ndarray, noise: np.ndarray, baseline: np.ndarray,
     return peaks
 
 
-def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
-                         baseline: np.ndarray, peaks: List[Peak],
-                         descriptors: Optional[Dict[str, Callable]] = None,
-                         filters: Optional[Dict[str, Tuple]] = None
-                         ) -> Tuple[List[Peak], List[Dict[str, float]]]:
+def get_peak_descriptors(
+        x: np.ndarray,
+        y: np.ndarray,
+        noise: np.ndarray,
+        baseline: np.ndarray,
+        peaks: List[Peak],
+        descriptors: Optional[Dict[str, Callable]] = None,
+        filters: Optional[Dict[str, Tuple]] = None
+) -> Tuple[List[Peak], List[Dict[str, float]]]:
     """
     Computes peak descriptors for a list of peaks.
 
@@ -305,7 +315,7 @@ def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
     baseline: array with the same size as x.
         Baseline estimation of y.
     peaks : List[Peaks]
-    descriptors : dict, optional
+    descriptors : dict or None, default=None
         A dictionary of strings to callables, used to estimate custom
         descriptors of a peak. The function must have the following signature:
 
@@ -313,7 +323,7 @@ def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
 
             "estimator_func(x, y, noise, baseline, peak) -> float"
 
-    filters : dict, optional
+    filters : dict or None, default=None
         A dictionary of descriptor names to a tuple of minimum and maximum
         acceptable values. To use only minimum/maximum values, use None
         (e.g. (None, max_value) in the case of using only maximum).Peaks with
@@ -325,7 +335,7 @@ def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
     peaks : List[Peak]
         filtered list of peaks
     descriptors: List[dict]
-        list of descriptors for each peaks.
+        Descriptors for each peak.
 
     See Also
     --------
@@ -353,8 +363,12 @@ def get_peak_descriptors(x: np.ndarray, y: np.ndarray, noise: np.ndarray,
     return valid_peaks, descriptor_list
 
 
-def estimate_noise(x: np.ndarray, min_slice_size: int = 200,
-                   n_slices: int = 5, robust: bool = True) -> np.ndarray:
+def estimate_noise(
+        x: np.ndarray,
+        min_slice_size: int = 200,
+        n_slices: int = 5,
+        robust: bool = True
+) -> np.ndarray:
     """
     Estimates the noise level in a signal.
 
@@ -365,13 +379,13 @@ def estimate_noise(x: np.ndarray, min_slice_size: int = 200,
     Parameters
     ----------
     x : 1D array
-    min_slice_size : int, optional
+    min_slice_size : int, default=200
         Minimum size of a slice. If the size of x is smaller than this value,
         the noise is estimated using the whole array.
-    n_slices: int, optional
+    n_slices: int, default=5
         Number of slices to create. The size of each slice must be greater than
         `min_slice_size`.
-    robust : bool
+    robust : bool, default=True
         If True, estimates the noise using the median absolute deviation. Else
         uses the standard deviation.
 
@@ -396,8 +410,11 @@ def estimate_noise(x: np.ndarray, min_slice_size: int = 200,
     return noise
 
 
-def estimate_baseline(x: np.ndarray, noise: np.ndarray,
-                      min_proba: float = 0.05) -> np.ndarray:
+def estimate_baseline(
+        x: np.ndarray,
+        noise: np.ndarray,
+        min_proba: float = 0.05
+) -> np.ndarray:
     """
     Computes the baseline of a 1D signal.
 
@@ -407,9 +424,10 @@ def estimate_baseline(x: np.ndarray, noise: np.ndarray,
 
     Parameters
     ----------
-    x : non empty 1D array
-    noise : array obtained with estimate noise
-    min_proba : number between 0 and 1
+    x : non-empty 1D array
+    noise : array
+        Noise estimation obtained with ``estimate_noise``
+    min_proba : number between 0 and 1, default=0.05
 
     Returns
     -------
@@ -454,18 +472,49 @@ def find_centroids(mz: np.ndarray, spint: np.ndarray, min_snr: float,
     """
     noise = estimate_noise(spint)
     baseline = estimate_baseline(spint, noise)
-    peaks = detect_peaks(spint, noise, baseline)
-    filters = {"snr": (min_snr, None)}
-    peaks, estimators = get_peak_descriptors(mz, spint, noise, baseline, peaks,
-                                             filters=filters)
-    centroids = np.array([[x["loc"], x["area"]] for x in estimators])
-    if centroids.size:
-        centroid_mz, centroid_int = centroids.T
-        centroid_mz, centroid_int = \
-            _merge_close_peaks(centroid_mz, centroid_int, min_distance)
+    baseline_index = np.where((spint - baseline) < noise)[0]
+    prominence = 3 * noise
+    find_peaks_params = {"prominence": prominence, "distance": 3}
+
+    peaks = find_peaks(spint, **find_peaks_params)[0]
+    # remove peaks close to baseline level
+    peaks = np.setdiff1d(peaks, baseline_index, assume_unique=True)
+    peaks = peaks[((spint[peaks] - baseline[peaks]) / noise[peaks]) > min_snr]
+
+    start, end = _find_peak_extension(peaks, baseline_index)
+    start, end = _fix_peak_overlap(spint, start, peaks, end)
+    start, peaks, end = _normalize_peaks(spint, start, peaks, end)
+
+    # peak centroid and total intensity computation
+    # if m[0], ...,  m[n] is the m/z array and i[0], ..., i[n] is the
+    # intensity array, for a peak with start and indices k and l respectively,
+    # the total intensity A is A = \sum_{j=k}^{l} i[j] and the centroid C,
+    # computed as the weighted mean of the m/z is
+    # C = \sum_{j=k}^{l} m[j] * i[j] / A
+    # If we define the cumulative intensity I_{k} = \sum_{j=0}^{k} i[j]
+    # It is easy to see that A = I[l - 1] - I[k - 1]. The same can be done
+    # for the centroids defining the weights W[k] = \sum_{j=0}^{k} m[j] * i[j]
+    # C = (W[l - 1] - W[k - 1]) / A
+    if start.size:
+        cumulative_spint = np.cumsum(spint)
+        weights = np.cumsum(mz * spint)
+        start_cumulative_spint = cumulative_spint[start - 1]
+        if start[0] == 0:
+            # prevents using the last value from cumulative_spint
+            start_cumulative_spint[0] = 0
+        total_spint = cumulative_spint[end - 1] - start_cumulative_spint
+
+        start_weight = weights[start - 1]
+        if start[0] == 0:
+            start_weight[0] = 0
+        centroid = (weights[end] - start_weight) / total_spint
     else:
-        centroid_mz, centroid_int = np.array([]), np.array([])
-    return centroid_mz, centroid_int
+        centroid = np.array([])
+        total_spint = np.array([])
+
+    if centroid.size:
+        _merge_close_peaks(centroid, total_spint, min_distance)
+    return centroid, total_spint
 
 
 class InvalidPeakException(ValueError):
@@ -609,7 +658,7 @@ def _has_all_valid_descriptors(peak_descriptors: Dict[str, float],
     Parameters
     ----------
     peak_descriptors : dict
-        Dictionary from descriptors names to values.
+        mapping of descriptor names to descriptor values.
     filters : dict
         Dictionary from descriptors names to minimum and maximum acceptable
         values.
@@ -647,7 +696,7 @@ def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
 
     Returns
     -------
-    noise : non negative number.
+    noise : non-negative number.
 
     """
     d2x = np.diff(x, n=2)
@@ -797,19 +846,30 @@ def _get_noise_slice_sum_std(noise: np.ndarray,
     # consecutive slices, i.e: the sum between of y between extrema[0] and
     # extrema[1], extrema[1] and extrema[2]...
     # The last element is not used
-    # TODO: this should be replaced with a for loop for clarity
     reduce_ind = (np.vstack([extrema, np.roll(extrema + 1, -1)])
                     .T.reshape(extrema.size * 2)[:-1])
     return np.sqrt(np.add.reduceat(noise ** 2, reduce_ind)[::2])
 
 
 def _get_signal_sum(x, extrema):
-    x_sum = np.zeros(extrema.size - 1)
-    for k in range(extrema.size - 1):
-        s, e = extrema[k:k+2]
-        min_x = min(x[s], x[e])
-        x_sum[k] = x[s:e+1].sum() - (e + 1 - s) * min_x
-    return np.abs(x_sum)
+    # we want to compute the sum of x between a, b, where a and b two
+    # consecutive local maxima indices. if X is the cumulative sum of x, then
+    # the sum between a and b is X[b] - X[a - 1]. The sum must also be relative
+    # to the minimum between a and b. Because we are comparing intervals
+    # between loca extrema, the intervals are monotonic, and we just need to
+    # subtract the min(x[a], x[b]) multiplied by the length of the interval.
+    # this code achieves this in a vectorized way
+    cum_x = np.cumsum(x)
+    ext_shift = np.roll(extrema, -1)
+    n_times = ext_shift - extrema + 1
+    start_cum_int = cum_x[extrema - 1]
+    # first value set to 0 to avoid errors associated with roll
+    start_cum_int[0] = 0
+    x_sum = cum_x[ext_shift] - start_cum_int
+    x_min = np.minimum(x[ext_shift], x[extrema])
+    res = x_sum - n_times * x_min
+    res = res[:-1]
+    return res
 
 
 def _build_baseline_index(x: np.ndarray, noise_probability: np.ndarray,
@@ -874,7 +934,9 @@ def _include_first_and_last_index(x: np.ndarray,
 def _merge_close_peaks(mz: np.ndarray, spint: np.ndarray,
                        min_distance: float) -> Tuple[np.ndarray, np.ndarray]:
     dmz = np.diff(mz)
-    close_index = np.where(dmz < min_distance)[0]
+    is_close_mask = (dmz < min_distance) & (np.roll(dmz, -1) > min_distance)
+    is_close_mask[-1] = (mz[-1] - mz[-2]) < min_distance    # boundary case
+    close_index = np.where(is_close_mask)[0]
     while close_index.size > 0:
         # merge close centroids
         new_spint = spint[close_index] + spint[close_index + 1]
@@ -887,5 +949,9 @@ def _merge_close_peaks(mz: np.ndarray, spint: np.ndarray,
         mz = np.delete(mz, close_index + 1)
         spint = np.delete(spint, close_index + 1)
 
-        close_index = np.where(dmz < min_distance)[0]
+        # repeat until no close peaks are detected
+        dmz = np.diff(mz)
+        is_close_mask = (dmz < min_distance) & (np.roll(dmz, -1) > min_distance)
+        is_close_mask[-1] = (mz[-1] - mz[-2]) < min_distance
+        close_index = np.where(is_close_mask)[0]
     return mz, spint
