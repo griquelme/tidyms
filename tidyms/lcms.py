@@ -108,7 +108,7 @@ class MSSpectrum:
 
         Returns
         -------
-        centroids : array
+        centroid : array
             m/z centroids. If ``self.is_centroid`` is ``True``, returns
             ``self.mz``.
         area : array
@@ -464,8 +464,7 @@ def get_find_centroid_params(instrument: str) -> dict:
     params = {"min_snr": 10}
     if instrument == "qtof":
         md = 0.01
-    else:
-        # valid values for instrument are qtof or orbitrap
+    else:   # orbitrap
         md = 0.005
     params["min_distance"] = md
     return params
