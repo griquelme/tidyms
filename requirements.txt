@@ -4,7 +4,6 @@ ipython
 numpy
 numpydoc
 pandas
-pyopenms
 pytest
 pytest-cov
 PyYAML
