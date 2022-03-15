@@ -6,16 +6,8 @@ Validation functions for Filter, Pipelines and DataContainer
 import warnings
 from functools import wraps
 from inspect import getfullargspec
-from os import getcwd
-from os.path import isdir
-from os.path import join
 import cerberus
 from typing import Callable
-
-# TODO: validate DataContainer using cerberus
-
-
-# functions used by check_with
 import numpy as np
 
 
@@ -51,14 +43,14 @@ def validate(params: dict, validator: cerberus.Validator) -> dict:
     ------
     ValueError: if any of the parameters are invalid.
     """
-    validated = validator.validated(params)
-    if not validated:
+    normalized = validator.normalized(params)
+    if not validator.validate(normalized):
         msg = ""
         for field, e_msgs in validator.errors.items():
             for e_msg in e_msgs:
                 msg += "{}: {}\n".format(field, e_msg)
         raise ValueError(msg)
-    return validated
+    return normalized
 
 
 class ValidatorWithLowerThan(cerberus.Validator):
@@ -120,7 +112,7 @@ def validate_data_matrix(df):
         msg = "Some columns have non float values: {}."
         msg = msg.format(", ".join(no_float_columns))
         raise TypeError(msg)
-    # check that all elements are non negative
+    # check that all elements are non-negative
     if (df < 0).sum().sum():
         raise ValueError("Data matrix has negative elements")
     # check nan
@@ -323,7 +315,6 @@ def spectra_iterator_schema(ms_data):
         "end": {
             "type": "integer",
             "max": n_spectra,
-            "nullable": True,
             "default": n_spectra
         },
         "start_time": {
@@ -441,12 +432,12 @@ def make_roi_schema(ms_data):
         },
         "min_intensity": {
             "type": "number",
-            "is_positive": True,
+            "min": 0.0,
             "nullable": True
         },
         "min_length": {
             "type": "integer",
-            "is_positive": True,
+            "min": 1,
             "nullable": True,
         },
         "pad": {
@@ -477,6 +468,14 @@ def make_roi_schema(ms_data):
         "end_time": {
             "type": "number",
             "nullable": True,
+        },
+        "min_snr": {
+            "type": "number",
+            "is_positive": True,
+        },
+        "min_distance": {
+            "type": "number",
+            "is_positive": True,
         }
     }
     defaults = make_roi_defaults(ms_data)
