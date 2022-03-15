@@ -8,10 +8,10 @@ gaussian_mixture(x, params) : create an array with several gaussian curves
 normalize(df, method) : adjust row values of a DataFrame
 scale(df, method) : adjust column values of a DataFrame
 transform(df, method) : perform element-wise transformation on a DataFrame
-sample_to_path(samples, path) : find files in path with name equal to samples
+sample_to_path(samples, path) : find files with names equal to the samples
 cv(df) : Computes the coefficient of variation for columns of a DataFrame
 sd(df) : Computes the std of a DataFrame and fills missing values with zeroes.
-iqr(df) : Computes the inter-quartile range  of a DataFrame and fills missing
+iqr(df) : Computes the interquartile range  of a DataFrame and fills missing
 values with zeroes.
 mad(df) : Computes the median absolute deviation for column in a DataFrame.
 Fill missing values with zeroes.
@@ -29,6 +29,7 @@ from statsmodels.stats.stattools import jarque_bera, durbin_watson
 from scipy.stats import spearmanr, median_abs_deviation
 import os.path
 from typing import Optional, Union
+import json
 
 data_type = Union[pd.DataFrame, pd.Series]
 reduced_type = Union[pd.Series, float]
@@ -61,7 +62,7 @@ def gaussian_mixture(x: np.ndarray, params: np.ndarray
 
     Parameters
     ----------
-    x : np.array
+    x : array
     params: np.ndarray
         parameter for each curve the shape of the array is n_curves by
         3. Each row has parameters for one curve (mu, sigma, amp)
@@ -90,7 +91,7 @@ def normalize(df: pd.DataFrame, method: str,
         Normalization method. `sum` normalizes using the sum along each row,
         `max` normalizes using the maximum of each row. `euclidean` normalizes
         using the euclidean norm of the row. `feature` normalizes area using
-        the value of an specified feature
+        the value of a specified feature.
     feature: str, optional
         Feature used for normalization in `feature` mode.
 
@@ -414,114 +415,114 @@ def is_unique(s: pd.Series):
     return (s.size == s_unique.size) and (s.values == s.unique()).all()
 
 
-class SimulatedExperiment:  # pragma: no cover
+def get_tidyms_path() -> str:
     """
-    Emulates a pyopenms MSExperiment. Used for tests.
+    Returns the path to the directory where datasets and config files are
+    stored.
+
+    Returns
+    -------
+    path : str
+    """
+    cache_path = os.path.join("~", ".tidyms")
+    cache_path = os.path.expanduser(cache_path)
+    return cache_path
+
+
+def default_settings():
+    settings = {
+        "bokeh": {
+            "apply_theme": True,
+            "theme": {
+                "attrs": {
+                    "Axis": {
+                        "axis_label_text_font_style": "bold",
+                    },
+                }
+            },
+            "line": {
+                "line_width": 1,
+                "line_color": "black",
+                "line_alpha": 0.8,
+            },
+            "varea": {
+                "fill_alpha": 0.8,
+            },
+            "palette": {
+                "name": "Set3",
+                "size": 9,
+            },
+            "chromatogram": {
+                "figure": {
+                    "aspect_ratio": 1.5,
+                },
+                "xaxis": {
+                    "axis_label": "Rt [s]",
+                },
+                "yaxis": {
+                    "axis_label": "Intensity [au]",
+                }
+            },
+            "spectrum": {
+                "figure": {
+                    "aspect_ratio": 1.5,
+                },
+                "xaxis": {
+                    "axis_label": "m/z",
+                },
+                "yaxis": {
+                    "axis_label": "intensity [au]",
+                }
+            }
+        }
+    }
+    return settings
+
+
+def get_settings() -> dict:
+    """
+    Loads the settings into a dictionary object.
+
+    Returns
+    -------
+    settings : dict
 
     """
-    def __init__(self, mz_values: np.ndarray, rt_values: np.ndarray,
-                 mz_params: np.ndarray, rt_params: np.ndarray,
-                 ft_noise: Optional[np.ndarray] = None,
-                 noise: Optional[float] = None, mode: str = "centroid"):
-        """
-        Constructor function
+    tidyms_path = get_tidyms_path()
+    settings_path = os.path.join(tidyms_path, "settings.json")
+    defaults = default_settings()
+    exist_user_settings = os.path.isfile(settings_path)
+    mode = "r" if exist_user_settings else "w"
 
-        Parameters
-        ----------
-        mz_values : array
-            sorted mz values for each mz scan, used to build spectra in profile
-            mode.
-        rt_values : array
-            sorted rt values, used to set scan time.
-        mz_params : array with shape (n, 3)
-             Used to build m/z peaks. Each row is the mean, standard deviation
-             and amplitude in the m/z dimension.
-        rt_params : array with shape (n, 3)
-             Used to build rt peaks. Each row is the mean, standard deviation
-             and amplitude in the rt dimension
-        ft_noise : array_with shape (n, 2), optional
-            adds noise to mz and rt values
-        noise : positive number, optional
-            noise level to add to each scan. the noise is modeled as gaussian
-            iid noise in each scan with standard deviation equal to the value
-            used. An offset value is added to make the noise contribution
-            non negative. To make the noise values reproducible, each scan has
-            a seed value associated to generate always the same noise value in
-            a given scan. seed values are generated randomly each time a new
-            object is instantiated.
-        mode : {"centroid", "profile"}
-
-        """
-        self.mz = mz_values
-        self.mz_params = mz_params
-        self.rt = rt_values
-        self.n_scans = rt_values.size
-        self._seeds = None
-        self._noise_level = None
-        self.ft_noise = ft_noise
-        self.mode = mode
-        # seeds are used to ensure that each time that a spectra is generated
-        # with get_spectra its values are the same
-        self._seeds = np.random.choice(self.n_scans * 10, self.n_scans)
-        self._noise_level = noise
-
-        if ft_noise is not None:
-            np.random.seed(self._seeds[0])
-            rt_params[0] += np.random.normal(scale=ft_noise[1])
-        self.rt_array = gaussian_mixture(rt_values, rt_params)
-
-    def getNrSpectra(self):
-        return self.n_scans
-
-    def getSpectrum(self, scan_number: int):
-        is_valid_scan = (0 <= scan_number) and (self.n_scans > scan_number)
-        if not is_valid_scan:
-            msg = "Invalid scan number."
-            raise ValueError(msg)
-        rt = self.rt[scan_number]
-
-        # create a mz array for the current scan
-        if self.ft_noise is not None:
-            np.random.seed(self._seeds[scan_number])
-            mz_noise = np.random.normal(scale=self.ft_noise[0])
-            mz_params = self.mz_params.copy()
-            mz_params[:, 0] += mz_noise
+    with open(settings_path, mode) as fin:
+        if exist_user_settings:
+            user_settings = json.load(fin)
+            defaults.update(user_settings)
         else:
-            mz_params = self.mz_params
+            json.dump(defaults, fin)
+        settings = defaults
+    return settings
 
-        if self.mode == "centroid":
-            mz = mz_params[:, 0]
-            spint = self.rt_array[:, scan_number] * mz_params[:, 1]
+
+SETTINGS = get_settings()
+
+
+def is_notebook() -> bool:
+    """
+    Returns True if the environment is  jupyter notebook.
+
+    Returns
+    -------
+    bool
+
+    """
+    try:
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':
+            return True   # Jupyter notebook or qtconsole
+        elif shell == 'TerminalInteractiveShell':
+            return False  # Terminal running IPython
         else:
-            mz = self.mz
-            mz_array = gaussian_mixture(self.mz, mz_params)
-            spint = self.rt_array[:, scan_number][:, np.newaxis] * mz_array
-            spint = spint.sum(axis=0)
-
-        if self._noise_level is not None:
-            np.random.seed(self._seeds[scan_number])
-            noise = np.random.normal(size=mz.size, scale=self._noise_level)
-            noise -= noise.min()
-            spint += noise
-        sp = SimulatedSpectrum(mz, spint, rt)
-        return sp
-
-
-class SimulatedSpectrum:    # pragma: no cover
-    """
-    Emulates pyopenms Spectrum. Used for tests.
-    """
-    def __init__(self, mz: np.ndarray, spint: np.ndarray, rt: float):
-        self.mz = mz
-        self.spint = spint
-        self.rt = rt
-
-    def getRT(self):
-        return self.rt
-
-    def get_peaks(self):
-        return self.mz, self.spint
-
-    def getMSLevel(self):
-        return 1
-
+            return False  # Other type (?)
+    except NameError:
+        return False      # Probably standard Python interpreter
