@@ -29,8 +29,6 @@ __all__ = ["detect_features", "feature_correspondence", "make_data_container"]
 def detect_features(path: Union[Path, List[str]], separation: str = "uplc",
                     instrument: str = "qtof", roi_params: Optional[dict] = None,
                     smoothing_strength: Optional[float] = 1.0,
-                    noise_params: Optional[dict] = None,
-                    baseline_params: Optional[dict] = None,
                     find_peaks_params: Optional[dict] = None,
                     descriptors: Optional[dict] = None,
                     filters: Optional[dict] = None,
@@ -63,10 +61,6 @@ def detect_features(path: Union[Path, List[str]], separation: str = "uplc",
         descriptors to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
     filters : dict, optional
         filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
-    noise_params : dict, optional
-        parameters to pass to :py:func:`tidyms.peaks.estimate_noise`
-    baseline_params : dict, optional
-        parameters to pass to :py:func:`tidyms.peaks.estimate_baseline`
     descriptors : dict, optional
         pass custom descriptors to :py:func:`tidyms.peaks.get_peak_descriptors`
     filters : dict, optional
@@ -153,8 +147,6 @@ def detect_features(path: Union[Path, List[str]], separation: str = "uplc",
                                        smoothing_strength=smoothing_strength,
                                        descriptors=descriptors,
                                        filters=filters,
-                                       noise_params=noise_params,
-                                       baseline_params=baseline_params,
                                        find_peaks_params=find_peaks_params)
 
         if verbose:
@@ -197,8 +189,6 @@ def _build_feature_table(roi: List[Roi],
                          smoothing_strength: Optional[float] = 1.0,
                          descriptors: Optional[dict] = None,
                          filters: Optional[dict] = None,
-                         noise_params: Optional[dict] = None,
-                         baseline_params: Optional[dict] = None,
                          find_peaks_params: Optional[dict] = None
                          ) -> pd.DataFrame:
     """
@@ -216,10 +206,6 @@ def _build_feature_table(roi: List[Roi],
         descriptors to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
     filters : dict, optional
         filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
-    noise_params : dict, optional
-        parameters to pass to :py:func:`tidyms.peaks.estimate_noise`
-    baseline_params : dict, optional
-        parameters to pass to :py:func:`tidyms.peaks.estimate_baseline`
 
     Returns
     -------
@@ -237,8 +223,6 @@ def _build_feature_table(roi: List[Roi],
         k_params = k_roi.find_peaks(smoothing_strength=smoothing_strength,
                                     descriptors=descriptors,
                                     filters=filters,
-                                    noise_params=noise_params,
-                                    baseline_params=baseline_params,
                                     find_peaks_params=find_peaks_params)
         n_features = len(k_params)
         descriptors_list.extend(k_params)
@@ -441,7 +425,7 @@ def make_data_container(feature_data: pd.DataFrame, cluster: pd.Series,
     # TODO: manage data inputting
     missing = pd.DataFrame(data=0, index=missing_index,
                            columns=data_matrix.columns)
-    data_matrix = data_matrix.append(missing)
+    data_matrix = pd.concat((data_matrix, missing))
     data_matrix = data_matrix.loc[sample_metadata.index, :]
 
     dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
@@ -563,9 +547,9 @@ def _make_gmm(ft_data: pd.DataFrame, n_feature: int, cluster_name: str):
     """
     gmm = mixture.GaussianMixture(n_components=n_feature,
                                   covariance_type="diag")
-    gmm.fit(ft_data.loc[:, ["mz", "rt"]])
+    gmm.fit(ft_data.loc[:, ["mz", "rt"]].values)
     # scores = pd.Series(data=gmm.score_samples(ft_data), index=ft_data.index)
-    ft_data["score"] = gmm.score_samples(ft_data.loc[:, ["mz", "rt"]])
+    ft_data["score"] = gmm.score_samples(ft_data.loc[:, ["mz", "rt"]].values)
 
     # get index of features in the cases where the number of features is greater
     # than the number of components in the gmm
@@ -675,7 +659,7 @@ def _search_missing_features(cluster: pd.Series, sample_data: pd.Series,
             noise["sample"].isin(missing_samples), ["mz", "rt", "sample"]]
         if not missing_candidates.empty:
             candidates_scores = gmm.score_samples(
-                missing_candidates.loc[:, ["mz", "rt"]])
+                missing_candidates.loc[:, ["mz", "rt"]].values)
             is_candidate = candidates_scores > min_likelihood
             is_any_candidate = is_candidate.any()
             if is_any_candidate:
