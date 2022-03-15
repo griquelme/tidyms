@@ -25,7 +25,6 @@ PYTHON_REQUIRES = ">=3.8"
 
 INSTALL_REQUIRES = [
     'pandas',
-    'pyopenms',
     'numpy',
     'pyyaml',
     'statsmodels',
