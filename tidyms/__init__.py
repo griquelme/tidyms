@@ -20,7 +20,18 @@ from . import peaks
 from . import filter
 from . import lcms
 from . import simulation
+from . import _mzml
 from .metabolomics import *
 from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum
+
+if utils.SETTINGS["bokeh"]["apply_theme"]:
+    from bokeh.themes import Theme as _Theme
+    from bokeh.io import curdoc as _curdoc
+    theme = utils.SETTINGS["bokeh"]["theme"]
+    _curdoc().theme = _Theme(json=theme)
+
+if utils.is_notebook():
+    from bokeh.plotting import output_notebook as _output_notebook
+    _output_notebook()
