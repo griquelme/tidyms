@@ -6,18 +6,18 @@ Quickstart
 ==========
 
 TidyMS [1]_ is a Python package that provides tools to process and analyze
-Mass Spectrometry (MS) data. . Although suited for general use, it’s
-functionality was mostly intended to be used with data from LC-MS metabolomics
-experiments.It uses the `pyopenms <https://www.openms.de/>`_ package to read raw
-data in the mzML format and `Numpy <https://numpy.org/>`_,
-`Pandas <https://pandas.pydata.org/>`_ and
+Mass Spectrometry (MS) data. Although suited for general use, it was designed
+to be used with datasets from LC-HRMS metabolomics experiments. It uses
+`Numpy <https://numpy.org/>`_, `Pandas <https://pandas.pydata.org/>`_ and
 `scikit-learn <https://scikit-learn.org>`_ for data processing and analysis.
 Some of the functionality that offers is:
 
-*   creation of chromatograms and accumulated spectra from raw data.
+*   read raw data in the mzML format using a custom parser, optimized for
+    speed and low memory usage.
+*   Creation of chromatograms and accumulated spectra from raw data.
 *   :term:`Feature detection<feature detection>` and
     :term:`feature correspondence` in metabolomics datasets.
-*   read processed data from other mass spectrometry processing software
+*   Read processed data from other mass spectrometry processing software
     (XCMS, mzmine2, etc...).
 *   A container object to manage metabolomics data.
 *   :term:`Data curation<data curation>` of untargeted metabolomics data sets
@@ -310,13 +310,15 @@ classes in your data and assign it to the mapping attribute of your data:
 
 .. code-block:: python
 
-    # available classes in the data set: "1", "2", "3", "4", "QC", "B", "Z"
-    # 1, 2, 3, 4 are the study samples
-    # Z and B are zero volume injection and process blank respectively
-    # QC are pooled quality control samples.
-    mapping = {"blank": ["Z", "B"],
-               "sample": ["1", "2", "3", "4"],
-               "qc": ["QC"]}
+    # classes in the data set: "1", "2", "3", "4", "QC", "B", "Z"
+    # "1", "2", "3" and "4" are study samples
+    # "Z" and "B" are zero volume injection and process blank respectively
+    # "QC" are pooled quality control samples.
+    mapping = {
+        "blank": ["Z", "B"],
+        "sample": ["1", "2", "3", "4"],
+        "qc": ["QC"]
+    }
     data.mapping = mapping
 
 Once the mapping is set, we can quickly perform data curation. In this example,

@@ -319,9 +319,9 @@ used can be summarized in the following steps:
     level is :math:`\sigma = 0.5 S_{y}`. Else decrease :math:`p` by 10 and go
     back to step 3.
 
-The noise estimation is clearly biased if we don't completely remove the
-contribution from :math:`s`, but it gives a good enough approximation to remove
-noisy peaks.
+If the contribution from :math:`s` is not completely removed, the noise
+estimation will be biased. Despite this, this method gives a good enough
+approximation of the noise level that can be used to remove noisy peaks.
 
 Baseline  estimation
 --------------------
