@@ -392,6 +392,7 @@ class MSData:
             self._index_offset,
             scan
         )
+        sp_data["is_centroid"] = self.ms_mode == "centroid"
         return lcms.MSSpectrum(**sp_data)
 
     @v.validated_ms_data(v.spectra_iterator_schema)
@@ -681,7 +682,9 @@ class MSData:
         start: int = 0,
         end: Optional[int] = None,
         start_time: float = 0.0,
-        end_time: Optional[float] = None
+        end_time: Optional[float] = None,
+        min_snr: float = 10,
+        min_distance: Optional[float] = None
     ) -> List[lcms.Roi]:
         """
         Builds regions of interest from raw data.
@@ -748,6 +751,14 @@ class MSData:
             Use scans starting at this acquisition time.
         end_time : float or None, default=None
             Stops when the acquisition time is higher than this value.
+        min_snr : positive number, default=10.0
+            Minimum signal-to-noise ratio of the peaks. Used only to convert
+            profile data to centroid mode
+        min_distance : positive number or None, default=None
+            Minimum distance between consecutive peaks. If ``None``, the value
+            is set to 0.01 if ``self.instrument`` is ``"qtof"`` or to 0.005 if
+            ``self.instrument`` is ``"orbitrap"``. Used only to convert profile
+            data to centroid mode.
 
         Notes
         -----
@@ -799,12 +810,9 @@ class MSData:
 
         """
 
-        if self.ms_mode != "centroid":
-            msg = "Data must be in centroid mode to use this method."
-            raise ValueError(msg)
-
         if targeted_mz is None:
-            mz_seed = self.get_spectrum(start).mz
+            sp_seed = self.get_spectrum(start)
+            mz_seed, _ = sp_seed.find_centroids(min_snr, min_distance)
             targeted = False
         else:
             mz_seed = targeted_mz
@@ -834,7 +842,8 @@ class MSData:
         for scan, sp in sp_iterator:
             rt[scan] = sp.time
             scans.append(scan)
-            processor.extend_roi(sp.mz, sp.spint, scan)
+            sp_mz, sp_spint = sp.find_centroids(min_snr, min_distance)
+            processor.extend_roi(sp_mz, sp_spint, scan)
             processor.store_completed_roi()
 
         # add roi not completed during the last scan
