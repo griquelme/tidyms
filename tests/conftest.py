@@ -5,13 +5,36 @@ from tidyms.container import DataContainer
 from tidyms import fileio
 import numpy as np
 import pytest
+import os
+import requests
+
+
+def download_raw_test_data():
+    """Download a dataset from GitHub"""
+    name = "test-raw-data"
+    cache_path = fileio.get_tidyms_path()
+    dataset_path = os.path.join(cache_path, name)
+    if not os.path.exists(dataset_path):
+        os.makedirs(dataset_path)
+    url = "https://raw.githubusercontent.com/griquelme/tidyms-data/master/"
+    dataset_url = url + "/" + name
+    files = [
+        "centroid-data-indexed-uncompressed.mzML",
+        "centroid-data-zlib-indexed-compressed.mzML",
+        "centroid-data-zlib-no-index-compressed.mzML",
+        "profile-data-zlib-indexed-compressed.mzML"
+    ]
+    for f in files:
+        file_url = dataset_url + "/" + f
+        r = requests.get(file_url)
+        file_path = os.path.join(dataset_path, f)
+        with open(file_path, "w") as fin:
+            fin.write(r.text)
 
 
 # simulated data used for tests
-def pytest_configure(config):
-    datasets = fileio.list_available_datasets(False)
-    for d in datasets:
-        fileio._download_dataset(d)
+def pytest_sessionstart(session):
+    download_raw_test_data()
 
 
 @pytest.fixture
@@ -61,5 +84,4 @@ def data_container_without_order(data_container_with_order):
     sm.pop("batch")
     fm = dc.feature_metadata.copy()
     mapping = {k: v for k, v in dc.mapping.items() if v is not None}
-    dcwo = DataContainer(dm, fm, sm, mapping)
-    return dcwo
+    return DataContainer(dm, fm, sm, mapping)
