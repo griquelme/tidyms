@@ -446,7 +446,7 @@ def _build_offset_list_non_indexed(
     return spectrum_offset_list, chromatogram_offset_list
 
 
-def _find_spectrum_tag_offset(line: str, regex) -> int:
+def _find_spectrum_tag_offset(line: str, regex: re.Pattern) -> int:
     if line.lstrip().startswith("<spectrum"):
         match = regex.search(line)
         if match:
@@ -456,7 +456,7 @@ def _find_spectrum_tag_offset(line: str, regex) -> int:
         return start
 
 
-def _find_chromatogram_tag_offset(line: str, regex) -> int:
+def _find_chromatogram_tag_offset(line: str, regex: re.Pattern) -> int:
     if line.lstrip().startswith("<chromatogram"):
         match = regex.search(line)
         if match:
