@@ -132,18 +132,20 @@ class MSSpectrum:
     def plot(
         self,
         fig_params: Optional[dict] = None,
-        line_params: Optional[dict] = None
+        line_params: Optional[dict] = None,
+        show: bool = True
     ) -> bokeh.plotting.Figure:     # pragma: no cover
         """
         Plot the spectrum using Bokeh.
 
         Parameters
         ----------
-        fig_params : dict
+        fig_params : dict or None, default=None
             key-value parameters to pass to ``bokeh.plotting.figure``.
-        line_params : dict
+        line_params : dict, or None, default=None
             key-value parameters to pass to ``bokeh.plotting.Figure.line``.
-
+        show : bool, default=True
+            If True calls ``bokeh.plotting.show`` on the Figure.
         Returns
         -------
         bokeh.plotting.Figure
@@ -163,7 +165,8 @@ class MSSpectrum:
             plotter = _plot_bokeh.add_line
         plotter(fig, self.mz, self.spint, line_params=line_params)
         _plot_bokeh.set_ms_spectrum_axis_params(fig)
-        bokeh.plotting.show(fig)
+        if show:
+            bokeh.plotting.show(fig)
         return fig
 
 
@@ -297,7 +300,8 @@ class Chromatogram:
         fig_params: Optional[dict] = None,
         line_params: Optional[dict] = None,
         fill_params: Optional[dict] = None,
-        palette: Optional[str] = None
+        palette: Optional[str] = None,
+        show: bool = True
     ) -> bokeh.plotting.Figure:     # pragma: no cover
         """
         Plot the chromatogram.
@@ -314,6 +318,8 @@ class Chromatogram:
             Used to fill the area under the peaks.
         palette : str or None, default=None
             Color palette used to fill the area under the peaks.
+        show : bool, default=True
+            If True calls ``bokeh.plotting.show`` on the Figure.
 
         Returns
         -------
@@ -339,7 +345,8 @@ class Chromatogram:
                 varea_params=fill_params
             )
         _plot_bokeh.set_chromatogram_axis_params(fig)
-        bokeh.plotting.show(fig)
+        if show:
+            bokeh.plotting.show(fig)
         return fig
 
 
