@@ -1,7 +1,7 @@
+from bokeh import plotting
 import tidyms as ms
 import numpy as np
-from bokeh import plotting
-plotting.output_file("example.html")
+plotting.output_file("chromatogram.html")
 
 # generate always the same plot
 np.random.seed(1234)
