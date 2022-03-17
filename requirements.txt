@@ -2,15 +2,11 @@ bokeh
 Cerberus
 ipython
 numpy
-numpydoc
 pandas
-pytest
-pytest-cov
 PyYAML
 requests
 scikit-learn
 scipy
 seaborn
-Sphinx
 statsmodels
 xlrd

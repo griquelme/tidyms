@@ -35,9 +35,13 @@ INSTALL_REQUIRES = [
     'cerberus',
     'seaborn',
     'ipython',
-    'pytest',
     'openpyxl',
     'requests',
+]
+
+TEST_REQUIRES = [
+    'pytest',
+    'pytest-cov'
 ]
 
 if __name__ == "__main__":
@@ -63,4 +67,5 @@ if __name__ == "__main__":
           packages=PACKAGES,
           python_requires=PYTHON_REQUIRES,
           install_requires=INSTALL_REQUIRES,
+          test_requires=TEST_REQUIRES,
           include_package_data=True)
