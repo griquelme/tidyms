@@ -39,11 +39,6 @@ INSTALL_REQUIRES = [
     'requests',
 ]
 
-TEST_REQUIRES = [
-    'pytest',
-    'pytest-cov'
-]
-
 if __name__ == "__main__":
     from setuptools import setup
     from sys import version_info
@@ -67,5 +62,4 @@ if __name__ == "__main__":
           packages=PACKAGES,
           python_requires=PYTHON_REQUIRES,
           install_requires=INSTALL_REQUIRES,
-          test_requires=TEST_REQUIRES,
           include_package_data=True)
