@@ -8,23 +8,13 @@ SPHINXBUILD   ?= sphinx-build
 SOURCEDIR     = .
 BUILDDIR      = _build
 
-# dir for bokeh figures
-BOKEH_DIR=bokeh
-STATIC_DIR=_static
-BOKEH_SRC_FILES=$(wildcard $(BOKEH_DIR)/*.py)
-BOKEH_HTML_FILES=$(patsubst $(BOKEH_DIR)/%.py,$(STATIC_DIR)/%.html,$(BOKEH_SRC_FILES))
-
 # Put it first so that "make" without argument is like "make help".
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-.PHONY: html
-html: $(BOKEH_HTML_FILES)
-	sphinx-build -M html "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+.PHONY: help Makefile
 
-.PHONY: clean
-clean:
-	rm -r $(BUILDDIR)
-
-$(STATIC_DIR)/%.html: $(BOKEH_DIR)/%.py
-	python $< $@
+# Catch-all target: route all unknown targets to Sphinx using the new
+# "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
+%: Makefile
+	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
