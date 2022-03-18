@@ -429,6 +429,12 @@ def get_tidyms_path() -> str:
     return cache_path
 
 
+def create_tidyms_dir():
+    tidyms_dir = get_tidyms_path()
+    if not os.path.exists(tidyms_dir):
+        os.mkdir(tidyms_dir)
+
+
 def default_settings():
     settings = {
         "bokeh": {
@@ -504,9 +510,6 @@ def get_settings() -> dict:
     return settings
 
 
-SETTINGS = get_settings()
-
-
 def is_notebook() -> bool:
     """
     Returns True if the environment is  jupyter notebook.
@@ -526,3 +529,6 @@ def is_notebook() -> bool:
             return False  # Other type (?)
     except NameError:
         return False      # Probably standard Python interpreter
+
+create_tidyms_dir()
+SETTINGS = get_settings()
