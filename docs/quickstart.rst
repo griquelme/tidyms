@@ -58,8 +58,8 @@ plotting or peak picking:
 
     chromatogram.plot()
 
-.. raw:: html
-   :file: _static/chromatogram.html
+.. bokeh-plot:: bokeh/chromatogram.py
+   :source-position: none
 
 The :meth:`tidyms.Chromatogram.find_peaks` method returns a list of descriptors
 for each detected peak:
@@ -74,8 +74,9 @@ for each detected peak:
 Also, the detected peaks are stored in the :code:`peaks` attribute of the
 chromatogram and can be visualized in a plot:
 
-.. raw:: html
-   :file: _static/chromatogram-with-peaks.html
+
+.. bokeh-plot:: bokeh/chromatogram-with-peaks.py
+   :source-position: none
 
 You can read about the peak detection process :doc:`here<peak-picking>`.
 
@@ -96,10 +97,6 @@ In a similar way, we can create a :class:`tidyms.MSSpectrum` object:
     spectrum = ms.MSSpectrum(mz, spint)
     spectrum.find_peaks()
     spectrum.plot()
-
-.. raw:: html
-
-    <iframe src="_static/ms-spectrum.html" width="700px" height="450px" frameborder="0"></iframe>
 
 Reading raw data
 ----------------
@@ -273,8 +270,9 @@ scores plot can be easily plotted:
 
     data.plot.pca_scores()
 
-.. raw:: html
-    :file: _static/pca-scores.html
+
+.. bokeh-plot:: bokeh/pca-scores.py
+    :source-position: none
 
 The intensity of a feature, as function of the run order can also be plotted:
 
@@ -287,9 +285,9 @@ The intensity of a feature, as function of the run order can also be plotted:
     ft_name = data.select_features(mz, rt)
     data.plot.feature(ft_name[0])
 
-.. raw:: html
 
-    <iframe src="_static/feature-plot.html" height="450px" width="650px" frameborder="0"></iframe>
+.. bokeh-plot:: bokeh/feature-plot.py
+    :source-position: none
 
 Data curation
 -------------
