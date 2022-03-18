@@ -24,19 +24,19 @@ PACKAGES = ["tidyms"]
 PYTHON_REQUIRES = ">=3.8"
 
 INSTALL_REQUIRES = [
-    'pandas',
-    'numpy',
-    'pyyaml',
-    'statsmodels',
-    'scipy',
-    'scikit-learn',
-    'bokeh',
-    'xlrd',
-    'cerberus',
-    'seaborn',
-    'ipython',
-    'openpyxl',
-    'requests',
+    "bokeh>=2.4",
+    "Cerberus>=1.3",
+    "ipython>=8.1",
+    "matplotlib>=3.5.1",
+    "numpy>=1.22",
+    "openpyxl>=3.0",
+    "pandas>=1.4.1",
+    "requests",
+    "scikit-learn>=1.0.2",
+    "scipy>=1.8",
+    "seaborn>=0.11",
+    "statsmodels>=0.13",
+    "xlrd>=2.0"
 ]
 
 if __name__ == "__main__":
