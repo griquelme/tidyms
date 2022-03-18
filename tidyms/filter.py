@@ -42,7 +42,6 @@ from . import container
 from ._names import *
 from ._filter_functions import *
 from . import validation
-import yaml
 import os.path
 from typing import Optional, List, Union, Callable
 Number = Union[float, int]
@@ -1001,24 +1000,11 @@ class BatchCorrector(Pipeline):
         self.name = "Batch Corrector"
 
 
-def read_config(path):
-    with open(path) as fin:
-        config = yaml.load(fin, Loader=yaml.UnsafeLoader)
-    return config
-
-
 def pipeline_from_list(param_list: list, verbose=False):
     processors = list()
     for d in param_list:
         processors.append(filter_from_dictionary(d))
     pipeline = Pipeline(processors, verbose)
-    return pipeline
-
-
-def pipeline_from_yaml(path):
-    d = read_config(path)
-    filters_list = d["Pipeline"]
-    pipeline = pipeline_from_list(filters_list)
     return pipeline
 
 
