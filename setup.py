@@ -28,7 +28,7 @@ INSTALL_REQUIRES = [
     "Cerberus>=1.3",
     "ipython>=8.1",
     "matplotlib>=3.5.1",
-    "numpy>=1.22",
+    "numpy<=1.21.4",
     "openpyxl>=3.0",
     "pandas>=1.4.1",
     "requests",
