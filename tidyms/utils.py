@@ -1,23 +1,5 @@
 """
-Functions used inside several modules.
-
-Functions
----------
-gauss(x, mu, sigma, amp) : creates a gaussian curve
-gaussian_mixture(x, params) : create an array with several gaussian curves
-normalize(df, method) : adjust row values of a DataFrame
-scale(df, method) : adjust column values of a DataFrame
-transform(df, method) : perform element-wise transformation on a DataFrame
-sample_to_path(samples, path) : find files with names equal to the samples
-cv(df) : Computes the coefficient of variation for columns of a DataFrame
-sd(df) : Computes the std of a DataFrame and fills missing values with zeroes.
-iqr(df) : Computes the interquartile range  of a DataFrame and fills missing
-values with zeroes.
-mad(df) : Computes the median absolute deviation for column in a DataFrame.
-Fill missing values with zeroes.
-robust_cv(df) : Estimates the coefficient of variation for columns of a
-DataFrame using the MAD and median. Fill missing values with zeroes.
-find_closest(x, xq) : Finds the elements in xq closest to x.
+Utility functions used inside several modules.
 
 """
 
@@ -36,12 +18,12 @@ reduced_type = Union[pd.Series, float]
 
 
 def gauss(x: np.ndarray, mu: float, sigma: float,
-          amp: float):  # pragma: no cover
+          amp: float):
     """
     gaussian curve.
 
     Parameters
-    ----------.sum(axis=0)
+    ----------
     x : np.array
     mu : float
     sigma : float
@@ -50,13 +32,14 @@ def gauss(x: np.ndarray, mu: float, sigma: float,
     Returns
     -------
     gaussian : np.array
+
     """
     gaussian = amp * np.power(np.e, - 0.5 * ((x - mu) / sigma) ** 2)
     return gaussian
 
 
 def gaussian_mixture(x: np.ndarray, params: np.ndarray
-                     ) -> np.ndarray:   # pragma: no cover
+                     ) -> np.ndarray:
     """
     Mixture of gaussian curves.
 
