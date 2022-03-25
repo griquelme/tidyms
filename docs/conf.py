@@ -23,6 +23,8 @@ copyright = '2020, Gabriel Riquelme'
 author = 'Gabriel Riquelme'
 
 # -- generate plot files -----------------------------------------------------
+if not os.path.isdir("_static"):
+    os.mkdir("_static")
 bokeh_plots.plot_chromatogram()
 bokeh_plots.plot_chromatogram_with_peaks()
 bokeh_plots.feature_plot()
