@@ -13,6 +13,8 @@
 import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.pardir))
+sys.path.insert(0, os.path.abspath(os.getcwd()))
+import bokeh_plots
 
 # -- Project information -----------------------------------------------------
 
@@ -20,6 +22,11 @@ project = 'TidyMS'
 copyright = '2020, Gabriel Riquelme'
 author = 'Gabriel Riquelme'
 
+# -- generate plot files -----------------------------------------------------
+bokeh_plots.plot_chromatogram()
+bokeh_plots.plot_chromatogram_with_peaks()
+bokeh_plots.feature_plot()
+bokeh_plots.pca_plot()
 
 # -- General configuration ---------------------------------------------------
 
@@ -48,6 +55,10 @@ numpydoc_show_class_members = False
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
+
+
+# def setup(app):
+#     plot_chromatogram()
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
