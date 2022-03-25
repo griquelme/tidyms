@@ -35,6 +35,7 @@ List of available filters and processors
     tidyms.filter.BatchCorrector
     tidyms.filter.BlankCorrector
     tidyms.filter.ClassRemover
+    tidyms.filter.DilutionFilter
     tidyms.filter.DRatioFilter
     tidyms.filter.PrevalenceFilter
     tidyms.filter.VariationFilter
