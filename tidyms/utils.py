@@ -370,6 +370,22 @@ def _find_closest_sorted(x: np.ndarray,
 
 def find_closest(x: np.ndarray, xq: Union[np.ndarray, float, int],
                  is_sorted: bool = True) -> np.ndarray:
+    """
+    Search the closest value between two arrays.
+
+    Parameters
+    ----------
+    x : array
+        Array used to search
+    xq : array
+        query values
+    is_sorted : bool, default=True
+        If True, assumes that x is sorted.
+
+    Returns
+    -------
+    array of indices in x
+    """
     if is_sorted:
         return _find_closest_sorted(x, xq)
     else:
@@ -512,6 +528,7 @@ def is_notebook() -> bool:
             return False  # Other type (?)
     except NameError:
         return False      # Probably standard Python interpreter
+
 
 create_tidyms_dir()
 SETTINGS = get_settings()
