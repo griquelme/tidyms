@@ -107,7 +107,7 @@ def correct_blanks(df: pd.DataFrame, classes: pd.Series,
         std_func = lambda x: x.std()
 
     corrector = {"max": lambda x: x.max(),
-                 "mean": lambda x: mean_func,
+                 "mean": lambda x: mean_func(x),
                  "lod": lambda x: mean_func(x) + 3 * std_func(x),
                  "loq": lambda x: mean_func(x) + 10 * std_func(x)}
     if hasattr(mode, "__call__"):
