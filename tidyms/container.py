@@ -139,6 +139,16 @@ class DataContainer(object):
         validation.validate_data_container(data_matrix, feature_metadata,
                                            sample_metadata)
 
+        # sort columns and indices of each DataFrame
+        data_matrix = data_matrix.sort_index()
+        data_matrix = data_matrix.reindex(sorted(data_matrix.columns), axis=1)
+        sample_metadata = sample_metadata.sort_index()
+        sample_metadata = sample_metadata.reindex(
+            sorted(sample_metadata.columns), axis=1)
+        feature_metadata = feature_metadata.sort_index()
+        feature_metadata = feature_metadata.reindex(sorted(
+            feature_metadata.columns), axis=1)
+
         # check and convert order and batch information
         try:
             order = sample_metadata.pop(_sample_order)

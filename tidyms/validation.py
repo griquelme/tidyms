@@ -162,12 +162,13 @@ def validate_data_container(data_matrix, feature_definitions,
     validate_data_matrix(data_matrix)
     validate_feature_metadata(feature_definitions)
     validate_sample_metadata(sample_info)
-    samples_equal = data_matrix.index.equals(sample_info.index)
-    if not samples_equal:
+    different_samples = data_matrix.index.difference(sample_info.index)
+    if different_samples.size > 0:
         msg = "Samples names should be equal in data matrix and sample info."
         raise ValueError(msg)
-    features_equal = data_matrix.columns.equals(feature_definitions.index)
-    if not features_equal:
+    different_features = data_matrix.columns.difference(
+        feature_definitions.index)
+    if different_features.size > 0:
         msg = "feature names should be equal in data matrix and feature " \
               "definitions."
         raise ValueError(msg)

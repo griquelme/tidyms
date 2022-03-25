@@ -124,7 +124,6 @@ def read_mzmine(data: Union[str, TextIO],
         * sample : the same sample names used in `data`
         * class : the sample classes
         Columns with run order and analytical batch information are optional.
-        Must be names "order" and "batch"
 
     Returns
     -------
