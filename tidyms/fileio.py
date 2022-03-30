@@ -394,7 +394,7 @@ class MSData:
         sp_data["is_centroid"] = self.ms_mode == "centroid"
         return lcms.MSSpectrum(**sp_data)
 
-    @v.validated_ms_data(v.spectra_iterator_schema)
+    @v.validated_ms_data(v.spectra_iterator_schema)     # parameter validation
     def get_spectra_iterator(
             self,
             ms_level: int = 1,
