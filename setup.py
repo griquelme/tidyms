@@ -27,6 +27,7 @@ INSTALL_REQUIRES = [
     "bokeh>=2.4",
     "Cerberus>=1.3",
     "ipython>=8.1",
+    "joblib>=1.1",
     "matplotlib>=3.5.1",
     "numpy<=1.21.4",
     "openpyxl>=3.0",
@@ -36,6 +37,7 @@ INSTALL_REQUIRES = [
     "scipy>=1.8",
     "seaborn>=0.11",
     "statsmodels>=0.13",
+    "tqdm>=4.63",
     "xlrd>=2.0"
 ]
 
