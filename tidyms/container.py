@@ -30,6 +30,7 @@ constructor:
 from . import utils
 from . import validation
 from . import fileio
+from . import _batch_corrector
 from ._names import *
 import numpy as np
 import pandas as pd
@@ -58,7 +59,7 @@ class DataContainer(object):
     data_matrix : DataFrame.
         feature values for each sample. Data is organized in a "tidy" way:
         each row is an observation, each column is a feature. dtype must
-        be float and all values should be non negative, but NANs are fine.
+        be float and all values should be non-negative, but NANs are fine.
     sample_metadata : DataFrame.
         Metadata associated to each sample (eg: sample class). Has the same
         index as the data_matrix. `class` (standing for sample class) is a
@@ -1251,6 +1252,118 @@ class PreprocessMethods:
 
     def __init__(self, dc: DataContainer):
         self.__data = dc
+
+    def correct_batches(
+        self,
+        min_qc_dr: float = 0.9,
+        first_n_qc: Optional[int] = None,
+        threshold: float = 0.0,
+        frac: Optional[float] = None,
+        n_jobs: Optional[int] = None,
+        verbose: bool = False
+    ):
+        r"""
+        Correct time dependant systematic bias along samples due to variation in
+        instrumental response.
+
+        Parameters
+        ----------
+        min_qc_dr : float
+            minimum fraction of QC where a feature was detected. See the notes
+            for an explanation of how this value is computed.
+        first_n_qc : int, optional
+            The number of first QC samples used to estimate the expected
+            value for each feature in the QC. If None uses all QC samples in a
+            batch. See notes for an explanation of its use.
+        threshold : float
+            Minimum value to consider a feature detected. Used to compute the
+            detection rate of each feature in the QC samples. Only features in
+            QC samples above this value are used to compute the correction
+            factor.
+        frac : float, optional
+            frac parameter of the LOESS model. If None, the best value for each
+            feature is estimated using cross validation.
+        n_jobs: int or None, default=None
+            Number of jobs to run in parallel. ``None`` means 1 unless in a
+            :obj:`joblib.parallel_backend` context. ``-1`` means using all
+            processors.
+        verbose : bool
+            If True displays a progress bar.
+
+        Notes
+        -----
+        The correction is applied as follows:
+
+        1.  Split the data matrix using the batch number.
+        2.  For each feature in a batch compute an intra-batch correction that
+            removes time-dependent variations.
+        3.  Once the features where corrected in all batches, apply an
+            inter-batch where the mean across different batches is corrected.
+
+        A detailed explanation of the correction algorithm can be found here.
+
+        """
+        mapping = self.__data.mapping
+
+        if mapping[_qc_sample_type] is None:
+            msg = "QC samples not defined in sample mapping"
+            raise ValueError(msg)
+
+        if mapping[_study_sample_type] is None:
+            msg = "Study samples not defined in sample mapping"
+            raise ValueError(msg)
+
+        sample_metadata = self.__data.sample_metadata
+
+        if _sample_order not in sample_metadata:
+            msg = "Run order information not available"
+            raise RunOrderError(msg)
+
+        if _sample_batch not in sample_metadata:
+            msg = "Batch information not available"
+            raise BatchInformationError(msg)
+
+        sample_class = mapping[_study_sample_type]
+        qc_class = mapping[_qc_sample_type]
+
+        rm_samples = _batch_corrector.find_invalid_samples(
+            sample_metadata, sample_class, qc_class
+        )
+        self.__data.remove(rm_samples, "samples")
+
+        # TODO: this should be removed after fixing the Datacontainer
+        #   00implementation
+        sample_metadata = self.__data.sample_metadata
+        data_matrix = self.__data.data_matrix
+
+        rm_features = _batch_corrector.find_invalid_features(
+            data_matrix,
+            sample_metadata,
+            sample_class,
+            qc_class,
+            threshold,
+            min_qc_dr
+        )
+        self.__data.remove(rm_features, "features")
+        if verbose:
+            msg = "{} samples and {} features were removed"
+            print(msg.format(rm_samples.size, rm_features.size))
+
+        sample_metadata = self.__data.sample_metadata
+        data_matrix = self.__data.data_matrix
+
+        corrected = _batch_corrector.correct_batches(
+            data_matrix,
+            sample_metadata,
+            sample_class,
+            qc_class,
+            threshold=threshold,
+            frac=frac,
+            first_n=first_n_qc,
+            n_jobs=n_jobs,
+            verbose=verbose
+        )
+        self.__data.data_matrix = corrected
 
     def normalize(self, method: str, inplace: bool = True,
                   feature: Optional[str] = None) -> Optional[pd.DataFrame]:
