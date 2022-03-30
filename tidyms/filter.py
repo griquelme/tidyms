@@ -41,6 +41,7 @@ from .container import DataContainer
 from . import container
 from ._names import *
 from ._filter_functions import *
+from ._batch_corrector import *
 from . import validation
 import os.path
 from typing import Optional, List, Union, Callable
@@ -880,10 +881,8 @@ class BatchCorrector(Pipeline):
         list of classes used to generate the correction. If None uses
         QC sample types from the mapping.
     process_classes : list[str], optional
-        list of classes used to correct. If None uses
-        sample sample types from the mapping.
-    scale_blanks : bool
-        If True, scale blanks across batches.
+        list of classes used to correct. If None uses sample sample types from
+        the mapping.
     verbose : bool
         If True a message is shown after processing the data matrix.
 
@@ -977,7 +976,6 @@ class BatchCorrector(Pipeline):
                  method: str = "multiplicative",
                  corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
-                 scale_blanks: bool = True,
                  verbose: bool = False):
 
         checker = \
