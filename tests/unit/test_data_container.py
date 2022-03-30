@@ -56,9 +56,13 @@ def test_order_getter_no_order_information(data_container_without_order):
 def test_order_setter(data_container_with_order):
     data = data_container_with_order
     # new order value
-    order_series = pd.Series(data=data.order + 1, index=data.order.index)
+    order_series = pd.Series(
+        data=data.order + 1,
+        index=data.order.index,
+        dtype=data.order.dtype
+    )
     data.order = order_series
-    assert data.order.equals(order_series)
+    assert (data.order == order_series).all()
 
 
 def test_id_getter(data_container_with_order):
