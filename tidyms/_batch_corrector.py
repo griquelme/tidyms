@@ -193,10 +193,6 @@ def correct_batches(
         desc = "Correcting {} features in {} batches".format(n_ft, n_batch)
         total = _get_tqdm_total(data_matrix, sample_metadata)
         iterator = tqdm(iterator, total=total, desc=desc)
-    # data = list()
-    # for x in iterator:
-    #     tmp = _correct_intra_batch(x)
-    #     data.append(tmp)
 
     # intra-batch correction
     corrector_func = partial(_correct_intra_batch, first_n=first_n, frac=frac)
@@ -209,7 +205,9 @@ def correct_batches(
         columns=data_matrix.columns
     )
     # inter-batch correction
-    data_corrected = _inter_batch_correction(data_corrected, sample_metadata)
+    data_corrected = _inter_batch_correction(
+        data_corrected, sample_metadata, qc_class
+    )
 
     return data_corrected
 
@@ -398,7 +396,8 @@ def _rebuild_data_matrix(shape, data: List[Tuple]) -> np.ndarray:
 
 def _inter_batch_correction(
         data_matrix: pd.DataFrame,
-        sample_metadata: pd.DataFrame
+        sample_metadata: pd.DataFrame,
+        qc_class: List[str]
 ) -> pd.DataFrame:
     """
     corrects the mean in each batch to a common mean. Aux function to
@@ -413,13 +412,15 @@ def _inter_batch_correction(
     -------
     pd.DataFrame
     """
-
+    qc_mask = sample_metadata["class"].isin(qc_class)
+    qc_dm = data_matrix[qc_mask]
     batch = sample_metadata["batch"]
+    qc_batch = batch[qc_mask]
     n_batches = batch.unique().size
     if n_batches == 1:
         res = data_matrix
     else:
-        factor = _get_inter_batch_correction_factor(data_matrix, batch)
+        factor = _get_inter_batch_correction_factor(qc_dm, qc_batch)
         res = data_matrix.groupby(batch).apply(lambda x: x * factor[x.name])
     return res
 
