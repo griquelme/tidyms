@@ -44,6 +44,7 @@ from ._filter_functions import *
 from ._batch_corrector import *
 from . import validation
 import os.path
+from warnings import warn
 from typing import Optional, List, Union, Callable
 Number = Union[float, int]
 
@@ -977,6 +978,13 @@ class BatchCorrector(Pipeline):
                  corrector_classes: Optional[List[str]] = None,
                  process_classes: Optional[List[str]] = None,
                  verbose: bool = False):
+
+        deprecation_msg = \
+            "{} is deprecated and is going to be removed in a future release. " \
+            "To perform batch correction use the method " \
+            " `preprocess.correct_batches` from DataContainer"
+        warn(deprecation_msg.format(self.__class__), DeprecationWarning,
+             stacklevel=2)
 
         checker = \
             _TemplateValidationFilter(process_classes=process_classes,
