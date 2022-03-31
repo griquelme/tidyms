@@ -11,7 +11,7 @@ Provides
     4. Functions for feature detection and feature correspondence.
 """
 
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 from . import fileio
 from . import container
