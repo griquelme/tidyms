@@ -1,4 +1,5 @@
 bokeh
 numpydoc
 sphinx
+tidyms
 sphinx_rtd_theme
