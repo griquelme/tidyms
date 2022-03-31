@@ -37,7 +37,7 @@ INSTALL_REQUIRES = [
     "scipy>=1.8",
     "seaborn>=0.11",
     "statsmodels>=0.13",
-    "tqdm>=4.63",
+    "tqdm>=4.0",
     "xlrd>=2.0"
 ]
 
