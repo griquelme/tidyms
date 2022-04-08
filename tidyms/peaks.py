@@ -16,204 +16,11 @@ Functions
 """
 
 import numpy as np
-from scipy.integrate import trapz
-from scipy.integrate import cumtrapz
 from scipy.interpolate import interp1d
 from scipy.signal import find_peaks
 from scipy.special import erfc
 from scipy.stats import median_abs_deviation as mad
-from typing import Callable, Dict, List, Optional, Tuple
-
-
-class Peak:
-    """
-    Representation of a peak. Computes peak descriptors.
-
-    Attributes
-    ----------
-    start: int
-        index where the peak begins. Must be smaller than `apex`
-    apex: int
-        index where the apex of the peak is located. Must be smaller than `end`
-    end: int
-        index where the peak ends. Start and end used as slices defines the
-        peak region.
-
-    """
-
-    def __init__(self, start: int, apex: int, end: int):
-
-        try:
-            assert start < apex
-            assert apex < end
-        except AssertionError:
-            msg = "start must be lower than loc and loc must be lower than end"
-            raise InvalidPeakException(msg)
-
-        self.apex = apex
-        self.start = start
-        self.end = end
-
-    def __repr__(self):
-        str_repr = "{}(start={}, apex={}, end={})"
-        name = self.__class__.__name__
-        str_repr = str_repr.format(name, self.start, self.apex, self.end)
-        return str_repr
-
-    def get_loc(self, x: np.ndarray, y: np.ndarray) -> float:
-        """
-        Finds the peak location in x, using y as weights.
-
-        Parameters
-        ----------
-        x : sorted array
-        y : array with the same size as x
-
-        Returns
-        -------
-        loc : float
-
-        """
-        weights = y[self.start:self.end]
-        weights[weights < 0] = 0
-        loc = np.abs(np.average(x[self.start:self.end], weights=weights))
-        return loc
-
-    def get_height(self, y: np.ndarray, baseline: np.ndarray) -> float:
-        """
-        Computes the height of the peak, defined as the difference between the
-        value of y and the baseline at the peak apex.
-
-        Parameters
-        ----------
-        y : array
-        baseline : array with the same size as y
-
-        Returns
-        -------
-        height : non-negative number. If the baseline estimation is greater
-        than y, the height is set to zero.
-
-        """
-        height = y[self.apex] - baseline[self.apex]
-        return max(0.0, height)
-
-    def get_area(self, x: np.ndarray, y: np.ndarray, baseline: np.ndarray
-                 ) -> float:
-        """
-        Computes the area in the region defined by the peak.
-
-        If the baseline area is greater than the peak area, the area is set
-        to zero.
-
-        Parameters
-        ----------
-        x : sorted array
-        y : array with the same size as y
-        baseline : array with the same size as y
-
-        Returns
-        -------
-        area : positive number.
-
-        """
-        baseline_corrected = (y[self.start:self.end] -
-                              baseline[self.start:self.end])
-        area = trapz(baseline_corrected, x[self.start:self.end])
-        return max(0.0, area)
-
-    def get_width(self, x: np.ndarray, y: np.ndarray, baseline: np.ndarray
-                  ) -> float:
-        """
-        Computes the peak width, defined as the region where the 95 % of the
-        total peak area is distributed.
-
-        Parameters
-        ----------
-        x : sorted array
-        y : array with the same size as y
-        baseline : array with the same size as y
-
-        Returns
-        -------
-        width : positive number.
-
-        """
-        height = (y[self.start:self.end] -
-                  baseline[self.start:self.end])
-        area = cumtrapz(height, x[self.start:self.end])
-        if area[-1] > 0:
-            relative_area = area / area[-1]
-            percentile = [0.025, 0.975]
-            start, end = self.start + np.searchsorted(relative_area, percentile)
-            width = x[end] - x[start]
-        else:
-            width = 0.0
-        return max(0.0, width)
-
-    def get_extension(self, x: np.ndarray) -> float:
-        """
-        Computes the peak extension, defined as the length of the peak region.
-
-        Parameters
-        ----------
-        x: sorted array
-
-        Returns
-        -------
-        extension : positive number
-
-        """
-        return x[self.end] - x[self.start]
-
-    def get_snr(self, y: np.array, noise: np.array, baseline: np.array
-                ) -> float:
-        """
-        Computes the peak signal-to-noise ratio, defined as the quotient
-        between the peak height and the noise level at the apex.
-
-        Parameters
-        ----------
-        y : array
-        noise : array with the same size as y
-        baseline : array with the same size as y
-
-        Returns
-        -------
-        snr : float
-
-        """
-
-        peak_noise = noise[self.apex]
-        if np.isclose(peak_noise, 0):
-            snr = np.inf
-        else:
-            snr = self.get_height(y, baseline) / peak_noise
-        return snr
-
-    def get_descriptors(self, x: np.array, y: np.array, noise: np.array,
-                        baseline: np.array) -> Dict[str, float]:
-        """
-        Computes peak height, area, location, width and SNR.
-
-        Parameters
-        ----------
-        x : sorted array
-        y : array with the same size as x
-        noise : array with the same size as x
-        baseline : array with the same size as x
-
-        Returns
-        -------
-        descriptors: dict
-            A mapping of descriptor names to descriptor values.
-        """
-        descriptors = {"height": self.get_height(y, baseline),
-                       "area": self.get_area(x, y, baseline),
-                       "loc": self.get_loc(x, y),
-                       "width": self.get_width(x, y, baseline),
-                       "snr": self.get_snr(y, noise, baseline)}
-        return descriptors
+from typing import List, Optional, Tuple
 
 
 def detect_peaks(
@@ -221,7 +28,7 @@ def detect_peaks(
         noise: np.ndarray,
         baseline: np.ndarray,
         find_peaks_params: Optional[dict] = None
-) -> List[Peak]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     r"""
     Finds peaks in a 1D signal.
 
@@ -238,8 +45,12 @@ def detect_peaks(
 
     Returns
     -------
-    peaks : List[Peak]
-        list of detected peaks
+    start : array
+        Indices where peaks start
+    apex : array
+        Indices where the peak maximum was found
+    end : array
+        Indices where peaks end
 
     Notes
     -----
@@ -286,81 +97,7 @@ def detect_peaks(
     start, end = _find_peak_extension(peaks, baseline_index)
     start, end = _fix_peak_overlap(x, start, peaks, end)
     start, peaks, end = _normalize_peaks(x, start, peaks, end)
-    peaks = [Peak(s, p, e) for s, p, e in zip(start, peaks, end)]
-    return peaks
-
-
-def get_peak_descriptors(
-        x: np.ndarray,
-        y: np.ndarray,
-        noise: np.ndarray,
-        baseline: np.ndarray,
-        peaks: List[Peak],
-        descriptors: Optional[Dict[str, Callable]] = None,
-        filters: Optional[Dict[str, Tuple]] = None
-) -> Tuple[List[Peak], List[Dict[str, float]]]:
-    """
-    Computes peak descriptors for a list of peaks.
-
-    By default, the location, height, area, width and SNR of each peak is
-    computed, but custom descriptors can also be included.
-
-    Parameters
-    ----------
-    x : sorted array
-    y : array with the same size as x
-        Signal where the peaks were detected.
-    noise: array with the same size as x.
-        Noise estimation of y.
-    baseline: array with the same size as x.
-        Baseline estimation of y.
-    peaks : List[Peaks]
-    descriptors : dict or None, default=None
-        A dictionary of strings to callables, used to estimate custom
-        descriptors of a peak. The function must have the following signature:
-
-        .. code-block:: python
-
-            "estimator_func(x, y, noise, baseline, peak) -> float"
-
-    filters : dict or None, default=None
-        A dictionary of descriptor names to a tuple of minimum and maximum
-        acceptable values. To use only minimum/maximum values, use None
-        (e.g. (None, max_value) in the case of using only maximum).Peaks with
-        descriptors outside these ranges are removed. Filters for custom
-        descriptors can also be used.
-
-    Returns
-    -------
-    peaks : List[Peak]
-        filtered list of peaks
-    descriptors: List[dict]
-        Descriptors for each peak.
-
-    See Also
-    --------
-    detect_peaks : detects peaks in a 1D signal
-
-    """
-
-    if descriptors is None:
-        descriptors = dict()
-
-    if filters is None:
-        filters = dict()
-    _fill_filter_boundaries(filters)
-
-    valid_peaks = list()
-    descriptor_list = list()
-    for p in peaks:
-        p_descriptors = p.get_descriptors(x, y, noise, baseline)
-        for descriptor, func in descriptors.items():
-            p_descriptors[descriptor] = func(x, y, noise, baseline, p)
-
-        if _has_all_valid_descriptors(p_descriptors, filters):
-            valid_peaks.append(p)
-            descriptor_list.append(p_descriptors)
-    return valid_peaks, descriptor_list
+    return start, peaks, end
 
 
 def estimate_noise(
@@ -517,15 +254,6 @@ def find_centroids(mz: np.ndarray, spint: np.ndarray, min_snr: float,
     return centroid, total_spint
 
 
-class InvalidPeakException(ValueError):
-    """
-    Exception raised when invalid indices are used in the construction of
-    Peak objects.
-
-    """
-    pass
-
-
 def _find_peak_extension(peaks: np.array, baseline_index: np.array
                          ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -631,52 +359,6 @@ def _normalize_peaks(y: np.ndarray, start: np.ndarray, peaks: np.ndarray,
     end = end[valid_peaks]
     fixed_peaks = fixed_peaks[valid_peaks]
     return start, fixed_peaks, end
-
-
-def _fill_filter_boundaries(filter_dict: Dict[str, Tuple]):
-    """
-    Replaces None in the filter boundaries to perform comparisons.
-
-    aux function of get_peak_descriptors
-    """
-    for k in filter_dict:
-        lb, ub = filter_dict[k]
-        if lb is None:
-            lb = -np.inf
-        if ub is None:
-            ub = np.inf
-        filter_dict[k] = (lb, ub)
-
-
-def _has_all_valid_descriptors(peak_descriptors: Dict[str, float],
-                               filters: Dict[str, Tuple[float, float]]) -> bool:
-    """
-    Check that the descriptors of a peak are in a valid range.
-
-    aux function of get_peak_descriptors.
-
-    Parameters
-    ----------
-    peak_descriptors : dict
-        mapping of descriptor names to descriptor values.
-    filters : dict
-        Dictionary from descriptors names to minimum and maximum acceptable
-        values.
-
-    Returns
-    -------
-    is_valid : bool
-        True if all descriptors are inside the valid ranges.
-
-    """
-    res = True
-    for descriptor, (lb, ub) in filters.items():
-        d = peak_descriptors[descriptor]
-        is_valid = (d >= lb) and (d <= ub)
-        if not is_valid:
-            res = False
-            break
-    return res
 
 
 def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
