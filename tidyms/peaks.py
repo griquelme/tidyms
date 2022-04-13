@@ -272,6 +272,9 @@ def detect_peaks(
     """
 
     baseline_index = np.where((x - baseline) < noise)[0]
+    if baseline_index.size == 0:
+        baseline_index = np.array([0, x.size - 1], dtype=int)
+
     prominence = 3 * noise
 
     if find_peaks_params is None:
