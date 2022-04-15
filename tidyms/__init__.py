@@ -25,6 +25,8 @@ from .metabolomics import *
 from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum
+from .assay import LCMSAssay
+# from .correspondence import feature_correspondence
 
 if utils.SETTINGS["bokeh"]["apply_theme"]:
     from bokeh.themes import Theme as _Theme
