@@ -1,18 +1,19 @@
 import numpy as np
 import pandas as pd
+from functools import partial
 from joblib import Parallel, delayed
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
 from typing import Dict, Generator, List, Optional, Tuple
-from functools import partial
 from .utils import get_progress_bar
+from . import _constants as c
 
 
-def feature_correspondence(
-        feature_data: pd.DataFrame,
-        samples_per_group: dict,
-        include_groups: Optional[List[int]],
+def match_features(
+        feature_table: pd.DataFrame,
+        samples_per_class: dict,
+        include_classes: Optional[List[int]],
         mz_tolerance: float,
         rt_tolerance: float,
         min_fraction: float,
@@ -20,17 +21,18 @@ def feature_correspondence(
         n_jobs: Optional[int] = None,
         verbose: bool = False
 ):
-    """
-    Match features across samples using a combination of clustering algorithms.
+    r"""
+    Match features across samples using DBSCAN and GMM. See the notes for a
+    detailed description of the algorithm.
 
     Parameters
     ----------
-    feature_data : pd.DataFrame
+    feature_table : pd.DataFrame
         Feature table obtained after feature detection.
-    samples_per_group : dict
-        Maps a group name to number of samples in the group.
-    include_groups : List[int] or None, default=None
-        Sample groups used to estimate the minimum cluster size and number of
+    samples_per_class : dict
+        Maps a class name to the number of samples in the class.
+    include_classes : List[int] or None, default=None
+        Sample classes used to estimate the minimum cluster size and number of
         chemical species in a cluster.
     mz_tolerance : float
         m/z tolerance used to set the `eps` parameter in the DBSCAN algorithm.
@@ -47,77 +49,181 @@ def feature_correspondence(
     verbose : bool
         If True, shows a progress bar
 
-    Returns
-    -------
+    Notes
+    -----
+    Features are matched as follows:
+
+    1.  A two column matrix is built from the feature table, each row is an
+        (m/z, Rt) tuple. The Rt column is scaled using ``rt_tolerance`` and
+        ``mz_tolerance`` to have both Rt and m/z in the same scale.
+    2.  DBSCAN is used to match features based on closeness (the scikit-learn
+        implementation is used). The `eps` parameter is set to ``mz_tolerance``.
+        The `min_samples` parameter is estimated as a fraction of the samples
+        from each class in ``include_classes`` using the ``min_fraction``
+        parameter: ``min_samples=round(min_fraction * n)`` where ``n`` is the
+        number of samples in the class in ``include_classes`` with the lowest
+        number of samples.
+    3.  After clustering the features with DBSCAN, each cluster is evaluated:
+        there must be only one feature in a cluster from a given sample. This
+        condition will not be meet if there are more than one ionic species
+        in the cluster or if there are spurious features. To deal with these
+        cases the number of ionic species in each cluster is estimated: the
+        number of features from each sample is counted and used to define
+        the k-feature repetitions in a cluster, that is, the number of times
+        a sample contribute with k features to the cluster. The number of
+        species in a cluster is the maximum value of k with a number of
+        repetitions greater or equal than `min_samples`.
+    4.  Each cluster is split according to the number of species in the cluster
+        using GMM setting the `n_components` parameter to the number of species.
+    5.  For each cluster a matrix :math:`S` with shape
+        :math:`(n_{c} \times n_{s})` is built for each sample, where
+        :math:`n_{c}` is the number of features that the sample contributes to
+        the cluster and :math:`n_{s}` is the number of ionic species in the
+        cluster. :math:`s_{ij}` is defined as follows:
+
+        .. math::
+            s_{ij} = \max (
+                \{
+                    \frac{ | mz_{i} - \mu_{mz, j} | }{\sigma_{mz, j}},
+                    \frac{|rt_{i} - \mu_{rt, j}|}{\sigma_{rt, j}}
+                \}
+            )
+
+        S can be seen as a measure of the distance to the mean of each cluster
+        in units of standard deviations. Using :math:`S` we can assign each
+        feature to an ionic species in a unique way using the Hungarian
+        algorithm.
+    6.  After all features in a sample are assigned, the value of :math:`s_{ij}`
+        is checked. If it is greater than ``max_deviations``, the feature
+        is assigned to noise.
 
     """
-    X = feature_data.loc[:, ["mz", "rt"]].to_numpy()
-    samples = feature_data["sample_"].to_numpy()
+    X = feature_table.loc[:, [c.MZ, c.RT]].to_numpy()
+    samples = feature_table[c.SAMPLE].to_numpy()
+    classes = feature_table[c.CLASS].to_numpy()
     # scale rt to use the same tolerance in both dimensions
     X[:, 1] *= mz_tolerance / rt_tolerance
 
-    # min_samples estimation using the number of samples
-    if include_groups is None:
-        min_samples = round(sum(samples_per_group.values()) * min_fraction)
-        include_groups = list(samples_per_group.keys())
-    else:
-        min_samples = _get_min_sample(
-            samples_per_group, include_groups, min_fraction
-        )
+    min_samples = _get_min_sample(
+        samples_per_class, include_classes, min_fraction
+    )
+    if include_classes is None:
+        include_classes = list(samples_per_class.keys())
 
     # DBSCAN clustering
     max_size = 100000
-    cluster = _make_initial_cluster(X, mz_tolerance, min_samples, max_size)
-    feature_data["cluster_"] = cluster
+    cluster = _cluster_dbscan(X, mz_tolerance, min_samples, max_size)
 
-    # estimate the number of chemical species per cluster
-    features_per_cluster = _estimate_n_species(
-        feature_data.loc[:, ["sample_", "cluster_", "class_"]],
-        min_fraction,
-        samples_per_group,
-        include_groups,
+    species_per_cluster = _estimate_n_species(
+        samples,
+        cluster,
+        classes,
+        samples_per_class,
+        include_classes,
+        min_fraction
     )
 
     cluster_iterator = _cluster_iterator(
-        X, cluster, samples, features_per_cluster
+        X, cluster, samples, species_per_cluster
     )
 
     if verbose:
         progress_bar = get_progress_bar()
-        total = _get_progress_bar_total(features_per_cluster)
+        total = _get_progress_bar_total(species_per_cluster)
         cluster_iterator = progress_bar(cluster_iterator, total=total)
 
     func = partial(_split_cluster_worker, max_deviation=max_deviation)
     func = delayed(func)
     data = Parallel(n_jobs=n_jobs)(func(x) for x in cluster_iterator)
-    refined_cluster = _build_label(data, feature_data.shape[0])
-    feature_data["cluster_"] = refined_cluster
+    refined_cluster, score = _build_label(data, feature_table.shape[0])
+    feature_table[c.LABEL] = refined_cluster
+    return score
+
+
+def get_match_features_defaults(separation: str, instrument: str):
+    """
+    Default values used for `match_features` based on data acquisition
+    characteristics.
+
+    Parameters
+    ----------
+    separation : {"uplc", "hplc"}
+    instrument : {"qtof", "orbitrap"}
+
+    Returns
+    -------
+
+    """
+    if instrument == c.QTOF:
+        mz_tolerance = 0.01
+    elif instrument == c.ORBITRAP:
+        mz_tolerance = 0.005
+    else:
+        raise ValueError
+
+    if separation == c.HPLC:
+        rt_tolerance = 10
+    elif separation == c.UPLC:
+        rt_tolerance = 5
+    else:
+        raise ValueError
+
+    defaults = {
+        "mz_tolerance": mz_tolerance,
+        "rt_tolerance": rt_tolerance,
+        "min_fraction": 0.25,
+        "max_deviation": 3.0,
+        "n_jobs": None,
+        "verbose": False
+    }
+
+    return defaults
 
 
 def _get_min_sample(
-    samples_per_group: Dict[int, int],
-    include_groups: List[int],
+    samples_per_class: Dict[int, int],
+    include_classes: Optional[List[int]],
     min_fraction: float
 ) -> int:
-    min_sample = np.inf
-    for k, v in samples_per_group.items():
-        if k in include_groups:
-            tmp = round(v * min_fraction)
-            min_sample = min(tmp, min_sample)
-    return min_sample
+    """
+    Computes the `min_sample` parameter to use in the DBSCAN model.
+
+    Auxiliary function to feature_correspondence
+
+    Parameters
+    ----------
+    samples_per_class : Dict[int, int]
+    include_classes : List[int] or None
+    min_fraction : number between 0 and 1
+
+    Returns
+    -------
+    min_sample : int
+
+    """
+    if include_classes is None:
+        min_samples = round(sum(samples_per_class.values()) * min_fraction)
+    else:
+        min_samples = np.inf
+        for k, v in samples_per_class.items():
+            if k in include_classes:
+                tmp = round(v * min_fraction)
+                min_samples = min(tmp, min_samples)
+    return min_samples
 
 
-def _make_initial_cluster(
+def _cluster_dbscan(
         X: np.ndarray,
         eps: float,
         min_samples: int,
         max_size: int
 ) -> np.ndarray:
     """
-    First estimation of matched features using the DBSCAN algorithm.
-    Data is split to reduce memory usage.
+    Clusterize rows of X using the DBSCAN algorithm. X is split into chunks to
+    reduce memory usage. The split is done in a way such that the solution
+    obtained is the same as the solution using X.
 
-    Auxiliary function to feature_correspondence.
+    Auxiliary function to match_features.
 
     Parameters
     ----------
@@ -149,6 +255,9 @@ def _make_initial_cluster(
         split_index = np.arange(max_size, n_rows, max_size)
 
         # find split indices candidates
+        # it can be shown that if X is split at one of these points, the
+        # points in each one of the chunks are not connected with points in
+        # another chunk
         min_diff_x = np.min(np.diff(X.T), axis=0)
         split_candidates = np.where(min_diff_x > eps)[0]
         close_index = np.searchsorted(split_candidates, split_index)
@@ -181,108 +290,117 @@ def _make_initial_cluster(
 
 
 def _estimate_n_species(
-        df: pd.DataFrame,
-        min_dr: float,
-        sample_per_group: Dict[int, int],
-        include_groups: Optional[List[int]]
+        samples: np.ndarray,
+        clusters: np.ndarray,
+        classes: np.ndarray,
+        samples_per_class: Dict[int, int],
+        include_classes: List[int],
+        min_dr: float
 ) -> Dict[int, int]:
+    """
+    Estimate the number of species in a cluster.
 
-    # gets a dataframe with four columns: group, sample, cluster and number
-    # of features in the cluster.
-    n_ft_cluster = (
-        df.groupby(["class_"])
-        .value_counts()
-        .reset_index()
-    )
+    Auxiliary function to match_features.
 
-    # computes maximum number of species where the detection rate is greater
-    # than min_dr
-    n_species_per_cluster = (
-        n_ft_cluster.groupby("class_")
-        .apply(
-            _get_n_species_per_group,
-            min_dr,
-            sample_per_group,
-            include_groups
-        )
-    )
-    if isinstance(n_species_per_cluster.index, pd.MultiIndex):
-        # unstack MultiIndex into a DataFrame and get the highest value
-        # estimation of the number of species for each cluster
-        n_species_per_cluster = n_species_per_cluster.unstack(-1).max()
-    elif isinstance(n_species_per_cluster, pd.DataFrame):
-        # If multiple groups are used a DataFrame is obtained
-        n_species_per_cluster = n_species_per_cluster.max()
-    else:
-        # DataFrame with only one row is converted to a Series
-        n_species_per_cluster = n_species_per_cluster.iloc[0]
+    Returns
+    -------
+    n_species_per_cluster : dict
+        A mapping from cluster label to the number of species estimated.
 
-    n_species_per_cluster = n_species_per_cluster.astype(int).to_dict()
+    """
+    n_clusters = clusters.max() + 1
+    n_class = len(include_classes)
+    species_array = np.zeros((n_class, n_clusters), dtype=int)
+    # estimate the number of species in a cluster according to each class
+    for k, cl in enumerate(include_classes):
+        n_samples = samples_per_class[cl]
+        n_min = round(n_samples * min_dr)
+        c_mask = classes == cl
+        c_samples = samples[c_mask]
+        c_clusters = clusters[c_mask]
+        c_species = _estimate_n_species_one_class(
+            c_samples, c_clusters, n_min, n_clusters)
+        species_array[k, :] = c_species
+    # keep the estimation with the highest number of species
+    species = species_array.max(axis=0)
+    n_species_per_cluster = dict(zip(np.arange(n_clusters), species))
     return n_species_per_cluster
 
 
-def _get_n_species_per_group(
-        df: pd.DataFrame,
-        min_dr: float,
-        samples_per_group: Dict[int, int],
-        include_groups: List[int]
-) -> pd.DataFrame:
-    if df.name in include_groups:
-        n_samples = samples_per_group[df.name]
-        res = (
-            # pivot table where the values are the number of features
-            # contributed by a sample
-            df.pivot(index="sample_", columns="cluster_", values=0)
-            .fillna(0)
-            # count how many times a given number of features was obtained
-            .apply(lambda x: x.value_counts())
-            .div(n_samples)  # convert values to detection rates
-            .fillna(0)
-            .iloc[::-1]
-            .cumsum()
-            .iloc[::-1]
-            # these three previous steps are a trick to pass detection rates
-            # values from higher to lower values.
-            .ge(min_dr)     # find values where above the min_dr
-            .apply(lambda x: x.iloc[::-1].idxmax() if x.any() else 0)
-            # get the maximum number of species above the min_dr
-        )
-    else:
-        c = df.cluster_.unique()
-        res = pd.Series(data=np.zeros(c.size), index=c)
-    return res
+def _estimate_n_species_one_class(
+        samples: np.ndarray,
+        clusters: np.ndarray,
+        min_samples: int,
+        n_clusters: int
+) -> np.ndarray:
+    """
+    Estimates the number of species in a cluster. Assumes only one class.
+
+    Auxiliary function to _estimate_n_species.
+
+    """
+    species = np.zeros(n_clusters, dtype=int)
+    for cl in range(n_clusters):
+        c_mask = clusters == cl
+        c_samples = samples[c_mask]
+        # count features per sample in a cluster
+        s_unique, s_counts = np.unique(c_samples, return_counts=True)
+        # count the number of times a sample has k features
+        k_unique, k_counts = np.unique(s_counts, return_counts=True)
+        k_mask = k_counts >= min_samples
+        k_unique = k_unique[k_mask]
+        if k_unique.size:
+            species[cl] = k_unique.max()
+    return species
 
 
 def _cluster_iterator(
     X: np.ndarray,
     cluster: np.ndarray,
     samples: np.ndarray,
-    features_per_cluster: Dict[int, int]
+    species_per_cluster: Dict[int, int]
 ) -> Generator[Tuple[np.ndarray, np.ndarray], None, None]:
+    """
+    Yields the rows of X associated with a cluster.
+
+    Auxiliary function to match_features.
+
+    Yields
+    ------
+    X_c : array
+        Rows of X associated to a cluster.
+    samples_c : array
+        Sample labels associated to X_c.
+    n_species : int
+        Number of species estimated for the cluster.
+    index : indices of the rows of `X_c` in `X`
+
+    """
     n_cluster = cluster.max() + 1
-    for c in range(n_cluster):
-        n_ft = features_per_cluster[c]
-        if n_ft > 0:
-            index = np.where(cluster == c)[0]
-            Xc = X[index, :]
+    for cl in range(n_cluster):
+        n_species = species_per_cluster[cl]
+        if n_species > 0:
+            index = np.where(cluster == cl)[0]
+            X_c = X[index, :]
             samples_c = samples[index]
-            yield Xc, samples_c, n_ft, index
+            yield X_c, samples_c, n_species, index
 
 
-def _split_cluster(
-    X: np.ndarray,
-    samples: np.ndarray,
+def _process_cluster(
+    X_c: np.ndarray,
+    samples_c: np.ndarray,
     n_species: int,
     max_deviation: float
-) -> np.ndarray:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Process each cluster obtained from DBSCAN. Auxiliary function to
-    `feature_correspondence`.
+    Process each cluster using GMM.
+
+    Auxiliary function to `match_features`.
 
     Parameters
     ----------
-    X : array
-    samples : array
+    X_c : array
+    samples_c : array
     max_deviation : float
     n_species: int
         Number of features in the cluster, estimated with
@@ -291,33 +409,46 @@ def _split_cluster(
     Returns
     -------
     label : np.ndarray
+    indecisiveness : np.ndarray
     """
 
     # fit GMM
     gmm = GaussianMixture(n_components=n_species, covariance_type="diag")
-    gmm.fit(X)
+    gmm.fit(X_c)
 
     # compute the deviation of the features respect to each cluster
-    deviation = _get_deviation(X, gmm.covariances_, gmm.means_)
+    deviation = _get_deviation(X_c, gmm.covariances_, gmm.means_)
 
     # assign each feature in a sample to component in the GMM minimizing the
     # total deviation in the sample.
-    label = - np.ones_like(samples)
-    unique_samples = np.unique(samples)
+    label = - np.ones_like(samples_c)   # by default features are set as noise
+    unique_samples = np.unique(samples_c)
+    # the indecisiveness is a metric that counts the number of samples
+    # where more than one feature can be potentially assigned to a species
+    # that is, for each species, the number of rows in deviation with values
+    # lower than max_deviation are counted as 1 and zero otherwise.
+    # This is done for all samples and the indecisiveness is divided by the
+    # number of samples.
+    indecisiveness = np.zeros(n_species)
     for s in unique_samples:
-        sample_mask = samples == s
+        sample_mask = samples_c == s
         sample_deviation = deviation[sample_mask, :]
-        # Find best option for each feature
+        # indecisiveness
+        count = (sample_deviation < max_deviation).sum(axis=0)
+        indecisiveness += (count > 1)
+
+        # Find the best option for each feature
         best_row, best_col = linear_sum_assignment(sample_deviation)
 
         # features with deviation greater than max_deviation are set to noise
-        min_proba_mask = sample_deviation[best_row, best_col] <= max_deviation
-        best_col = best_col[min_proba_mask]
-        best_row = best_row[min_proba_mask]
+        valid_ft_mask = sample_deviation[best_row, best_col] <= max_deviation
+        best_col = best_col[valid_ft_mask]
+        best_row = best_row[valid_ft_mask]
         sample_label = - np.ones(sample_deviation.shape[0], dtype=int)
         sample_label[best_row] = best_col
         label[sample_mask] = sample_label
-    return label
+    indecisiveness /= unique_samples.size
+    return label, indecisiveness
 
 
 def _get_deviation(
@@ -327,6 +458,8 @@ def _get_deviation(
 ) -> np.ndarray:
     """
     Compute the deviation of features.
+
+    Auxiliary function to _process_cluster
     
     Parameters
     ----------
@@ -352,19 +485,32 @@ def _get_deviation(
 
 
 def _split_cluster_worker(args, max_deviation):
+    """
+    Worker used to parallelize feature clustering.
+
+    """
     Xc, samples_c, n_ft, index = args
-    label_c = _split_cluster(Xc, samples_c, n_ft, max_deviation)
-    return label_c, index, n_ft
+    label_c, score = _process_cluster(Xc, samples_c, n_ft, max_deviation)
+    return label_c, score, index, n_ft
 
 
 def _build_label(data, size):
+    """
+    Merge the data obtained from each cluster.
+
+    Auxiliary function to match_features.
+
+    """
     label = -1 * np.ones(size, dtype=int)
     cluster_count = 0
-    for c_label, c_index, c_n_ft in data:
+    score_list = list()
+    for c_label, c_score, c_index, c_n_ft in data:
         c_label[c_label > -1] += cluster_count
         label[c_index] = c_label
         cluster_count += c_n_ft
-    return label
+        score_list.append(c_score)
+    score_list = np.hstack(score_list)
+    return label, score_list
 
 
 def _get_progress_bar_total(ft_per_cluster: Dict[int, int]) -> int:
