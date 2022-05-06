@@ -3,6 +3,7 @@ import pandas as pd
 from tidyms.simulation import simulate_dataset
 from tidyms.container import DataContainer
 from tidyms import fileio
+from tidyms.utils import get_tidyms_path
 import numpy as np
 import pytest
 import os
@@ -117,3 +118,22 @@ def data_container_without_order(data_container_with_order):
     fm = dc.feature_metadata.copy()
     mapping = {k: v for k, v in dc.mapping.items() if v is not None}
     return DataContainer(dm, fm, sm, mapping)
+
+
+@pytest.fixture
+def centroid_mzml():
+    cache_path = get_tidyms_path()
+    dataset_name = "test-raw-data"
+    filename = "centroid-data-zlib-indexed-compressed.mzML"
+    data_path = os.path.join(cache_path, dataset_name, filename)
+    ms_data = fileio.MSData(data_path, ms_mode="profile")
+    return ms_data
+
+
+@pytest.fixture
+def profile_mzml():
+    cache_path = get_tidyms_path()
+    filename = "profile-data-zlib-indexed-compressed.mzML"
+    data_path = os.path.join(cache_path, "test-raw-data", filename)
+    ms_data = fileio.MSData(data_path, ms_mode="profile")
+    return ms_data
