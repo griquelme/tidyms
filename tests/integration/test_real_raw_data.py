@@ -34,11 +34,14 @@ def test_ms_data_invalid_separation_setter(ms_data_centroid):
 
 def test_make_chromatogram_ms_level_1(ms_data_centroid):
     mz = np.array([205.098, 524.37, 188.07])   # some m/z observed in the data
-    chromatograms = ms_data_centroid.make_chromatograms(mz)
-    rt = ms_data_centroid.get_rt(ms_level=1)
+    chromatograms = ms.make_chromatograms(ms_data_centroid, mz)
+    rt = list()
+    for _, sp in ms_data_centroid.get_spectra_iterator(ms_level=1):
+        rt.append(sp.time)
+    rt = np.array(rt)
     for c in chromatograms:
-        assert np.array_equal(rt, c.rt)
-        assert c.rt.size == c.spint.size
+        assert np.array_equal(rt, c.time)
+        assert c.time.size == c.spint.size
 
 
 def test_ms_data_get_spectrum(ms_data_centroid):
@@ -47,29 +50,37 @@ def test_ms_data_get_spectrum(ms_data_centroid):
 
 
 def test_make_tic_ms_level_1(ms_data_centroid):
-    tic = ms_data_centroid.make_tic(ms_level=1)
-    rt = ms_data_centroid.get_rt(ms_level=1)
-    assert np.array_equal(rt, tic.rt)
-    assert tic.rt.size == tic.spint.size
+    tic = ms.make_tic(ms_data_centroid, ms_level=1)
+    rt = list()
+    for _, sp in ms_data_centroid.get_spectra_iterator(ms_level=1):
+        rt.append(sp.time)
+    rt = np.array(rt)
+    assert np.array_equal(rt, tic.time)
+    assert tic.time.size == tic.spint.size
 
 
 def test_make_chromatogram_ms_level_2(ms_data_centroid):
     mz = np.array([205.098, 524.37, 188.07])   # some m/z observed in the data
-    chromatograms = ms_data_centroid.make_chromatograms(mz, ms_level=2)
-    rt = ms_data_centroid.get_rt(ms_level=2)
+    ms_level = 2
+    chromatograms = ms.make_chromatograms(
+        ms_data_centroid, mz, ms_level=ms_level)
+    rt = list()
+    for _, sp in ms_data_centroid.get_spectra_iterator(ms_level=ms_level):
+        rt.append(sp.time)
+    rt = np.array(rt)
     for c in chromatograms:
-        assert np.array_equal(rt, c.rt)
-        assert c.rt.size == c.spint.size
+        assert np.array_equal(rt, c.time)
+        assert c.time.size == c.spint.size
 
 
 def test_make_roi(ms_data_centroid):
-    roi_list = ms_data_centroid.make_roi()
+    roi_list = ms.make_roi(ms_data_centroid)
     for r in roi_list:
         # The three arrays must have the same size
-        assert r.rt.size == r.spint.size
-        assert r.rt.size == r.scan.size
+        assert r.time.size == r.spint.size
+        assert r.time.size == r.scan.size
 
 
 def test_accumulate_spectra(ms_data_centroid):
-    sp = ms_data_centroid.accumulate_spectra(20, 30)
+    sp = ms.accumulate_spectra(ms_data_centroid, start_time=20, end_time=30)
     assert sp.mz.size == sp.spint.size
