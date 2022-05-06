@@ -21,13 +21,14 @@ get_find_centroid_params
 
 import bokeh.plotting
 import numpy as np
-from collections import namedtuple, deque
 from scipy.ndimage import gaussian_filter1d
-from typing import Optional, Tuple, Union, List, Callable
+from typing import Dict, List, Optional, Tuple
 from scipy.interpolate import interp1d
+from scipy.integrate import trapz
+from scipy.integrate import cumtrapz
 from . import peaks
 from . import _plot_bokeh
-from .utils import find_closest
+from . import _constants as c
 
 
 class MSSpectrum:
@@ -61,7 +62,7 @@ class MSSpectrum:
         time: Optional[float] = None,
         ms_level: int = 1,
         polarity: Optional[int] = None,
-        instrument: str = "qtof",
+        instrument: str = c.QTOF,
         is_centroid: bool = True
     ):
         self.mz = mz
@@ -78,12 +79,12 @@ class MSSpectrum:
 
     @instrument.setter
     def instrument(self, value):
-        valid_values = ["qtof", "orbitrap"]
+        valid_values = c.MS_INSTRUMENTS
         if value in valid_values:
             self._instrument = value
         else:
-            msg = "instrument must be one of `qtof` or `orbitrap`. Got {}"
-            raise ValueError(msg.format(value))
+            msg = "{} is not a valid instrument. Valid values are: {}."
+            raise ValueError(msg.format(value, c.MS_INSTRUMENTS))
 
     def find_centroids(
         self,
@@ -104,7 +105,7 @@ class MSSpectrum:
 
         Raises
         ------
-        ValueError: if the spectrum is in centroid mode
+        ValueError: if the spectrum is in centroid mode.
 
         Returns
         -------
@@ -146,6 +147,7 @@ class MSSpectrum:
             key-value parameters to pass to ``bokeh.plotting.Figure.line``.
         show : bool, default=True
             If True calls ``bokeh.plotting.show`` on the Figure.
+
         Returns
         -------
         bokeh.plotting.Figure
@@ -170,154 +172,47 @@ class MSSpectrum:
         return fig
 
 
-class Chromatogram:
+class Roi:
     """
-    Representation of a chromatogram. Manages plotting and peak detection.
+        m/z traces extracted from raw data. m/z information is stored besides
+        time and intensity information.
 
-    Attributes
-    ----------
-    rt : array
-        Retention time data.
-    spint : array
-        Intensity data.
-    mode : {"uplc", "hplc"}, default="uplc"
-        Analytical platform used for separation. Sets default values for peak
-        detection.
-
-    """
-
-    def __init__(self, rt: np.ndarray, spint: np.ndarray, mode: str = "uplc"):
-        self.mode = mode
-        self.rt = rt
-        self.spint = spint
-        self.peaks = None
-
-    @property
-    def mode(self):
-        return self._mode
-
-    @mode.setter
-    def mode(self, value):
-        valid_values = ["uplc", "hplc"]
-        if value in valid_values:
-            self._mode = value
-        else:
-            msg = "mode must be one of {}. Got {}"
-            raise ValueError(msg.format(valid_values, value))
-
-    def find_peaks(
-        self,
-        smoothing_strength: Optional[float] = 1.0,
-        descriptors: Optional[dict] = None,
-        filters: Optional[dict] = None,
-        find_peaks_params: Optional[dict] = None,
-        return_signal_estimators: bool = False
-    ) -> List[dict]:
-        """
-        Find peaks and compute peak descriptors.
-
-        Stores the detected peaks in the `peaks` attribute and returns the peaks
-        descriptors.
-
-        Parameters
+        Attributes
         ----------
-        descriptors : dict or None, default=None
-            descriptors to pass to :py:func:`tidyms.peaks.get_peak_descriptors`.
-        find_peaks_params : dict or None, default=None
-            parameters to pass to :py:func:`tidyms.peaks.detect_peaks`
-        smoothing_strength: positive number or None, default=1.0
-            Width of a gaussian window used to smooth the signal. If ``None``,
-            no smoothing is applied.
-        filters : dict or None, default=None
-            filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`
-        return_signal_estimators : bool, default=False
-            If True, returns a dictionary with the noise, baseline and the
-            smoothed signal
-
-        Returns
-        -------
-        params : List[dict]
-            List of peak descriptors
-        estimators : dict
-            a dictionary with the noise, baseline and smoothed signal used
-            inside the function. Only if `return_signal_estimators` is ``True``.
-
-        Notes
-        -----
-        Peak detection is done in five steps:
-
-        1. Estimate the noise level.
-        2. Apply a gaussian smoothing to the chromatogram.
-        3. Estimate the baseline.
-        4. Detect peaks in the chromatogram.
-        5. Compute peak descriptors and filter peaks.
-
-        See Also
-        --------
-        peaks.estimate_noise : noise estimation of 1D signals
-        peaks.estimate_baseline : baseline estimation of 1D signals
-        peaks.detect_peaks : peak detection of 1D signals.
-        peaks.get_peak_descriptors: computes peak descriptors.
-        lcms.get_lc_filter_peaks_params : default value for filters
+        time : array
+            time in each scan.
+        spint : array
+            intensity in each scan.
+        mz : array
+            m/z in each scan.
+        scan : array
+            scan numbers where the ROI is defined.
+        mode : {"uplc", "hplc"}
+            Analytical platform used separation. Sets default values for peak
+            detection.
 
         """
-        if find_peaks_params is None:
-            find_peaks_params = dict()
-
-        if filters is None:
-            filters = get_lc_filter_peak_params(self.mode)
-
-        noise = peaks.estimate_noise(self.spint)
-
-        if smoothing_strength is None:
-            x = self.spint
-        else:
-            x = gaussian_filter1d(self.spint, smoothing_strength)
-
-        baseline = peaks.estimate_baseline(x, noise)
-        peak_list = peaks.detect_peaks(x, noise, baseline, **find_peaks_params)
-
-        peak_list, peak_descriptors = peaks.get_peak_descriptors(
-            self.rt,
-            self.spint,
-            noise,
-            baseline,
-            peak_list,
-            descriptors=descriptors,
-            filters=filters
-        )
-        self.peaks = peak_list
-
-        if return_signal_estimators:
-            estimators = {"smoothed": x, "noise": noise, "baseline": baseline}
-            res = peak_descriptors, estimators
-        else:
-            res = peak_descriptors
-        return res
+    def __init__(self, spint: np.ndarray, mz: np.ndarray, time: np.ndarray,
+                 scan: np.ndarray, mode: str):
+        self.mode = mode
+        self.time = time
+        self.spint = spint
+        self.mz = mz
+        self.scan = scan
+        self.features = None    # Type: Optional[List[Feature]]
 
     def plot(
         self,
-        fig_params: Optional[dict] = None,
-        line_params: Optional[dict] = None,
-        fill_params: Optional[dict] = None,
-        palette: Optional[str] = None,
+        figure: Optional[bokeh.plotting.Figure] = None,
         show: bool = True
     ) -> bokeh.plotting.Figure:     # pragma: no cover
         """
-        Plot the chromatogram.
+        Plot the ROI.
 
         Parameters
         ----------
-        fig_params : dict or None, default=None
-            key-value parameters to pass to ``bokeh.plotting.figure``.
-        line_params : dict or None, default=None
-            key-value parameters to pass to ``bokeh.plotting.Figure.line``.
-            Used to draw the chromatogram line.
-        fill_params : dict or None, default=None
-            key-value parameters to pass to ``bokeh.plotting.Figure.varea``.
-            Used to fill the area under the peaks.
-        palette : str or None, default=None
-            Color palette used to fill the area under the peaks.
+        figure : bokeh.plotting.Figure or None, default=None
+            Figure to add the plot. If None, a new figure is created.
         show : bool, default=True
             If True calls ``bokeh.plotting.show`` on the Figure.
 
@@ -326,57 +221,88 @@ class Chromatogram:
         bokeh.plotting.Figure
 
         """
-        default_fig_params = _plot_bokeh.get_chromatogram_figure_params()
-        if fig_params:
-            default_fig_params.update(fig_params)
-            fig_params = default_fig_params
-        else:
-            fig_params = default_fig_params
-        fig = bokeh.plotting.Figure(**fig_params)
+        if figure is None:
+            fig_params = _plot_bokeh.get_chromatogram_figure_params()
+            figure = bokeh.plotting.Figure(**fig_params)
 
-        _plot_bokeh.add_line(fig, self.rt, self.spint, line_params=line_params)
-        if self.peaks:
-            _plot_bokeh.fill_peaks(
-                fig,
-                self.rt,
-                self.spint,
-                self.peaks,
-                palette,
-                varea_params=fill_params
-            )
-        _plot_bokeh.set_chromatogram_axis_params(fig)
+        _plot_bokeh.add_line(figure, self.time, self.spint)
+        if self.features:
+            palette = _plot_bokeh.get_palette()
+            palette_cycler = _plot_bokeh.palette_cycler(palette)
+            for f, color in zip(self.features, palette_cycler):
+                _plot_bokeh.fill_area(
+                    figure,
+                    self.time,
+                    self.spint,
+                    f.start,
+                    f.end,
+                    color,
+                )
+        _plot_bokeh.set_chromatogram_axis_params(figure)
         if show:
-            bokeh.plotting.show(fig)
-        return fig
+            bokeh.plotting.show(figure)
+        return figure
 
+    def extract_features(self, **kwargs) -> List["Feature"]:
+        raise NotImplementedError
 
-class Roi(Chromatogram):
-    """
-    m/z traces where a chromatographic peak may be found. m/z information
-    is stored besides time and intensity information.
+    def describe_features(
+        self,
+        custom_descriptors: Optional[dict] = None,
+        filters: Optional[dict] = None
+    ) -> List[Dict[str, float]]:
+        """
+        Computes descriptors for the features detected in the ROI.
 
-    Subclassed from Chromatogram. Used for feature detection in LCMS data.
+        Parameters
+        ----------
+        custom_descriptors : dict or None, default=None
+            A dictionary of strings to callables, used to estimate custom
+            descriptors of a feature. The function must have the following
+            signature:
 
-    Attributes
-    ----------
-    rt : array
-        retention time in each scan.
-    spint : array
-        intensity in each scan.
-    mz : array
-        m/z in each scan.
-    scan : array
-        scan numbers where the ROI is defined.
-    mode : {"uplc", "hplc"}
-        Analytical platform used separation. Sets default values for peak
-        detection.
+            .. code-block:: python
 
-    """
-    def __init__(self, spint: np.ndarray, mz: np.ndarray, rt: np.ndarray,
-                 scan: np.ndarray, mode: str = "uplc"):
-        super(Roi, self).__init__(rt, spint, mode=mode)
-        self.mz = mz
-        self.scan = scan
+                "estimator_func(roi: Roi, feature: Feature) -> float"
+
+        filters : dict or None, default=None
+            A dictionary of descriptor names to a tuple of minimum and maximum
+            acceptable values. To use only minimum/maximum values, use None
+            (e.g. (None, max_value) in the case of using only maximum). Features
+            with descriptors outside those ranges are removed. Filters for
+            custom descriptors can also be used.
+
+        Returns
+        -------
+        features : List[Feature]
+            filtered list of features.
+        descriptors: List[Dict[str, float]]
+            Descriptors for each feature.
+
+        """
+
+        if custom_descriptors is None:
+            custom_descriptors = dict()
+
+        if filters is None:
+            filters = self._get_default_filters()
+        _fill_filter_boundaries(filters)
+
+        valid_features = list()
+        descriptor_list = list()      # Type: List[Dict[str, float]]
+        for f in self.features:
+            f_descriptors = f.get_descriptors(self)
+            for descriptor, func in custom_descriptors.items():
+                f_descriptors[descriptor] = func(self)
+
+            if _has_all_valid_descriptors(f_descriptors, filters):
+                valid_features.append(f)
+                descriptor_list.append(f_descriptors)
+        self.features = valid_features
+        return descriptor_list
+
+    def _get_default_filters(self) -> Dict[str, float]:
+        raise NotImplementedError
 
     def fill_nan(self, fill_value: Optional[float] = None):
         """
@@ -400,59 +326,432 @@ class Roi(Chromatogram):
             self.spint[-1] = 0
 
         missing = np.isnan(self.spint)
-        mz_mean = np.nanmean(self.mz)
         if fill_value is None:
-            interpolator = interp1d(self.rt[~missing], self.spint[~missing])
-            self.mz[missing] = mz_mean
-            self.spint[missing] = interpolator(self.rt[missing])
+            interpolator = interp1d(self.time[~missing], self.spint[~missing])
+            self.spint[missing] = interpolator(self.time[missing])
         else:
-            self.mz[missing] = mz_mean
             self.spint[missing] = fill_value
 
-    def get_peaks_mz(self) -> Tuple[np.ndarray, np.ndarray]:
+        if isinstance(self.mz, np.ndarray):
+            mz_mean = np.nanmean(self.mz)
+            self.mz[missing] = mz_mean
+
+
+class LCRoi(Roi):
+    """
+        m/z traces where chromatographic peaks may be found. m/z information
+        is stored besides time and intensity information.
+
+        Subclassed from Roi. Used for feature detection in LCMS data.
+
+        Attributes
+        ----------
+        time : array
+            time in each scan.
+        spint : array
+            intensity in each scan.
+        mz : array
+            m/z in each scan.
+        scan : array
+            scan numbers where the ROI is defined.
+        mode : {"uplc", "hplc"}
+            Analytical platform used separation. Sets default values for peak
+            detection.
+
         """
-        Computes the weighted mean of the m/z for each peak and the m/z
-        standard deviation.
+
+    def __init__(self, spint: np.ndarray, mz: np.ndarray, time: np.ndarray,
+                 scan: np.ndarray, mode: str = c.UPLC):
+        super(LCRoi, self).__init__(spint, mz, time, scan, mode)
+        self.baseline = None
+        self.noise = None
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        if value in c.LC_MODES:
+            self._mode = value
+        else:
+            msg = "{} is not a valid mode. Valid values are: {}."
+            raise ValueError(msg.format(value, c.LC_MODES))
+
+    def extract_features(
+        self,
+        smoothing_strength: Optional[float] = 1.0,
+        store_smoothed: bool = False,
+        **kwargs
+    ) -> List["Peak"]:
+        """
+        Detect chromatographic peaks.
+
+        Peaks are stored in the `features` attribute.
+
+        Parameters
+        ----------
+        smoothing_strength : float or None, default=1.0
+            Scale of a Gaussian function used to smooth the signal. If None,
+            no smoothing is applied.
+        store_smoothed : bool, default=True
+            If True, replaces the original data with the smoothed version.
+        **kwargs :
+            Parameters to pass to :py:func:`tidyms.peaks.detect_peaks`.
+
+        Notes
+        -----
+        Peak detection is done in five steps:
+
+        1. Estimate the noise level.
+        2. Apply a gaussian smoothing to the chromatogram.
+        3. Estimate the baseline.
+        4. Detect peaks in the chromatogram.
+
+        See Also
+        --------
+        peaks.estimate_noise : noise estimation of 1D signals
+        peaks.estimate_baseline : baseline estimation of 1D signals
+        peaks.detect_peaks : peak detection of 1D signals.
+
+        """
+        self.fill_nan(0.0)
+        noise = peaks.estimate_noise(self.spint)
+
+        if smoothing_strength is None:
+            x = self.spint
+        else:
+            x = gaussian_filter1d(self.spint, smoothing_strength)
+
+        if store_smoothed:
+            self.spint = x
+
+        baseline = peaks.estimate_baseline(self.spint, noise)
+        start, apex, end = peaks.detect_peaks(
+            self.spint, noise, baseline, **kwargs
+        )
+        features = [Peak(s, a, e) for s, a, e in zip(start, apex, end)]
+
+        self.features = features
+        self.baseline = baseline
+        self.noise = noise
+        return features
+
+    def _get_default_filters(self) -> dict:
+        """
+        Default filters for peaks detected in LC data.
+        """
+        if self.mode == c.HPLC:
+            filters = {"width": (10, 90), "snr": (5, None)}
+        else:   # mode = "uplc"
+            filters = {"width": (4, 60), "snr": (5, None)}
+        return filters
+
+
+class Chromatogram(LCRoi):
+    """
+    Representation of a chromatogram. Manages plotting and peak detection.
+
+    Subclassed from LCRoi.
+
+    Attributes
+    ----------
+    time : array
+        Retention time data.
+    spint : array
+        Intensity data.
+    mode : {"uplc", "hplc"}, default="uplc"
+        Analytical platform used for separation. Sets default values for peak
+        detection.
+
+    """
+    def __init__(self, time: np.ndarray, spint: np.ndarray, mode: str = c.UPLC):
+        super(Chromatogram, self).__init__(spint, None, time, None, mode)
+
+
+class InvalidPeakException(ValueError):
+    """
+    Exception raised when invalid indices are used in the construction of
+    Peak objects.
+
+    """
+    pass
+
+
+class Feature:
+    """
+    Abstract representation of a feature.
+
+    Attributes
+    ----------
+    start: int
+        index where the peak begins. Must be smaller than `apex`
+    end: int
+        index where the peak ends. Start and end used as slices defines the
+        peak region.
+
+    """
+
+    def __init__(self, start: int, end: int):
+
+        try:
+            assert start < end
+        except AssertionError:
+            msg = "start must be lower than end"
+            raise ValueError(msg)
+
+        self.start = start
+        self.end = end
+
+    def __repr__(self):
+        str_repr = "{}(start={}, end={})"
+        name = self.__class__.__name__
+        str_repr = str_repr.format(name, self.start, self.end)
+        return str_repr
+
+    def plot(
+        self,
+        roi: Roi,
+        figure: bokeh.plotting.Figure,
+        color: str,
+        **varea_params
+    ):
+        _plot_bokeh.fill_area(
+            figure, roi.time, roi.spint, self.start, self.end, color,
+            **varea_params
+        )
+
+    def get_descriptors(self, roi: Roi):
+        raise NotImplementedError
+
+
+class Peak(Feature):
+    """
+    Representation of a chromatographic peak. Computes peak descriptors.
+
+    Attributes
+    ----------
+    start: int
+        index where the peak begins. Must be smaller than `apex`
+    apex: int
+        index where the apex of the peak is located. Must be smaller than `end`
+    end: int
+        index where the peak ends. Start and end used as slices defines the
+        peak region.
+
+    """
+
+    def __init__(self, start: int, apex: int, end: int):
+        super(Peak, self).__init__(start, end)
+        try:
+            assert self.start < apex
+            assert apex < self.end
+        except AssertionError:
+            msg = "start must be lower than loc and loc must be lower than end"
+            raise InvalidPeakException(msg)
+        self.apex = apex
+
+    def __repr__(self):
+        str_repr = "{}(start={}, apex={}, end={})"
+        name = self.__class__.__name__
+        str_repr = str_repr.format(name, self.start, self.apex, self.end)
+        return str_repr
+
+    def get_rt(self, roi: LCRoi) -> float:
+        """
+        Finds the peak location in the ROI rt, using spint as weights.
+
+        Parameters
+        ----------
+        roi: Roi
+            ROI where the peak was detected
 
         Returns
         -------
-        mean_mz : array
-        mz_std : array
+        loc : float
 
         """
-        mz_std = np.zeros(len(self.peaks))
-        mz_mean = np.zeros(len(self.peaks))
-        for k, peak in enumerate(self.peaks):
-            mz_std[k] = self.mz[peak.start:peak.end].std()
-            mz_mean[k] = peak.get_loc(self.mz, self.spint)
-        return mz_mean, mz_std
+        weights = roi.spint[self.start:self.end]
+        weights[weights < 0] = 0
+        loc = np.abs(np.average(roi.time[self.start:self.end], weights=weights))
+        return loc
 
+    def get_height(self, roi: LCRoi) -> float:
+        """
+        Computes the height of the peak, defined as the difference between the
+        value of intensity in the ROI and the baseline at the peak apex.
 
-def get_lc_filter_peak_params(lc_mode: str) -> dict:
-    """
-    Default filters for peaks detected in LC data.
+        Parameters
+        ----------
+        roi : LCRoi
+            ROI where the peak was detected
 
-    Parameters
-    ----------
-    lc_mode : {"hplc", "uplc"}
-        HPLC assumes typical experimental conditions for HPLC experiments:
-        longer columns with particle size greater than 3 micron. UPLC is for
-        data acquired with short columns with particle size lower than 3 micron.
+        Returns
+        -------
+        height : non-negative number. If the baseline estimation is greater
+        than y, the height is set to zero.
 
-    Returns
-    -------
-    filters : dict
-        filters to pass to :py:func:`tidyms.peaks.get_peak_descriptors`.
+        """
+        height = roi.spint[self.apex] - roi.baseline[self.apex]
+        return max(0.0, height)
 
-    """
-    if lc_mode == "hplc":
-        filters = {"width": (10, 90), "snr": (5, None)}
-    elif lc_mode == "uplc":
-        filters = {"width": (4, 60), "snr": (5, None)}
-    else:
-        msg = "`mode` must be `hplc` or `uplc`"
-        raise ValueError(msg)
-    return filters
+    def get_area(self, roi: LCRoi) -> float:
+        """
+        Computes the area in the region defined by the peak.
+
+        If the baseline area is greater than the peak area, the area is set
+        to zero.
+
+        Parameters
+        ----------
+        roi : Roi
+            ROI where the peak was detected
+
+        Returns
+        -------
+        area : positive number.
+
+        """
+        baseline_corrected = (roi.spint[self.start:self.end] -
+                              roi.baseline[self.start:self.end])
+        area = trapz(baseline_corrected, roi.time[self.start:self.end])
+        return max(0.0, area)
+
+    def get_width(self, roi: LCRoi) -> float:
+        """
+        Computes the peak width, defined as the region where the 95 % of the
+        total peak area is distributed.
+
+        Parameters
+        ----------
+        roi : Roi
+            ROI where the peak was detected
+
+        Returns
+        -------
+        width : positive number.
+
+        """
+        height = (
+                roi.spint[self.start:self.end] -
+                roi.baseline[self.start:self.end]
+        )
+        area = cumtrapz(height, roi.time[self.start:self.end])
+        if area[-1] > 0:
+            relative_area = area / area[-1]
+            percentile = [0.025, 0.975]
+            start, end = self.start + np.searchsorted(relative_area, percentile)
+            width = roi.time[end] - roi.time[start]
+        else:
+            width = 0.0
+        return max(0.0, width)
+
+    def get_extension(self, roi: LCRoi) -> float:
+        """
+        Computes the peak extension, defined as the length of the peak region.
+
+        Parameters
+        ----------
+        roi : Roi
+            ROI where the peak was detected
+
+        Returns
+        -------
+        extension : positive number
+
+        """
+        return roi.time[self.end] - roi.time[self.start]
+
+    def get_snr(self, roi: LCRoi) -> float:
+        """
+        Computes the peak signal-to-noise ratio, defined as the quotient
+        between the peak height and the noise level at the apex.
+
+        Parameters
+        ----------
+        roi : Roi
+            ROI where the peak was detected
+
+        Returns
+        -------
+        snr : float
+
+        """
+
+        peak_noise = roi.noise[self.apex]
+        if np.isclose(peak_noise, 0):
+            snr = np.inf
+        else:
+            snr = self.get_height(roi) / peak_noise
+        return snr
+
+    def get_mean_mz(self, roi: LCRoi) -> float:
+        """
+        Computes the weighted average m/z of the peak.
+
+        Parameters
+        ----------
+        roi : Roi
+            ROI where the peak was detected
+
+        Returns
+        -------
+        mz_mean : float
+
+        """
+        if roi.mz is None:
+            mz_mean = None
+        else:
+            weights = roi.spint[self.start:self.end]
+            weights[weights < 0] = 0
+            mz_mean = np.average(roi.mz[self.start:self.end], weights=weights)
+            mz_mean = max(0.0, mz_mean)
+        return mz_mean
+
+    def get_mz_std(self, roi: LCRoi) -> float:
+        """
+        Computes the standard deviation of the m/z in the peak
+
+        Parameters
+        ----------
+        roi : Roi
+            ROI where the peak was detected
+
+        Returns
+        -------
+        mz_std : float
+
+        """
+        if roi.mz is None:
+            mz_std = None
+        else:
+            mz_std = roi.mz[self.start:self.end].std()
+        return mz_std
+
+    def get_descriptors(self, roi: LCRoi) -> Dict[str, float]:
+        """
+        Computes peak height, area, location, width and SNR.
+
+        Parameters
+        ----------
+        roi : Roi
+            ROI where the peak was detected
+
+        Returns
+        -------
+        descriptors: dict
+            A mapping of descriptor names to descriptor values.
+        """
+        descriptors = {
+            "height": self.get_height(roi),
+            "area": self.get_area(roi),
+            "rt": self.get_rt(roi),
+            "width": self.get_width(roi),
+            "snr": self.get_snr(roi),
+            "mz": self.get_mean_mz(roi),
+            "mz_std": self.get_mz_std(roi)
+        }
+        return descriptors
 
 
 def get_find_centroid_params(instrument: str) -> dict:
@@ -469,7 +768,7 @@ def get_find_centroid_params(instrument: str) -> dict:
 
     """
     params = {"min_snr": 10}
-    if instrument == "qtof":
+    if instrument == c.QTOF:
         md = 0.01
     else:   # orbitrap
         md = 0.005
@@ -477,434 +776,47 @@ def get_find_centroid_params(instrument: str) -> dict:
     return params
 
 
-class RoiMaker:
+def _fill_filter_boundaries(filter_dict: Dict[str, Tuple]):
     """
-    Helper class used by make_roi to create Roi instances from raw data.
+    Replaces None in the filter boundaries to perform comparisons.
 
-    Attributes
-    ----------
-    mz_mean: numpy.ndarray
-        mean value of mz for a given row in mz_array. Used to add new values
-        based on a tolerance. Updated after adding a new column
-    n_missing: numpy.ndarray
-        number of consecutive missing values. Used to detect finished rois
-    roi: list[_TemporaryRoi]
+    aux function of get_peak_descriptors
     """
-
-    def __init__(self, mz_seed: np.ndarray, max_missing: int = 1,
-                 min_length: int = 5, min_intensity: float = 0,
-                 tolerance: float = 0.005, multiple_match: str = "closest",
-                 mz_reduce: Optional[Callable] = None,
-                 sp_reduce: Union[str, Callable] = "sum",
-                 targeted: bool = False):
-        """
-
-        Parameters
-        ----------
-        mz_seed: numpy.ndarray
-            initial values to build rois
-        max_missing: int
-            maximum number of missing consecutive values. when a row surpass
-            this number the roi is flagged as finished.
-        min_length: int
-            The minimum length of a finished roi to be considered valid before
-            being added to the roi list.
-        min_intensity: float
-        tolerance: float
-            mz tolerance used to connect values.
-        multiple_match: {"closest", "reduce"}
-            how to match peaks when there is more than one match. If mode is
-            `closest`, then the closest peak is assigned as a match and the
-            others are assigned to no match. If mode is `reduce`, then a unique
-            mz and intensity value is generated using the reduce function in
-            `mz_reduce` and `spint_reduce` respectively.
-        mz_reduce: callable, optional
-            function used to reduce mz values. Can be a function accepting
-            numpy arrays and returning numbers. Only used when `multiple_match`
-            is ``"reduce"``. See the following prototype:
-
-            def mz_reduce(mz_match: np.ndarray) -> float:
-                pass
-
-            If None, m/z values are reduced using the mean.
-
-        sp_reduce: str or callable
-            function used to reduce spint values. Can be a function accepting
-            numpy arrays and returning numbers. Only used when `multiple_match`
-            is ``"reduce"``. To use custom functions see the prototype shown on
-            `mz_reduce`.
-        """
-        if multiple_match not in ["closest", "reduce"]:
-            msg = "Valid modes are closest or reduce"
-            raise ValueError(msg)
-
-        if mz_reduce == "mean":
-            self._mz_reduce = np.mean
-        else:
-            self._mz_reduce = mz_reduce
-
-        if sp_reduce == "mean":
-            self._spint_reduce = np.mean
-        elif sp_reduce == "sum":
-            self._spint_reduce = np.sum
-        else:
-            self._spint_reduce = sp_reduce
-
-        # temporary roi data
-        self.mz_mean = np.unique(mz_seed.copy())
-        # roi index maps the values in mz_mean to a temp roi in temp_roi_dict
-        self.roi_index = np.arange(mz_seed.size)
-        self.n_missing = np.zeros_like(mz_seed, dtype=int)
-        self.max_intensity = np.zeros_like(mz_seed)
-        self.length = np.zeros_like(mz_seed, dtype=int)
-        self.temp_roi_dict = {x: _make_temporary_roi() for x in self.roi_index}
-        self.roi = list()
-
-        # parameters used to build roi
-        self.min_intensity = min_intensity
-        self.max_missing = max_missing
-        self.min_length = min_length
-        self.tolerance = tolerance
-        self.multiple_match = multiple_match
-        self.targeted = targeted
-
-    def extend_roi(self, mz: np.ndarray, sp: np.ndarray, scan: int):
-        """
-        connects mz values with self.mz_mean to extend existing roi.
-        Non-matching mz values are used to create new temporary roi.
-
-        """
-        self.n_missing += 1
-
-        if mz.size:
-            # find matching and non-matching mz values
-            match_index, mz_match, sp_match, mz_no_match, sp_no_match = \
-                _match_mz(
-                    self.mz_mean, mz, sp, self.tolerance,
-                    self.multiple_match, self._mz_reduce, self._spint_reduce
-                )
-
-            # extend matching roi
-            for k, k_mz, k_sp in zip(match_index, mz_match, sp_match):
-                k_temp_roi = self.temp_roi_dict[self.roi_index[k]]
-                _append_to__roi(k_temp_roi, k_mz, k_sp, scan)
-
-            # update mz_mean and missing values
-            updated_mean = (
-                (
-                    self.mz_mean[match_index] * self.length[match_index]
-                    + mz_match
-                )
-                / (self.length[match_index] + 1)
-            )
-
-            self.length[match_index] += 1
-            # reset missing count for matching roi
-            self.n_missing[match_index] = 0
-            self.max_intensity[match_index] = \
-                np.maximum(self.max_intensity[match_index], sp_match)
-
-            # if there are non-matching mz values, use them to build new rois.
-            # in targeted mode, only roi with specified mz values are built
-            if not self.targeted:
-                self.mz_mean[match_index] = updated_mean
-                self.create_new_roi(mz_no_match, sp_no_match, scan)
-
-    def store_completed_roi(self):
-        """
-        store completed ROIs. Valid ROI are appended toi roi attribute.
-        The validity of the ROI is checked based on roi length and minimum
-        intensity.
-
-        """
-
-        # check completed rois
-        is_completed = self.n_missing > self.max_missing
-
-        # length and intensity check
-        is_valid_roi = ((self.length >= self.min_length) &
-                        (self.max_intensity >= self.min_intensity))
-
-        # add valid roi to roi list
-        completed_index = np.where(is_completed)[0]
-        for ind in completed_index:
-            roi_ind = self.roi_index[ind]
-            finished_roi = self.temp_roi_dict.pop(roi_ind)
-            if is_valid_roi[ind]:
-                self.roi.append(finished_roi)
-
-        # remove completed roi
-        if self.targeted:
-            self.n_missing[is_completed] = 0
-            self.length[is_completed] = 0
-            self.max_intensity[is_completed] = 0
-            max_roi_ind = self.roi_index.max()
-            n_completed = is_completed.sum()
-            new_indices = np.arange(max_roi_ind + 1,
-                                    max_roi_ind + 1 + n_completed)
-            self.roi_index[is_completed] = new_indices
-            new_tmp_roi = {k: _make_temporary_roi() for k in new_indices}
-            self.temp_roi_dict.update(new_tmp_roi)
-        else:
-            self.mz_mean = self.mz_mean[~is_completed]
-            self.n_missing = self.n_missing[~is_completed]
-            self.length = self.length[~is_completed]
-            self.roi_index = self.roi_index[~is_completed]
-            self.max_intensity = self.max_intensity[~is_completed]
-
-    def create_new_roi(self, mz: np.ndarray, sp: np.ndarray, scan: int):
-        """
-        Creates new temporary roi from non-matching values
-
-        """
-
-        # finds roi index for new temp roi and update metadata
-        max_index = self.roi_index.max()
-        new_indices = np.arange(mz.size) + max_index + 1
-        mz_mean_tmp = np.hstack((self.mz_mean, mz))
-        roi_index_tmp = np.hstack((self.roi_index, new_indices))
-        n_missing_tmp = np.zeros_like(new_indices, dtype=int)
-        n_missing_tmp = np.hstack((self.n_missing, n_missing_tmp))
-        length_tmp = np.ones_like(new_indices, dtype=int)
-        length_tmp = np.hstack((self.length, length_tmp))
-        max_int_tmp = np.zeros_like(new_indices, dtype=float)
-        max_int_tmp = np.hstack((self.max_intensity, max_int_tmp))
-
-        # temp roi creation
-        for k_index, k_mz, k_sp in zip(new_indices, mz, sp):
-            new_roi = _TemporaryRoi([k_mz], [k_sp], [scan])
-            self.temp_roi_dict[k_index] = new_roi
-
-        # replace new temp roi metadata
-        # roi extension is done using bisection search, all values are sorted
-        # using the mz values
-        sorted_index = np.argsort(mz_mean_tmp)
-        self.mz_mean = mz_mean_tmp[sorted_index]
-        self.roi_index = roi_index_tmp[sorted_index]
-        self.n_missing = n_missing_tmp[sorted_index]
-        self.length = length_tmp[sorted_index]
-        self.max_intensity = max_int_tmp[sorted_index]
-
-    def flag_as_completed(self):
-        self.n_missing[:] = self.max_missing + 1
-
-    def process_completed_roi(
-        self,
-        valid_scan: List[int],
-        rt: np.ndarray,
-        pad: int,
-        separation: str
-    ) -> List[Roi]:
-        """
-        Converts valid ROI into ROI objects.
-        Parameters
-        ----------
-        valid_scan : list
-            Scan numbers used for ROI creation
-        rt : array
-            rt values associated to each scan
-        pad : int
-            Number of dummy values to pad the ROI with
-        separation : {"uplc", "hplc"}
-            separation value to pass to ROI constructor function.
-
-        Returns
-        -------
-        List[ROI] : List of completed ROI.
-
-        """
-        valid_scan = np.array(valid_scan)
-        roi_list = list()
-        for r in self.roi:
-            # converting to deque makes padding easier
-            r = _TemporaryRoi(deque(r.mz), deque(r.sp), deque(r.scan))
-            _pad_roi(r, pad, valid_scan)
-            r = _build_roi(r, rt, valid_scan, separation)
-            roi_list.append(r)
-        return roi_list
+    for k in filter_dict:
+        lb, ub = filter_dict[k]
+        if lb is None:
+            lb = -np.inf
+        if ub is None:
+            ub = np.inf
+        filter_dict[k] = (lb, ub)
 
 
-def _match_mz(mz1: np.ndarray, mz2: np.ndarray, sp2: np.ndarray,
-              tolerance: float, mode: str, mz_reduce: Callable,
-              sp_reduce: Callable
-              ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-                         np.ndarray]:
+def _has_all_valid_descriptors(peak_descriptors: Dict[str, float],
+                               filters: Dict[str, Tuple[float, float]]) -> bool:
     """
-    aux function to add method in _RoiProcessor. Find matched values.
+    Check that the descriptors of a peak are in a valid range.
+
+    aux function of get_peak_descriptors.
 
     Parameters
     ----------
-    mz1: numpy.ndarray
-        _RoiProcessor mz_mean
-    mz2: numpy.ndarray
-        mz values to match
-    sp2: numpy.ndarray
-        intensity values associated to mz2
-    tolerance: float
-        tolerance used to match values
-    mode: {"closest", "merge"}
-        Behaviour when more than one peak in mz2 matches with a given peak in
-        mz1. If mode is `closest`, then the closest peak is assigned as a
-        match and the others are assigned to no match. If mode is `merge`, then
-        a unique mz and int value is generated using the average of the mz and
-        the sum of the intensities.
-
-    Returns
-    ------
-    match_index: numpy.ndarray
-        index when of peaks matching in mz1.
-    mz_match: numpy.ndarray
-        values of mz2 that matches with mz1
-    sp_match: numpy.ndarray
-        values of sp2 that matches with mz1
-    mz_no_match: numpy.ndarray
-    sp_no_match: numpy.ndarray
-    """
-    closest_index = find_closest(mz1, mz2)
-    dmz = np.abs(mz1[closest_index] - mz2)
-    match_mask = (dmz <= tolerance)
-    no_match_mask = ~match_mask
-    match_index = closest_index[match_mask]
-
-    # check multiple_matches
-    unique, first_index, count_index = np.unique(match_index,
-                                                 return_counts=True,
-                                                 return_index=True)
-
-    # set match values
-    match_index = unique
-    sp_match = sp2[match_mask][first_index]
-    mz_match = mz2[match_mask][first_index]
-
-    # compute matches for duplicates
-    multiple_match_mask = count_index > 1
-    first_index = first_index[multiple_match_mask]
-    if first_index.size > 0:
-        first_index_index = np.where(count_index > 1)[0]
-        count_index = count_index[multiple_match_mask]
-        iterator = zip(first_index_index, first_index, count_index)
-        if mode == "closest":
-            rm_index = list()   # list of duplicate index to remove
-            mz_replace = list()
-            spint_replace = list()
-            for first_ind, index, count in iterator:
-                # check which of the duplicate is closest, the rest are removed
-                closest = \
-                    np.argmin(dmz[match_mask][index:(index + count)]) + index
-                mz_replace.append(mz2[match_mask][closest])
-                spint_replace.append(sp2[match_mask][closest])
-                remove = np.arange(index, index + count)
-                remove = np.setdiff1d(remove, closest)
-                rm_index.extend(remove)
-            # fix rm_index to full mz2 size
-            rm_index = np.where(match_mask)[0][rm_index]
-            no_match_mask[rm_index] = True
-            mz_match[first_index_index] = mz_replace
-            sp_match[first_index_index] = spint_replace
-        elif mode == "reduce":
-            for first_ind, index, count in iterator:
-                # check which of the duplicate is closest
-                mz_multiple_match = mz2[match_mask][index:(index + count)]
-                sp_multiple_match = sp2[match_mask][index:(index + count)]
-                mz_match[first_ind] = mz_reduce(mz_multiple_match)
-                sp_match[first_ind] = sp_reduce(sp_multiple_match)
-        else:
-            msg = "mode must be `closest` or `merge`"
-            raise ValueError(msg)
-
-    mz_no_match = mz2[no_match_mask]
-    sp_no_match = sp2[no_match_mask]
-    return match_index, mz_match, sp_match, mz_no_match, sp_no_match
-
-
-_TemporaryRoi = namedtuple("TemporaryRoi", ["mz", "sp", "scan"])
-
-
-def _make_temporary_roi() -> _TemporaryRoi:
-    return _TemporaryRoi([], [], [])
-
-
-def _append_to__roi(roi: _TemporaryRoi, mz: float, sp: float,
-                    scan: int):
-    roi.mz.append(mz)
-    roi.sp.append(sp)
-    roi.scan.append(scan)
-
-
-def _pad_roi(roi: _TemporaryRoi, n: int, valid_scan: np.ndarray):
-    first_scan = roi.scan[0]
-    last_scan = roi.scan[-1]
-    start, end = np.searchsorted(valid_scan, [first_scan, last_scan + 1])
-    l_pad_index = max(0, start - n)
-    nl = start - l_pad_index
-    r_pad_index = min(valid_scan.size, end + n)
-    nr = r_pad_index - end
-
-    # fill values
-    sp_max = max(roi.sp)
-    sp_min = min(roi.sp)
-    mz_fill = np.mean(roi.mz)
-    sp_threshold = 0.75 * sp_max
-
-    # left pad
-    sp_fill_left = sp_max if (roi.sp[0] > sp_threshold) else sp_min
-    roi.mz.extendleft([mz_fill] * nl)
-    roi.sp.extendleft([sp_fill_left] * nl)
-    # deque extendleft from right to left
-    roi.scan.extendleft(valid_scan[l_pad_index:start][::-1])
-
-    # right pad
-    sp_fill_right = sp_max if (roi.sp[-1] > sp_threshold) else sp_min
-    roi.mz.extend([mz_fill] * nr)
-    roi.sp.extend([sp_fill_right] * nr)
-    roi.scan.extend(valid_scan[end:r_pad_index])
-
-
-def _build_roi(
-        roi: _TemporaryRoi, rt: np.ndarray, scans: np.ndarray, separation: str
-) -> Roi:
-    """
-    Converts a TemporaryRoi into a ROI object
-
-    Parameters
-    ----------
-    roi : TemporaryRoi
-    rt: array
-        Retention times associated to each scan
-    scans : array
-        Scans associated used to build the Rois.
-    separation : mode to pass to ROI creation.
+    peak_descriptors : dict
+        mapping of descriptor names to descriptor values.
+    filters : dict
+        Dictionary from descriptors names to minimum and maximum acceptable
+        values.
 
     Returns
     -------
-    Roi
+    is_valid : bool
+        True if all descriptors are inside the valid ranges.
 
     """
-    # build temporal roi arrays, these include scans that must be removed
-    # because they are associated with other ms levels.
-    first_scan = roi.scan[0]
-    last_scan = roi.scan[-1]
-    size = last_scan + 1 - first_scan
-    mz_tmp = np.ones(size) * np.nan
-    spint_tmp = mz_tmp.copy()
-
-    # copy values of the roi to the temporal arrays
-    scan_index = np.array(roi.scan) - roi.scan[0]
-    mz_tmp[scan_index] = roi.mz
-    spint_tmp[scan_index] = roi.sp
-
-    start_ind, end_ind = np.searchsorted(scans,
-                                         [first_scan, last_scan + 1])
-    scan_tmp = scans[start_ind:end_ind].copy()
-    valid_index = scan_tmp - first_scan
-    mz_tmp = mz_tmp[valid_index]
-    spint_tmp = spint_tmp[valid_index]
-    rt_tmp = rt[scan_tmp].copy()
-
-    # temporal sanity check for the roi arrays
-    assert rt_tmp.size == mz_tmp.size
-    assert rt_tmp.size == spint_tmp.size
-    assert rt_tmp.size == scan_tmp.size
-
-    roi = Roi(spint_tmp, mz_tmp, rt_tmp, scan_tmp, mode=separation)
-    return roi
+    res = True
+    for descriptor, (lb, ub) in filters.items():
+        d = peak_descriptors[descriptor]
+        is_valid = (d >= lb) and (d <= ub)
+        if not is_valid:
+            res = False
+            break
+    return res
