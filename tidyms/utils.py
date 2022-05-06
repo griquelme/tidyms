@@ -12,6 +12,8 @@ from scipy.stats import spearmanr, median_abs_deviation
 import os.path
 from typing import Optional, Union
 import json
+from tqdm import tqdm as cli_bar
+from tqdm.notebook import tqdm as notebook_bar
 
 data_type = Union[pd.DataFrame, pd.Series]
 reduced_type = Union[pd.Series, float]
@@ -530,5 +532,10 @@ def is_notebook() -> bool:
         return False      # Probably standard Python interpreter
 
 
-create_tidyms_dir()
-SETTINGS = get_settings()
+def get_progress_bar():
+    if is_notebook():
+        progress_bar = notebook_bar
+    else:
+        progress_bar = cli_bar
+    return progress_bar
+
