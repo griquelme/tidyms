@@ -1,3 +1,8 @@
+"""
+Functions used to match features
+
+"""
+
 import numpy as np
 import pandas as pd
 from functools import partial
@@ -31,7 +36,7 @@ def match_features(
         Feature table obtained after feature detection.
     samples_per_class : dict
         Maps a class name to the number of samples in the class.
-    include_classes : List[int] or None, default=None
+    include_classes : List or None, default=None
         Sample classes used to estimate the minimum cluster size and number of
         chemical species in a cluster.
     mz_tolerance : float
@@ -136,48 +141,11 @@ def match_features(
     func = delayed(func)
     data = Parallel(n_jobs=n_jobs)(func(x) for x in cluster_iterator)
     refined_cluster, score = _build_label(data, feature_table.shape[0])
-    feature_table[c.LABEL] = refined_cluster
-    return score
-
-
-def get_match_features_defaults(separation: str, instrument: str):
-    """
-    Default values used for `match_features` based on data acquisition
-    characteristics.
-
-    Parameters
-    ----------
-    separation : {"uplc", "hplc"}
-    instrument : {"qtof", "orbitrap"}
-
-    Returns
-    -------
-
-    """
-    if instrument == c.QTOF:
-        mz_tolerance = 0.01
-    elif instrument == c.ORBITRAP:
-        mz_tolerance = 0.005
-    else:
-        raise ValueError
-
-    if separation == c.HPLC:
-        rt_tolerance = 10
-    elif separation == c.UPLC:
-        rt_tolerance = 5
-    else:
-        raise ValueError
-
-    defaults = {
-        "mz_tolerance": mz_tolerance,
-        "rt_tolerance": rt_tolerance,
-        "min_fraction": 0.25,
-        "max_deviation": 3.0,
-        "n_jobs": None,
-        "verbose": False
+    results = {
+        c.LABEL: refined_cluster,
+        "indecisiveness": score
     }
-
-    return defaults
+    return results
 
 
 def _get_min_sample(

@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from tidyms import correspondence
+from tidyms import _constants as c
 import pytest
 from sklearn.cluster import DBSCAN
 
@@ -172,14 +173,14 @@ def test_match_features():
     samples = np.hstack(s_list)
 
     feature_table = pd.DataFrame(X, columns=["mz", "rt"])
-    feature_table["sample_"] = samples
-    feature_table["class_"] = 0
+    feature_table[c.SAMPLE] = samples
+    feature_table[c.CLASS] = 0
     samples_per_class = {0: 200}
 
     expected = np.array([0] * n + [1] * n + [-1] * n_noise)
 
-    correspondence.match_features(
+    labels = correspondence.match_features(
         feature_table, samples_per_class, None, 2, 2, 0.25, 4, verbose=True)
-    labels = feature_table["cluster_"].to_numpy()
+    labels = labels[c.LABEL]
 
     assert np.array_equal(labels, expected)
