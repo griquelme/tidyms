@@ -397,27 +397,36 @@ def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
     n_deviations = 3    # dummy values to initialize the loop
     percentile_counter = 9  # start at 90th percentile
     noise_std = 0
-    while (n_deviations > 1.0) and (percentile_counter > 2):
-        percentile_index = percentile_counter * d2x.size // 10
-        # the minimum number of elements required to compute the MAD
-        if percentile_index <= 2:
-            break
-        # dev_threshold = 2 / np.sqrt(percentile - 2)
 
-        if robust:
-            noise_std = mad(d2x[:percentile_index], scale="normal")
-            noise_mean = np.median(d2x[:percentile_index])
-        else:
-            noise_std = d2x[:percentile_index].std()
-            noise_mean = d2x[:percentile_index].mean()
+    if robust:
+        mean_func = np.median
+        std_func = lambda x: mad(x, scale="normal")
+    else:
+        mean_func = np.mean
+        std_func = np.std
 
-        # if all the values in d2x are equal, noise_std is equal to zero
-        if noise_std > 0:
-            n_deviations = abs(noise_mean / noise_std)
-        else:
-            break
-        percentile_counter -= 1
-    noise = noise_std / 2
+    if d2x.size >= 2:   # we need at least 2 points to compute the std
+        while (n_deviations > 1.0) and (percentile_counter > 2):
+            percentile_index = percentile_counter * d2x.size // 10
+            # the minimum number of elements required to compute the MAD
+            if percentile_index <= 2:
+                break
+            noise_std = std_func(d2x[:percentile_index])
+            noise_mean = mean_func(d2x[:percentile_index])
+
+            # if all the values in d2x are equal, noise_std is equal to zero
+            if noise_std > 0:
+                n_deviations = abs(noise_mean / noise_std)
+            else:
+                break
+            percentile_counter -= 1
+        noise = noise_std / 2
+        if np.isclose(noise, 0):
+            noise = d2x.std()
+    else:
+        # in the case where d2x < 2 we cannot compute the std, the noise is
+        # defined as 0
+        noise = 0.0
     return noise
 
 
