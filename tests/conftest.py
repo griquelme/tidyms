@@ -10,30 +10,23 @@ import os
 import requests
 
 
-def download_raw_test_data():
+def download_test_data(name, files):
     """Download a dataset from GitHub"""
-    name = "test-raw-data"
     cache_path = fileio.get_tidyms_path()
     dataset_path = os.path.join(cache_path, name)
     if not os.path.exists(dataset_path):
         os.makedirs(dataset_path)
     url = "https://raw.githubusercontent.com/griquelme/tidyms-data/master/"
     dataset_url = url + "/" + name
-    files = [
-        "centroid-data-indexed-uncompressed.mzML",
-        "centroid-data-zlib-indexed-compressed.mzML",
-        "centroid-data-zlib-no-index-compressed.mzML",
-        "profile-data-zlib-indexed-compressed.mzML"
-    ]
 
     WINDOWS_LINE_ENDING = b'\r\n'
     UNIX_LINE_ENDING = b'\n'
 
     for f in files:
-        file_url = dataset_url + "/" + f
-        r = requests.get(file_url)
         file_path = os.path.join(dataset_path, f)
         if not os.path.isfile(file_path):
+            file_url = dataset_url + "/" + f
+            r = requests.get(file_url)
             # save content
             with open(file_path, "w") as fin:
                 fin.write(r.text)
@@ -48,9 +41,34 @@ def download_raw_test_data():
                     fin.write(content)
 
 
+def download_raw_test_data():
+    """Download mzML files for testing"""
+    name = "test-raw-data"
+    files = [
+        "centroid-data-indexed-uncompressed.mzML",
+        "centroid-data-zlib-indexed-compressed.mzML",
+        "centroid-data-zlib-no-index-compressed.mzML",
+        "profile-data-zlib-indexed-compressed.mzML"
+    ]
+    download_test_data(name, files)
+
+
+def download_nist_test_data():
+    name = "test-nist-raw-data"
+    files1 = ["NZ_20200226_{:03d}.mzML".format(x) for x in range(1, 24, 2)]
+    files2_n = [
+        9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 39, 49, 59, 69, 79, 89, 91,
+        93, 97
+    ]
+    files2 = ["NZ_20200227_{:03d}.mzML".format(x) for x in files2_n]
+    files = files1 + files2
+    download_test_data(name, files)
+
+
 # simulated data used for tests
 def pytest_sessionstart(session):
     download_raw_test_data()
+    download_nist_test_data()
 
 
 @pytest.fixture
