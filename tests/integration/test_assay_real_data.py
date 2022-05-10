@@ -7,7 +7,7 @@ from pathlib import Path
 @pytest.fixture
 def assay(tmpdir) -> ms.Assay:
     tidyms_path = ms.fileio.get_tidyms_path()
-    data_path = Path(tidyms_path).joinpath("test-nist")
+    data_path = Path(tidyms_path).joinpath("test-nist-raw-data")
     assay_path = Path(tmpdir).joinpath("test-assay")
     return ms.Assay(assay_path, data_path)
 
