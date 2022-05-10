@@ -27,11 +27,10 @@ Roi
 import os
 import pickle
 import requests
-from pathlib import Path
-from typing import Optional, Callable, Union, List, BinaryIO, TextIO, Tuple
-from typing import Generator
 import numpy as np
 import pandas as pd
+from pathlib import Path
+from typing import BinaryIO, Generator, List, Optional, TextIO, Tuple, Union
 from .container import DataContainer
 from ._names import *
 from . import lcms
@@ -399,7 +398,6 @@ class MSData:
         sp_data["is_centroid"] = self.ms_mode == "centroid"
         return lcms.MSSpectrum(**sp_data)
 
-    @v.validated_ms_data(v.spectra_iterator_schema)     # parameter validation
     def get_spectra_iterator(
             self,
             ms_level: int = 1,
@@ -430,6 +428,12 @@ class MSData:
         spectrum : lcms.MSSpectrum
 
         """
+        if end is None:
+            end = self.get_n_spectra()
+        elif end > self.get_n_spectra():
+            msg = "End must be lower than the number of spectra in the file."
+            raise ValueError(msg)
+
         for k in range(start, end):
             sp = self.get_spectrum(k)
             is_valid_level = ms_level == sp.ms_level
