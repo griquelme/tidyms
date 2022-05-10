@@ -1,24 +1,22 @@
 import pickle
-from pathlib import Path
-from typing import Optional, List, Union, Generator, Callable
-from .fileio import MSData
-from .lcms import Roi
-from .utils import get_progress_bar
 import numpy as np
 import pandas as pd
-from .correspondence import match_features
-from .container import DataContainer
+from functools import wraps
+from inspect import getfullargspec
 from joblib import Parallel, delayed
-import bokeh.plotting
-from . import _plot_bokeh
+from pathlib import Path
+from typing import Callable, List, Optional, Union
 from . import _constants as c
 from . import validation as val
 from . import raw_data_utils
-from inspect import getfullargspec
-from functools import wraps
+from .container import DataContainer
+from .correspondence import match_features
+from .fileio import MSData
+from .lcms import Roi
+from .utils import get_progress_bar
+from ._plot_bokeh import _LCAssayPlotter
 
 
-# TODO: validate data
 # TODO: add id_ column to sample metadata
 # TODO: add make_roi params to each column in sample metadata for cases where
 #   more than one sample are obtained from the same file.
@@ -35,6 +33,7 @@ def _manage_preprocessing_step(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
+        # Get function parameters
         func_arg_spec = getfullargspec(func)
         func_arg_names = func_arg_spec.args[1:]    # exclude self
         params = dict(zip(func_arg_names, args[1:]))
@@ -100,11 +99,10 @@ class Assay:
 
     Notes
     -----
-    The data is processed in each step and stored in a directory to reduce
-    memory usage and to keep track of intermediate steps.
-
-    Assay can be used to obtain processed data in a pipeline-like workflow. The
-    following preprocessing steps are applied in order:
+    Assay process raw MS data applying a pipeline-like workflow. After each
+    processing step the results are stored in a directory to reduce memory
+    usage and to keep track of intermediate steps. The following preprocessing
+    steps are applied in order:
 
     Feature Detection
         Regions of interest (ROI) are detected in each sample. ROI are regions
@@ -115,7 +113,7 @@ class Assay:
 
     Feature Extraction
         Features are extracted from each ROI. A feature is an interesting
-        region of the data. For example, in LC data, a feature is
+        region of the data. In LC data, for example, a feature is a
         chromatographic peak, defined by the start, apex and end of the peak.
         Feature extraction is done using the `extract_features` method. After
         feature extraction, the features detected in each ROI are stored as a
@@ -126,7 +124,7 @@ class Assay:
         descriptors. For LC data, the descriptors are the peak area, Rt, m/z,
         peak width, among others. Feature description is done using the
         ``describe_features`` method. After this step, the descriptors for
-        the features founds in a sample are stored in a Pandas DataFrame that
+        the features found in a sample are stored in a Pandas DataFrame that
         can be recovered using the ``load_features`` method. Besides the
         descriptors, this data frame contains two additional columns:
         `roi_index` and `ft_index`. `roi_index` is used to indentify the
@@ -137,9 +135,9 @@ class Assay:
     Feature table construction
         The feature table contains the descriptors of features found in each
         sample. The feature table is built using the ``build_feature_table``
-        method. Two additional columns are included: `sample_` contains a unique
-        integer value associated to each sample. `class_` contains a unique
-        integer value associated to the class of each sample.
+        method. Two additional columns are included: `sample_` contains the
+        sample name where the feature was detected and `class_` contains the
+        corresponding class name.
 
     Feature matching
         In this step features found in different samples are grouped together
@@ -167,36 +165,18 @@ class Assay:
         instrument: str = "qtof",
         separation: str = "uplc",
     ):
-        assay_path = _normalize_assay_path(assay_path)
 
-        status = _is_assay_dir(assay_path)
-        if status == 1:     # valid assay dir, load assay
-            metadata_path = assay_path.joinpath(c.MANAGER_FILENAME)
-            with open(metadata_path, "rb") as fin:
-                self.manager = pickle.load(fin)
-        elif status == 0:   # dir does not exist, create assay
-            manager = _AssayManager(
-                assay_path,
-                data_path,
-                sample_metadata,
-                ms_mode,
-                instrument,
-                separation,
-            )
-            self.manager = manager
-            self.manager.create_assay_dir()
-            self.manager.save()
-        else:
-            msg = "The directory is not a valid Assay directory."
-            raise ValueError(msg)
-
-        # instrument and separation info
+        self.manager = _create_assay_manager(
+            assay_path,
+            data_path,
+            sample_metadata,
+            ms_mode,
+            instrument,
+            separation
+        )
         self.separation = separation
         self.instrument = instrument
-
-        # sample metadata
-        self.plot = None
-        self._set_plotter()
+        self.plot = _create_assay_plotter(self)
         self.feature_table = None   # type: Optional[pd.DataFrame]
         self.data_matrix = None  # type: Optional[DataContainer]
         self.feature_metrics = dict()
@@ -224,10 +204,6 @@ class Assay:
         else:
             msg = "{} is not a valid instrument. Valid values are: {}."
             raise ValueError(msg.format(value, c.MS_INSTRUMENTS))
-
-    def _set_plotter(self):
-        if self.separation in c.LC_MODES:
-            self.plot = _LCAssayPlotter(self)
 
     @staticmethod
     def _get_feature_detection_strategy(
@@ -279,14 +255,14 @@ class Assay:
             raise ValueError(msg)
         return func
 
-    def get_ms_data(self, sample: Union[str, int]) -> MSData:
+    def get_ms_data(self, sample: str) -> MSData:
         """
         Loads a raw sample file into an MSData object.
 
         Parameters
         ----------
-        sample: str or int
-            Sample name or sample code used in the feature table.
+        sample: str
+            Sample name used in the sample metadata.
 
         Returns
         -------
@@ -311,14 +287,16 @@ class Assay:
         """
         return self.manager.get_sample_metadata()
 
-    def load_roi(self, sample: Union[str, int], roi_index: int) -> Roi:
+    def load_roi(self, sample: str, roi_index: int) -> Roi:
         """
         Loads a ROI from a sample.
 
+        Must be called after performing feature detection.
+
         Parameters
         ----------
-        sample : str or int
-            sample name or sample code used in the feature table.
+        sample : str
+            sample name used in the sample metadata.
         roi_index : int
             index of the requested ROI.
 
@@ -328,31 +306,37 @@ class Assay:
 
         Raises
         ------
-        ValueError : if the ROI data was not found. This error occurs if a
-        wrong sample name is used or if `self.detect_features` was not called.
+        ValueError : If an invalid `name` or `roi_index` were used.
+        FileNotFoundError : If a non-existent `roi_index` was used.
+
+        See Also
+        --------
+        detect_features : Detect ROI in the Assay samples.
+        load_roi_list : Loads all ROI from a sample.
 
         """
+        if not isinstance(roi_index, int):
+            msg = "`roi_index` must be a non-negative int."
+            raise ValueError(msg)
+
         file_name = "{}.pickle".format(roi_index)
         roi_path = self.manager.get_roi_dir_path(sample).joinpath(file_name)
-        if roi_path.is_file():
-            with roi_path.open("rb") as fin:
-                roi = pickle.load(fin)
-        else:
-            msg = (
-                "ROI data not found. Run the `detect_features` method before "
-                "loading ROI data."
-            )
-            raise ValueError(msg)
+
+        with roi_path.open("rb") as fin:
+            roi = pickle.load(fin)
+
         return roi
 
-    def load_roi_list(self, sample: Union[str, int]) -> List[Roi]:
+    def load_roi_list(self, sample: str) -> List[Roi]:
         """
         Loads all the ROIs detected in a sample.
 
+        Must be called after performing feature detection.
+
         Parameters
         ----------
-        sample : str or sample code used in the feature table.
-            sample name
+        sample : str.
+            sample name used in the sample metadata.
 
         Returns
         -------
@@ -363,7 +347,15 @@ class Assay:
         ValueError : if the ROI data was not found. This error occurs if a
         wrong sample name is used or if `self.detect_features` was not called.
 
+        See Also
+        --------
+        detect_features : Detect ROI in the Assay samples.
+
         """
+        if not self.manager.check_step("detect_features"):
+            msg = "`load_roi_list` must be called after `detect_features`."
+            raise ValueError(msg)
+
         roi_list = list()
         for path in self.manager.get_roi_list_path(sample):
             with open(path, "rb") as fin:
@@ -371,14 +363,16 @@ class Assay:
                 roi_list.append(roi)
         return roi_list
 
-    def load_features(self, sample: Union[str, int]) -> pd.DataFrame:
+    def load_features(self, sample: str) -> pd.DataFrame:
         """
         Loads a table with feature descriptors for a sample.
+
+
 
         Parameters
         ----------
         sample : str
-            sample name or sample code used in the feature table.
+            sample name used in the sample metadata.
 
         Returns
         -------
@@ -390,24 +384,22 @@ class Assay:
         wrong sample name is used or if `self.describe_features` was not called.
 
         """
-        ft_path = self.manager.get_feature_path(sample)
-        if ft_path.is_file():
-            with ft_path.open("rb") as fin:
-                df = pickle.load(fin)
-        else:
-            msg = (
-                "Feature data not found. Run `self.extract_features` and "
-                "`self.describe_features` before loading feature data."
-            )
+        if not self.manager.check_step("describe_features"):
+            msg = "`load_features` must be called after `describe_features`."
             raise ValueError(msg)
+
+        ft_path = self.manager.get_feature_path(sample)
+        with ft_path.open("rb") as fin:
+            df = pickle.load(fin)
+
         return df
 
     @_manage_preprocessing_step
     def detect_features(
         self,
+        strategy: Union[str, Callable] = "default",
         n_jobs: Optional[int] = None,
         verbose: bool = True,
-        strategy: Union[str, Callable] = "default",
         **kwargs
     ) -> "Assay":
         """
@@ -418,12 +410,6 @@ class Assay:
 
         Parameters
         ----------
-        n_jobs: int or None, default=None
-            Number of jobs to run in parallel. ``None`` means 1 unless in a
-            :obj:`joblib.parallel_backend` context. ``-1`` means using all
-            processors.
-        verbose : bool, default=True
-            If ``True``, displays a progress bar.
         strategy : str or callable, default="default"
             If ``default`` is used, then
             :py:meth:`tidyms.raw_data_utils.make_roi` is used to build ROIs in
@@ -435,7 +421,13 @@ class Assay:
                 def func(ms_data: MSData, **kwargs) -> List[Roi]:
                     ...
 
-        **kwargs : dict
+        n_jobs: int or None, default=None
+            Number of jobs to run in parallel. ``None`` means 1 unless in a
+            :obj:`joblib.parallel_backend` context. ``-1`` means using all
+            processors.
+        verbose : bool, default=True
+            If ``True``, displays a progress bar.
+        **kwargs :
             Parameters to pass to the underlying function used. See the strategy
             parameter.
 
@@ -480,9 +472,9 @@ class Assay:
     @_manage_preprocessing_step
     def extract_features(
         self,
+        strategy: Union[str, Callable] = "default",
         n_jobs: Optional[int] = None,
         verbose: bool = True,
-        strategy: Union[str, Callable] = "default",
         **kwargs
     ) -> "Assay":
         """
@@ -493,12 +485,6 @@ class Assay:
 
         Parameters
         ----------
-        n_jobs: int or None, default=None
-            Number of jobs to run in parallel. ``None`` means 1 unless in a
-            :obj:`joblib.parallel_backend` context. ``-1`` means using all
-            processors.
-        verbose : bool, default=True
-            If ``True``, displays a progress bar.
         strategy : str or callable, default="default"
             If ``default`` is used, then
             :py:meth:`tidyms.lcms.LCRoi.extract_features` is used to extract
@@ -510,6 +496,12 @@ class Assay:
                 def func(roi: Roi, **kwargs) -> List[Feature]:
                     ...
 
+        n_jobs: int or None, default=None
+            Number of jobs to run in parallel. ``None`` means 1 unless in a
+            :obj:`joblib.parallel_backend` context. ``-1`` means using all
+            processors.
+        verbose : bool, default=True
+            If ``True``, displays a progress bar.
         **kwargs : dict
             Parameters to pass to the underlying function used. See the strategy
             parameter.
@@ -532,7 +524,7 @@ class Assay:
         if n_samples:
 
             def iterator():
-                for sample in self.manager.get_sample_list():
+                for sample in self.manager.get_sample_names():
                     roi_path = self.manager.get_roi_dir_path(sample)
                     roi_list = self.load_roi_list(sample)
                     yield roi_path, roi_list
@@ -549,6 +541,9 @@ class Assay:
                 bar = get_progress_bar()
                 iterator = bar(iterator(), total=n_samples)
             Parallel(n_jobs=n_jobs)(worker(x) for x in iterator)
+        else:
+            if verbose:
+                print("All samples are processed already.")
         return self
 
     @_manage_preprocessing_step
@@ -586,7 +581,7 @@ class Assay:
         if n_samples:
 
             def iterator():
-                for sample in self.manager.get_sample_list():
+                for sample in self.manager.get_sample_names():
                     roi_path = self.manager.get_roi_dir_path(sample)
                     ft_path = self.manager.get_feature_path(sample)
                     roi_list = self.load_roi_list(sample)
@@ -607,6 +602,9 @@ class Assay:
             else:
                 iterator = iterator()
             Parallel(n_jobs=n_jobs)(worker(x) for x in iterator)
+        else:
+            if verbose:
+                print("All samples are processed already.")
             return self
 
     @_manage_preprocessing_step
@@ -615,9 +613,9 @@ class Assay:
         Merges the feature descriptors from all samples into one DataFrame.
 
         The feature table is stored in ``self.feature_table``. Two additional
-        columns are created: `sample_` contains a unique integer value
-        associated to each sample. `class_` contains a unique integer value
-        associated to the class of each sample.
+        columns are created: `sample_` contains the sample name where the
+        feature was detected. `class_` contains the corresponding class name of
+        the sample.
 
         Raises
         ------
@@ -625,27 +623,26 @@ class Assay:
         occurs if `self.describe_features` was not called.
 
         """
-        # TODO: manage this step
         file_name = c.FT_TABLE_FILENAME
         save_path = self.manager.assay_path.joinpath(file_name)
         if save_path.is_file():
-            feature_table = pd.from_pickle(save_path)
+            feature_table = pd.read_pickle(save_path)
         else:
             df_list = list()
-            for name in self.manager.get_sample_list():
+            for name in self.manager.get_sample_names():
                 df = self.load_features(name)
-                df[c.SAMPLE] = self.manager.get_sample_code(name)
-                class_ = self.manager.get_class_code(name)
+                df[c.SAMPLE] = name
+                class_ = self.manager.get_class(name)
                 if class_ is None:
                     df[c.CLASS] = 0
                 else:
                     df[c.CLASS] = class_
                 df_list.append(df)
             feature_table = pd.concat(df_list).reset_index(drop=True)
-            feature_table["roi_index"] = feature_table["roi_index"].astype(int)
-            feature_table["ft_index"] = feature_table["ft_index"].astype(int)
-            feature_table[c.SAMPLE] = feature_table[c.SAMPLE].astype(int)
-            feature_table[c.CLASS] = feature_table[c.CLASS].astype(int)
+            feature_table[c.ROI_INDEX] = feature_table[c.ROI_INDEX].astype(int)
+            feature_table[c.FT_INDEX] = feature_table[c.FT_INDEX].astype(int)
+            feature_table[c.SAMPLE] = feature_table[c.SAMPLE]
+            feature_table[c.CLASS] = feature_table[c.CLASS]
             feature_table.to_pickle(str(save_path))
         self.feature_table = feature_table
         return self
@@ -721,7 +718,6 @@ class Assay:
         else:
             # TODO: update this code when new modes are included
             raise ValueError
-        data_matrix.index = data_matrix.index.map(self.manager.get_sample_name)
         data_matrix.columns.name = c.FEATURE
         data_matrix.index.name = "sample"
 
@@ -740,6 +736,7 @@ class Assay:
         # sort data_matrix
         data_matrix = data_matrix.loc[sample_metadata.index, :]
         dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
+        self.data_matrix = dc
         return dc
 
     def annotate_isotopologues(self, **kwargs):
@@ -804,10 +801,6 @@ class _AssayManager:
     ):
         self.assay_path = assay_path
         self._sample_to_path = None
-        self._sample_to_code = None
-        self._code_to_sample = None
-        self._sample_to_class_code = None
-        self._class_code_to_class_name = None
         self.sample_metadata = None
         self.sample_queue = None
         self.add_samples(data_path, sample_metadata)
@@ -824,13 +817,6 @@ class _AssayManager:
         else:
             self._add_samples_existing_assay(data_path, sample_metadata)
 
-        classes, class_factors = pd.factorize(self.sample_metadata[c.CLASS])
-        self.sample_metadata[c.CLASS] = classes
-        self._sample_to_class_code = self.sample_metadata[c.CLASS].to_dict()
-        code_to_class = dict(zip(range(class_factors.size), class_factors))
-        self._class_code_to_class_name = code_to_class
-        self._code_to_sample = {v: k for k, v in self._sample_to_code.items()}
-
     def _add_samples_empty_assay(
         self,
         data_path: Optional[Union[str, List[str], Path]],
@@ -838,12 +824,9 @@ class _AssayManager:
     ):
         path_list = sorted(_get_path_list(data_path))
         sample_to_path = {x.stem: x for x in path_list}
-        n_samples = len(sample_to_path)
-        sample_to_code = dict(zip(sample_to_path.keys(), range(n_samples)))
         self._sample_to_path = sample_to_path
-        self._sample_to_code = sample_to_code
 
-        sample_names = self.get_sample_list()
+        sample_names = self.get_sample_names()
         sm = _create_sample_metadata(sample_metadata, sample_names)
         sm = _normalize_sample_metadata(sm, sample_names)
         self.sample_metadata = sm
@@ -859,14 +842,9 @@ class _AssayManager:
             stem = path.stem
             if stem not in self._sample_to_path:
                 new_sample_to_path[stem] = path
-        old_n_samples = len(self._sample_to_path)
-        new_n_samples = len(new_sample_to_path)
-        new_codes = range(old_n_samples, old_n_samples + new_n_samples)
-        new_sample_to_code = dict(zip(new_sample_to_path, new_codes))
         self._sample_to_path.update(new_sample_to_path)
-        self._sample_to_code.update(new_sample_to_code)
 
-        new_sample_names = list(new_sample_to_code)
+        new_sample_names = list(new_sample_to_path)
         sm = _create_sample_metadata(sample_metadata, new_sample_names)
         sm = _normalize_sample_metadata(sm, new_sample_names)
         self.sample_metadata = pd.concat((self.sample_metadata, sm))
@@ -881,7 +859,7 @@ class _AssayManager:
         roi_dir_path = self.assay_path.joinpath(c.ROI_DIR)
         roi_dir_path.mkdir()
         # dir for each sample roi
-        for s in self.get_sample_list():
+        for s in self.get_sample_names():
             sample_roi_path = roi_dir_path.joinpath(s)
             sample_roi_path.mkdir()
 
@@ -930,7 +908,7 @@ class _AssayManager:
         return check_okay
 
     def _check_sample_name(self, name: str):
-        if name not in self._sample_to_code:
+        if name not in self._sample_to_path:
             msg = "{} not found in the assay data.".format(name)
             raise ValueError(msg)
 
@@ -950,11 +928,14 @@ class _AssayManager:
                 path = self.get_feature_path(sample)
                 path.unlink(missing_ok=True)
         elif step == "build_feature_table":
-            file_name = c.FT_TABLE_FILENAME
-            table_path = self.assay_path.joinpath(file_name)
-            table_path.unlink(missing_ok=True)
+            if samples:
+                file_name = c.FT_TABLE_FILENAME
+                table_path = self.assay_path.joinpath(file_name)
+                table_path.unlink(missing_ok=True)
         self.params["preprocess_steps"][step] = False
-        self.params["processed_samples"][step] = set()
+        processed_samples = self.params["processed_samples"][step]
+        self.params["processed_samples"][step] = \
+            processed_samples.difference(samples)
 
     def flag_completed(self, step: str):
         """
@@ -962,70 +943,41 @@ class _AssayManager:
         """
         self.params["preprocess_steps"][step] = True
 
-    def get_class_code(self, name: Union[str, int]):
-        if isinstance(name, int):
-            name = self.get_sample_name(name)
-        else:
-            self._check_sample_name(name)
-        return self._sample_to_class_code[name]
-
-    def get_class_name(self, name: Union[str, int]):
-        if isinstance(name, int):
-            name = self.get_sample_name(name)
-        class_code = self.get_class_code(name)
-        return self._class_code_to_class_name[class_code]
-
-    def get_sample_name(self, code: int) -> str:
-        try:
-            return self._code_to_sample[code]
-        except KeyError:
-            msg = "{} is not a valid sample code".format(code)
-            raise ValueError(msg)
-
-    def get_sample_code(self, name: str) -> int:
+    def get_class(self, name: str):
         self._check_sample_name(name)
-        return self._sample_to_code[name]
+        return self.sample_metadata.at[name, c.CLASS]
 
-    def get_sample_list(self) -> List[str]:
-        return list(self._sample_to_code)
+    def get_sample_names(self) -> List[str]:
+        return list(self._sample_to_path)
 
-    def get_sample_path(self, name: Union[str, int]) -> Path:
-        if isinstance(name, int):
-            name = self.get_sample_name(name)
-        else:
-            self._check_sample_name(name)
+    def get_sample_path(self, name: str) -> Path:
+        self._check_sample_name(name)
         return self._sample_to_path.get(name)
 
-    def get_roi_dir_path(self, name: Union[str, int]) -> Path:
-        if isinstance(name, int):
-            name = self.get_sample_name(name)
-        else:
-            self._check_sample_name(name)
+    def get_roi_dir_path(self, name: str) -> Path:
+        self._check_sample_name(name)
         roi_path = self.assay_path.joinpath(c.ROI_DIR, name)
         return roi_path
 
-    def get_roi_list_path(
-        self,
-        name: Union[str, int]
-    ) -> Generator[Path, None, None]:
+    def get_roi_list_path(self, name: str) -> List[Path]:
         roi_path = self.get_roi_dir_path(name)
         n_roi = len([x for x in roi_path.glob("*")])
+        roi_list_path = list()
         for k in range(n_roi):
-            yield roi_path.joinpath("{}.pickle".format(k))
+            path = roi_path.joinpath("{}.pickle".format(k))
+            roi_list_path.append(path)
+        return roi_list_path
 
-    def get_feature_path(self, name: Union[str, int]) -> Path:
-        if isinstance(name, int):
-            name = self.get_sample_name(name)
-        else:
-            self._check_sample_name(name)
+    def get_feature_path(self, name: str) -> Path:
+        self._check_sample_name(name)
         file_name = "{}.pickle".format(name)
         feature_path = self.assay_path.joinpath(c.FT_DIR, file_name)
         return feature_path
 
     def get_sample_metadata(self) -> pd.DataFrame:
+        # TODO: remove this method after refactoring DataContainer
         sm = self.sample_metadata.copy()
         sm.index.name = "sample"
-        sm[c.CLASS] = sm[c.CLASS].map(self._class_code_to_class_name)
         sm = sm.rename(columns={c.CLASS: "class", "id_": "id",
                                 c.ORDER: "order", c.BATCH: "batch"})
         return sm
@@ -1051,7 +1003,7 @@ class _AssayManager:
         old_params = self.params.get(step)
         same_params = compare_dict(old_params, kwargs)
         # build list of files to process:
-        samples = set(self.get_sample_list())
+        samples = set(self.get_sample_names())
         if same_params:
             already_processed = self.params["processed_samples"][step]
             process_samples = samples.difference(already_processed)
@@ -1070,7 +1022,7 @@ class _AssayManager:
     def manage_step_after(self, step: str, kwargs: dict):
         self.update_params(step, kwargs)
         self.flag_completed(step)
-        self.params["processed_samples"][step] = self.get_sample_list()
+        self.params["processed_samples"][step] = set(self.get_sample_names())
         self.sample_queue = None
         self.save()
 
@@ -1081,172 +1033,6 @@ class _AssayManager:
 
     def update_params(self, step: str, params: dict):
         self.params[step] = params
-
-
-class _LCAssayPlotter:     # pragma: no cover
-    """
-    Methods to plot data from an Assay. Generates Bokeh Figures.
-
-    Methods
-    -------
-    roi(sample: str) :
-        m/z vs Rt view of the ROI and features in a sample.
-    stacked_chromatogram(feature: int) :
-        Overlapped chromatographic peaks for a feature in all samples
-
-    """
-    def __init__(self, assay: Assay):
-        self.assay = assay
-        self.roi_index = None
-        self.ft_index = None
-        # self._build_roi_index_table()
-        # self._build_peak_index_table()
-
-    def _build_roi_index_table(self):
-        ft_table = self.assay.feature_table.copy()
-        ft_table = ft_table[ft_table[c.LABEL] > -1]
-        roi_index_table = (
-            ft_table.pivot(
-                index=c.SAMPLE,
-                columns=c.LABEL,
-                values="roi_index"
-            )
-            .fillna(-1)
-            .astype(int)
-        )
-        code_to_sample = self.assay.manager.get_sample_name
-        roi_index_table.index = roi_index_table.index.map(code_to_sample)
-        self.roi_index = roi_index_table
-
-    def _build_peak_index_table(self):
-        ft_table = self.assay.feature_table.copy()
-        ft_table = ft_table[ft_table[c.LABEL] > -1]
-        ft_index_table = (
-            ft_table.pivot(
-                index=c.SAMPLE,
-                columns=c.LABEL,
-                values="ft_index"
-            )
-            .fillna(-1)
-            .astype(int)
-        )
-        code_to_sample = self.assay.manager.get_sample_name
-        ft_index_table.index = ft_index_table.index.map(code_to_sample)
-        self.ft_index = ft_index_table
-
-    def roi(self, sample: str) -> bokeh.plotting.Figure:
-        """
-        Plots m/z vs time dispersion of the ROI in a sample. Detected features
-        are highlighted using circles.
-
-        Parameters
-        ----------
-        sample : str
-            sample used in the Assay.
-
-        Returns
-        -------
-        bokeh Figure
-        """
-        roi = self.assay.load_roi_list(sample)
-
-        TOOLTIPS = [
-            ("m/z", "@{}".format(c.MZ)),
-            ("Rt", "@{}".format(c.RT)),
-            ("area", "@{}".format(c.AREA)),
-            ("height", "@{}".format(c.HEIGHT)),
-            ("width", "@{}".format(c.WIDTH)),
-            ("SNR", "@{}".format(c.SNR)),
-            ("roi index", "@{}".format(c.ROI_INDEX)),
-            ("feature index", "@{}".format(c.FT_INDEX))
-        ]
-        fig = bokeh.plotting.figure(tooltips=TOOLTIPS)
-
-        rt_list = list()
-        mz_list = list()
-        for r in roi:
-            rt_list.append(r.time)
-            mz_list.append(r.mz)
-        line_source = bokeh.plotting.ColumnDataSource(
-            dict(xs=rt_list, ys=mz_list)
-        )
-        line_params = _plot_bokeh.get_line_params()
-        fig.multi_line(xs="xs", ys="ys", source=line_source, **line_params)
-
-        try:
-            ft = self.assay.load_features(sample)
-            source = bokeh.plotting.ColumnDataSource(ft)
-            fig.circle('rt', 'mz', size=5, source=source)
-        except FileNotFoundError:
-            pass
-        fig.xaxis.update(axis_label="Rt [s]")
-        fig.yaxis.update(axis_label="m/z")
-        bokeh.plotting.show(fig)
-        return fig
-
-    def stacked_chromatogram(
-        self,
-        cluster: int,
-        include_classes: Optional[List[str]] = None
-    ) -> bokeh.plotting.Figure:
-        """
-        Plots chromatograms of a feature detected across different samples.
-
-        Parameters
-        ----------
-        cluster : int
-            cluster value obtained from feature correspondence.
-        include_classes : List[str] or None, default=None
-            List of classes to plot. If None is used, samples from all classes
-            are plotted.
-
-        Returns
-        -------
-        bokeh Figure
-
-        """
-        if not self.assay.manager.check_step("match_features"):
-            msg = "This plot only can be generated after feature matching"
-            raise ValueError(msg)
-        else:
-            if self.ft_index is None:
-                self._build_peak_index_table()
-
-            if self.roi_index is None:
-                self._build_roi_index_table()
-
-        fig_params = _plot_bokeh.get_chromatogram_figure_params()
-        fig = bokeh.plotting.figure(**fig_params)
-        roi_index = self.roi_index[cluster].to_numpy()
-        ft_index = self.ft_index[cluster].to_numpy()
-        samples = self.roi_index.index
-        # TODO: fix after refactoring DataContainers
-        classes = self.assay.get_sample_metadata()["class"]
-        palette = _plot_bokeh.get_palette()
-        if include_classes is not None:
-            class_to_color = dict()
-            for k, cl in enumerate(include_classes):
-                class_to_color[cl] = palette[k]
-
-        iterator = zip(samples, roi_index, ft_index, classes)
-        for sample, roi_index, ft_index, class_ in iterator:
-            check_draw = (
-                (roi_index > -1) and
-                ((include_classes is None) or (class_ in include_classes))
-            )
-            if check_draw:
-                if include_classes is None:
-                    color = palette[0]
-                else:
-                    color = class_to_color[class_]
-                roi = self.assay.load_roi(sample, roi_index)
-                ft = roi.features[ft_index]
-                _plot_bokeh.add_line(fig, roi.time, roi.spint)
-                _plot_bokeh.fill_area(fig, roi.time, roi.spint, ft.start,
-                                      ft.end, color, alpha=0.2)
-        _plot_bokeh.set_chromatogram_axis_params(fig)
-        bokeh.plotting.show(fig)
-        return fig
 
 
 class PreprocessingOrderError(ValueError):
@@ -1274,15 +1060,18 @@ def _describe_features_default(roi_list: List[Roi], **kwargs) -> pd.DataFrame:
         roi_index_list.append([roi_index] * n_features)
         ft_index.append(range(n_features))
 
-    roi_index_list = np.hstack(roi_index_list)
-    ft_index = np.hstack(ft_index)
+    if roi_index_list:
+        roi_index_list = np.hstack(roi_index_list)
+        ft_index = np.hstack(ft_index)
 
-    ft_table = pd.DataFrame(data=descriptors_list)
-    ft_table["roi_index"] = roi_index_list
-    ft_table["ft_index"] = ft_index
-    ft_table = ft_table.dropna(axis=0)
-    ft_table["roi_index"] = ft_table["roi_index"].astype(int)
-    ft_table["ft_index"] = ft_table["ft_index"].astype(int)
+        ft_table = pd.DataFrame(data=descriptors_list)
+        ft_table["roi_index"] = roi_index_list
+        ft_table["ft_index"] = ft_index
+        ft_table = ft_table.dropna(axis=0)
+        ft_table["roi_index"] = ft_table["roi_index"].astype(int)
+        ft_table["ft_index"] = ft_table["ft_index"].astype(int)
+    else:
+        ft_table = pd.DataFrame()
     return ft_table
 
 
@@ -1304,6 +1093,48 @@ def _match_features_default(assay: Assay, **kwargs):
         **params
     )
     return results
+
+
+def _create_assay_manager(
+    assay_path,
+    data_path,
+    sample_metadata,
+    ms_mode,
+    instrument,
+    separation
+) -> _AssayManager:
+    assay_path = _normalize_assay_path(assay_path)
+
+    status = _is_assay_dir(assay_path)
+    if status == 1:  # valid assay dir, load assay
+        metadata_path = assay_path.joinpath(c.MANAGER_FILENAME)
+        with open(metadata_path, "rb") as fin:
+            manager = pickle.load(fin)
+    elif status == 0:  # dir does not exist, create assay
+        manager = _AssayManager(
+            assay_path,
+            data_path,
+            sample_metadata,
+            ms_mode,
+            instrument,
+            separation,
+        )
+        manager.create_assay_dir()
+        manager.save()
+    else:
+        msg = "The directory is not a valid Assay directory."
+        raise ValueError(msg)
+    return manager
+
+
+def _create_assay_plotter(assay: Assay):
+    separation = assay.separation
+    if separation in c.LC_MODES:
+        plotter = _LCAssayPlotter(assay)
+    else:
+        msg = "No valid plotter found for separation={}".format(separation)
+        raise ValueError(msg)
+    return plotter
 
 
 def _create_sample_metadata(
@@ -1392,7 +1223,7 @@ def _normalize_assay_path(assay_path: Union[Path, str]):
     suffix = ".tidyms-assay"
     if assay_path.suffix != suffix:
         assay_path = Path(assay_path.parent / (assay_path.name + suffix))
-    return assay_path
+    return assay_path.absolute()
 
 
 def _flatten_column_multindex(df: pd.DataFrame):
@@ -1445,6 +1276,7 @@ def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
             msg = "{} is not a path to a mzML file".format(p)
             raise ValueError(msg)
 
+    path_list = [x.absolute() for x in path_list]
     return path_list
 
 
@@ -1500,6 +1332,7 @@ def _build_params_dict(ms_mode: str, separation: str, instrument: str):
             "describe_features": set(),
             "annotate_isotopologues": set(),
             "annotate_adducts": set(),
+            "build_feature_table": set(),
             "match_features": set(),
             "fill_missing": set(),
         },
@@ -1509,20 +1342,12 @@ def _build_params_dict(ms_mode: str, separation: str, instrument: str):
             "describe_features": False,
             "annotate_isotopologues": False,
             "annotate_adducts": False,
+            "build_feature_table": True,
             "match_features": False,
             "fill_missing": False,
         }
     }
     return params_dict
-
-
-def _build_processed_samples_dict():
-    processed_samples_dict = {
-        "detect_features": set(),
-        "extract_features": set(),
-        "describe_features": set()
-    }
-    return processed_samples_dict
 
 
 def _is_assay_dir(p: Path) -> int:
