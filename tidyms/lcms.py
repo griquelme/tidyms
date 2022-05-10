@@ -206,42 +206,7 @@ class Roi:
         figure: Optional[bokeh.plotting.Figure] = None,
         show: bool = True
     ) -> bokeh.plotting.Figure:     # pragma: no cover
-        """
-        Plot the ROI.
-
-        Parameters
-        ----------
-        figure : bokeh.plotting.Figure or None, default=None
-            Figure to add the plot. If None, a new figure is created.
-        show : bool, default=True
-            If True calls ``bokeh.plotting.show`` on the Figure.
-
-        Returns
-        -------
-        bokeh.plotting.Figure
-
-        """
-        if figure is None:
-            fig_params = _plot_bokeh.get_chromatogram_figure_params()
-            figure = bokeh.plotting.Figure(**fig_params)
-
-        _plot_bokeh.add_line(figure, self.time, self.spint)
-        if self.features:
-            palette = _plot_bokeh.get_palette()
-            palette_cycler = _plot_bokeh.palette_cycler(palette)
-            for f, color in zip(self.features, palette_cycler):
-                _plot_bokeh.fill_area(
-                    figure,
-                    self.time,
-                    self.spint,
-                    f.start,
-                    f.end,
-                    color,
-                )
-        _plot_bokeh.set_chromatogram_axis_params(figure)
-        if show:
-            bokeh.plotting.show(figure)
-        return figure
+        raise NotImplementedError
 
     def extract_features(self, **kwargs) -> List["Feature"]:
         raise NotImplementedError
@@ -408,11 +373,14 @@ class LCRoi(Roi):
         3. Estimate the baseline.
         4. Detect peaks in the chromatogram.
 
+        A complete description can be found
+        `here <https://tidyms.readthedocs.io/en/latest/peak-picking.html>`__.
+
         See Also
         --------
-        peaks.estimate_noise : noise estimation of 1D signals
-        peaks.estimate_baseline : baseline estimation of 1D signals
-        peaks.detect_peaks : peak detection of 1D signals.
+        tidyms.peaks.estimate_noise : noise estimation of 1D signals
+        tidyms.peaks.estimate_baseline : baseline estimation of 1D signals
+        tidyms.peaks.detect_peaks : peak detection of 1D signals.
 
         """
         self.fill_nan(0.0)
@@ -436,6 +404,48 @@ class LCRoi(Roi):
         self.baseline = baseline
         self.noise = noise
         return features
+
+    def plot(
+        self,
+        figure: Optional[bokeh.plotting.Figure] = None,
+        show: bool = True
+    ) -> bokeh.plotting.Figure:     # pragma: no cover
+        """
+        Plot the ROI.
+
+        Parameters
+        ----------
+        figure : bokeh.plotting.Figure or None, default=None
+            Figure to add the plot. If None, a new figure is created.
+        show : bool, default=True
+            If True calls ``bokeh.plotting.show`` on the Figure.
+
+        Returns
+        -------
+        bokeh.plotting.Figure
+
+        """
+        if figure is None:
+            fig_params = _plot_bokeh.get_chromatogram_figure_params()
+            figure = bokeh.plotting.Figure(**fig_params)
+
+        _plot_bokeh.add_line(figure, self.time, self.spint)
+        if self.features:
+            palette = _plot_bokeh.get_palette()
+            palette_cycler = _plot_bokeh.palette_cycler(palette)
+            for f, color in zip(self.features, palette_cycler):
+                _plot_bokeh.fill_area(
+                    figure,
+                    self.time,
+                    self.spint,
+                    f.start,
+                    f.end,
+                    color,
+                )
+        _plot_bokeh.set_chromatogram_axis_params(figure)
+        if show:
+            bokeh.plotting.show(figure)
+        return figure
 
     def _get_default_filters(self) -> dict:
         """
@@ -743,13 +753,13 @@ class Peak(Feature):
             A mapping of descriptor names to descriptor values.
         """
         descriptors = {
-            "height": self.get_height(roi),
-            "area": self.get_area(roi),
-            "rt": self.get_rt(roi),
-            "width": self.get_width(roi),
-            "snr": self.get_snr(roi),
-            "mz": self.get_mean_mz(roi),
-            "mz_std": self.get_mz_std(roi)
+            c.HEIGHT: self.get_height(roi),
+            c.AREA: self.get_area(roi),
+            c.RT: self.get_rt(roi),
+            c.WIDTH: self.get_width(roi),
+            c.SNR: self.get_snr(roi),
+            c.MZ: self.get_mean_mz(roi),
+            c.MZ_STD: self.get_mz_std(roi)
         }
         return descriptors
 
