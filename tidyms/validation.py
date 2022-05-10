@@ -5,10 +5,10 @@ Validation functions for Filter, Pipelines and DataContainer
 
 import warnings
 from functools import wraps
-from inspect import getfullargspec
 import cerberus
 from typing import Callable
 import numpy as np
+from . import _constants as c
 
 
 def is_callable(field, value, error):
@@ -329,19 +329,12 @@ def spectra_iterator_schema(ms_data):
         }
     }
 
-    defaults = spectra_iterator_defaults(ms_data)
+    defaults = dict()
     set_defaults(schema, defaults)
     return schema
 
 
-def spectra_iterator_defaults(ms_data):
-    return dict()
-
-
 def make_chromatogram_schema(ms_data) -> dict:
-
-    n_spectra = ms_data.get_n_spectra()
-
     schema = {
         "mz": {
             "empty": False,
@@ -359,17 +352,6 @@ def make_chromatogram_schema(ms_data) -> dict:
         "ms_level": {
             "type": "integer",
             "min": 1,
-        },
-        "start": {
-            "type": "integer",
-            "min": 0,
-            "lower_than": "end",
-        },
-        "end": {
-            "type": "integer",
-            "max": n_spectra,
-            "nullable": True,
-            "default": n_spectra
         },
         "start_time": {
             "type": "number",
@@ -390,7 +372,7 @@ def make_chromatogram_schema(ms_data) -> dict:
 def make_chromatogram_defaults(ms_data):
     instrument = ms_data.instrument
 
-    if instrument == "qtof":
+    if instrument == c.QTOF:
         window = 0.05
     else:   # orbitrap
         window = 0.01
@@ -402,7 +384,6 @@ def make_chromatogram_defaults(ms_data):
 
 
 def make_roi_schema(ms_data):
-    n_spectra = ms_data.get_n_spectra()
     schema = {
         "tolerance": {
             "type": "number",
@@ -450,17 +431,6 @@ def make_roi_schema(ms_data):
             "type": "integer",
             "min": 1,
         },
-        "start": {
-            "type": "integer",
-            "min": 0,
-            "lower_than": "end",
-        },
-        "end": {
-            "type": "integer",
-            "max": n_spectra,
-            "nullable": True,
-            "default": n_spectra
-        },
         "start_time": {
             "type": "number",
             "min": 0.0,
@@ -488,12 +458,12 @@ def make_roi_defaults(ms_data):
     separation = ms_data.separation
     instrument = ms_data.instrument
 
-    if instrument == "qtof":
+    if instrument == c.QTOF:
         tolerance = 0.01
     else:   # orbitrap
         tolerance = 0.005
 
-    if separation == "uplc":
+    if separation == c.UPLC:
         min_length = 10
     else:   # hplc
         min_length = 20
@@ -518,31 +488,27 @@ def make_roi_defaults(ms_data):
 
 def accumulate_spectra_schema(ms_data):
 
-    n_spectra = ms_data.get_n_spectra()
-
     schema = {
-        "start": {
-            "type": "integer",
+        "start_time": {
+            "type": "number",
             "min": 0,
-            "lower_than": "end"
+            "lower_than": "end_time"
         },
-        "end": {
-            "type": "integer",
-            "max": n_spectra,
-            "lower_or_equal": "subtract_right"
+        "end_time": {
+            "type": "number",
+            "lower_or_equal": "subtract_right_time"
         },
-        "subtract_left": {
-            "type": "integer",
-            "lower_or_equal": "start",
+        "subtract_left_time": {
+            "type": "number",
+            "lower_or_equal": "start_time",
             "min": 0,
             "nullable": True,
-            "default_setter": lambda doc: doc["start"]
+            "default_setter": lambda doc: doc["start_time"]
         },
-        "subtract_right": {
-            "type": "integer",
-            "max": n_spectra,
+        "subtract_right_time": {
+            "type": "number",
             "nullable": True,
-            "default_setter": lambda doc: doc["end"]
+            "default_setter": lambda doc: doc["end_time"]
         },
         "kind": {
             "type": "string"
@@ -567,36 +533,92 @@ def set_defaults(schema: dict, defaults: dict):
                 v.update(defaults[k])
 
 
-def validated_ms_data(schema_getter: Callable):
+def match_features_schema():
+    schema = {
+        "mz_tolerance": {
+            "type": "number",
+            "min": 0.0,
+        },
+        "rt_tolerance": {
+            "type": "number",
+            "min": 0.0,
+        },
+        "min_fraction": {
+            "type": "number",
+            "min": 0.0,
+            "max": 1.0,
+        },
+        "max_deviation": {
+            "type": "number",
+            "min": 0.0,
+        },
+        "include_classes": {
+            "type": "list",
+            "nullable": True,
+            "schema": {"type": "string"}
+        },
+        "n_jobs": {
+            "nullable": True,
+            "type": "integer"
+        },
+        "verbose": {
+            "type": "boolean"
+        }
+    }
+    return schema
+
+
+def match_features_defaults(separation: str, instrument: str):
     """
-    Validates input for MSData methods and set default values based on
-    the `instrument` and `separation` attributes.
+    Default values used for `match_features` based on data acquisition
+    characteristics.
 
     Parameters
     ----------
-    schema_getter : callable
-        Function that returns the schema used for validation. The function must
-        take the MSData object as the only argument.
+    separation : {"uplc", "hplc"}
+    instrument : {"qtof", "orbitrap"}
 
     Returns
     -------
 
     """
+    if instrument == c.QTOF:
+        mz_tolerance = 0.01
+    elif instrument == c.ORBITRAP:
+        mz_tolerance = 0.005
+    else:
+        raise ValueError
 
+    if separation == c.HPLC:
+        rt_tolerance = 10
+    elif separation == c.UPLC:
+        rt_tolerance = 5
+    else:
+        raise ValueError
+
+    defaults = {
+        "mz_tolerance": mz_tolerance,
+        "rt_tolerance": rt_tolerance,
+        "min_fraction": 0.25,
+        "max_deviation": 3.0,
+        "include_classes": None,
+        "n_jobs": None,
+        "verbose": False
+    }
+
+    return defaults
+
+
+def validate_raw_data_utils(schema_getter: Callable):
     def validator_wrapper(func):
         @wraps(func)
         def func_wrapper(*args, **kwargs):
             # build a dictionary with input
-            func_argspec = getfullargspec(func)
-            func_argnames = func_argspec.args[1:]    # we don't need self
-            params = dict(zip(func_argnames, args[1:]))
-            params.update(kwargs)
             ms_data = args[0]
-            # get schema and defaults
-            schema = schema_getter(ms_data)
             # validate input
+            schema = schema_getter(ms_data)
             validator = ValidatorWithLowerThan(schema)
-            validated = validate(params, validator)
-            return func(ms_data, **validated)
+            validated = validate(kwargs, validator)
+            return func(*args, **validated)
         return func_wrapper
     return validator_wrapper
