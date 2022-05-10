@@ -5,10 +5,11 @@ TidyMS
 A package to work with Mass Spectrometry data from Metabolomics Experiments.
 
 Provides
-    1. The MSData object to analyze and process raw MS data.
-    2. The DataContainer object to store metabolomics data sets.
-    3. Pipeline and Processor objects to perform curation of data sets.
-    4. Functions for feature detection and feature correspondence.
+    1. The Assay object to process datasets from raw data.
+    2. The MSData object to work with raw data.
+    3. The DataContainer object to store metabolomics data sets.
+    4. Pipeline and Processor objects to perform curation of data sets.
+
 """
 
 __version__ = "0.3.5"
@@ -20,18 +21,22 @@ from . import peaks
 from . import filter
 from . import lcms
 from . import simulation
+from . import raw_data_utils
 from . import _mzml
-from .metabolomics import *
+from . import correspondence
 from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum
-from .assay import LCMSAssay
-# from .correspondence import feature_correspondence
+from .assay import Assay
+from .raw_data_utils import *
 
-if utils.SETTINGS["bokeh"]["apply_theme"]:
+utils.create_tidyms_dir()
+SETTINGS = utils.get_settings()
+
+if SETTINGS["bokeh"]["apply_theme"]:
     from bokeh.themes import Theme as _Theme
     from bokeh.io import curdoc as _curdoc
-    theme = utils.SETTINGS["bokeh"]["theme"]
+    theme = SETTINGS["bokeh"]["theme"]
     _curdoc().theme = _Theme(json=theme)
 
 if utils.is_notebook():
