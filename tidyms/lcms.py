@@ -103,10 +103,6 @@ class MSSpectrum:
             is set to 0.01 if ``self.instrument`` is ``"qtof"`` or to 0.005 if
             ``self.instrument`` is ``"orbitrap"``.
 
-        Raises
-        ------
-        ValueError: if the spectrum is in centroid mode.
-
         Returns
         -------
         centroid : array
