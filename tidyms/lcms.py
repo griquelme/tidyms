@@ -254,7 +254,7 @@ class Roi:
         for f in self.features:
             f_descriptors = f.get_descriptors(self)
             for descriptor, func in custom_descriptors.items():
-                f_descriptors[descriptor] = func(self)
+                f_descriptors[descriptor] = func(self, f)
 
             if _has_all_valid_descriptors(f_descriptors, filters):
                 valid_features.append(f)
@@ -369,8 +369,7 @@ class LCRoi(Roi):
         3. Estimate the baseline.
         4. Detect peaks in the chromatogram.
 
-        A complete description can be found
-        `here <https://tidyms.readthedocs.io/en/latest/peak-picking.html>`__.
+        A complete description can be found :ref:`here <peak-picking>`.
 
         See Also
         --------
