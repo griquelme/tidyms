@@ -1,0 +1,7 @@
+#,name,description
+1,Feature Detection,"Regions of interest (ROI) are detected in each sample."
+2,Feature Extraction,"Features are extracted from each ROI."
+3,Feature description,"A table of feature descriptors is built for each sample."
+4,Feature table construction,"A feature table for all samples is built"
+5,Feature matching,"Features found in different samples are grouped if they have a common identity."
+6,Data matrix creation,"The data matrix is created using the feature table."
