@@ -1,6 +1,8 @@
-.. quickstart
+.. _peak-picking:
 
 .. py:currentmodule:: tidyms
+
+:orphan:
 
 Feature detection
 =================
@@ -21,55 +23,34 @@ in two steps:
 1.  Build regions of interest (ROI) from raw MS data.
 2.  Detect chromatographic peaks in each ROI.
 
-For the examples described in this tutorial we are going to use an example file
-that can be downloaded from Metabolights using the following code:
+Feature detection in a complete MS dataset is done using the
+:class:`~tidyms.Assay` object. A guide to working with :class:`~tidyms.Assay`
+objects can be found :ref:`here <processing-datasets>`.
+
+For the examples described in this tutorial we use an example file that can be
+downloaded using the following code:
 
 .. code-block:: python
 
-    from ftplib import FTP
-    import os
-
-    study_path = "pub/databases/metabolights/studies/public/MTBLS1919"
-    sample_path = os.path.join(study_path, "Applications/Centroid_data")
-    filename = "NZ_20200227_041.mzML"
-    ftp = FTP("ftp.ebi.ac.uk")
-    ftp.login()
-    ftp.cwd(sample_path)
-    with open(filename, "wb") as fin:
-        ftp.retrbinary("RETR " + filename, fin.write)
-    ftp.close()
-
-The complete process of feature detection can be easily made using
-:py:func:`tidyms.detect_features`, which performs feature detection on several
-samples and returns a dictionary of sample names to a list of ROI created
-from each sample and a Pandas DataFrame with the descriptors (see the table
-below for a list of the descriptors computed by default) associated to all
-the features detected in each ROI:
-
-.. code-block:: python
-
+    import numpy as np
     import tidyms as ms
 
-    roi_dict, ft_table = ms.detect_features(filename, instrument="qtof",
-        separation="uplc")
+    filename = "NZ_20200227_039.mzML"
+    dataset = "test-nist-raw-data"
+    ms.fileio.download_tidyms_data(dataset, [filename], download_dir=".")
 
-The :code:`instrument` and :code:`separation` parameters are used to provide
-reasonable defaults for the different parameters used according to the MS
-instrument and analytical separation method used.
+    ms_data = ms.MSData(
+        filename,
+        ms_mode="centroid",
+        instrument="qtof",
+        separation="uplc"
+    )
 
-.. csv-table:: Feature descriptors computed by default
-   :file: descriptors.csv
-   :widths: 30, 70
-   :header-rows: 1
 
-:py:func:`tidyms.detect_features` is a rather complex function accepting
-several different parameters. In order to explain each one of them, in this
-tutorial we are going to break down this function into parts to understand each
-parameter in detail.
-
+.. _roi-creation:
 
 ROI creation
-------------
+============
 
 ROI are similar to chromatograms but with two differences: information related
 to the m/z value used in each scan is included and the traces are defined only
@@ -77,50 +58,129 @@ where m/z values were detected.
 
 ..  plot:: plots/roi-definition.py
     :caption:   A ROI is defined by three arrays storing information related to
-                m/z, retention time and intensity.
+                m/z, time and intensity.
 
-In the first step of feature detection, ROIs are built from raw MS data in
-centroid mode using :py:meth:`tidyms.fileio.MSData.make_roi`, which implements
-the strategy described in [1]_. ROIs are created and extended connecting close
-m/z values across successive scans using the following method:
+ROIs are built from raw MS data in centroid mode using
+:py:func:`tidyms.raw_data_utils.make_roi`, which implements the strategy
+described in [1]_. ROIs are created and extended connecting close m/z values
+across successive scans using the following method:
 
-1.  m/z values in the first scan are used to initialize a list of ROI.
-2.  m/z values from the next scan are used to extend ROIs in the ROI list if
-    they are closer than :code:`tolerance` to the mean m/z of a ROI. m/z values
-    that don't match any ROI are used to create new ROIs and are appended to the
-    ROI list.
+1.  The m/z values in The first scan are used to initialize a list of
+    ROI. If ``targeted_mz`` is used, the ROI are initialized using this
+    list.
+2.  m/z values from the next scan extend the ROIs if they are closer
+    than ``tolerance`` to the mean m/z of the ROI. Values that don't match
+    any ROI are used to create new ROIs and are appended to the ROI
+    list. If ``targeted_mz`` is used, these values are discarded.
 3.  If more than one m/z value is within the tolerance threshold, m/z and
-    intensity values are computed according to the :code:`multiple_match`
+    intensity values are computed according to the ``multiple_match``
     strategy. Two strategies are available: merge multiple peaks into an
     average peak or use only the closest peak to extend the ROI and create
     new ROIs with the others.
 4.  If a ROI can't be extended with any m/z value from the new scan, it is
     extended using NaNs.
-5.  If there are more than :code:`max_missing` consecutive NaN in a ROI, then
+5.  If there are more than ``max_missing`` consecutive NaN in a ROI, then
     the ROI is flagged as completed. If the maximum intensity of a completed ROI
-    is greater than :code:`min_intensity` and the number of points is greater
-    than :code:`min_length`, then the ROI is flagged as valid. Otherwise, the ROI is
+    is greater than ``min_intensity`` and the number of points is greater
+    than ``min_length``, then the ROI is flagged as valid. Otherwise, the ROI is
     discarded.
 6.  Repeat from step 2 until no more new scans are available.
 
-The following example shows how ROI can be created from raw data:
+The following example shows how ROI can be created from raw data (an intensity
+threshold is used  to reduce the number of ROI created):
 
 .. code-block:: python
 
-    ms_data = ms.MSData(filename, ms_mode="centroid", instrument="qtof",
-                        separation="uplc")
-    roi_list = ms_data.make_roi()
+    roi_list = ms.make_roi(ms_data, min_intensity=10000)
 
-The parameters associated with ROI creation can be tuned in the feature
-detection function through the :code:`roi_params` parameter, that passes a
-dictionary of parameters used in :py:meth:`tidyms.fileio.MSData.make_roi`.
+ROI can be used in the same way as chromatograms as shown
+:ref:`here <fileio>`:
 
-After finding the ROIs in a sample, the next step is detecting the
-chromatographic peaks on each ROI.
+.. code-block:: python
 
+    roi = roi_list[0]
+    roi.fill_nan()
+    roi.plot()
 
-Peak detection
---------------
+.. _feature-extraction:
+
+Extracting chromatographic peaks from a ROI
+-------------------------------------------
+
+The complete algorithm for detecting features in a ROI can be described as
+follows:
+
+1.  Estimate the noise level in the chromatogram.
+2.  Optionally, smooth the chromatogram using a gaussian filter.
+3.  Estimate the baseline in the ROI.
+4.  Detect peaks in the chromatogram.
+5.  Compute descriptors for each detected peak.
+
+Steps 1-4 are done with :meth:`tidyms.lcms.LCRoi.extract_features`, which
+builds a list of :class:`tidyms.lcms.Peak` objects where the location of
+each detected peak is stored. The `smoothing_strength` parameter controls the
+width of the Gaussian curve for smoothing:
+
+.. code-block:: python
+
+    roi.extract_features(smoothing_strength=1.0)
+
+After building a list of peaks, the descriptors for each peak can be computed
+using :meth:`tidyms.lcms.LCRoi.describe_features`:
+
+.. code-block:: python
+
+    >>> roi.describe_features()
+    [{'height': 11817.91, 'area': 74238.66, 'rt': 125.65, 'width': 12.00,
+     'snr': 144.93, 'mz': 146.06, 'mz_std': 0.00}]
+
+By default, the following descriptors are computed:
+
+.. csv-table:: Feature descriptors computed by default
+   :file: descriptors.csv
+   :widths: 30, 70
+   :header-rows: 1
+
+Custom descriptors can be computed using the ``custom_descriptors`` parameter:
+
+.. code-block:: python
+
+    # custom descriptors must have the following prototype
+    def symmetry(roi: ms.lcms.LCRoi, peak: ms.lcms.Peak) -> float:
+        # we are defining the symmetry as the quotient between the left
+        # and right peak extension
+        x = roi.time
+        left_extension = x[peak.apex] - x[peak.start]
+        right_extension = x[peak.end - 1] - x[peak.apex]
+        return left_extension / right_extension
+    custom_descriptors = {"symmetry": symmetry}
+    descriptors = roi.describe_features(custom_descriptors=custom_descriptors)
+
+    >>> descriptors
+    [{'height': 11793.07, 'area': 73998.12, 'rt': 125.63, 'width': 12.00,
+      'snr': 154.45, 'mz': 146.06, 'mz_std': 0.00, 'symmetry': 0.48}]
+
+Finally, ``filters`` can be used to filter peaks according to a specific
+range for each descriptor. This parameter takes a dictionary of descriptor
+names to a tuple of minimum and maximum values. If a descriptor has values
+outside this range, the peak is removed. For example, we can remove peaks with
+an retention times lower than 150 in the following way:
+
+.. code-block:: python
+
+    >>> filters = {"rt": (150, None)}
+    >>> descriptors = roi.describe_features(filters=filters)
+    >>> descriptors
+    []
+
+If no ``filters`` are provided, the default filters are obtained using
+:meth:`tidyms.lcms.LCRoi.get_default_filters`, which filters peaks with
+SNR lower than 5 and widths outside the range (4 s - 60 s) if the `separation`
+attribute of the ROI is ``uplc`` and (10 s - 90 s) if the `separation` is
+``hplc``.
+
+Implementation of the peak picking algorithm
+--------------------------------------------
 
 In the first release of TidyMS, peak picking worked using a modified version of
 the CWT algorithm, described in [2]_. In chromatographic data, and in particular
@@ -148,17 +208,14 @@ appear while using the CWT algorithm are:
 These reasons motivated us to replace the CWT peak picking function. The
 new peak picking function uses the thoroughly tested function
 :py:func:`scipy.signal.find_peaks`. We focused on keeping the function simple
-and easy to extend. In this section we describe how peak picking works with
-arbitrary signals, examples of usage and how peak detection is used inside
-:py:func:`tidyms.detect_features`.
+and easy to extend.
 
 Peak detection usually involves detecting the peak apex, but in order to compute
 peak descriptors such as area or width, the peak start and end must also be
 found. The region defined between the peak start and end is the peak extension.
 We decoupled the tasks of detecting peaks and computing peak descriptors.
-:py:func:`tidyms.peaks.detect_peaks` builds a list of
-:py:class:`tidyms.peaks.Peak` objects that store the peak start, apex and end.
-This is done in five steps:
+:py:func:`tidyms.peaks.detect_peaks` returns three arrays, with indices where
+start, apex and end of each peak was detected. This is done in five steps:
 
 1.  The noise level in the signal is estimated.
 2.  Using the noise level estimation, each point in the signal is classified as
@@ -175,104 +232,6 @@ This is done in five steps:
 
 ..  plot:: plots/peak-definition.py
     :caption: Peak start, apex and end.
-
-
-Steps 1 and 2 are described in detail at the end of this guide. We start first
-by showing how this function is used. Besides the signal, noise estimation and
-baseline estimation, `find_peaks_params` pass parameters to the underlying
-peak picking function :py:func:`scipy.signal.find_peaks`. In general, it is not
-necessary to change this parameter, since peak filtering is managed at a later
-stage.
-
-.. plot:: plots/peak-detection-example.py
-    :include-source: true
-    :caption: Peak detection example with two gaussian peaks
-
-After obtaining a list of peaks, the next step is computing descriptors for each
-peak. This is done with the function
-:py:func:`tidyms.peaks.get_peak_descriptors`. This function uses the list of
-peaks and the values of x, y, noise and baseline and computes peak location,
-area, height, width and SNR.
-
-.. code-block:: python
-
-    >>> peaks
-    [Peak(start=15, loc=25, end=37), Peak(start=43, loc=50, end=61)]
-    >>> peaks, descriptors = get_peak_descriptors(x, y, noise, baseline, peaks)
-    >>> descriptors
-    [{'height': 29.50, 'area': 222.03, 'loc': 25.08, 'width': 12, 'snr': 48.98},
-    {'height': 60.29, 'area': 297.97, 'loc': 50.12, 'width': 8, 'snr': 100.09}]
-
-:code:`descriptors` can be used to compute arbitrary peak descriptors:
-
-.. code-block:: python
-
-    # custom descriptors must have the following prototype, even if some
-    # parameters aren't used.
-    # peak is a single Peak
-    >>> def symmetry(x, y, noise, baseline, peak):
-    ...     # we are defining the symmetry as the quotient between the left
-    ...     # and right peak prominences
-    ...     left_prominence = x[peak.apex] - x[peak.start]
-    ...     right_prominence = x[peak.apex] - x[peak.end - 1]
-    ...     return left_prominence / right_prominence
-    >>> custom_descriptors = {"symmetry": symmetry}
-    >>> peaks, descriptors = get_peak_descriptors(
-    ...        x, y, noise, baseline, peaks, descriptors=custom_descriptors)
-    >>> descriptors
-    [{'height': 29.50, 'area': 222.03, 'loc': 25.08, 'width': 12,
-      'snr': 48.98, 'symmetry': 1.00}, {'height': 60.29, 'area': 297.97,
-      'loc': 50.12, 'width': 8, 'snr': 100.09, 'symmetry': 1.01}]
-
-Finally, :code:`filters` can be used to filter peaks according to a specific
-range for each descriptor. This parameter takes a dictionary of descriptor
-names to a tuple of minimum and maximum values. If a descriptor has values
-outside this range, the peak is removed. For example, we can filter peaks with a
-signal-to-noise ratio lower than 50 in the following way:
-
-.. code-block:: python
-
-    >>> filters = {"snr": (50, None)}
-    >>> peaks, descriptors = get_peak_descriptors(
-    ...        x, y, noise, baseline, peaks, filters=filters)
-    >>> peaks
-    [Peak(start=43, loc=50, end=61)]
-
-
-The task of peak detection and computing peak descriptors is combined in
-:py:meth:`tidyms.lcms.Chromatogram.find_peaks` to analyze chromatographic data.
-Going back to the example data used in the previous section, the following code
-can be used to detect peaks:
-
-.. code-block:: python
-
-    >>> roi = roi_list[70]      # select a ROI from the list
-    >>> roi.fill_nan()      # fill missing values in the ROI
-    >>> peak_descriptors = roi.find_peaks()
-    >>> peak_descriptors
-    [{'height': 79848.54, 'area': 310080.0, 'loc': 336.12, 'width': 11.32,
-      'snr': 851.49},
-      {'height': 1723.73, 'area': 8130.52, 'loc': 355.17, 'width': 9.26,
-       'snr': 18.38}]
-
-The complete workflow can be described as follows:
-
-1.  Estimate the noise level in the chromatogram using
-    :py:func:`tidyms.peaks.estimate_noise`. The parameter :code:`noise_params`
-    pass parameters to this function.
-2.  Optionally, smooth the chromatogram using a gaussian filter.
-    :code:`smoothing_strength` specifies the standard deviation of the gaussian
-    kernel used to perform the smoothing.
-3.  Estimate the baseline using :py:func:`tidyms.peaks.estimate_baseline`.
-    :code:`baseline_params` pass parameters to this function.
-4.  Detect peaks in the chromatogram using :py:func:`tidyms.peaks.detect_peaks`.
-5.  Compute peak descriptors and filter peaks using
-    :py:func:`tidyms.peaks.get_peak_estimators`. :code:`estimators` and
-    :code:`filters` are used in the same way as described above.
-
-These parameters are used also by :py:func:`tidyms.detect_features` to customize
-the peak picking process.
-
 
 Noise estimation
 ----------------
@@ -363,6 +322,21 @@ from noise is going to be small. This can be computed in the following way:
     \right )
 
 An interval is classified as baseline if this probability is greater than 0.05.
+
+Peak detection
+--------------
+
+Besides the signal, noise estimation and baseline estimation,
+`find_peaks_params` pass parameters to the underlying peak picking function
+:py:func:`scipy.signal.find_peaks`. In general, it is not necessary to change
+this parameter, since peak filtering is managed at a later stage.
+
+.. plot:: plots/peak-detection-example.py
+    :include-source: true
+    :caption: Peak detection example with two gaussian peaks
+
+The following figure shows the result of the peak picking algorithm with
+different SNR levels, baseline shapes and peak widths.
 
 ..  plot:: plots/peak_detection_baseline_example.py
     :caption: Peak detection and baseline estimation in noisy signals.
