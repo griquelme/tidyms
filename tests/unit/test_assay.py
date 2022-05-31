@@ -424,7 +424,7 @@ class DummyRoi(Roi):
     def extract_features(self, **kwargs):
         self.features = [DummyFeature(0, 4) for _ in range(DummyRoi.n_features)]
 
-    def _get_default_filters(self):
+    def get_default_filters(self):
         return dict()
 
 

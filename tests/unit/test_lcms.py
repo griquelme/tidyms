@@ -249,7 +249,7 @@ def test_get_descriptors_custom_descriptors(lc_roi_peak):
     lc_roi.noise = np.zeros_like(lc_roi.spint)
     lc_roi.baseline = np.zeros_like(lc_roi.spint)
 
-    def return_one(roi):
+    def return_one(roi, peak):
         return 1
 
     custom_descriptor = {"custom": return_one}
