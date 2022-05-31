@@ -2,11 +2,14 @@
 
 .. py:currentmodule:: tidyms
 
-Working with Raw Data
+:orphan:
+
+Working with raw data
 =====================
 
-TidyMS works with raw data using the :class:`~tidyms.MSData` class. In this
-section we show commons operations on raw data.
+TidyMS works with raw data in the mzML format using the :class:`~tidyms.MSData`
+class. In this section we show commons operations on raw data. For file
+conversion to the mzML format see :ref:`this guide <mzml>`
 
 For the examples we will use an example mzML file that can be downloaded with
 the following code:
@@ -129,5 +132,5 @@ Peak descriptors can be obtained using
 
 A detailed description of the algorithm used for peak picking can be found
 :doc:`here <peak-picking>`. These methods are also used to create a data matrix from
-a dataset. See :doc:`here <ADD-LINK>` a tutorial on how to work with complete
-datasets to extract a data matrix.
+a dataset. See :doc:`here <processing-datasets>` a tutorial on how to work with
+complete datasets to extract a data matrix.
