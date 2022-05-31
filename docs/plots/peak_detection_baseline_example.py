@@ -9,8 +9,8 @@ n_col = 4
 x = np.arange(200)
 noise_level = signal_height / snr
 noise = np.random.normal(size=x.size, scale=noise_level)
-fig, ax = plt.subplots(nrows=3, ncols=n_col, figsize=(12, 12), sharex=True,
-                       sharey=True)
+fig, ax = plt.subplots(
+    nrows=3, ncols=n_col, figsize=(12, 12), sharex=True, sharey=True)
 
 # first row: one peak, different baselines
 row = 0
@@ -22,7 +22,9 @@ for col in range(n_col):
     noise_estimation = ms.peaks.estimate_noise(y)
     ys = ms.lcms.gaussian_filter1d(y, 1)
     baseline_estimation = ms.peaks.estimate_baseline(ys, noise_estimation)
-    peaks = ms.peaks.detect_peaks(ys, noise_estimation, baseline_estimation)
+    start, apex, end = ms.peaks.detect_peaks(
+        ys, noise_estimation, baseline_estimation)
+    peaks = [ms.lcms.Peak(s, a, p) for (s, a, p) in zip(start, apex, end)]
     ax[row, col].plot(x, y)
     ax[row, col].plot(x, baseline_estimation)
     for p in peaks:
@@ -40,7 +42,9 @@ for col in range(n_col):
     noise_estimation = ms.peaks.estimate_noise(y)
     ys = ms.lcms.gaussian_filter1d(y, 1)
     baseline_estimation = ms.peaks.estimate_baseline(ys, noise_estimation)
-    peaks = ms.peaks.detect_peaks(ys, noise_estimation, baseline_estimation)
+    start, apex, end = ms.peaks.detect_peaks(
+        ys, noise_estimation, baseline_estimation)
+    peaks = [ms.lcms.Peak(s, a, p) for (s, a, p) in zip(start, apex, end)]
     ax[row, col].plot(x, y)
     ax[row, col].plot(x, baseline_estimation)
     for p in peaks:
@@ -58,7 +62,9 @@ for col in range(n_col):
     noise_estimation = ms.peaks.estimate_noise(y)
     ys = ms.lcms.gaussian_filter1d(y, 1)
     baseline_estimation = ms.peaks.estimate_baseline(ys, noise_estimation)
-    peaks = ms.peaks.detect_peaks(ys, noise_estimation, baseline_estimation)
+    start, apex, end = ms.peaks.detect_peaks(
+        ys, noise_estimation, baseline_estimation)
+    peaks = [ms.lcms.Peak(s, a, p) for (s, a, p) in zip(start, apex, end)]
     ax[row, col].plot(x, y)
     ax[row, col].plot(x, baseline_estimation)
     for p in peaks:

@@ -9,7 +9,7 @@ grid = np.arange(50)
 signal = ms.utils.gauss(grid, 25, 2, 30)
 noise = np.random.normal(size=signal.size, scale=1)
 x = signal + noise + 3
-peak = ms.peaks.Peak(19, 25, 30)
+peak = ms.lcms.Peak(19, 25, 30)
 fig, ax = plt.subplots(figsize=(6, 6))
 ax.plot(grid, x, label="signal")
 ax.scatter(grid[peak.start], x[peak.start], label="peak start", s=50)
