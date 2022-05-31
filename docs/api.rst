@@ -1,3 +1,4 @@
+.. _api:
 
 .. py:currentmodule:: tidyms
 
@@ -10,12 +11,10 @@ Tools for working with raw data
 .. autosummary::
     :toctree: generated
 
+    tidyms.Assay
     tidyms.MSData
     tidyms.Chromatogram
     tidyms.MSSpectrum
-    tidyms.detect_features
-    tidyms.feature_correspondence
-    tidyms.make_data_container
 
 Tools for working with processed data
 -------------------------------------
@@ -47,9 +46,10 @@ Module reference
     :toctree: generated
 
     tidyms.container
+    tidyms.correspondence
     tidyms.fileio
     tidyms.filter
     tidyms.lcms
-    tidyms.metabolomics
     tidyms.peaks
+    tidyms.raw_data_utils
     tidyms.utils
