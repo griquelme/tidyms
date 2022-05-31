@@ -1,3 +1,7 @@
+.. _mzml:
+
+.. py:currentmodule:: tidyms
+
 Converting raw data to mzML format
 ==================================
 
