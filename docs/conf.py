@@ -13,22 +13,23 @@
 import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.pardir))
-sys.path.insert(0, os.path.abspath(os.getcwd()))
-import bokeh_plots
+sys.path.insert(0, os.path.abspath(os.getcwd())) 
+from bokeh_plots import create_plots
 
 # -- Project information -----------------------------------------------------
 
 project = 'TidyMS'
-copyright = '2020, Gabriel Riquelme'
+copyright = "2020, Bioanalytical Mass Spectrometry Group at CIBION-CONICET"
 author = 'Gabriel Riquelme'
 
 # -- generate plot files -----------------------------------------------------
 if not os.path.isdir("_static"):
     os.mkdir("_static")
-bokeh_plots.plot_chromatogram()
-bokeh_plots.plot_chromatogram_with_peaks()
-bokeh_plots.feature_plot()
-bokeh_plots.pca_plot()
+
+if not os.path.isdir("_build"):
+    os.mkdir("_build")
+
+create_plots()
 
 # -- General configuration ---------------------------------------------------
 
@@ -37,8 +38,6 @@ bokeh_plots.pca_plot()
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
-    # 'sphinx.ext.doctest',
-    # 'sphinx.ext.coverage',
     'sphinx.ext.mathjax',
     'sphinx.ext.autosummary',
     'sphinx.ext.intersphinx',
@@ -46,7 +45,6 @@ extensions = [
     'IPython.sphinxext.ipython_console_highlighting',
     'bokeh.sphinxext.bokeh_plot',
     'matplotlib.sphinxext.plot_directive',
-    # 'gallery_generator',
     'numpydoc'
 ]
 
@@ -57,10 +55,6 @@ numpydoc_show_class_members = False
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
-
-
-# def setup(app):
-#     plot_chromatogram()
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -80,9 +74,13 @@ html_theme = 'sphinx_rtd_theme'
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
 
-intersphinx_mapping = \
-    {'pandas': ('http://pandas.pydata.org/pandas-docs/stable/', None),
-     'scipy': ('https://docs.scipy.org/doc/scipy/reference/', None)}
+intersphinx_mapping = {
+    'pandas': ('https://pandas.pydata.org/docs/', None),
+    'scipy': ('https://docs.scipy.org/doc/scipy/', None),
+}
 
 # set index.rst as the master doc
 master_doc = 'index'
+
+# include __init__ in docs
+autoclass_content = 'both'
