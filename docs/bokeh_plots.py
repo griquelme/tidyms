@@ -118,3 +118,11 @@ def create_assay_plots():
     assay.match_features(verbose=False)
     plot_roi_assay(assay, "_static/roi-peaks.html")
     plot_stacked_chromatogram(assay)
+
+
+def create_plots():
+    plot_chromatogram()
+    plot_chromatogram_with_peaks()
+    feature_plot()
+    pca_plot()
+    create_assay_plots()
