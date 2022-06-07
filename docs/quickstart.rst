@@ -12,11 +12,12 @@ to be used with datasets from LC-HRMS metabolomics experiments. It uses
 `scikit-learn <https://scikit-learn.org>`_ for data processing and analysis.
 Some of the functionality that offers is:
 
-*   read raw data in the mzML format using a custom parser, optimized for
-    speed and low memory usage.
+*   read raw data in the mzML format using :class:`tidyms.MSData` class,
+    optimized for speed and low memory usage.
 *   Creation of chromatograms and accumulated spectra from raw data.
 *   :term:`Feature detection<feature detection>` and
-    :term:`feature correspondence` in metabolomics datasets.
+    :term:`feature correspondence` in metabolomics datasets using the
+    :class:`tidyms.Assay` class.
 *   Read processed data from other mass spectrometry processing software
     (XCMS, mzmine2, etc...).
 *   A container object to manage metabolomics data.
@@ -25,16 +26,19 @@ Some of the functionality that offers is:
 *   Interactive data visualization using `bokeh <https://bokeh.org/>`_, or
     publication quality plots using `seaborn <https://seaborn.pydata.org/>`_.
 
-In the rest of this guide, we will show different use cases for the TidyMS
-package. A basic knowledge of MS and metabolomics is assumed, but you can look
-up in the :doc:`glossary` the concepts used in this guide.
+In the rest of this guide, you can find links for different use cases for the
+TidyMS package. A basic knowledge of MS and metabolomics is assumed, but you can
+look up in the :doc:`glossary` the concepts used in the guides.
 Installation instructions are available :doc:`here<installation>`.
 
 You can refer to the following guides to learn about specific topics:
 
-*   :ref:`Working with raw data <working-with-raw-data>`.
-*   :ref:`Processing complete datasets from raw data <processing-datasets>`.
+*   :ref:`Working with raw data <working-with-raw-data>`
+*   :ref:`Processing complete datasets from raw data <processing-datasets>`
 *   :ref:`Curation of a metabolomics data matrix <data-curation>`
+*   :ref:`Feature detection and extraction algorithms <peak-picking>`
+*   :ref:`Feature correspondence algorithm <ft-correspondence>`
+*   :ref:`Converting proprietary instrument-specific formats into mzML <mzml>`
 
 
 References

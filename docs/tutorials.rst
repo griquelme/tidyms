@@ -1,4 +1,4 @@
-.. tutorials
+.. _tutorials:
 
 .. py:currentmodule:: tidyms
 
@@ -7,6 +7,8 @@ Tutorials
 
 In this section there is available a list of tutorials on specific topics.
 
-* :doc:`Converting files to mzML<mzml>`
-* :doc:`Loading and saving data<fileio_tutorial>`
-* :doc:`Feature detection<peak-picking>`
+* :ref:`Converting files to mzML <mzml>`
+* :ref:`Working with raw data <working-with-raw-data>`
+* :ref:`Processing complete datasets <processing-datasets>`
+* :ref:`Feature detection <peak-picking>`
+* :ref:`Feature correspondence <ft-correspondence>`

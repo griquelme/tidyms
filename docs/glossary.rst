@@ -40,21 +40,22 @@ Here is a list of the concepts used in TidyMS.
         is usually represented as a chromatographic peak.
 
     feature correspondence
-        The process of match features extracted in different samples. In LC-MS,
-        due to difference in m/z and rt in different samples, this is a critical
-        step before performing any kind of statistical comparison. (LC-MS
-        alignment in theory and practice: a comprehensive algorithmic review)
+        The process of match features extracted in different samples.
 
     feature descriptor
         A series of characteristics of a feature. In the case of a
-        chromatographic peak, a feature can be described as a combination of
-        retention time, m/z and area.
+        chromatographic peak, feature descriptors can be peak area, retention
+        time, mean m/z among, others.
 
     feature detection
         The process of finding a feature in a data set. Once a feature is
         detected it can be extracted into a feature descriptor. In LC-MS the
         feature detection procedure involves the detection of chromatographic
         peaks and extraction into rt, m/z and area information.
+
+    feature table
+        The table obtained after feature extraction, where each row is a
+        feature detected in a sample and each column is a descriptor.
 
     filtration
         A data curation step where samples or features are removed according

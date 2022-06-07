@@ -191,7 +191,7 @@ During feature correspondence features in different samples are grouped based on
 their identity. Ina untargeted metabolomics, the identity is guessed based on the
 similarity of the descriptors of each feature, listed in the feature table.
 In TidyMS, a cluster-based approach is used to group features together. A
-description of the algorithm used can be found :ref:`here <ADD-LINK>`.
+description of the algorithm used can be found :ref:`here <ft-correspondence>`.
 
 Feature matching is done using the :meth:`tidyms.Assay.match_features` method:
 
