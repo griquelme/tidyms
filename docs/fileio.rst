@@ -131,6 +131,6 @@ Peak descriptors can be obtained using
       'snr': 385.44, 'mz': None, 'mz_std': None}]
 
 A detailed description of the algorithm used for peak picking can be found
-:doc:`here <peak-picking>`. These methods are also used to create a data matrix from
-a dataset. See :doc:`here <processing-datasets>` a tutorial on how to work with
+:ref:`here <peak-picking>`. These methods are also used to create a data matrix from
+a dataset. See :ref:`here <processing-datasets>` a tutorial on how to work with
 complete datasets to extract a data matrix.
