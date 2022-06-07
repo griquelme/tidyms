@@ -78,7 +78,7 @@ through the `metrics` attribute, which has methods to compute several metrics:
     variation of each feature.
 *   :meth:`~tidyms.container.MetricMethods.detection_rate` computes the
     coefficient of variation of each feature.
-*   :meth:`~tidyms.container.MetricMethods.dratio` computes the D-ratio [5]_ of
+*   :meth:`~tidyms.container.MetricMethods.dratio` computes the D-ratio [3]_ of
     each feature.
 *   :meth:`~tidyms.container.MetricMethods.pca` builds a PCA model from the
     data matrix.
@@ -149,7 +149,7 @@ Data curation
 In order to increase confidence in the results obtained during data analysis,
 it's necessary to correct the bias in the data due to sample
 preparation and also remove any features that cannot be measured in an
-analytically robust way [4]_, [5]_. We call this process :term:`data curation`.
+analytically robust way [2]_, [3]_. We call this process :term:`data curation`.
 In TidyMS, the data curation is applied using :term:`filtration` and
 :term:`correction` steps to obtain a robust data matrix. Before applying data
 curation, it's recommended to define a :term:`mapping` as described before. Once
@@ -211,7 +211,7 @@ DataContainers can be stored in a pickle object using the ``save`` method:
 
 .. code-block:: python
 
-    data.save("processeded-data.pickle)
+    data.save("processed-data.pickle)
 
 
 This allows to quickly store and load processed data. The pickle object can
@@ -234,17 +234,11 @@ References
 ..  [1] Riquelme, G. *et al*, "A Python-Based Pipeline for Preprocessing LC–MS
     Data for Untargeted Metabolomics Workflows". Metabolites 2020, 10, 416.
     https://doi.org/10.3390/metabo10100416
-..  [2] Tautenhahn, R. *et al*, S. "Highly sensitive feature detection for high
-    resolution LC/MS". BMC Bioinformatics 9, 504 (2008).
-    https://doi.org/10.1186/1471-2105-9-504
-..  [3] Smith, R., *et al*, "LC-MS alignment in theory and practice: a
-    comprehensive algorithmic review", Briefings in Bioinformatics
-    16, 1, (2015), Pages 104–117, https://doi.org/10.1093/bib/bbt080
-..  [4] W B Dunn *et al*, "Procedures for large-scale metabolic profiling of
+..  [2] W B Dunn *et al*, "Procedures for large-scale metabolic profiling of
     serum and plasma using gas chromatography and liquid chromatography
     coupled to mass spectrometry", Nature Protocols volume 6, pages
     1060–1083 (2011).
-..  [5] D Broadhurst *et al*, "Guidelines and considerations for the use of
+..  [3] D Broadhurst *et al*, "Guidelines and considerations for the use of
     system suitability and quality control samples in mass spectrometry assays
     applied in untargeted clinical metabolomic studies.", Metabolomics,
     2018;14(6):72. doi: 10.1007/s11306-018-1367-3
