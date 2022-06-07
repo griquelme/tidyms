@@ -27,8 +27,9 @@ def match_features(
         verbose: bool = False
 ):
     r"""
-    Match features across samples using DBSCAN and GMM. See the notes for a
-    detailed description of the algorithm.
+    Match features across samples using DBSCAN and GMM. See the
+    :ref:`user guide <ft-correspondence>` for a detailed description of the
+    algorithm.
 
     Parameters
     ----------
@@ -40,67 +41,24 @@ def match_features(
         Sample classes used to estimate the minimum cluster size and number of
         chemical species in a cluster.
     mz_tolerance : float
-        m/z tolerance used to set the `eps` parameter in the DBSCAN algorithm.
+        m/z tolerance used to group close features. Sets the `eps` parameter in
+        the DBSCAN algorithm.
     rt_tolerance : float
-        Rt tolerance used to set the `eps` parameter in the DBSCAN algorithm.
+        Rt tolerance used to group close features. Sets the `eps` parameter in
+        the DBSCAN algorithm.
     min_fraction : float
-        Minimum fraction of samples of a given group in a cluster.
+        Minimum fraction of samples of a given group in a cluster. If
+        `include_classes` is ``None``, the total number of sample is used
+        to compute the minimum fraction.
     max_deviation : float
-        The maximum deviation of a feature from a cluster.
+        The maximum deviation of a feature from a cluster, measured in numbers
+        of standard deviations from the cluster.
     n_jobs: int or None, default=None
         Number of jobs to run in parallel. ``None`` means 1 unless in a
         :obj:`joblib.parallel_backend` context. ``-1`` means using all
         processors.
     verbose : bool
-        If True, shows a progress bar
-
-    Notes
-    -----
-    Features are matched as follows:
-
-    1.  A two column matrix is built from the feature table, each row is an
-        (m/z, Rt) tuple. The Rt column is scaled using ``rt_tolerance`` and
-        ``mz_tolerance`` to have both Rt and m/z in the same scale.
-    2.  DBSCAN is used to match features based on closeness (the scikit-learn
-        implementation is used). The `eps` parameter is set to ``mz_tolerance``.
-        The `min_samples` parameter is estimated as a fraction of the samples
-        from each class in ``include_classes`` using the ``min_fraction``
-        parameter: ``min_samples=round(min_fraction * n)`` where ``n`` is the
-        number of samples in the class in ``include_classes`` with the lowest
-        number of samples.
-    3.  After clustering the features with DBSCAN, each cluster is evaluated:
-        there must be only one feature in a cluster from a given sample. This
-        condition will not be meet if there are more than one ionic species
-        in the cluster or if there are spurious features. To deal with these
-        cases the number of ionic species in each cluster is estimated: the
-        number of features from each sample is counted and used to define
-        the k-feature repetitions in a cluster, that is, the number of times
-        a sample contribute with k features to the cluster. The number of
-        species in a cluster is the maximum value of k with a number of
-        repetitions greater or equal than `min_samples`.
-    4.  Each cluster is split according to the number of species in the cluster
-        using GMM setting the `n_components` parameter to the number of species.
-    5.  For each cluster a matrix :math:`S` with shape
-        :math:`(n_{c} \times n_{s})` is built for each sample, where
-        :math:`n_{c}` is the number of features that the sample contributes to
-        the cluster and :math:`n_{s}` is the number of ionic species in the
-        cluster. :math:`s_{ij}` is defined as follows:
-
-        .. math::
-            s_{ij} = \max (
-                \{
-                    \frac{ | mz_{i} - \mu_{mz, j} | }{\sigma_{mz, j}},
-                    \frac{|rt_{i} - \mu_{rt, j}|}{\sigma_{rt, j}}
-                \}
-            )
-
-        S can be seen as a measure of the distance to the mean of each cluster
-        in units of standard deviations. Using :math:`S` we can assign each
-        feature to an ionic species in a unique way using the Hungarian
-        algorithm.
-    6.  After all features in a sample are assigned, the value of :math:`s_{ij}`
-        is checked. If it is greater than ``max_deviations``, the feature
-        is assigned to noise.
+        If True, shows progress bar
 
     """
     X = feature_table.loc[:, [c.MZ, c.RT]].to_numpy()
