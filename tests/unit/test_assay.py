@@ -554,7 +554,15 @@ def test_assay_extract_features(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     test_assay = DummyAssay(assay_path, data_path)
     test_assay.detect_features(strategy=detect_features_dummy)
-    test_assay.extract_features()
+    test_assay.extract_features(verbose=False)
+    assert True
+
+
+def test_assay_extract_features_verbose(tmpdir):
+    assay_path, data_path = create_assay_dir(tmpdir, 20)
+    test_assay = DummyAssay(assay_path, data_path)
+    test_assay.detect_features(strategy=detect_features_dummy)
+    test_assay.extract_features(verbose=True)
     assert True
 
 
@@ -582,7 +590,16 @@ def test_assay_describe_features(tmpdir):
     test_assay = DummyAssay(assay_path, data_path)
     test_assay.detect_features(strategy=detect_features_dummy)
     test_assay.extract_features()
-    test_assay.describe_features()
+    test_assay.describe_features(verbose=False)
+    assert True
+
+
+def test_assay_describe_features_verbose(tmpdir):
+    assay_path, data_path = create_assay_dir(tmpdir, 20)
+    test_assay = DummyAssay(assay_path, data_path)
+    test_assay.detect_features(strategy=detect_features_dummy)
+    test_assay.extract_features()
+    test_assay.describe_features(verbose=True)
     assert True
 
 
