@@ -186,6 +186,7 @@ class Roi:
         mode : {"uplc", "hplc"}
             Analytical platform used separation. Sets default values for peak
             detection.
+        features : OptionalList[Feature]]
 
         """
     def __init__(self, spint: np.ndarray, mz: np.ndarray, time: np.ndarray,
@@ -246,7 +247,7 @@ class Roi:
             custom_descriptors = dict()
 
         if filters is None:
-            filters = self._get_default_filters()
+            filters = self.get_default_filters()
         _fill_filter_boundaries(filters)
 
         valid_features = list()
@@ -262,7 +263,7 @@ class Roi:
         self.features = valid_features
         return descriptor_list
 
-    def _get_default_filters(self) -> Dict[str, float]:
+    def get_default_filters(self) -> Dict[str, float]:
         raise NotImplementedError
 
     def fill_nan(self, fill_value: Optional[float] = None):
@@ -369,7 +370,7 @@ class LCRoi(Roi):
         3. Estimate the baseline.
         4. Detect peaks in the chromatogram.
 
-        A complete description can be found :ref:`here <peak-picking>`.
+        A complete description can be found :ref:`here <feature-extraction>`.
 
         See Also
         --------
@@ -442,7 +443,7 @@ class LCRoi(Roi):
             bokeh.plotting.show(figure)
         return figure
 
-    def _get_default_filters(self) -> dict:
+    def get_default_filters(self) -> dict:
         """
         Default filters for peaks detected in LC data.
         """
