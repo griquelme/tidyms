@@ -38,6 +38,11 @@ from . import validation as v
 from .utils import get_tidyms_path, gaussian_mixture
 from ._mzml import build_offset_list, get_spectrum, get_chromatogram
 
+# TODO: test read_pickle valid file
+# TODO: delete read_data_matrix function
+# TODO: test get_spectra iterator raise ValueError when end > n_spectra
+# TODO: test download_tidyms_data
+
 
 def read_pickle(path: Union[str, BinaryIO]) -> DataContainer:
     """
@@ -166,7 +171,7 @@ def read_mzmine(data: Union[str, TextIO],
 def read_xcms(data_matrix: str, feature_metadata: str,
               sample_metadata: str, class_column: str = "class",
               sep: str = "\t"):
-    """
+    r"""
     Reads tabular data generated with xcms.
 
     Parameters
@@ -187,11 +192,12 @@ def read_xcms(data_matrix: str, feature_metadata: str,
         Column name which holds sample class information in the sample metadata.
     sep : str
         Separator used in the files. As the feature metadata generated with XCMS
-        has comma characters, the default value for the separator is "\t".
+        has comma characters, the default value for the separator is "\\t".
 
     Returns
     -------
     DataContainer
+
     """
 
     # data matrix
@@ -265,8 +271,8 @@ class MSData:
         The MS instrument type used to acquire the experimental data. Used to
         set default parameters in the methods.
     separation : {"uplc", "hplc"}, default="uplc"
-        The separation technique used before MS analysis. Used to
-        set default parameters in the methods.
+        The separation technique used before MS analysis. Used to set default
+        parameters in the methods.
 
     """
 
@@ -374,13 +380,13 @@ class MSData:
             chrom_data["time"], chrom_data["spint"], mode=self.separation)
         return name, chromatogram
 
-    def get_spectrum(self, scan: int) -> lcms.MSSpectrum:
+    def get_spectrum(self, n: int) -> lcms.MSSpectrum:
         """
-        get the spectrum for the given scan number.
+        get the nth spectrum stored in the file.
 
         Parameters
         ----------
-        scan: int
+        n: int
             scan number
 
         Returns
@@ -393,7 +399,7 @@ class MSData:
             self._spectra_offset,
             self._chromatogram_offset,
             self._index_offset,
-            scan
+            n
         )
         sp_data["is_centroid"] = self.ms_mode == "centroid"
         return lcms.MSSpectrum(**sp_data)
@@ -414,9 +420,10 @@ class MSData:
         ms_level : int, default=1
             Use data from this ms level.
         start : int, default=0
-            Starts iteration at this scan number.
+            Starts iteration at this spectrum index.
         end : int or None, default=None
-            Ends iteration at this scan number. By default, uses all scans.
+            Ends iteration at this spectrum index. If None, stops after the
+            last spectrum.
         start_time : float, default=0.0
             Ignore scans with acquisition times lower than this value.
         end_time : float or None, default=None
@@ -577,22 +584,148 @@ def _check_dataset_name(name: str):
         raise ValueError(msg)
 
 
-def _download_dataset(name: str):
-    """Download a dataset from GitHub"""
-    _check_dataset_name(name)
-    cache_path = get_tidyms_path()
-    dataset_path = os.path.join(cache_path, name)
-    if not os.path.exists(dataset_path):
-        os.makedirs(dataset_path)
-    repo_url = "https://raw.githubusercontent.com/griquelme/tidyms-data/master/"
-    dataset_url = repo_url + "/" + name
-    files = ["feature.csv", "sample.csv", "data.csv"]
+def download_tidyms_data(
+    name: str,
+    files: List[str],
+    download_dir: Optional[str] = None
+):
+    """
+    Download a list of files from the data repository
+
+    https://github.com/griquelme/tidyms-data
+
+    Parameters
+    ----------
+    name : str
+        Name of the data directory
+    files : List[str]
+        List of files inside the data directory.
+    download_dir : str or None, default=None
+        String representation of a path to download the data. If None, downloads
+        the data to the `.tidyms` directory
+
+    Examples
+    --------
+
+    Download the `data.csv` file from the `reference-materials` directory into
+    the current directory:
+
+    >>> import tidyms as ms
+    >>> dataset = "reference-materials"
+    >>> file_list = ["data.csv"]
+    >>> ms.fileio.download_tidyms_data(dataset, file_list, download_dir=".")
+
+    See Also
+    --------
+    dowload_dataset
+    load_dataset
+
+    """
+    if download_dir is None:
+        download_dir = Path(get_tidyms_path()).joinpath(name)
+    else:
+        download_dir = Path(download_dir).joinpath(name)
+
+    if not download_dir.exists():
+        download_dir.mkdir()
+
+    url = "https://raw.githubusercontent.com/griquelme/tidyms-data/master/"
+    dataset_url = url + "/" + name
+
+    WINDOWS_LINE_ENDING = b'\r\n'
+    UNIX_LINE_ENDING = b'\n'
+
     for f in files:
-        file_url = dataset_url + "/" + f
-        r = requests.get(file_url)
-        file_path = os.path.join(dataset_path, f)
-        with open(file_path, "w") as fin:
-            fin.write(r.text)
+        file_path = download_dir.joinpath(f)
+        if not file_path.is_file():
+            file_url = dataset_url + "/" + f
+            r = requests.get(file_url)
+            # save content
+            with open(file_path, "w") as fin:
+                fin.write(r.text)
+
+            # convert end line characters for windows
+            if os.name == "nt":
+                with open(file_path, "rb") as fin:
+                    content = fin.read()
+                content = content.replace(WINDOWS_LINE_ENDING, UNIX_LINE_ENDING)
+
+                with open(file_path, "wb") as fin:
+                    fin.write(content)
+
+
+def _get_dataset_files(name: str):
+    data_matrix_files = ["feature.csv", "sample.csv", "data.csv"]
+    files_dict = {
+        "reference-materials": data_matrix_files,
+        "test-mzmine": data_matrix_files,
+        "test-xcms": data_matrix_files,
+        "test-progenesis": data_matrix_files,
+        "test-raw-data": [
+            "centroid-data-indexed-uncompressed.mzML",
+            "centroid-data-zlib-indexed-compressed.mzML",
+            "centroid-data-zlib-no-index-compressed.mzML",
+            "profile-data-zlib-indexed-compressed.mzML"
+        ],
+        "test-nist-raw-data": [
+            'NZ_20200226_005.mzML', 'NZ_20200226_007.mzML',
+            'NZ_20200226_009.mzML', 'NZ_20200226_011.mzML',
+            'NZ_20200226_013.mzML', 'NZ_20200226_015.mzML',
+            'NZ_20200226_017.mzML', 'NZ_20200226_019.mzML',
+            'NZ_20200226_021.mzML', 'NZ_20200226_023.mzML',
+            'NZ_20200227_009.mzML', 'NZ_20200227_011.mzML',
+            'NZ_20200227_013.mzML', 'NZ_20200227_015.mzML',
+            'NZ_20200227_017.mzML', 'NZ_20200227_019.mzML',
+            'NZ_20200227_021.mzML', 'NZ_20200227_023.mzML',
+            'NZ_20200227_025.mzML', 'NZ_20200227_027.mzML',
+            'NZ_20200227_029.mzML', 'NZ_20200227_039.mzML',
+            'NZ_20200227_049.mzML', 'NZ_20200227_059.mzML',
+            'NZ_20200227_069.mzML', 'NZ_20200227_079.mzML',
+            'NZ_20200227_089.mzML', 'NZ_20200227_091.mzML',
+            'NZ_20200227_093.mzML', 'NZ_20200227_097.mzML',
+            'sample_list.csv'
+        ]
+    }
+    return files_dict[name]
+
+
+def download_dataset(name: str, download_dir: Optional[str] = None):
+    """
+    Download a directory from the data repository.
+
+    https://github.com/griquelme/tidyms-data
+
+    Parameters
+    ----------
+    name : str
+        Name of the data directory
+    download_dir : str or None, default=None
+        String representation of a path to download the data. If None, downloads
+        the data to the `.tidyms` directory
+
+    Examples
+    --------
+
+    Download the `data.csv` file from the `reference-materials` directory into
+    the current directory:
+
+    >>> import tidyms as ms
+    >>> dataset = "reference-materials"
+    >>> ms.fileio.download_dataset(dataset, download_dir=".")
+
+    See Also
+    --------
+    dowload_dataset
+    load_dataset
+
+    """
+    datasets = list_available_datasets(False)
+    if name in datasets:
+        file_list = _get_dataset_files(name)
+        download_tidyms_data(name, file_list, download_dir=download_dir)
+    else:
+        msg = "{} is not a valid dataset name".format(name)
+        raise ValueError(msg)
 
 
 def load_dataset(name: str, cache: bool = True, **kwargs) -> DataContainer:
@@ -626,7 +759,7 @@ def load_dataset(name: str, cache: bool = True, **kwargs) -> DataContainer:
                      os.path.exists(data_matrix_path))
 
     if not (cache and is_data_found):
-        _download_dataset(name)
+        download_dataset(name)
         pass
 
     sample_metadata = pd.read_csv(sample_path, index_col=0, **kwargs)
