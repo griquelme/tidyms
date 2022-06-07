@@ -94,7 +94,7 @@ threshold is used  to reduce the number of ROI created):
     roi_list = ms.make_roi(ms_data, min_intensity=10000)
 
 ROI can be used in the same way as chromatograms as shown
-:ref:`here <fileio>`:
+:ref:`here <working-with-raw-data>`:
 
 .. code-block:: python
 
