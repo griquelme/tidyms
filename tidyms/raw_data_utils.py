@@ -187,7 +187,9 @@ def make_roi(
     """
     Builds regions of interest from raw data.
 
-    See the Notes for a detailed description of the algorithm used.
+    ROI are created by connecting values across scans based on the closeness in
+    m/z. See the :ref:`user guide <roi-creation>` for a description of the
+    algorithm used.
 
     Parameters
     ----------
@@ -252,34 +254,6 @@ def make_roi(
         ``ms_data.instrument`` is ``"orbitrap"``. Used only to convert profile
         data to centroid mode.
 
-    Notes
-    -----
-    ROIs are built using the method described in [TR08]_ with slight
-    modifications.
-
-    A ROI is modelled as a combination of three arrays with the same size:
-    m/z, intensity and time. ROIs are created and extended connecting
-    m/z values across successive scans using the following method:
-
-    1.  The m/z values in The first scan are used to initialize a list of
-        ROI. If `targeted_mz` is used, the ROI are initialized using this
-        list.
-    2.  m/z values from the next scan extend the ROIs if they are closer
-        than `tolerance` to the mean m/z of the ROI. Values that don't match
-        any ROI are used to create new ROIs and are appended to the ROI
-        list (only if `targeted_mz` is not used).
-    3.  If more than one m/z value is within the tolerance threshold,
-        m/z and intensity values are computed according to the
-        `multiple_match` strategy.
-    4.  If a ROI can't be extended with any m/z value from the new scan,
-        it is extended using NaNs.
-    5.  If the last `max_missing` values of a ROI are NaN, the ROI is
-        flagged as finished. If the maximum intensity of a finished ROI
-        is greater than `min_intensity` and the number of points is greater
-        than `min_length`, then the ROI is flagged as valid. Otherwise, the
-        ROI is discarded.
-    6.  Repeat from step 2 until no more scans are available.
-
     Returns
     -------
     roi : list[Roi]
@@ -288,12 +262,7 @@ def make_roi(
     See Also
     --------
     lcms.Roi : Representation of a ROI.
-
-    References
-    ----------
-    .. [TR08] Tautenhahn, R., Böttcher, C. & Neumann, S. Highly sensitive
-        feature detection for high resolution LC/MS. BMC Bioinformatics 9,
-        504 (2008). https://doi.org/10.1186/1471-2105-9-504
+    lcms.LCRoi : ROI used in LC data.
 
     """
 
@@ -862,7 +831,7 @@ def _accumulate_spectra_centroid(
     # set subtract values to negative
     for k, r in enumerate(roi):
         sign = - np.ones(r.time.size)
-        start_index, end_index = np.searchsorted(r.scan, [start_time, end_time])
+        start_index, end_index = np.searchsorted(r.time, [start_time, end_time])
         sign[start_index:end_index] = 1
         mz[k] = np.nanmean(r.mz)
         spint[k] = np.nansum(r.spint * sign)
