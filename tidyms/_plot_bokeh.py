@@ -177,7 +177,7 @@ class _LCAssayPlotter:     # pragma: no cover
             .astype(int)
         )
 
-    def roi(self, sample: str) -> bokeh.plotting.Figure:
+    def roi(self, sample: str, show: bool = True) -> bokeh.plotting.Figure:
         """
         Plots m/z vs time dispersion of the ROI in a sample. Detected features
         are highlighted using circles.
@@ -186,6 +186,8 @@ class _LCAssayPlotter:     # pragma: no cover
         ----------
         sample : str
             sample used in the Assay.
+        show : bool, default=True
+            If True calls ``bokeh.plotting.show`` on the Figure.
 
         Returns
         -------
@@ -220,17 +222,19 @@ class _LCAssayPlotter:     # pragma: no cover
             ft = self.assay.load_features(sample)
             source = bokeh.plotting.ColumnDataSource(ft)
             fig.circle('rt', 'mz', size=5, source=source)
-        except FileNotFoundError:
+        except ValueError:
             pass
         fig.xaxis.update(axis_label="Rt [s]")
         fig.yaxis.update(axis_label="m/z")
-        bokeh.plotting.show(fig)
+        if show:
+            bokeh.plotting.show(fig)
         return fig
 
     def stacked_chromatogram(
         self,
         cluster: int,
-        include_classes: Optional[List[str]] = None
+        include_classes: Optional[List[str]] = None,
+        show: bool = True
     ) -> bokeh.plotting.Figure:
         """
         Plots chromatograms of a feature detected across different samples.
@@ -242,6 +246,8 @@ class _LCAssayPlotter:     # pragma: no cover
         include_classes : List[str] or None, default=None
             List of classes to plot. If None is used, samples from all classes
             are plotted.
+        show : bool, default=True
+            If True calls ``bokeh.plotting.show`` on the Figure.
 
         Returns
         -------
@@ -288,5 +294,6 @@ class _LCAssayPlotter:     # pragma: no cover
                 fill_area(
                     fig, r.time, r.spint, ft.start, ft.end, color, alpha=0.2)
         set_chromatogram_axis_params(fig)
-        bokeh.plotting.show(fig)
+        if show:
+            bokeh.plotting.show(fig)
         return fig
