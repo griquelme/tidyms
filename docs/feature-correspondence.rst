@@ -41,9 +41,7 @@ parameters used in the implementation of the function
 * ``max_deviations`` : maximum distance of a feature to the center of a cluster.
 
 As in other methods used in TidyMS, the default values for this parameters
-are defined based on the MS instrument and the separation method used. This
-notebook [ADD_LINK] describes the criteria used to set the default values for
-DBSCAN and GMM.
+are defined based on the MS instrument and the separation method used.
 
 DBSCAN clustering
 -----------------
@@ -57,7 +55,9 @@ more points including itself, reachable if they are connected to a core point,
 and noise otherwise. ``eps`` is set based on the experimental precision of
 the mass spectrometer and the dispersion expected on the Rt based on
 the separation method used. We found that using two times the maximum expected
-standard deviation for Rt and m/z produces the best results.
+standard deviation for Rt and m/z produces the best results. See
+:ref:`this section <dbscan-optimization>` for a description of the method used
+to select defaults values.
 The ``eps_rt`` and ``eps_mz`` parameters of the feature matching function are
 defined to account for variations in m/z and Rt. A value of ``0.01`` for
 ``eps_mz`` is used for Q-TOF instruments and ``0.005`` is used for Orbitrap
@@ -127,6 +127,46 @@ assigned to a unique ionic species:
 ..  plot:: plots/gmm-clustering.py
     :caption: Assignment of features to a unique ionic species. Features labelled with -1 are noise.
 
+
+.. _dbscan-optimization:
+
+Default values for the DBSCAN parameters
+----------------------------------------
+
+The main goal of the application of the DBSCAN algorithm is to cluster features
+from the same ionic species. One of the assumptions is that the values of Rt
+and m/z in a ionic species are randomly distributed around its true value. Also,
+before training the DBSCAN model, Rt values are scaled using ``eps_rt`` and
+``eps_mz``, which are greater than the maximum expected dispersion for m/z and
+Rt. After this step, the standard deviation in Rt should be equal or lower than
+the standard deviation in m/z. It is for this reason that the analysis can be
+limited to cases where the standard deviation in Rt and m/z are the same. For
+the evaluation of the DBSCAN parameters we simulate m/z and Rt values using
+the standard Normal distribution.
+The effect of different parameters are tested using different sample sizes,
+and repeating each test five times. The following values were tested:
+
+* ``min_sample``: 10 %, 25 %, 50 %, 75 % and 100 % of the current sample size.
+* ``eps``: 0.5, 1, 2, 3 and 4.
+
+To measure the performance to cluster the data the noise fraction was evaluated,
+defined as the ratio between the number of samples classified as noise and the
+total number of samples. The following figure shows the result from this
+analysis.
+
+..  plot:: plots/dbscan-parameters.py
+    :caption: Noise fraction for different parameters used in DBSCAN.
+
+It can be seen that ``eps >= 2`` and ``min_samples <= 0.75 * n`` reduces the
+noise fraction to zero in almost all cases. Based on this, ``eps=2.0`` and
+``min_samples=0.25 * n`` seem a reasonable choice. The next step is to translate
+the value of ``eps`` to ``eps_mz`` and ``eps_rt``. In the case of ``eps_mz``,
+the values are computed from the experimental deviation commonly observed
+according to the instrument used. For example, for Q-Tof instruments standard
+deviations of 3-4 mDa are common. Based on this, the default value is set as
+``0.01``. In the case of ``eps_rt`` the election of a default value is not
+so straightforward. We choose a default value for UPLC of 5 s based on the
+typical values observed on experimental data.
 
 References
 ----------
