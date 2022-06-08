@@ -27,7 +27,7 @@ def match_features(
         verbose: bool = False
 ):
     r"""
-    Match features across samples using DBSCAN and GMM. See the
+    Match features across samples using DBSCAN and GMM.See the
     :ref:`user guide <ft-correspondence>` for a detailed description of the
     algorithm.
 
@@ -59,6 +59,15 @@ def match_features(
         processors.
     verbose : bool
         If True, shows progress bar
+
+    Returns
+    -------
+    results: dictionary
+        `clusters_` Contains the results from the feature mathing, where each
+        number is a different ionic species. Features labelled with `-1` are
+        considered noise. `indecisiveness` is a metric that counts the fraction
+        of features in a cluster that could be potentially assigned to more
+        than one cluster. Values close to zero indicate higher quality grouping.
 
     """
     X = feature_table.loc[:, [c.MZ, c.RT]].to_numpy()
