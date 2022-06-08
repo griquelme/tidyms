@@ -97,7 +97,7 @@ retrieved using :meth:`tidyms.Assay.load_roi` or
 
 .. code-block:: python
 
-    sample_name = "NZ_20200226_039"
+    sample_name = "NZ_20200227_039"
     roi_list = assay.load_roi_list(sample_name)
 
 The results can be explored by analyzing each one of the ROI or by using the
@@ -200,9 +200,9 @@ Feature matching is done using the :meth:`tidyms.Assay.match_features` method:
     assay.match_features()
     assay.feature_table
 
-After this step, a new column called `label_` is added to the feature table.
-`label_` groups features based on their identity. Features labelled with ``-1``
-do not belong to any group.
+After this step, a new column called `cluster_` is added to the feature table.
+`cluster_` groups features based on their identity. Features labelled with
+``-1`` do not belong to any group.
 
 Groups of features can be visualized using the ``plot.stacked_chromatogram``
 method:
@@ -220,7 +220,7 @@ method:
 Data matrix creation
 --------------------
 
-Using the `sample_` and `label_` columns, the data matrix is built by pivoting
+The data matrix is built by pivoting the `sample_` and `cluster_` columns in
 the feature table, as described in this
 `link <https://pandas.pydata.org/docs/user_guide/reshaping.html#reshaping>`_.
 The data matrix is created using the :meth:`tidyms.Assay.make_data_matrix`
@@ -245,3 +245,63 @@ DataFrames:
 
 Further data preprocessing using the :class:`~tidyms.DataContainer` object is
 described in :ref:`this guide <data-curation>`.
+
+Customizing Assay methods
+-------------------------
+
+Customization of the feature detection, extraction and correspondence steps
+is straightforward, as only the function to process a specific sample is
+required. In the case of feature detection, this can be done by creating a
+function to process a single :class:`tidyms.MSData` instance and pass it to
+the `strategy` parameter of the :meth:`tidyms.Assay.detect_features`:
+
+.. code-block:: python
+
+    sample_metadata_path = "reference-materials/sample.csv"
+    data_path = "test-nist-raw-data"
+    assay_path = "test-assay"
+
+    assay = ms.Assay(
+        data_path=data_path,
+        assay_path=assay_path,
+        sample_metadata=sample_metadata_path,
+        separation="uplc",
+        instrument="qtof"
+    )
+
+    def detect_features_dummy(ms_data: ms.MSData, **kwargs):
+        roi_list = list()
+        for k in range(5):
+            value = np.ones(20)
+            # the same values are used for m/z spint and time
+            # intensity, mz, time, scan number and separation mode must be
+            # passed to the LCRoi constructor
+            roi = ms.lcms.LCRoi(
+                value, value, value, value, mode=ms_data.separation)
+            roi_list.append(roi)
+        return roi_list
+
+    assay.detect_features(strategy=detect_features_dummy)
+
+    roi_list = assay.load_roi_list(sample_name)
+    # check the ROI values
+    np.array_equal(np.ones(20), roi_list[0].mz)
+
+``feature_detection_dummy`` returns a list of :class:`tidyms.lcms.LCRoi` objects
+that stores the information of each ROI. A similar approach can be used for
+feature extraction, but in this case, the function takes as input a ROI. The
+function must modify the `features` attribute with a list of the detected
+features:
+
+.. code-block:: python
+
+    def extract_features_dummy(roi: ms.lcms.LCRoi, **kwargs):
+        roi.features = [ms.lcms.Peak(0, 5, 12)]
+
+    assay.extract_features(strategy=extract_features_dummy)
+
+Features in LC-MS data are stored in :class:`tidyms.lcms.Feature` objects that
+store the start, apex and end of a peak in a ROI.  Finally, the same approach
+can be used to create a custom feature correspondence algorithm. See the
+documentation in :meth:`tidyms.Assay.match_features` for a description of
+the expected input and output for the correspondence function.
