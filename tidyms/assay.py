@@ -20,6 +20,7 @@ from ._plot_bokeh import _LCAssayPlotter
 # TODO: add id_ column to sample metadata
 # TODO: add make_roi params to each column in sample metadata for cases where
 #   more than one sample are obtained from the same file.
+# TODO: test verbose false describe_features, extract_features
 
 def _manage_preprocessing_step(func):
     """
@@ -52,7 +53,7 @@ class Assay:
     """
     Manages data preprocessing workflows from raw data to data matrix.
 
-    See the notes for usage instructions.
+    See the :ref:`user guide <processing-datasets>` for usage instructions.
 
     Parameters
     ----------
@@ -66,7 +67,7 @@ class Assay:
         Path to store the assay data. If the path does not exist, a new
         directory is created. If an existing assay directory is passed,
         it loads the data from the assay.
-    sample_metadata : str or DataFrame or None.
+    sample_metadata : str, Path, DataFrame or None.
         Provides information associated with each sample. If a string is
         provided, it is assumed that it is the path to a csv file with sample
         metadata information. The other columns may contain any kind of data
@@ -97,70 +98,13 @@ class Assay:
         The separation method used. Used to set several defaults during data
         preprocessing.
 
-    Notes
-    -----
-    Assay process raw MS data applying a pipeline-like workflow. After each
-    processing step the results are stored in a directory to reduce memory
-    usage and to keep track of intermediate steps. The following preprocessing
-    steps are applied in order:
-
-    Feature Detection
-        Regions of interest (ROI) are detected in each sample. ROI are regions
-        of data where features may be found. Feature detection is done through
-        the ``detect_features`` method. In LC data, for example, a ROI is an
-        extracted chromatogram. The ``load_roi_list`` method is used to recover
-        the ROIs detected in a sample.
-
-    Feature Extraction
-        Features are extracted from each ROI. A feature is an interesting
-        region of the data. In LC data, for example, a feature is a
-        chromatographic peak, defined by the start, apex and end of the peak.
-        Feature extraction is done using the `extract_features` method. After
-        feature extraction, the features detected in each ROI are stored as a
-        list in the ``features`` attribute of the corresponding ROI.
-
-    Feature description
-        Each detected feature in a sample is described using a series of
-        descriptors. For LC data, the descriptors are the peak area, Rt, m/z,
-        peak width, among others. Feature description is done using the
-        ``describe_features`` method. After this step, the descriptors for
-        the features found in a sample are stored in a Pandas DataFrame that
-        can be recovered using the ``load_features`` method. Besides the
-        descriptors, this data frame contains two additional columns:
-        `roi_index` and `ft_index`. `roi_index` is used to indentify the
-        ROI where the feature was detected, and can be used to load the ROI
-        using the ``load_roi`` method. The `ft_index` value is used to identify
-        the feature in the `feature` attribute of the ROI.
-
-    Feature table construction
-        The feature table contains the descriptors of features found in each
-        sample. The feature table is built using the ``build_feature_table``
-        method. Two additional columns are included: `sample_` contains the
-        sample name where the feature was detected and `class_` contains the
-        corresponding class name.
-
-    Feature matching
-        In this step features found in different samples are grouped together
-        if they have a common identity. The identity is defined based on the
-        similarity of the descriptors in the feature table. Feature matching
-        is done using the ``match_features`` method. After this step, a new
-        column called `label_` is added to the feature table. `label_` groups
-        features based on their identity. Features labelled with ``-1`` do not
-        belong to any group.
-
-    Data matrix creation
-        The data matrix is created using the feature table and organized into
-        a :py:class:`tidyms.DataContainer`. Each column in the data matrix is a
-        feature group defined in the feature matching step, and each row is a
-        sample. The creation is done using the ``make_data_matrix`` method.
-
     """
 
     def __init__(
         self,
         assay_path: Union[str, Path],
         data_path: Optional[Union[str, List[str], Path]],
-        sample_metadata: Optional[Union[pd.DataFrame, str]] = None,
+        sample_metadata: Optional[Union[pd.DataFrame, str, Path]] = None,
         ms_mode: str = "centroid",
         instrument: str = "qtof",
         separation: str = "uplc",
@@ -315,10 +259,6 @@ class Assay:
         load_roi_list : Loads all ROI from a sample.
 
         """
-        if not isinstance(roi_index, int):
-            msg = "`roi_index` must be a non-negative int."
-            raise ValueError(msg)
-
         file_name = "{}.pickle".format(roi_index)
         roi_path = self.manager.get_roi_dir_path(sample).joinpath(file_name)
 
@@ -502,7 +442,7 @@ class Assay:
             processors.
         verbose : bool, default=True
             If ``True``, displays a progress bar.
-        **kwargs : dict
+        **kwargs :
             Parameters to pass to the underlying function used. See the strategy
             parameter.
 
@@ -536,10 +476,11 @@ class Assay:
                 _save_roi_list(roi_path, roi_list)
 
             worker = delayed(worker)
+            iterator = iterator()
             if verbose:
                 print("Extracting features in {} samples".format(n_samples))
                 bar = get_progress_bar()
-                iterator = bar(iterator(), total=n_samples)
+                iterator = bar(iterator, total=n_samples)
             Parallel(n_jobs=n_jobs)(worker(x) for x in iterator)
         else:
             if verbose:
@@ -672,7 +613,7 @@ class Assay:
                 def func(assay: Assay, **kwargs) -> Dict:
                     ...
 
-            The dictionary must have at least one key called "labels",
+            The dictionary must have at least one key called "cluster_",
             containing an 1D numpy with size matching the number of rows in the
             feature table. Each value is used to group features from different
             samples into a data matrix. The value ``-1`` in the array is used
@@ -680,10 +621,10 @@ class Assay:
             going to be included in the data matrix. Other keys with arbitrary
             names may be used, but the value associated must be a 1D numpy
             array with size equal to the number of different groups in the
-            label array. These arrays can be used to compute feature matching
+            cluster array. These arrays can be used to compute feature matching
             metrics than can be passed to the data matrix construction and used
             to assess the feature matching process.
-        **kwargs : dict
+        **kwargs :
             Parameters to pass to the underlying function used. See the strategy
             parameter.
 
@@ -794,7 +735,7 @@ class _AssayManager:
         self,
         assay_path: Path,
         data_path: Union[str, List[str], Path],
-        sample_metadata: Optional[Union[str, pd.DataFrame]],
+        sample_metadata: Optional[Union[str, Path, pd.DataFrame]],
         ms_mode: str,
         instrument: str,
         separation: str,
@@ -1142,7 +1083,7 @@ def _create_sample_metadata(
         sample_names: List[str]
 ) -> pd.DataFrame:
     # sample metadata df
-    if isinstance(sample_metadata, str):
+    if isinstance(sample_metadata, str) or isinstance(sample_metadata, Path):
         df = pd.read_csv(sample_metadata)
     elif sample_metadata is None:
         df = pd.DataFrame(data=sample_names, columns=["sample"])
