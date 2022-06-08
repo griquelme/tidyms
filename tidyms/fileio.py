@@ -211,7 +211,6 @@ def read_xcms(data_matrix: str, feature_metadata: str,
     fm.index.name = "feature"
     fm = fm.rename(columns={"mzmed": "mz", "rtmed": "rt"})
     fm = fm.loc[:, ["mz", "rt"]]
-    # TODO : include information from CAMERA package
 
     # sample_metadata
     sm = pd.read_csv(sample_metadata, sep=sep, index_col=0)
