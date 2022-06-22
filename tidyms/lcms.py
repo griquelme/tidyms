@@ -266,15 +266,12 @@ class Roi:
     def get_default_filters(self) -> Dict[str, float]:
         raise NotImplementedError
 
-    def fill_nan(self, fill_value: Optional[float] = None):
+    def fill_nan(self):
         """
-        Fill missing intensity values using linear interpolation.
-
-        Parameters
-        ----------
-        fill_value : float or None
-            Missing intensity values are replaced with this value. If None,
-            values are filled using linear interpolation.
+        Fill missing values. Missing m/z values are filled using the mean m/z
+        of the ROI. Missing intensity values are filled using linear
+        interpolation. Missing values on the boundaries are filled by
+        extrapolation. Negative values are set to 0.
 
         """
 
@@ -282,21 +279,22 @@ class Roi:
         # of zero. This prevents errors in the interpolation and makes peak
         # picking work better.
 
-        if np.isnan(self.spint[0]):
-            self.spint[0] = 0
-        if np.isnan(self.spint[-1]):
-            self.spint[-1] = 0
-
         missing = np.isnan(self.spint)
-        if fill_value is None:
-            interpolator = interp1d(self.time[~missing], self.spint[~missing])
+        if missing.any():
+            interpolator = interp1d(
+                self.time[~missing],
+                self.spint[~missing],
+                fill_value="extrapolate",
+                assume_sorted=True
+            )
+            sp_max = np.nanmax(self.spint)
+            sp_min = np.nanmin(self.spint)
             self.spint[missing] = interpolator(self.time[missing])
-        else:
-            self.spint[missing] = fill_value
-
+            # bound extrapolated values to max and min observed values
+            self.spint = np.maximum(self.spint, sp_min)
+            self.spint = np.minimum(self.spint, sp_max)
         if isinstance(self.mz, np.ndarray):
-            mz_mean = np.nanmean(self.mz)
-            self.mz[missing] = mz_mean
+            self.mz[missing] = np.nanmean(self.mz)
 
 
 class LCRoi(Roi):
@@ -379,7 +377,7 @@ class LCRoi(Roi):
         tidyms.peaks.detect_peaks : peak detection of 1D signals.
 
         """
-        self.fill_nan(0.0)
+        self.fill_nan()
         noise = peaks.estimate_noise(self.spint)
 
         if smoothing_strength is None:
@@ -390,10 +388,8 @@ class LCRoi(Roi):
         if store_smoothed:
             self.spint = x
 
-        baseline = peaks.estimate_baseline(self.spint, noise)
-        start, apex, end = peaks.detect_peaks(
-            self.spint, noise, baseline, **kwargs
-        )
+        baseline = peaks.estimate_baseline(x, noise)
+        start, apex, end = peaks.detect_peaks(x, noise, baseline, **kwargs)
         features = [Peak(s, a, e) for s, a, e in zip(start, apex, end)]
 
         self.features = features
