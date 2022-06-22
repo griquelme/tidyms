@@ -347,9 +347,12 @@ def _find_closest_sorted(x: np.ndarray,
     if isinstance(xq, (float, int)):
         xq = np.array(xq)
 
-    if (x.size == 0) or (xq.size == 0):
-        msg = "`x` and `xq` must be non empty arrays"
+    if (x.size == 0):
+        msg = "`x` must be a non-empty array."
         raise ValueError(msg)
+
+    if xq.size == 0:
+        return np.array([], dtype=int)
 
     ind = np.searchsorted(x, xq)
 

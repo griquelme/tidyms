@@ -157,8 +157,8 @@ def test_find_closest_empty_x():
 def test_find_closest_empty_y():
     x = np.arange(10)
     y = np.array([])
-    with pytest.raises(ValueError):
-        utils.find_closest(x, y)
+    res = utils.find_closest(x, y)
+    assert res.size == 0
 
 
 def test_find_closest_multiple_values():
