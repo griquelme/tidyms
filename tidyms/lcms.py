@@ -20,6 +20,7 @@ get_find_centroid_params
 """
 
 import bokeh.plotting
+import json
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from typing import Dict, List, Optional, Tuple
@@ -29,6 +30,7 @@ from scipy.integrate import cumtrapz
 from . import peaks
 from . import _plot_bokeh
 from . import _constants as c
+from .utils import array1d_to_str, str_to_array1d
 
 
 class MSSpectrum:
@@ -296,6 +298,13 @@ class Roi:
         if isinstance(self.mz, np.ndarray):
             self.mz[missing] = np.nanmean(self.mz)
 
+    @staticmethod
+    def from_json(s: str) -> "Roi":
+        raise NotImplementedError
+
+    def to_json(self) -> str:
+        raise NotImplementedError
+
 
 class LCRoi(Roi):
     """
@@ -449,6 +458,62 @@ class LCRoi(Roi):
             filters = {"width": (4, 60), "snr": (5, None)}
         return filters
 
+    @staticmethod
+    def from_json(s: str):
+        """
+        Creates a LCRoi from a JSON str. Used to serialize LCRoi objects.
+
+        Parameters
+        ----------
+        s : str
+
+        Returns
+        -------
+        LCRoi
+
+        """
+        d = json.loads(s)
+        roi = LCRoi(
+            str_to_array1d(d["spint"]),
+            str_to_array1d(d["mz"]),
+            str_to_array1d(d["time"]),
+            str_to_array1d(d["scan"]),
+        )
+        if "noise" in d:
+            roi.noise = str_to_array1d(d["noise"])
+
+        if "baseline" in d:
+            roi.baseline = str_to_array1d(d["baseline"])
+
+        if "features" in d:
+            roi.features = [Peak(x, y, z) for (x, y, z) in d["features"]]
+        return roi
+
+    def to_json(self) -> str:
+        """
+        Serializes the LCRoi into a JSON str.
+
+        Returns
+        -------
+        str
+
+        """
+        d = dict()
+        d["time"] = array1d_to_str(self.time)
+        d["spint"] = array1d_to_str(self.spint)
+        d["scan"] = array1d_to_str(self.scan)
+        d["mz"] = array1d_to_str(self.mz)
+        if self.features is not None:
+            d["features"] = [[x.start, x.apex, x.end] for x in self.features]
+
+        if self.baseline is not None:
+            d["baseline"] = array1d_to_str(self.baseline)
+
+        if self.noise is not None:
+            d["noise"] = array1d_to_str(self.noise)
+        d_json = json.dumps(d)
+        return d_json
+
 
 class Chromatogram(LCRoi):
     """
@@ -502,8 +567,8 @@ class Feature:
             msg = "start must be lower than end"
             raise ValueError(msg)
 
-        self.start = start
-        self.end = end
+        self.start = int(start)
+        self.end = int(end)
 
     def __repr__(self):
         str_repr = "{}(start={}, end={})"
@@ -551,7 +616,7 @@ class Peak(Feature):
         except AssertionError:
             msg = "start must be lower than loc and loc must be lower than end"
             raise InvalidPeakException(msg)
-        self.apex = apex
+        self.apex = int(apex)
 
     def __repr__(self):
         str_repr = "{}(start={}, apex={}, end={})"
