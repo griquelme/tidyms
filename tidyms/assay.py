@@ -1190,7 +1190,9 @@ def _flatten_column_multindex(df: pd.DataFrame):
         "rtmean": "rt",
         "rtstd": "rt std",
         "rtmin": "rt min",
-        "rtmax": "rt max"
+        "rtmax": "rt max",
+        "rt startmean": "rt start",
+        "rt endmean": "rt end",
     }
     new_names = [col_name_map[x + y] for x, y in zip(level_0, level_1)]
     return new_names
