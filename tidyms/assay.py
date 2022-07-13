@@ -12,15 +12,16 @@ from . import raw_data_utils
 from .container import DataContainer
 from .correspondence import match_features
 from .fileio import MSData
-from .lcms import Roi
+from .lcms import Roi, LCRoi
 from .utils import get_progress_bar
 from ._plot_bokeh import _LCAssayPlotter
-
+import json
 
 # TODO: add id_ column to sample metadata
 # TODO: add make_roi params to each column in sample metadata for cases where
 #   more than one sample are obtained from the same file.
 # TODO: test verbose false describe_features, extract_features
+
 
 def _manage_preprocessing_step(func):
     """
@@ -259,12 +260,23 @@ class Assay:
         load_roi_list : Loads all ROI from a sample.
 
         """
-        file_name = "{}.pickle".format(roi_index)
-        roi_path = self.manager.get_roi_dir_path(sample).joinpath(file_name)
+        roi_path = self.manager.get_roi_path(sample)
 
-        with roi_path.open("rb") as fin:
-            roi = pickle.load(fin)
+        if self.separation in c.LC_MODES:
+            roi_class = LCRoi
+        else:
+            roi_class = Roi
 
+        with open(roi_path, "r", newline="\n") as fin:
+            header = fin.readline()
+            index_offset = int(header.split("=")[-1])
+            fin.seek(index_offset)
+            json_str = fin.read()
+            index = json.loads(json_str)
+            offset, length = index[roi_index]
+            fin.seek(offset)
+            s = fin.read(length)
+            roi = roi_class.from_json(s)
         return roi
 
     def load_roi_list(self, sample: str) -> List[Roi]:
@@ -296,10 +308,24 @@ class Assay:
             msg = "`load_roi_list` must be called after `detect_features`."
             raise ValueError(msg)
 
-        roi_list = list()
-        for path in self.manager.get_roi_list_path(sample):
-            with open(path, "rb") as fin:
-                roi = pickle.load(fin)
+        roi_path = self.manager.get_roi_path(sample)
+
+        if self.separation in c.LC_MODES:
+            roi_class = LCRoi
+        else:
+            roi_class = Roi
+
+        with open(roi_path, "r", newline="\n") as fin:
+            header = fin.readline()
+            index_offset = int(header.split("=")[-1])
+            fin.seek(index_offset)
+            index = json.loads(fin.read())
+
+            roi_list = list()
+            for offset, length in index:
+                fin.seek(offset)
+                s = fin.read(length)
+                roi = roi_class.from_json(s)
                 roi_list.append(roi)
         return roi_list
 
@@ -386,7 +412,7 @@ class Assay:
 
             def iter_func(sample_list):
                 for x in sample_list:
-                    roi_path = self.manager.get_roi_dir_path(x)
+                    roi_path = self.manager.get_roi_path(x)
                     ms_data = self.get_ms_data(x)
                     yield roi_path, ms_data
 
@@ -465,7 +491,7 @@ class Assay:
 
             def iterator():
                 for sample in self.manager.get_sample_names():
-                    roi_path = self.manager.get_roi_dir_path(sample)
+                    roi_path = self.manager.get_roi_path(sample)
                     roi_list = self.load_roi_list(sample)
                     yield roi_path, roi_list
 
@@ -523,7 +549,7 @@ class Assay:
 
             def iterator():
                 for sample in self.manager.get_sample_names():
-                    roi_path = self.manager.get_roi_dir_path(sample)
+                    roi_path = self.manager.get_roi_path(sample)
                     ft_path = self.manager.get_feature_path(sample)
                     roi_list = self.load_roi_list(sample)
                     yield roi_path, ft_path, roi_list
@@ -663,7 +689,7 @@ class Assay:
         data_matrix.index.name = "sample"
 
         # TODO: deal with nan values. Move this to self.fill_missing
-        data_matrix = data_matrix.fillna(0)
+        # data_matrix = data_matrix.fillna(0)
 
         sample_metadata = self.manager.get_sample_metadata()
         # add samples without features as rows with zeros
@@ -799,10 +825,6 @@ class _AssayManager:
         # roi dir
         roi_dir_path = self.assay_path.joinpath(c.ROI_DIR)
         roi_dir_path.mkdir()
-        # dir for each sample roi
-        for s in self.get_sample_names():
-            sample_roi_path = roi_dir_path.joinpath(s)
-            sample_roi_path.mkdir()
 
         # feature tables dir
         ft_dir_path = self.assay_path.joinpath(c.FT_DIR)
@@ -860,10 +882,8 @@ class _AssayManager:
         """
         if step == "detect_features":
             for sample in samples:
-                path_list = self.get_roi_list_path(sample)
-                for path in path_list:
-                    if path.is_file():
-                        path.unlink(missing_ok=True)
+                path = self.get_roi_path(sample)
+                path.unlink(missing_ok=True)
         elif step == "describe_features":
             for sample in samples:
                 path = self.get_feature_path(sample)
@@ -895,19 +915,10 @@ class _AssayManager:
         self._check_sample_name(name)
         return self._sample_to_path.get(name)
 
-    def get_roi_dir_path(self, name: str) -> Path:
+    def get_roi_path(self, name: str) -> Path:
         self._check_sample_name(name)
         roi_path = self.assay_path.joinpath(c.ROI_DIR, name)
         return roi_path
-
-    def get_roi_list_path(self, name: str) -> List[Path]:
-        roi_path = self.get_roi_dir_path(name)
-        n_roi = len([x for x in roi_path.glob("*")])
-        roi_list_path = list()
-        for k in range(n_roi):
-            path = roi_path.joinpath("{}.pickle".format(k))
-            roi_list_path.append(path)
-        return roi_list_path
 
     def get_feature_path(self, name: str) -> Path:
         self._check_sample_name(name)
@@ -1123,7 +1134,7 @@ def _normalize_sample_metadata(df: pd.DataFrame, name_to_path: List[str]):
 
     if "order" in df:
         order_dtype = df["order"].dtype
-        is_int = order_dtype == int
+        is_int = np.issubdtype(order_dtype, np.integer)
         if not is_int:
             msg = "Order column dtype must be `int`. Got `{}`."
             raise TypeError(msg.format(order_dtype))
@@ -1139,7 +1150,7 @@ def _normalize_sample_metadata(df: pd.DataFrame, name_to_path: List[str]):
 
     if "batch" in df:
         batch_dtype = df["batch"].dtype
-        is_int = batch_dtype == int
+        is_int = np.issubdtype(batch_dtype, np.integer)
         if not is_int:
             msg = "Batch column dtype must be `int`. Got `{}`."
             raise TypeError(msg.format(batch_dtype))
@@ -1221,11 +1232,27 @@ def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
     return path_list
 
 
-def _save_roi_list(dir_path: Path, roi_list: List[Roi]):
-    for k, roi in enumerate(roi_list):
-        save_path = dir_path.joinpath("{}.pickle".format(k))
-        with save_path.open("wb") as fin:
-            pickle.dump(roi, fin)
+def _save_roi_list(roi_path: Path, roi_list: List[Roi]):
+    header_template = "index_offset={:020n}\n"
+    # the dummy header is used as a place holder to fill with the correct offset
+    # value after all ROI have been serialized
+    with open(roi_path, "w", newline="\n") as fin:
+        dummy_header = header_template.format(1)
+        fin.write(dummy_header)
+        offset = len(dummy_header)
+        index = list()
+        for roi in roi_list:
+            serialized_roi = roi.to_json() + '\n'
+            length = len(serialized_roi)
+            index.append([offset, length])
+            offset += len(serialized_roi)
+            fin.write(serialized_roi)
+        # write index
+        fin.write(json.dumps(index))
+        fin.seek(0)
+        # update header offset
+        header = header_template.format(offset)
+        fin.write(header)
 
 
 def compare_dict(d1: Optional[dict], d2: Optional[dict]) -> bool:
@@ -1336,7 +1363,10 @@ def _lc_feature_data_from_feature_table(feature_table: pd.DataFrame):
 
     # compute aggregate statistics for each feature -> feature metadata
     estimators = {"mz": ["mean", "std", "min", "max"],
-                  "rt": ["mean", "std", "min", "max"]}
+                  "rt": ["mean", "std", "min", "max"],
+                  "rt start": ["mean"],
+                  "rt end": ["mean"],
+    }
     feature_metadata = feature_data.groupby(c.LABEL).agg(estimators)
     feature_metadata.columns = _flatten_column_multindex(feature_metadata)
     feature_metadata.index = feature_metadata.index.map(cluster_to_ft)
