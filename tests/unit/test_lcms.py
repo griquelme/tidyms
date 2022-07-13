@@ -143,6 +143,20 @@ def test_peak_rt(lc_roi_peak):
     assert np.isclose(test_rt, expected_rt)
 
 
+def test_Peak_get_rt_start(lc_roi_peak):
+    lc_roi, peak = lc_roi_peak
+    test_rt_start = peak.get_rt_start(lc_roi)
+    expected_rt_start = lc_roi.time[peak.start]
+    assert np.isclose(test_rt_start, expected_rt_start)
+
+
+def test_Peak_get_rt_end(lc_roi_peak):
+    lc_roi, peak = lc_roi_peak
+    test_rt_end = peak.get_rt_end(lc_roi)
+    expected_rt_end = lc_roi.time[peak.end - 1]
+    assert np.isclose(test_rt_end, expected_rt_end)
+
+
 def test_peak_height(lc_roi_peak):
     # check that the height of the peak is close to the estimation
     lc_roi, peak = lc_roi_peak
@@ -255,3 +269,42 @@ def test_get_descriptors_custom_descriptors(lc_roi_peak):
     custom_descriptor = {"custom": return_one}
     descriptors = lc_roi.describe_features(custom_descriptors=custom_descriptor)
     assert descriptors[0]["custom"] == 1
+
+
+# Test ROI serialization
+
+@pytest.fixture
+def lc_roi(roi_data):
+    rt, mz, spint, mode = roi_data
+    return lcms.LCRoi(
+        spint,
+        mz,
+        rt,
+        rt,
+        mode=mode
+    )
+
+
+def test_LCRoi_serialization_no_noise_no_baseline_no_features(lc_roi):
+    roi_str = lc_roi.to_json()
+    roi_from_str = lcms.LCRoi.from_json(roi_str)
+    assert np.array_equal(lc_roi.time, roi_from_str.time)
+    assert np.array_equal(lc_roi.spint, roi_from_str.spint, equal_nan=True)
+    assert np.array_equal(lc_roi.mz, roi_from_str.mz, equal_nan=True)
+    assert np.array_equal(lc_roi.scan, roi_from_str.scan)
+
+
+def test_LCRoi_serialization(lc_roi):
+    lc_roi.extract_features()
+    roi_str = lc_roi.to_json()
+    roi_from_str = lcms.LCRoi.from_json(roi_str)
+    assert np.array_equal(lc_roi.time, roi_from_str.time)
+    assert np.array_equal(lc_roi.spint, roi_from_str.spint, equal_nan=True)
+    assert np.array_equal(lc_roi.mz, roi_from_str.mz, equal_nan=True)
+    assert np.array_equal(lc_roi.scan, roi_from_str.scan)
+    assert np.array_equal(lc_roi.noise, roi_from_str.noise)
+    assert np.array_equal(lc_roi.baseline, roi_from_str.baseline)
+    for expected, test in zip(lc_roi.features, roi_from_str.features):
+        assert expected.start == test.start
+        assert expected.apex == test.apex
+        assert expected.end == test.end

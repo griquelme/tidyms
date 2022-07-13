@@ -624,6 +624,34 @@ class Peak(Feature):
         str_repr = str_repr.format(name, self.start, self.apex, self.end)
         return str_repr
 
+    def get_rt_start(self, roi: LCRoi) -> float:
+        """
+        Computes the start of the peak, in time units
+        Parameters
+        ----------
+        roi : LCRoi
+
+        Returns
+        -------
+        float
+
+        """
+        return roi.time[self.start]
+
+    def get_rt_end(self, roi: LCRoi) -> float:
+        """
+        Computes the end of the peak, in time units
+        Parameters
+        ----------
+        roi : LCRoi
+
+        Returns
+        -------
+        float
+
+        """
+        return roi.time[self.end - 1]
+
     def get_rt(self, roi: LCRoi) -> float:
         """
         Finds the peak location in the ROI rt, using spint as weights.
@@ -816,7 +844,9 @@ class Peak(Feature):
             c.WIDTH: self.get_width(roi),
             c.SNR: self.get_snr(roi),
             c.MZ: self.get_mean_mz(roi),
-            c.MZ_STD: self.get_mz_std(roi)
+            c.MZ_STD: self.get_mz_std(roi),
+            c.RT_START: self.get_rt_start(roi),
+            c.RT_END: self.get_rt_end(roi)
         }
         return descriptors
 
