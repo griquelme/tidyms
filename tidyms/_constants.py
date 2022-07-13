@@ -14,7 +14,10 @@ MS_INSTRUMENTS: Final[List[str]] = [QTOF, ORBITRAP]
 # feature descriptors
 FEATURE: Final[str] = "feature"
 MZ: Final[str] = "mz"
+RT_START: Final[str] = "rt start"
+RT_END: Final[str] = "rt end"
 RT: Final[str] = "rt"
+RT_STD: Final[str] = "rt std"
 AREA: Final[str] = "area"
 WIDTH: Final[str] = "width"
 HEIGHT: Final[str] = "height"
