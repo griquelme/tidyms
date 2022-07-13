@@ -47,7 +47,7 @@ def match_features(
         Rt tolerance used to group close features. Sets the `eps` parameter in
         the DBSCAN algorithm.
     min_fraction : float
-        Minimum fraction of samples of a given group in a cluster. If
+        Minimum fraction of samples of a given class in a cluster. If
         `include_classes` is ``None``, the total number of sample is used
         to compute the minimum fraction.
     max_deviation : float
@@ -58,7 +58,7 @@ def match_features(
         :obj:`joblib.parallel_backend` context. ``-1`` means using all
         processors.
     verbose : bool
-        If True, shows progress bar
+        If True, shows a progress bar.
 
     Returns
     -------
@@ -95,7 +95,7 @@ def match_features(
         min_fraction
     )
 
-    cluster_iterator = _cluster_iterator(
+    cluster_iterator = _get_cluster_iterator(
         X, cluster, samples, species_per_cluster
     )
 
@@ -289,7 +289,7 @@ def _estimate_n_species_one_class(
     return species
 
 
-def _cluster_iterator(
+def _get_cluster_iterator(
     X: np.ndarray,
     cluster: np.ndarray,
     samples: np.ndarray,
