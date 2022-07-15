@@ -85,6 +85,7 @@ def make_chromatograms(
     *,
     window: Optional[float] = None,
     accumulator: str = "sum",
+    fill_missing: bool = True,
     ms_level: int = 1,
     start_time: float = 0.0,
     end_time: Optional[float] = None,
@@ -124,6 +125,9 @@ def make_chromatograms(
                     .T.reshape(mz.size * 2))
 
     eic = np.zeros((mz.size, n_sp))
+    if not fill_missing:
+        eic[:] = np.nan
+
     rt = np.zeros(n_sp)
     valid_index = list()
     sp_iterator = ms_data.get_spectra_iterator(
