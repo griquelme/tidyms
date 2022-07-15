@@ -268,12 +268,17 @@ class Roi:
     def get_default_filters(self) -> Dict[str, float]:
         raise NotImplementedError
 
-    def fill_nan(self):
+    def fill_nan(self, **kwargs):
         """
         Fill missing values. Missing m/z values are filled using the mean m/z
         of the ROI. Missing intensity values are filled using linear
         interpolation. Missing values on the boundaries are filled by
         extrapolation. Negative values are set to 0.
+
+        Parameters
+        ----------
+        kwargs:
+            Parameters to pass to :func:`scipy.interpolate.interp1d`
 
         """
 
@@ -286,8 +291,8 @@ class Roi:
             interpolator = interp1d(
                 self.time[~missing],
                 self.spint[~missing],
-                fill_value="extrapolate",
-                assume_sorted=True
+                assume_sorted=True,
+                **kwargs
             )
             sp_max = np.nanmax(self.spint)
             sp_min = np.nanmin(self.spint)
@@ -386,7 +391,7 @@ class LCRoi(Roi):
         tidyms.peaks.detect_peaks : peak detection of 1D signals.
 
         """
-        self.fill_nan()
+        self.fill_nan(fill_value="extrapolate")
         noise = peaks.estimate_noise(self.spint)
 
         if smoothing_strength is None:
@@ -667,7 +672,9 @@ class Peak(Feature):
 
         """
         weights = roi.spint[self.start:self.end]
-        weights[weights < 0] = 0
+        if roi.baseline is not None:
+            weights = weights - roi.baseline[self.start:self.end]
+        weights = np.maximum(weights, 0)
         loc = np.abs(np.average(roi.time[self.start:self.end], weights=weights))
         return loc
 
