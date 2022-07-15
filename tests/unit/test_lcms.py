@@ -101,7 +101,7 @@ def test_roi_creation(roi_data):
 def test_fill_nan(roi_data):
     rt, mz, spint, mode = roi_data
     roi = lcms.Roi(spint, mz, rt, rt, mode)
-    roi.fill_nan()
+    roi.fill_nan(fill_value="extrapolate")
     has_nan = np.any(np.isnan(roi.mz) & np.isnan(roi.spint))
     assert not has_nan
 
