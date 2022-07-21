@@ -182,7 +182,8 @@ def _cluster_dbscan(
     if n_rows > max_size:
         # sort X based on the values of the columns and find positions to
         # split into smaller chunks of data.
-        sorted_index = np.lexsort(tuple(X.T))
+        x1 = X.T[1]
+        sorted_index = np.argsort(x1)
         revert_sorted_index = np.argsort(sorted_index)
         X = X[sorted_index]
 
@@ -193,8 +194,8 @@ def _cluster_dbscan(
         # it can be shown that if X is split at one of these points, the
         # points in each one of the chunks are not connected with points in
         # another chunk
-        min_diff_x = np.abs(np.min(np.diff(X.T), axis=0))
-        split_candidates = np.where(min_diff_x > eps)[0]
+        dx = np.diff(x1)
+        split_candidates = np.where(dx > eps)[0]
         close_index = np.searchsorted(split_candidates, split_index)
 
         close_index[-1] = min(split_candidates.size - 1, close_index[-1])
