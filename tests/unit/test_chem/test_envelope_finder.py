@@ -45,11 +45,11 @@ def elements():
 
 
 @pytest.mark.parametrize("element_set", ["cho", "chnops"])
-def test_make_m_bounds(elements, element_set):
+def test__make_exact_mass_difference_bounds(elements, element_set):
     # test bounds for different element combinations
     elements = elements[element_set]
     elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
+    bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
     # m and M are the bounds for each nominal mass increment
     for e in elements:
         nom, ex, ab = e.get_abundances()
@@ -62,47 +62,21 @@ def test_make_m_bounds(elements, element_set):
 
 
 @pytest.mark.parametrize("element_set", ["cho", "chnops"])
-def test_get_k_bounds_float_mz(elements, element_set):
+def test__get_next_mz_search_interval_mz(elements, formulas, element_set):
     elements = elements[element_set]
     elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
-    f = Formula("H2O")
-    _, mz, _ = f.get_isotopic_envelope()
-    mz0 = mz[0]
-    mz1 = mz[1]
-    min_mz, max_mz = ef._get_k_bounds(mz0, bounds, 1, 1, 0.005)
-    assert (min_mz < mz1) and (mz1 < max_mz)
-
-
-@pytest.mark.parametrize("elements_set", ["cho", "chnops"])
-def test_get_k_bounds_different_k_values(elements, formulas, elements_set):
-    # test that the bounds for each k value make sense
-    elements = elements[elements_set]
-    formulas = formulas[elements_set]
-    elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
-    for f_str in formulas:
+    dM_bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
+    # test bounds for different formulas
+    for f_str in formulas[element_set]:
         f = Formula(f_str)
         _, mz, _ = f.get_isotopic_envelope()
-        for k in range(1, mz.size):
-            m_min, m_max = ef._get_k_bounds(mz, bounds, k, 1, 0.005)
-            assert (m_min < mz[k]) and (mz[k] < m_max)
-
-
-@pytest.mark.parametrize("elements_set", ["cho", "chnops"])
-def test_get_k_bounds_few_mz_values(elements, formulas, elements_set):
-    # test that the bounds for each k value make sense when there are
-    # few previous mz values.
-    elements = elements[elements_set]
-    formulas = formulas[elements_set]
-    elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
-    for f_str in formulas:
-        f = Formula(f_str)
-        _, mz, _ = f.get_isotopic_envelope()
-        for k in range(1, 5):
-            m_min, m_max = ef._get_k_bounds(mz[:2], bounds, k, 1, 0.005)
-            assert (m_min < mz[k]) and (mz[k] < m_max)
+        length = len(mz)
+        # test bounds for different mz lengths
+        for l in range(1, length - 1):
+            mz_l = mz[l]
+            min_mz, max_mz = ef._get_next_mz_search_interval(
+                mz[:l], dM_bounds, 1, 0.005)
+            assert (min_mz < mz_l) and (mz_l < max_mz)
 
 
 @pytest.mark.parametrize("charge", list(range(1, 6)))
@@ -110,112 +84,57 @@ def test_get_k_bounds_multiple_charges(elements, formulas, charge):
     elements = elements["chnops"]
     formulas = formulas["chnops"]
     elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
+    bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
     for f_str in formulas:
         f = Formula(f_str)
         _, mz, _ = f.get_isotopic_envelope()
         mz = mz / charge
-        for k in range(1, mz.size):
-            m_min, m_max = ef._get_k_bounds(mz, bounds, k, charge, 0.005)
+        length = len(mz)
+        for k in range(1, length - 1):
+            m_min, m_max = ef._get_next_mz_search_interval(
+                mz[:k], bounds, charge, 0.005)
             assert (m_min < mz[k]) and (mz[k] < m_max)
 
 
 @pytest.mark.parametrize("elements_set", ["cho", "chnops"])
-def test_find_envelope_candidates_aux(formulas, elements, elements_set):
+def test__find_envelopes(formulas, elements, elements_set):
     # test that the function works using as a list m/z values generated from
     # formulas.
     elements = elements[elements_set]
     formulas = formulas[elements_set]
     elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
+    bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
     for f_str in formulas:
         f = Formula(f_str)
         _, mz, _ = f.get_isotopic_envelope()
-        n_isotopes = mz.size
-        for k in range(1, n_isotopes):
-            envelopes = ef._find_envelopes_aux(mz, 0, bounds, n_isotopes,
-                                               0, 1, 0.005)
-            assert envelopes[0] == list(range(n_isotopes))
+        max_length = 5
+        max_charge = 1
+        mz_tolerance = 0.005
+        envelopes = ef._find_envelopes(
+            mz, 0, max_charge, bounds, max_length, mz_tolerance)
+        assert envelopes[1][0] == list(range(max_length))
 
 
 @pytest.mark.parametrize("elements_set", ["cho", "chnops"])
-def test_find_envelope_candidates_aux_max_nominal(formulas, elements,
-                                                  elements_set):
-    # test that the values obtained match the specified max_nominal value
-    max_nominal = 3
+def test__find_envelopes_no_charge(formulas, elements, elements_set):
+    # test that the function works using as a list m/z values generated from
+    # formulas.
     elements = elements[elements_set]
     formulas = formulas[elements_set]
     elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
+    bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
     for f_str in formulas:
         f = Formula(f_str)
         _, mz, _ = f.get_isotopic_envelope()
-        envelopes = ef._find_envelopes_aux(mz, 0, bounds, max_nominal, 0, 1,
-                                           0.005)
-        assert envelopes[0][-1] == max_nominal
+        max_length = 5
+        max_charge = 0
+        mz_tolerance = 0.005
+        envelopes = ef._find_envelopes(
+            mz, 0, max_charge, bounds, max_length, mz_tolerance)
+        assert envelopes[0][0] == list(range(max_length))
 
 
-@pytest.mark.parametrize("elements_set", ["cho", "chnops"])
-def test_find_envelope_candidates_aux_max_missing(formulas, elements,
-                                                  elements_set):
-    # test that the values when missing values = 1
-    max_missing = 1
-    elements = elements[elements_set]
-    formulas = formulas[elements_set]
-    elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
-    for f_str in formulas:
-        f = Formula(f_str)
-        _, mz, _ = f.get_isotopic_envelope()
-        n_isotopes = mz.size
-        mz[2] += 0.5    # convert one peak into an invalid value.
-        envelopes = ef._find_envelopes_aux(mz, 0, bounds, n_isotopes,
-                                           max_missing, 1, 0.005)
-        expected = np.arange(n_isotopes)
-        expected = expected[expected != 2]
-        assert (envelopes[0] == expected).all()
-
-
-def test_find_envelope_candidates_aux_non_zero_index(formulas, elements):
-    # test if the function works when the monoisotopic index is greater than 0
-    elements = elements["chnops"]
-    elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
-    f_str = formulas["chnops"][0]
-    f = Formula(f_str)
-    _, mz, _ = f.get_isotopic_envelope()
-    n_isotopes = mz.size
-    mz_min = mz[0]
-    mz_prepend = np.arange(mz_min - 10, mz_min)
-    mz = np.hstack((mz_prepend, mz))
-    monoisotopic_index = mz_prepend.size
-    expected = np.arange(monoisotopic_index, monoisotopic_index + n_isotopes)
-    envelopes = ef._find_envelopes_aux(mz, monoisotopic_index, bounds,
-                                       n_isotopes, 0, 1, 0.005)
-    assert (expected == envelopes[0]).all()
-
-
-def tests_find_envelope_candidates(elements, formulas):
-    # test that a dictionary with multiple charges is obtained
-    elements = elements["chnops"]
-    formulas = formulas["chnops"]
-    elements = [PTABLE[x] for x in elements]
-    bounds = ef._make_m_bounds(elements, 0.0)
-    charge_list = [1, 2, 3]
-    for f_str in formulas:
-        q = np.random.choice(charge_list)
-        f = Formula(f_str)
-        _, mz, _ = f.get_isotopic_envelope()
-        n_isotopes = mz.size
-        mz /= q
-        envelopes = ef._find_envelopes(mz, 0, charge_list, bounds, n_isotopes,
-                                       0, 0.005)
-        for charge in charge_list:
-            if charge == q:
-                assert len(envelopes[charge][0]) == mz.size
-
-
-def test_ef(elements, formulas):
+def test_EnvelopeFinder(elements, formulas):
     elements = elements["chnops"]
     formulas = formulas["chnops"]
     envelope_finder = ef.EnvelopeFinder(elements, 0.005)
