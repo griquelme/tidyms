@@ -12,147 +12,6 @@ from typing import List, Dict, Tuple
 # m for nominal mass
 # p for abundances
 
-def _make_exact_mass_difference_bounds(
-    elements: List[Element], min_p: float
-) -> Dict[int, Tuple[float, float]]:
-    """
-    Computes possible mass differences obtaining from changing one isotope.
-
-    Parameters
-    ----------
-    elements: list of Elements
-    min_p: number between 0 and 1.
-        Minimum abundance of the isotopes used.
-
-    Returns
-    -------
-    bounds: dict
-        mapping of possible nominal mass increments to exact mass increments,
-        used by _get_k_bounds to estimate valid m/z ranges for isotopologues.
-
-    """
-    bounds = dict()
-    for e in elements:
-        m, M, p = e.get_abundances()
-        for i in range(1, M.size):
-            if p[i] > min_p:
-                dm = m[i] - m[0]
-                dM = M[i] - M[0]
-                dM_list = bounds.get(dm)
-                if dM_list is None:
-                    bounds[dm] = [dM]
-                else:
-                    dM_list.append(dM)
-
-    for dm in bounds:
-        bounds[dm] = min(bounds[dm]), max(bounds[dm])
-    return bounds
-
-
-def _get_next_mz_search_interval(
-    mz: np.ndarray,
-    elements_mass_difference: Dict[int, Tuple[float, float]],
-    charge: int,
-    mz_tolerance: float,
-) -> Tuple[float, float]:
-    """
-    Computes the valid m/z range for a k-th isotopologue using information from
-    m/z values from previous isotopologues.
-
-    Parameters
-    ----------
-    mz: sorted list
-        List of previous found m/z values
-    elements_mass_difference: dict
-        bounds obtained with _make_m bounds
-    charge: int
-    mz_tolerance: float
-
-    Returns
-    -------
-    min_mz: minimum mz value for the M + k isotopologue
-    max_mz: maximum mz value for the M + K isotopologue
-
-    """
-
-    # If the charge is 0 (neutral mass) the results are the same as using
-    # charge = 1. There is no difference between positive and negative
-    # charges
-    charge = max(1, abs(charge))
-    length = len(mz)
-    min_mz = mz[-1] + 2    # dummy values
-    max_mz = mz[-1] - 2
-    for dm, (min_dM, max_dM) in elements_mass_difference.items():
-        i = length - dm
-        if i >= 0:
-            min_mz = min(min_mz, mz[i] + min_dM / charge)
-            max_mz = max(max_mz, mz[i] + max_dM / charge)
-    min_mz -= mz_tolerance
-    max_mz += mz_tolerance
-    return min_mz, max_mz
-
-
-def _find_envelopes(
-    mz: np.ndarray,
-    mmi_index: int,
-    max_charge: int,
-    bounds: Dict[int, Tuple[float, float]],
-    max_length: int,
-    mz_tolerance: float,
-) -> Dict[int, List[List[int]]]:
-    """
-
-    Finds isotopic envelope candidates using multiple charge states.
-
-    Parameters
-    ----------
-    mz: array
-        array of sorted m/z values
-    mmi_index: int
-        index of the first isotope in the envelope
-    bounds: dict
-        bounds obtained with _make_m_bounds
-    max_length: int
-        maximum length ot the isotope candidates
-    max_charge: List[int]
-        charge state of the isotopic envelope
-    mz_tolerance: float
-
-    Returns
-    -------
-    envelopes:
-        List where each element is a list of indices with isotopic envelopes
-        candidates.
-
-    """
-    if max_charge == 0:
-        charge_list = [0]
-    else:
-        charge_list = list(range(1, abs(max_charge) + 1))
-
-    completed_candidates = dict()
-
-    for q in charge_list:
-        candidates = [[mmi_index]]
-        while candidates:
-            candidate = candidates.pop()
-            length = len(candidate)
-            min_mz, max_mz = _get_next_mz_search_interval(
-                mz[candidate], bounds, q, mz_tolerance)
-            start, end = np.searchsorted(mz, [min_mz, max_mz])
-
-            if (start < end) and (length < max_length):
-                tmp = [candidate + [x] for x in range(start, end)]
-                candidates.extend(tmp)
-            else:
-                q_candidates = completed_candidates.get(q)
-                if q_candidates is None:
-                    completed_candidates[q] = [candidate]
-                else:
-                    q_candidates.append(candidate)
-    return completed_candidates
-
-
 class EnvelopeFinder(object):
     r"""
     Find isotopic envelopes candidates in a list of sorted m/z values.
@@ -231,3 +90,144 @@ class EnvelopeFinder(object):
             self._max_length,
             self._tolerance,
         )
+
+
+def _find_envelopes(
+    mz: np.ndarray,
+    mmi_index: int,
+    max_charge: int,
+    bounds: Dict[int, Tuple[float, float]],
+    max_length: int,
+    mz_tolerance: float,
+) -> Dict[int, List[List[int]]]:
+    """
+
+    Finds isotopic envelope candidates using multiple charge states.
+
+    Parameters
+    ----------
+    mz: array
+        array of sorted m/z values
+    mmi_index: int
+        index of the first isotope in the envelope
+    bounds: dict
+        bounds obtained with _make_m_bounds
+    max_length: int
+        maximum length ot the isotope candidates
+    max_charge: List[int]
+        charge state of the isotopic envelope
+    mz_tolerance: float
+
+    Returns
+    -------
+    envelopes:
+        List where each element is a list of indices with isotopic envelopes
+        candidates.
+
+    """
+    if max_charge == 0:
+        charge_list = [0]
+    else:
+        charge_list = list(range(1, abs(max_charge) + 1))
+
+    completed_candidates = dict()
+
+    for q in charge_list:
+        candidates = [[mmi_index]]
+        while candidates:
+            candidate = candidates.pop()
+            length = len(candidate)
+            min_mz, max_mz = _get_next_mz_search_interval(
+                mz[candidate], bounds, q, mz_tolerance)
+            start, end = np.searchsorted(mz, [min_mz, max_mz])
+
+            if (start < end) and (length < max_length):
+                tmp = [candidate + [x] for x in range(start, end)]
+                candidates.extend(tmp)
+            else:
+                q_candidates = completed_candidates.get(q)
+                if q_candidates is None:
+                    completed_candidates[q] = [candidate]
+                else:
+                    q_candidates.append(candidate)
+    return completed_candidates
+
+
+def _get_next_mz_search_interval(
+    mz: np.ndarray,
+    elements_mass_difference: Dict[int, Tuple[float, float]],
+    charge: int,
+    mz_tolerance: float,
+) -> Tuple[float, float]:
+    """
+    Computes the valid m/z range for a k-th isotopologue using information from
+    m/z values from previous isotopologues.
+
+    Parameters
+    ----------
+    mz: sorted list
+        List of previous found m/z values
+    elements_mass_difference: dict
+        bounds obtained with _make_m bounds
+    charge: int
+    mz_tolerance: float
+
+    Returns
+    -------
+    min_mz: minimum mz value for the M + k isotopologue
+    max_mz: maximum mz value for the M + K isotopologue
+
+    """
+
+    # If the charge is 0 (neutral mass) the results are the same as using
+    # charge = 1. There is no difference between positive and negative
+    # charges
+    charge = max(1, abs(charge))
+    length = len(mz)
+    min_mz = mz[-1] + 2    # dummy values
+    max_mz = mz[-1] - 2
+    for dm, (min_dM, max_dM) in elements_mass_difference.items():
+        i = length - dm
+        if i >= 0:
+            min_mz = min(min_mz, mz[i] + min_dM / charge)
+            max_mz = max(max_mz, mz[i] + max_dM / charge)
+    min_mz -= mz_tolerance
+    max_mz += mz_tolerance
+    return min_mz, max_mz
+
+
+def _make_exact_mass_difference_bounds(
+    elements: List[Element], min_p: float
+) -> Dict[int, Tuple[float, float]]:
+    """
+    Computes possible mass differences obtaining from changing one isotope.
+
+    Parameters
+    ----------
+    elements: list of Elements
+    min_p: number between 0 and 1.
+        Minimum abundance of the isotopes used.
+
+    Returns
+    -------
+    bounds: dict
+        mapping of possible nominal mass increments to exact mass increments,
+        used by _get_k_bounds to estimate valid m/z ranges for isotopologues.
+
+    """
+    bounds = dict()
+    for e in elements:
+        m, M, p = e.get_abundances()
+        for i in range(1, M.size):
+            if p[i] > min_p:
+                dm = m[i] - m[0]
+                dM = M[i] - M[0]
+                dM_list = bounds.get(dm)
+                if dM_list is None:
+                    bounds[dm] = [dM]
+                else:
+                    dM_list.append(dM)
+
+    for dm in bounds:
+        bounds[dm] = min(bounds[dm]), max(bounds[dm])
+    return bounds
