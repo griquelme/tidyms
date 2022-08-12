@@ -23,7 +23,9 @@ from . import lcms
 from . import simulation
 from . import raw_data_utils
 from . import _mzml
+from . import _build_data_matrix
 from . import correspondence
+from . import fill_missing
 from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum

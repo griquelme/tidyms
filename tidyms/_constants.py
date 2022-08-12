@@ -25,6 +25,7 @@ SNR: Final[str] = "snr"
 MZ_STD: Final[str] = "mz_std"
 ROI_INDEX: Final[str] = "roi_index"
 FT_INDEX: Final[str] = "ft_index"
+MERGED: Final[str] = "merged"
 
 # sample metadata
 SAMPLE: Final[str] = "sample_"
