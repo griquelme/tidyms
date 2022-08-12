@@ -112,6 +112,8 @@ class Assay:
         instrument: str = "qtof",
         separation: str = "uplc",
     ):
+        if isinstance(assay_path, str):
+            assay_path = Path(assay_path)
 
         self.manager = _create_assay_manager(
             assay_path,
@@ -703,19 +705,26 @@ class Assay:
             metadata, are closer than this values.
 
         """
-        sample_metadata = self.manager.get_sample_metadata()
-        data_matrix, feature_metadata = build_data_matrix(
-            self.feature_table,
-            sample_metadata,
-            self.separation,
-            merge_close_features,
-            mz_merge,
-            rt_merge,
-            merge_threshold
-        )
-        dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
-        self.data_matrix = dc
-        return dc
+        process_samples = self.manager.sample_queue
+        n_samples = len(process_samples)
+        if n_samples:
+            sample_metadata = self.manager.get_sample_metadata()
+            data_matrix, feature_metadata = build_data_matrix(
+                self.feature_table,
+                sample_metadata,
+                self.separation,
+                merge_close_features,
+                mz_merge,
+                rt_merge,
+                merge_threshold
+            )
+            dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
+            dc.save(self.manager.assay_path.joinpath(c.DATA_MATRIX_FILENAME))
+            self.data_matrix = dc
+        else:
+            pass
+
+        return self.data_matrix
 
     def annotate_isotopologues(self, **kwargs):
         raise NotImplementedError
@@ -723,11 +732,12 @@ class Assay:
     def annotate_adducts(self, **kwargs):
         raise NotImplementedError
 
+    @_manage_preprocessing_step
     def fill_missing(
         self,
         mz_tolerance: float,
-        n_deviations: float,
-        estimate_not_found: bool,
+        n_deviations: float = 1.0,
+        estimate_not_found: bool = True,
         n_jobs: Optional[int] = None,
         verbose: bool = False
     ):
@@ -759,7 +769,7 @@ class Assay:
         the `feature_metadata`.
 
         In LC-MS datasets, missing features are searched in each raw data file
-        by building chromatograms with the expected value of the feature and a
+        by building chromatograms with the expected value of the feature and an
         m/z window defined by ``mz_tolerance``. Chromatographic peaks are
         detected and the area is used as a fill value if a peak has a Rt that
         meets the following condition:
@@ -777,10 +787,16 @@ class Assay:
         `rt_start` and `rt_end` values in the feature table.
 
         """
-        samples = self.manager.get_sample_names()
-        generator = ((x, self.get_ms_data(x)) for x in samples)
-        has_missing = self.data_matrix.data_matrix.isna().any().any()
-        if has_missing:
+        process_samples = self.manager.sample_queue
+        n_samples = len(process_samples)
+        if n_samples:
+            samples = self.manager.get_sample_names()
+            generator = ((x, self.get_ms_data(x)) for x in samples)
+            has_missing = self.data_matrix.data_matrix.isna().any().any()
+            if not has_missing:
+                mask = self.data_matrix.missing != 0
+                self.data_matrix._data_matrix[mask] = np.nan
+
             data_matrix, missing = fill_missing_lc(
                 generator,
                 self.data_matrix.data_matrix,
@@ -795,8 +811,9 @@ class Assay:
             # TODO: update DataContainer Status
             self.data_matrix.missing = missing
         else:
-            msg = "Data matrix doesn't contain missing data."
-            print(msg)
+            if verbose:
+                msg = "Data matrix doesn't contain missing data."
+                print(msg)
 
 
 class _AssayManager:
@@ -831,15 +848,6 @@ class _AssayManager:
         have been processed and which preprocessing steps has been applied.
 
     """
-    PROCESSING_STEPS = [
-            "detect_features",
-            "extract_features",
-            "describe_features",
-            "build_feature_table",
-            "match_features",
-            "make_data_matrix",
-            "fill_missing"
-    ]
 
     def __init__(
         self,
@@ -899,7 +907,7 @@ class _AssayManager:
         sm = _create_sample_metadata(sample_metadata, new_sample_names)
         sm = _normalize_sample_metadata(sm, new_sample_names)
         self.sample_metadata = pd.concat((self.sample_metadata, sm))
-        self.clear_data("build_feature_table", new_sample_names)
+        self.clear_data(c.BUILD_FEATURE_TABLE, new_sample_names)
 
     def create_assay_dir(self):
         """
@@ -929,22 +937,26 @@ class _AssayManager:
         PreprocessingOrderError : If the previous steps were not executed.
 
         """
-        steps = _AssayManager.PROCESSING_STEPS
         try:
-            ind = steps.index(step)
-            previous = steps[ind - 1]
+            ind = c.PREPROCESSING_STEPS.index(step)
+            previous = c.PREPROCESSING_STEPS[ind - 1]
         except ValueError:      # manage optional steps
-            if step == "annotate_isotopologues":
-                previous = steps[2]
-            elif step == "annotate_adducts":
-                previous = "annotate_isotopologues"
+            if step == c.ANNOTATE_ISOTOPOLOGUES:
+                previous = c.PREPROCESSING_STEPS[2]
+            elif step == c.ANNOTATE_ADDUCTS:
+                previous = c.ANNOTATE_ISOTOPOLOGUES
             else:
                 msg = "`{}` is not a valid preprocessing step".format(step)
                 raise ValueError(msg)
 
         # skip checking for the first step
-        if step == steps[0]:
+        if step == c.PREPROCESSING_STEPS[0]:
             check_okay = True
+        elif step == c.BUILD_FEATURE_TABLE:
+            # special case for describe features, to avoid optional annotation
+            # steps
+            previous = c.DESCRIBE_FEATURES
+            check_okay = self.params["preprocess_steps"][previous]
         else:
             check_okay = self.params["preprocess_steps"][previous]
 
@@ -964,15 +976,15 @@ class _AssayManager:
         Deletes old processed data.
 
         """
-        if step == "detect_features":
+        if step == c.DETECT_FEATURES:
             for sample in samples:
                 path = self.get_roi_path(sample)
                 path.unlink(missing_ok=True)
-        elif step == "describe_features":
+        elif step == c.DESCRIBE_FEATURES:
             for sample in samples:
                 path = self.get_feature_path(sample)
                 path.unlink(missing_ok=True)
-        elif step == "build_feature_table":
+        elif step == c.BUILD_FEATURE_TABLE:
             if samples:
                 file_name = c.FT_TABLE_FILENAME
                 table_path = self.assay_path.joinpath(file_name)
@@ -1050,9 +1062,9 @@ class _AssayManager:
     def manage_step_before(self, step: str, kwargs: dict):
         self.check_step(step)
         self.send_samples_to_queue(step, kwargs)
-        if step in _AssayManager.PROCESSING_STEPS:
-            ind = _AssayManager.PROCESSING_STEPS.index(step)
-            for s in _AssayManager.PROCESSING_STEPS[ind:]:
+        if step in c.PREPROCESSING_STEPS:
+            ind = c.PREPROCESSING_STEPS.index(step)
+            for s in c.PREPROCESSING_STEPS[ind:]:
                 self.clear_data(s, self.sample_queue)
 
     def manage_step_after(self, step: str, kwargs: dict):
@@ -1101,11 +1113,11 @@ def _describe_features_default(roi_list: List[Roi], **kwargs) -> pd.DataFrame:
         ft_index = np.hstack(ft_index)
 
         ft_table = pd.DataFrame(data=descriptors_list)
-        ft_table["roi_index"] = roi_index_list
-        ft_table["ft_index"] = ft_index
+        ft_table[c.ROI_INDEX] = roi_index_list
+        ft_table[c.FT_INDEX] = ft_index
         ft_table = ft_table.dropna(axis=0)
-        ft_table["roi_index"] = ft_table["roi_index"].astype(int)
-        ft_table["ft_index"] = ft_table["ft_index"].astype(int)
+        ft_table[c.ROI_INDEX] = ft_table[c.ROI_INDEX].astype(int)
+        ft_table[c.FT_INDEX] = ft_table[c.FT_INDEX].astype(int)
     else:
         ft_table = pd.DataFrame()
     return ft_table
@@ -1300,7 +1312,7 @@ def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
 
 def _save_roi_list(roi_path: Path, roi_list: List[Roi]):
     header_template = "index_offset={:020n}\n"
-    # the dummy header is used as a place holder to fill with the correct offset
+    # the dummy header is used as a placeholder to fill with the correct offset
     # value after all ROI have been serialized
     with open(roi_path, "w", newline="\n") as fin:
         dummy_header = header_template.format(1)
@@ -1353,36 +1365,10 @@ def _build_params_dict(ms_mode: str, separation: str, instrument: str):
             "separation": separation,
             "instrument": instrument,
         },
-        "detect_features": dict(),
-        "extract_features": dict(),
-        "describe_features": dict(),
-        "annotate_isotopologues": dict(),
-        "annotate_adducts": dict(),
-        "match_features": dict(),
-        "fill_missing": dict(),
-        "processed_samples": {
-            "detect_features": set(),
-            "extract_features": set(),
-            "describe_features": set(),
-            "annotate_isotopologues": set(),
-            "annotate_adducts": set(),
-            "build_feature_table": set(),
-            "match_features": set(),
-            "make_data_matrix": set(),
-            "fill_missing": set(),
-        },
-        "preprocess_steps": {
-            "detect_features": False,
-            "extract_features": False,
-            "describe_features": False,
-            "annotate_isotopologues": False,
-            "annotate_adducts": False,
-            "build_feature_table": True,
-            "match_features": False,
-            "make_data_matrix": False,
-            "fill_missing": False,
-        }
+        "processed_samples": {x: set() for x in c.PREPROCESSING_STEPS},
+        "preprocess_steps": {x: False for x in c.PREPROCESSING_STEPS}
     }
+    params_dict.update({x: dict() for x in c.PREPROCESSING_STEPS})
     return params_dict
 
 
@@ -1419,9 +1405,3 @@ def _is_assay_dir(p: Path) -> int:
     else:
         status = 0
     return status
-
-
-
-
-
-
