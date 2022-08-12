@@ -39,3 +39,27 @@ ROI_DIR: Final[str] = "roi"
 FT_DIR: Final[str] = "feature"
 MANAGER_FILENAME: Final[str] = "metadata.pickle"
 FT_TABLE_FILENAME: Final[str] = "feature-table.pickle"
+DATA_MATRIX_FILENAME: Final[str] = "data-matrix.pickle"
+
+# preprocessing steps
+DETECT_FEATURES: Final[str] = "detect_features"
+EXTRACT_FEATURES: Final[str] = "extract_features"
+DESCRIBE_FEATURES: Final[str] = "describe_features"
+ANNOTATE_ISOTOPOLOGUES: Final[str] = "annotate_isotopologues"
+ANNOTATE_ADDUCTS: Final[str] = "annotate_adducts"
+BUILD_FEATURE_TABLE: Final[str] = "build_feature_table"
+MATCH_FEATURES: Final[str] = "match_features"
+MAKE_DATA_MATRIX: Final[str] = "make_data_matrix"
+FILL_MISSING: Final[str] = "fill_missing"
+
+PREPROCESSING_STEPS: Final[List[str]] = [
+    DETECT_FEATURES,
+    EXTRACT_FEATURES,
+    DESCRIBE_FEATURES,
+    ANNOTATE_ISOTOPOLOGUES,
+    ANNOTATE_ADDUCTS,
+    BUILD_FEATURE_TABLE,
+    MATCH_FEATURES,
+    MAKE_DATA_MATRIX,
+    FILL_MISSING
+]
