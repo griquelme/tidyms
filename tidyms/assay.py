@@ -15,6 +15,8 @@ from .fileio import MSData
 from .lcms import Roi, LCRoi
 from .utils import get_progress_bar
 from ._plot_bokeh import _LCAssayPlotter
+from .fill_missing import fill_missing_lc
+from ._build_data_matrix import build_data_matrix
 import json
 
 # TODO: add id_ column to sample metadata
@@ -667,41 +669,50 @@ class Assay:
             self.feature_table.to_pickle(str(save_path))
         return self
 
-    def make_data_matrix(self) -> DataContainer:
+    @_manage_preprocessing_step
+    def make_data_matrix(
+        self,
+        merge_close_features: bool = True,
+        merge_threshold: float = 0.8,
+        mz_merge: Optional[float] = None,
+        rt_merge: Optional[float] = None,
+    ):
         """
-        Organizes the data from the feature table into a data matrix.
+        Creates a data matrix.
 
-        Returns
-        -------
-        DataContainer
+        The results are stored in `self.data_matrix`.
+
+        Parameters
+        ----------
+        merge_close_features : bool
+            If ``True`` finds close features and merge them into a single
+            feature. The code of the merged features is in the `merged` column
+            of the feature metadata. The area in the data matrix is the sum of
+            the merged features.
+        merge_threshold : float, default=0.8
+            Number between 0.0 and 1.0. This value is compared against the
+            quotient between the number of samples where both features where
+            detected and the number of samples where any of the features was
+            detected. If this quotient is lower than the threshold, the pair o
+            features is merged into a single one.
+        mz_merge : float or None, default=None
+            Merge features only if their mean m/z, as described by the feature
+            metadata, are closer than this values.
+        rt_merge : float or None, default=None
+            Merge features only if their mean Rt, as described by the feature
+            metadata, are closer than this values.
 
         """
-
-        feature_table = self.feature_table
-        if self.separation in c.LC_MODES:
-            data_matrix, feature_metadata = _lc_feature_data_from_feature_table(
-                feature_table
-            )
-        else:
-            # TODO: update this code when new modes are included
-            raise ValueError
-        data_matrix.columns.name = c.FEATURE
-        data_matrix.index.name = "sample"
-
-        # TODO: deal with nan values. Move this to self.fill_missing
-        # data_matrix = data_matrix.fillna(0)
-
         sample_metadata = self.manager.get_sample_metadata()
-        # add samples without features as rows with zeros
-        missing_index = sample_metadata.index.difference(data_matrix.index)
-        missing = pd.DataFrame(
-            data=0,
-            index=missing_index,
-            columns=data_matrix.columns
+        data_matrix, feature_metadata = build_data_matrix(
+            self.feature_table,
+            sample_metadata,
+            self.separation,
+            merge_close_features,
+            mz_merge,
+            rt_merge,
+            merge_threshold
         )
-        data_matrix = pd.concat((data_matrix, missing))
-        # sort data_matrix
-        data_matrix = data_matrix.loc[sample_metadata.index, :]
         dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
         self.data_matrix = dc
         return dc
@@ -712,8 +723,80 @@ class Assay:
     def annotate_adducts(self, **kwargs):
         raise NotImplementedError
 
-    def fill_missing(self, **kwargs):
-        raise NotImplementedError
+    def fill_missing(
+        self,
+        mz_tolerance: float,
+        n_deviations: float,
+        estimate_not_found: bool,
+        n_jobs: Optional[int] = None,
+        verbose: bool = False
+    ):
+        """
+        Fill missing values in the Data matrix by searching missing features in
+        raw data, using values average values from the detected features.
+
+        Parameters
+        ----------
+        mz_tolerance : float
+            m/z tolerance used to create chromatograms.
+        n_deviations : float
+            Number of deviations from the mean retention time to search a peak,
+            in units of standard deviations.
+        estimate_not_found : bool
+            If ``True``, and estimation for the peak area in cases where no
+            chromatographic peaks are found is done as described in the Notes.
+            If ``False``, missing values after peak search are set to zero.
+        n_jobs: int or None, default=None
+            Number of jobs to run in parallel. ``None`` means 1 unless in a
+            :obj:`joblib.parallel_backend` context. ``-1`` means using all
+            processors.
+        verbose : bool
+            If True, shows a progress bar.
+
+        Notes
+        -----
+        Missing features are searched in raw data using values obtained from
+        the `feature_metadata`.
+
+        In LC-MS datasets, missing features are searched in each raw data file
+        by building chromatograms with the expected value of the feature and a
+        m/z window defined by ``mz_tolerance``. Chromatographic peaks are
+        detected and the area is used as a fill value if a peak has a Rt that
+        meets the following condition:
+
+        .. math::
+
+            \frac{rt_{detected} - rt_{mean}}{rt_{std}} \leq n_{deviations}
+
+        where :math:`rt_{detected}` is the Rt of the peak in the chromatogram,
+        :math:`rt_{mean}` is the mean Rt of the feature and :math:`rt_{std}` is
+        the standard deviation of the feature. If no peaks are found, the
+        feature value is filled to zero if the `estimate_not_found` is set to
+        ``False``. Otherwise, a fill value is computed as the area in the region
+        where the chromatographic peak was expected to appear, defined by the
+        `rt_start` and `rt_end` values in the feature table.
+
+        """
+        samples = self.manager.get_sample_names()
+        generator = ((x, self.get_ms_data(x)) for x in samples)
+        has_missing = self.data_matrix.data_matrix.isna().any().any()
+        if has_missing:
+            data_matrix, missing = fill_missing_lc(
+                generator,
+                self.data_matrix.data_matrix,
+                self.data_matrix.feature_metadata,
+                mz_tolerance,
+                n_deviations,
+                estimate_not_found,
+                n_jobs,
+                verbose
+            )
+            self.data_matrix._data_matrix = data_matrix
+            # TODO: update DataContainer Status
+            self.data_matrix.missing = missing
+        else:
+            msg = "Data matrix doesn't contain missing data."
+            print(msg)
 
 
 class _AssayManager:
@@ -754,6 +837,7 @@ class _AssayManager:
             "describe_features",
             "build_feature_table",
             "match_features",
+            "make_data_matrix",
             "fill_missing"
     ]
 
@@ -1178,26 +1262,6 @@ def _normalize_assay_path(assay_path: Union[Path, str]):
     return assay_path.absolute()
 
 
-def _flatten_column_multindex(df: pd.DataFrame):
-    columns = df.columns
-    level_0 = columns.get_level_values(0)
-    level_1 = columns.get_level_values(1)
-    col_name_map = {
-        "mzmean": "mz",
-        "mzstd": "mz std",
-        "mzmin": "mz min",
-        "mzmax": "mz max",
-        "rtmean": "rt",
-        "rtstd": "rt std",
-        "rtmin": "rt min",
-        "rtmax": "rt max",
-        "rt startmean": "rt start",
-        "rt endmean": "rt end",
-    }
-    new_names = [col_name_map[x + y] for x, y in zip(level_0, level_1)]
-    return new_names
-
-
 def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
     """
     converts path to a list of Path objects pointing to mzML files. Aux function
@@ -1304,6 +1368,7 @@ def _build_params_dict(ms_mode: str, separation: str, instrument: str):
             "annotate_adducts": set(),
             "build_feature_table": set(),
             "match_features": set(),
+            "make_data_matrix": set(),
             "fill_missing": set(),
         },
         "preprocess_steps": {
@@ -1314,6 +1379,7 @@ def _build_params_dict(ms_mode: str, separation: str, instrument: str):
             "annotate_adducts": False,
             "build_feature_table": True,
             "match_features": False,
+            "make_data_matrix": False,
             "fill_missing": False,
         }
     }
@@ -1355,38 +1421,7 @@ def _is_assay_dir(p: Path) -> int:
     return status
 
 
-def _lc_feature_data_from_feature_table(feature_table: pd.DataFrame):
-    # remove noise
-    rm_noise_mask = feature_table[c.LABEL] > -1
-    feature_data = feature_table[rm_noise_mask]
-
-    # feature names
-    cluster_to_ft = _cluster_to_feature_name(feature_table)
-
-    # compute aggregate statistics for each feature -> feature metadata
-    estimators = {"mz": ["mean", "std", "min", "max"],
-                  "rt": ["mean", "std", "min", "max"],
-                  "rt start": ["mean"],
-                  "rt end": ["mean"],
-    }
-    feature_metadata = feature_data.groupby(c.LABEL).agg(estimators)
-    feature_metadata.columns = _flatten_column_multindex(feature_metadata)
-    feature_metadata.index = feature_metadata.index.map(cluster_to_ft)
-    feature_metadata.index.name = c.FEATURE
-
-    # make data matrix
-    data_matrix = feature_data.pivot(index=c.SAMPLE, columns=c.LABEL,
-                                     values=c.AREA)
-    data_matrix.columns = data_matrix.columns.map(cluster_to_ft)
-
-    return data_matrix, feature_metadata
 
 
-def _cluster_to_feature_name(feature_table: pd.DataFrame):
-    # feature names
-    unique_cluster = feature_table[c.LABEL].unique()
-    n_cluster = unique_cluster[unique_cluster > -1].size
-    max_n_chars_cluster = len(str(n_cluster))
-    template = "FT-{{:0{}d}}".format(max_n_chars_cluster)
-    cluster_to_ft = {k: template.format(k + 1) for k in range(n_cluster)}
-    return cluster_to_ft
+
+
