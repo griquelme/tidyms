@@ -14,6 +14,7 @@ Provides
 
 __version__ = "0.4.0"
 
+from . import chem
 from . import fileio
 from . import container
 from . import utils
