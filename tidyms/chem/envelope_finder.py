@@ -3,9 +3,9 @@ Functions to find isotopic envelopes candidates in a list of m/z values.
 """
 
 
-from .atoms import *
 import numpy as np
 from typing import List, Dict, Tuple
+from .atoms import Element, PTABLE
 
 
 # M is used for Molecular mass
@@ -66,19 +66,26 @@ class EnvelopeFinder(object):
         self._max_length = max_length
         self._bounds = _make_exact_mass_difference_bounds(self._elements, min_p)
 
-    def find(self, mz: np.ndarray, mmi_index: int):
+    def find(
+        self,
+        mz: np.ndarray,
+        mmi_index: int
+    ) -> Dict[int, List[List[int]]]:
         """
-        Finds isotopologues candidates for a specific value in the list.
+        Finds isotopic envelope candidates starting from the minimum mass
+        isotopologue (MMI).
 
         Parameters
         ----------
-        mz : sorted array of m/z values
-        mmi_index : index considered as M0 isotopologue
+        mz : array
+            sorted array of m/z values
+        mmi_index : int
+            index of the MMI
 
         Returns
         -------
         envelopes: dict
-            a dictionary from charge values to a list of lists with possible
+            a dictionary from charge values to a list of lists with indices of
             envelope candidates.
 
         """
