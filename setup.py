@@ -44,10 +44,14 @@ INSTALL_REQUIRES = [
 if __name__ == "__main__":
     from setuptools import setup
     from sys import version_info
+    from Cython.Build import cythonize
 
     if version_info[:2] < (3, 8):
         msg = "tidyms requires Python >= 3.8."
         raise RuntimeError(msg)
+
+    ext_modules = cythonize(["tidyms/chem/*.pyx"],
+                            compiler_directives={'language_level': "3"})
 
     setup(name=PACKAGE_NAME,
           version=VERSION,
@@ -64,4 +68,6 @@ if __name__ == "__main__":
           packages=PACKAGES,
           python_requires=PYTHON_REQUIRES,
           install_requires=INSTALL_REQUIRES,
-          include_package_data=True)
+          include_package_data=True,
+          ext_modules=ext_modules
+    )
