@@ -47,7 +47,7 @@ def match_features(
         Rt tolerance used to group close features. Sets the `eps` parameter in
         the DBSCAN algorithm.
     min_fraction : float
-        Minimum fraction of samples of a given group in a cluster. If
+        Minimum fraction of samples of a given class in a cluster. If
         `include_classes` is ``None``, the total number of sample is used
         to compute the minimum fraction.
     max_deviation : float
@@ -58,7 +58,7 @@ def match_features(
         :obj:`joblib.parallel_backend` context. ``-1`` means using all
         processors.
     verbose : bool
-        If True, shows progress bar
+        If True, shows a progress bar.
 
     Returns
     -------
@@ -95,7 +95,7 @@ def match_features(
         min_fraction
     )
 
-    cluster_iterator = _cluster_iterator(
+    cluster_iterator = _get_cluster_iterator(
         X, cluster, samples, species_per_cluster
     )
 
@@ -182,7 +182,8 @@ def _cluster_dbscan(
     if n_rows > max_size:
         # sort X based on the values of the columns and find positions to
         # split into smaller chunks of data.
-        sorted_index = np.lexsort(tuple(X.T))
+        x1 = X.T[1]
+        sorted_index = np.argsort(x1)
         revert_sorted_index = np.argsort(sorted_index)
         X = X[sorted_index]
 
@@ -193,8 +194,8 @@ def _cluster_dbscan(
         # it can be shown that if X is split at one of these points, the
         # points in each one of the chunks are not connected with points in
         # another chunk
-        min_diff_x = np.abs(np.min(np.diff(X.T), axis=0))
-        split_candidates = np.where(min_diff_x > eps)[0]
+        dx = np.diff(x1)
+        split_candidates = np.where(dx > eps)[0]
         close_index = np.searchsorted(split_candidates, split_index)
 
         close_index[-1] = min(split_candidates.size - 1, close_index[-1])
@@ -289,7 +290,7 @@ def _estimate_n_species_one_class(
     return species
 
 
-def _cluster_iterator(
+def _get_cluster_iterator(
     X: np.ndarray,
     cluster: np.ndarray,
     samples: np.ndarray,

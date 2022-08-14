@@ -20,6 +20,7 @@ get_find_centroid_params
 """
 
 import bokeh.plotting
+import json
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from typing import Dict, List, Optional, Tuple
@@ -29,6 +30,7 @@ from scipy.integrate import cumtrapz
 from . import peaks
 from . import _plot_bokeh
 from . import _constants as c
+from .utils import array1d_to_str, str_to_array1d
 
 
 class MSSpectrum:
@@ -266,12 +268,17 @@ class Roi:
     def get_default_filters(self) -> Dict[str, float]:
         raise NotImplementedError
 
-    def fill_nan(self):
+    def fill_nan(self, **kwargs):
         """
         Fill missing values. Missing m/z values are filled using the mean m/z
         of the ROI. Missing intensity values are filled using linear
         interpolation. Missing values on the boundaries are filled by
         extrapolation. Negative values are set to 0.
+
+        Parameters
+        ----------
+        kwargs:
+            Parameters to pass to :func:`scipy.interpolate.interp1d`
 
         """
 
@@ -284,8 +291,8 @@ class Roi:
             interpolator = interp1d(
                 self.time[~missing],
                 self.spint[~missing],
-                fill_value="extrapolate",
-                assume_sorted=True
+                assume_sorted=True,
+                **kwargs
             )
             sp_max = np.nanmax(self.spint)
             sp_min = np.nanmin(self.spint)
@@ -295,6 +302,13 @@ class Roi:
             self.spint = np.minimum(self.spint, sp_max)
         if isinstance(self.mz, np.ndarray):
             self.mz[missing] = np.nanmean(self.mz)
+
+    @staticmethod
+    def from_json(s: str) -> "Roi":
+        raise NotImplementedError
+
+    def to_json(self) -> str:
+        raise NotImplementedError
 
 
 class LCRoi(Roi):
@@ -377,7 +391,7 @@ class LCRoi(Roi):
         tidyms.peaks.detect_peaks : peak detection of 1D signals.
 
         """
-        self.fill_nan()
+        self.fill_nan(fill_value="extrapolate")
         noise = peaks.estimate_noise(self.spint)
 
         if smoothing_strength is None:
@@ -449,6 +463,62 @@ class LCRoi(Roi):
             filters = {"width": (4, 60), "snr": (5, None)}
         return filters
 
+    @staticmethod
+    def from_json(s: str):
+        """
+        Creates a LCRoi from a JSON str. Used to serialize LCRoi objects.
+
+        Parameters
+        ----------
+        s : str
+
+        Returns
+        -------
+        LCRoi
+
+        """
+        d = json.loads(s)
+        roi = LCRoi(
+            str_to_array1d(d["spint"]),
+            str_to_array1d(d["mz"]),
+            str_to_array1d(d["time"]),
+            str_to_array1d(d["scan"]),
+        )
+        if "noise" in d:
+            roi.noise = str_to_array1d(d["noise"])
+
+        if "baseline" in d:
+            roi.baseline = str_to_array1d(d["baseline"])
+
+        if "features" in d:
+            roi.features = [Peak(x, y, z) for (x, y, z) in d["features"]]
+        return roi
+
+    def to_json(self) -> str:
+        """
+        Serializes the LCRoi into a JSON str.
+
+        Returns
+        -------
+        str
+
+        """
+        d = dict()
+        d["time"] = array1d_to_str(self.time)
+        d["spint"] = array1d_to_str(self.spint)
+        d["scan"] = array1d_to_str(self.scan)
+        d["mz"] = array1d_to_str(self.mz)
+        if self.features is not None:
+            d["features"] = [[x.start, x.apex, x.end] for x in self.features]
+
+        if self.baseline is not None:
+            d["baseline"] = array1d_to_str(self.baseline)
+
+        if self.noise is not None:
+            d["noise"] = array1d_to_str(self.noise)
+        d_json = json.dumps(d)
+        return d_json
+
 
 class Chromatogram(LCRoi):
     """
@@ -502,8 +572,8 @@ class Feature:
             msg = "start must be lower than end"
             raise ValueError(msg)
 
-        self.start = start
-        self.end = end
+        self.start = int(start)
+        self.end = int(end)
 
     def __repr__(self):
         str_repr = "{}(start={}, end={})"
@@ -551,13 +621,41 @@ class Peak(Feature):
         except AssertionError:
             msg = "start must be lower than loc and loc must be lower than end"
             raise InvalidPeakException(msg)
-        self.apex = apex
+        self.apex = int(apex)
 
     def __repr__(self):
         str_repr = "{}(start={}, apex={}, end={})"
         name = self.__class__.__name__
         str_repr = str_repr.format(name, self.start, self.apex, self.end)
         return str_repr
+
+    def get_rt_start(self, roi: LCRoi) -> float:
+        """
+        Computes the start of the peak, in time units
+        Parameters
+        ----------
+        roi : LCRoi
+
+        Returns
+        -------
+        float
+
+        """
+        return roi.time[self.start]
+
+    def get_rt_end(self, roi: LCRoi) -> float:
+        """
+        Computes the end of the peak, in time units
+        Parameters
+        ----------
+        roi : LCRoi
+
+        Returns
+        -------
+        float
+
+        """
+        return roi.time[self.end - 1]
 
     def get_rt(self, roi: LCRoi) -> float:
         """
@@ -574,7 +672,9 @@ class Peak(Feature):
 
         """
         weights = roi.spint[self.start:self.end]
-        weights[weights < 0] = 0
+        if roi.baseline is not None:
+            weights = weights - roi.baseline[self.start:self.end]
+        weights = np.maximum(weights, 0)
         loc = np.abs(np.average(roi.time[self.start:self.end], weights=weights))
         return loc
 
@@ -751,7 +851,9 @@ class Peak(Feature):
             c.WIDTH: self.get_width(roi),
             c.SNR: self.get_snr(roi),
             c.MZ: self.get_mean_mz(roi),
-            c.MZ_STD: self.get_mz_std(roi)
+            c.MZ_STD: self.get_mz_std(roi),
+            c.RT_START: self.get_rt_start(roi),
+            c.RT_END: self.get_rt_end(roi)
         }
         return descriptors
 

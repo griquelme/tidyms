@@ -29,7 +29,7 @@ INSTALL_REQUIRES = [
     "ipython>=8.1",
     "joblib>=1.1",
     "matplotlib>=3.5.1",
-    "numpy<=1.21.4",
+    "numpy>=1.22",
     "openpyxl>=3.0",
     "pandas>=1.4.1",
     "requests",

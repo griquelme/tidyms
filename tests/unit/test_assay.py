@@ -1,5 +1,5 @@
 from tidyms import assay
-from tidyms.lcms import Roi, Feature
+from tidyms.lcms import LCRoi, Peak
 import pytest
 from pathlib import Path
 import os
@@ -298,11 +298,6 @@ def test_assay_manager_create_assay_dir(tmpdir):
     ft_path = metadata.assay_path.joinpath("feature")
     assert ft_path.is_dir()
 
-    # check sample dir
-    for sample in metadata.get_sample_names():
-        roi_sample_path = roi_path.joinpath(sample)
-        assert roi_sample_path.is_dir()
-
 
 def test_assay_manager_check_previous_step_first_step(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
@@ -348,32 +343,14 @@ def test_assay_manager_get_roi_dir_path_sample_name(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     metadata = create_dummy_assay_manager(assay_path, data_path, None)
     name = metadata.get_sample_names()[0]
-    metadata.get_roi_dir_path(name)
+    metadata.get_roi_path(name)
 
 
 def test_assay_manager_get_roi_dir_path_invalid_sample_name(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     metadata = create_dummy_assay_manager(assay_path, data_path, None)
     with pytest.raises(ValueError):
-        metadata.get_roi_dir_path("invalid-sample-name")
-
-
-def test_assay_manager_get_roi_list_path(tmpdir):
-    assay_path, data_path = create_assay_dir(tmpdir, 20)
-    metadata = create_dummy_assay_manager(assay_path, data_path, None)
-    metadata.create_assay_dir()
-    sample_name = metadata.get_sample_names()[0]
-    roi_path = metadata.get_roi_dir_path(sample_name)
-
-    # create dummy files
-    sim_path = list()
-    for k in range(5):
-        roi_file_path = roi_path.joinpath("{}.pickle".format(k))
-        roi_file_path.touch()
-        sim_path.append(roi_file_path)
-    test_path_iter = metadata.get_roi_list_path(sample_name)
-    for expected_path, test_path in zip(sim_path, test_path_iter):
-        assert expected_path == test_path
+        metadata.get_roi_path("invalid-sample-name")
 
 
 def test_assay_manager_get_feature_path_sample_name(tmpdir):
@@ -409,29 +386,11 @@ def test_assay_manager_add_samples(tmpdir):
 
 # create a subclass with dummy methods
 
-class DummyFeature(Feature):
-
-    n_descriptors = 4
-
-    def get_descriptors(self, roi: Roi):
-        descriptors = {"a": 1, "b": 1, "c": 1, "d": 1}
-        return descriptors
-
-
-class DummyRoi(Roi):
-    n_features = 5
-
-    def extract_features(self, **kwargs):
-        self.features = [DummyFeature(0, 4) for _ in range(DummyRoi.n_features)]
-
-    def get_default_filters(self):
-        return dict()
-
-
 class DummyAssay(assay.Assay):
 
     n_roi = 5
-    roi_length = 10
+    roi_length = 20
+    n_ft = 5
 
     def get_ms_data(self, sample: str):
         return sample
@@ -441,9 +400,15 @@ def detect_features_dummy(ms_data: str, **kwargs):
     results = list()
     for k in range(DummyAssay.n_roi):
         x = np.arange(DummyAssay.roi_length)
-        roi = DummyRoi(x, x, x, x, "uplc")
+        roi = LCRoi(x, x, x, x, "uplc")
         results.append(roi)
     return results
+
+
+def extract_features_dummy(roi, **kwargs):
+    roi.noise = np.zeros_like(roi.spint) + 1e-8
+    roi.baseline = np.zeros_like(roi.spint) + 1e-8
+    roi.features = [Peak(0, 5, 10) for _ in range(DummyAssay.n_ft)]
 
 
 def test_assay_creation(tmpdir):
@@ -533,7 +498,7 @@ def test_assay_load_roi_invalid_roi_index(tmpdir):
     create_dummy_assay_manager(assay_path, data_path, None)
     test_assay = DummyAssay(assay_path, data_path)
     test_assay.detect_features(strategy=detect_features_dummy)
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(IndexError):
         sample_name = test_assay.manager.get_sample_names()[0]
         test_assay.load_roi(sample_name, 1000)
 
@@ -570,12 +535,12 @@ def test_assay_extract_features_saved_features(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     test_assay = DummyAssay(assay_path, data_path)
     test_assay.detect_features(strategy=detect_features_dummy)
-    test_assay.extract_features()
+    test_assay.extract_features(strategy=extract_features_dummy)
     sample_list = test_assay.manager.get_sample_names()
     for sample in sample_list:
         roi_list = test_assay.load_roi_list(sample)
         for r in roi_list:
-            assert len(r.features) == DummyRoi.n_features
+            assert len(r.features) == DummyAssay.n_ft
 
 
 def test_assay_extract_features_before_detect_features(tmpdir):
@@ -607,13 +572,16 @@ def test_assay_load_features(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     test_assay = DummyAssay(assay_path, data_path)
     test_assay.detect_features(strategy=detect_features_dummy)
-    test_assay.extract_features()
-    test_assay.describe_features()
+    test_assay.extract_features(strategy=extract_features_dummy)
+    filters = {"width": (0, None), "snr": (0, None)}
+    test_assay.describe_features(filters=filters)
     sample_list = test_assay.manager.get_sample_names()
     for sample in sample_list:
         features = test_assay.load_features(sample)
-        n_features = DummyRoi.n_features * DummyAssay.n_roi
-        n_descriptors = DummyFeature.n_descriptors + 2  # roi and feature index
+        n_features = DummyAssay.n_ft * DummyAssay.n_roi
+        # descriptors = area, width, height, snr, mz, mz_std, rt, rt start,
+        # rt end, roi index, ft index == 11
+        n_descriptors = 11
         expected_shape = (n_features, n_descriptors)
         assert features.shape == expected_shape
     assert True
@@ -624,11 +592,11 @@ def test_assay_build_feature_table(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, n_samples)
     test_assay = DummyAssay(assay_path, data_path)
     test_assay.detect_features(strategy=detect_features_dummy)
-    test_assay.extract_features()
-    test_assay.describe_features()
+    test_assay.extract_features(strategy=extract_features_dummy)
+    filters = {"width": (0, None), "snr": (0, None)}
+    test_assay.describe_features(filters=filters)
     test_assay.build_feature_table()
-    n_features = DummyRoi.n_features * DummyAssay.n_roi * n_samples
-    n_descriptors = DummyFeature.n_descriptors
-    n_descriptors += 4  # roi index, ft index, sample and class are extra cols
+    n_features = DummyAssay.n_ft * DummyAssay.n_roi * n_samples
+    n_descriptors = 13
     expected_shape = (n_features, n_descriptors)
     assert test_assay.feature_table.shape == expected_shape

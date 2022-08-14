@@ -12,8 +12,10 @@ from scipy.stats import spearmanr, median_abs_deviation
 import os.path
 from typing import Optional, Union
 import json
+import base64
 from tqdm import tqdm as cli_bar
 from tqdm.notebook import tqdm as notebook_bar
+from IPython.core.getipython import get_ipython
 
 data_type = Union[pd.DataFrame, pd.Series]
 reduced_type = Union[pd.Series, float]
@@ -322,8 +324,10 @@ def _fill_na(s: reduced_type, fill_value: Optional[float]):
     return res
 
 
-def _find_closest_sorted(x: np.ndarray,
-                         xq: Union[np.ndarray, float, int]) -> np.ndarray:
+def _find_closest_sorted(
+        x: np.ndarray,
+        xq: Union[np.ndarray, float, int]
+) -> np.ndarray:
     """
     Find the index in x closest to each xq element. Assumes that x is sorted.
 
@@ -347,7 +351,7 @@ def _find_closest_sorted(x: np.ndarray,
     if isinstance(xq, (float, int)):
         xq = np.array(xq)
 
-    if (x.size == 0):
+    if x.size == 0:
         msg = "`x` must be a non-empty array."
         raise ValueError(msg)
 
@@ -542,3 +546,39 @@ def get_progress_bar():
         progress_bar = cli_bar
     return progress_bar
 
+
+def array1d_to_str(arr: np.ndarray):
+    """
+    Encode a numpy array into a string.
+
+    Parameters
+    ----------
+    arr : array
+
+    Returns
+    -------
+    str
+
+    """
+    arr_str = base64.b64encode(arr.tobytes()).decode("utf8")
+    dtype_str = str(arr.dtype)
+    return dtype_str + "," + arr_str
+
+
+def str_to_array1d(s: str):
+    """
+    Decode a string generated with array1d_to_str into a numpy array.
+
+    Parameters
+    ----------
+    s : str
+
+    Returns
+    -------
+    numpy.ndarray
+
+    """
+    sep_index = s.index(",")
+    dtype = s[:sep_index]
+    data = base64.b64decode(bytes(s[sep_index + 1:], "utf8"))
+    return np.frombuffer(data, dtype=dtype).copy()

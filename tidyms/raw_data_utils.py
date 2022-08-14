@@ -85,6 +85,7 @@ def make_chromatograms(
     *,
     window: Optional[float] = None,
     accumulator: str = "sum",
+    fill_missing: bool = True,
     ms_level: int = 1,
     start_time: float = 0.0,
     end_time: Optional[float] = None,
@@ -105,6 +106,10 @@ def make_chromatograms(
         Mode used to accumulate the values inside the m/z window. ``"sum"``
         computes the total intensity inside the window. ``"mean"`` divides
         the total intensity using the number of points inside the window.
+    fill_missing : bool, default=True
+        If ``True``, sets the intensity to zero if no signal was found in a
+        given scan. If ``False``, missing values are set to NaN.
+
     ms_level : int, default=1
         ms level used to build the chromatograms.
     start_time : float, default=0.0
@@ -124,6 +129,9 @@ def make_chromatograms(
                     .T.reshape(mz.size * 2))
 
     eic = np.zeros((mz.size, n_sp))
+    if not fill_missing:
+        eic[:] = np.nan
+
     rt = np.zeros(n_sp)
     valid_index = list()
     sp_iterator = ms_data.get_spectra_iterator(
@@ -202,9 +210,10 @@ def make_roi(
         maximum number of consecutive missing values in a valid  ROI. If
         ``None``, the value is set to ``1``.
     min_length : positive integer or None, default=None
-        The minimum length of a valid ROI. If, ``None``, the value is set
-        based on ``ms_data.separation``. If ``"uplc"``, the value is set to
-        ``10``. If ``"hplc"``, the value is set to ``20``.
+        The minimum length of a valid ROI, defined as the number of non-NaN
+        values in the ROI. If, ``None``, the value is set based on
+        ``ms_data.separation``. If ``"uplc"``, the value is set to ``10``. If
+        ``"hplc"``, the value is set to ``20``.
     min_intensity : non-negative number , default=0.0
         Minimum intensity in a valid ROI.
     pad: int or None, default=None

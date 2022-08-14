@@ -12,15 +12,18 @@ from . import raw_data_utils
 from .container import DataContainer
 from .correspondence import match_features
 from .fileio import MSData
-from .lcms import Roi
+from .lcms import Roi, LCRoi
 from .utils import get_progress_bar
 from ._plot_bokeh import _LCAssayPlotter
-
+from .fill_missing import fill_missing_lc
+from ._build_data_matrix import build_data_matrix
+import json
 
 # TODO: add id_ column to sample metadata
 # TODO: add make_roi params to each column in sample metadata for cases where
 #   more than one sample are obtained from the same file.
 # TODO: test verbose false describe_features, extract_features
+
 
 def _manage_preprocessing_step(func):
     """
@@ -109,6 +112,8 @@ class Assay:
         instrument: str = "qtof",
         separation: str = "uplc",
     ):
+        if isinstance(assay_path, str):
+            assay_path = Path(assay_path)
 
         self.manager = _create_assay_manager(
             assay_path,
@@ -259,12 +264,23 @@ class Assay:
         load_roi_list : Loads all ROI from a sample.
 
         """
-        file_name = "{}.pickle".format(roi_index)
-        roi_path = self.manager.get_roi_dir_path(sample).joinpath(file_name)
+        roi_path = self.manager.get_roi_path(sample)
 
-        with roi_path.open("rb") as fin:
-            roi = pickle.load(fin)
+        if self.separation in c.LC_MODES:
+            roi_class = LCRoi
+        else:
+            roi_class = Roi
 
+        with open(roi_path, "r", newline="\n") as fin:
+            header = fin.readline()
+            index_offset = int(header.split("=")[-1])
+            fin.seek(index_offset)
+            json_str = fin.read()
+            index = json.loads(json_str)
+            offset, length = index[roi_index]
+            fin.seek(offset)
+            s = fin.read(length)
+            roi = roi_class.from_json(s)
         return roi
 
     def load_roi_list(self, sample: str) -> List[Roi]:
@@ -296,10 +312,24 @@ class Assay:
             msg = "`load_roi_list` must be called after `detect_features`."
             raise ValueError(msg)
 
-        roi_list = list()
-        for path in self.manager.get_roi_list_path(sample):
-            with open(path, "rb") as fin:
-                roi = pickle.load(fin)
+        roi_path = self.manager.get_roi_path(sample)
+
+        if self.separation in c.LC_MODES:
+            roi_class = LCRoi
+        else:
+            roi_class = Roi
+
+        with open(roi_path, "r", newline="\n") as fin:
+            header = fin.readline()
+            index_offset = int(header.split("=")[-1])
+            fin.seek(index_offset)
+            index = json.loads(fin.read())
+
+            roi_list = list()
+            for offset, length in index:
+                fin.seek(offset)
+                s = fin.read(length)
+                roi = roi_class.from_json(s)
                 roi_list.append(roi)
         return roi_list
 
@@ -386,7 +416,7 @@ class Assay:
 
             def iter_func(sample_list):
                 for x in sample_list:
-                    roi_path = self.manager.get_roi_dir_path(x)
+                    roi_path = self.manager.get_roi_path(x)
                     ms_data = self.get_ms_data(x)
                     yield roi_path, ms_data
 
@@ -465,7 +495,7 @@ class Assay:
 
             def iterator():
                 for sample in self.manager.get_sample_names():
-                    roi_path = self.manager.get_roi_dir_path(sample)
+                    roi_path = self.manager.get_roi_path(sample)
                     roi_list = self.load_roi_list(sample)
                     yield roi_path, roi_list
 
@@ -523,7 +553,7 @@ class Assay:
 
             def iterator():
                 for sample in self.manager.get_sample_names():
-                    roi_path = self.manager.get_roi_dir_path(sample)
+                    roi_path = self.manager.get_roi_path(sample)
                     ft_path = self.manager.get_feature_path(sample)
                     roi_list = self.load_roi_list(sample)
                     yield roi_path, ft_path, roi_list
@@ -641,44 +671,60 @@ class Assay:
             self.feature_table.to_pickle(str(save_path))
         return self
 
-    def make_data_matrix(self) -> DataContainer:
+    @_manage_preprocessing_step
+    def make_data_matrix(
+        self,
+        merge_close_features: bool = True,
+        merge_threshold: float = 0.8,
+        mz_merge: Optional[float] = None,
+        rt_merge: Optional[float] = None,
+    ):
         """
-        Organizes the data from the feature table into a data matrix.
+        Creates a data matrix.
 
-        Returns
-        -------
-        DataContainer
+        The results are stored in `self.data_matrix`.
+
+        Parameters
+        ----------
+        merge_close_features : bool
+            If ``True`` finds close features and merge them into a single
+            feature. The code of the merged features is in the `merged` column
+            of the feature metadata. The area in the data matrix is the sum of
+            the merged features.
+        merge_threshold : float, default=0.8
+            Number between 0.0 and 1.0. This value is compared against the
+            quotient between the number of samples where both features where
+            detected and the number of samples where any of the features was
+            detected. If this quotient is lower than the threshold, the pair o
+            features is merged into a single one.
+        mz_merge : float or None, default=None
+            Merge features only if their mean m/z, as described by the feature
+            metadata, are closer than this values.
+        rt_merge : float or None, default=None
+            Merge features only if their mean Rt, as described by the feature
+            metadata, are closer than this values.
 
         """
-
-        feature_table = self.feature_table
-        if self.separation in c.LC_MODES:
-            data_matrix, feature_metadata = _lc_feature_data_from_feature_table(
-                feature_table
+        process_samples = self.manager.sample_queue
+        n_samples = len(process_samples)
+        if n_samples:
+            sample_metadata = self.manager.get_sample_metadata()
+            data_matrix, feature_metadata = build_data_matrix(
+                self.feature_table,
+                sample_metadata,
+                self.separation,
+                merge_close_features,
+                mz_merge,
+                rt_merge,
+                merge_threshold
             )
+            dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
+            dc.save(self.manager.assay_path.joinpath(c.DATA_MATRIX_FILENAME))
+            self.data_matrix = dc
         else:
-            # TODO: update this code when new modes are included
-            raise ValueError
-        data_matrix.columns.name = c.FEATURE
-        data_matrix.index.name = "sample"
+            pass
 
-        # TODO: deal with nan values. Move this to self.fill_missing
-        data_matrix = data_matrix.fillna(0)
-
-        sample_metadata = self.manager.get_sample_metadata()
-        # add samples without features as rows with zeros
-        missing_index = sample_metadata.index.difference(data_matrix.index)
-        missing = pd.DataFrame(
-            data=0,
-            index=missing_index,
-            columns=data_matrix.columns
-        )
-        data_matrix = pd.concat((data_matrix, missing))
-        # sort data_matrix
-        data_matrix = data_matrix.loc[sample_metadata.index, :]
-        dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
-        self.data_matrix = dc
-        return dc
+        return self.data_matrix
 
     def annotate_isotopologues(self, **kwargs):
         raise NotImplementedError
@@ -686,8 +732,88 @@ class Assay:
     def annotate_adducts(self, **kwargs):
         raise NotImplementedError
 
-    def fill_missing(self, **kwargs):
-        raise NotImplementedError
+    @_manage_preprocessing_step
+    def fill_missing(
+        self,
+        mz_tolerance: float,
+        n_deviations: float = 1.0,
+        estimate_not_found: bool = True,
+        n_jobs: Optional[int] = None,
+        verbose: bool = False
+    ):
+        """
+        Fill missing values in the Data matrix by searching missing features in
+        raw data, using values average values from the detected features.
+
+        Parameters
+        ----------
+        mz_tolerance : float
+            m/z tolerance used to create chromatograms.
+        n_deviations : float
+            Number of deviations from the mean retention time to search a peak,
+            in units of standard deviations.
+        estimate_not_found : bool
+            If ``True``, and estimation for the peak area in cases where no
+            chromatographic peaks are found is done as described in the Notes.
+            If ``False``, missing values after peak search are set to zero.
+        n_jobs: int or None, default=None
+            Number of jobs to run in parallel. ``None`` means 1 unless in a
+            :obj:`joblib.parallel_backend` context. ``-1`` means using all
+            processors.
+        verbose : bool
+            If True, shows a progress bar.
+
+        Notes
+        -----
+        Missing features are searched in raw data using values obtained from
+        the `feature_metadata`.
+
+        In LC-MS datasets, missing features are searched in each raw data file
+        by building chromatograms with the expected value of the feature and an
+        m/z window defined by ``mz_tolerance``. Chromatographic peaks are
+        detected and the area is used as a fill value if a peak has a Rt that
+        meets the following condition:
+
+        .. math::
+
+            \frac{rt_{detected} - rt_{mean}}{rt_{std}} \leq n_{deviations}
+
+        where :math:`rt_{detected}` is the Rt of the peak in the chromatogram,
+        :math:`rt_{mean}` is the mean Rt of the feature and :math:`rt_{std}` is
+        the standard deviation of the feature. If no peaks are found, the
+        feature value is filled to zero if the `estimate_not_found` is set to
+        ``False``. Otherwise, a fill value is computed as the area in the region
+        where the chromatographic peak was expected to appear, defined by the
+        `rt_start` and `rt_end` values in the feature table.
+
+        """
+        process_samples = self.manager.sample_queue
+        n_samples = len(process_samples)
+        if n_samples:
+            samples = self.manager.get_sample_names()
+            generator = ((x, self.get_ms_data(x)) for x in samples)
+            has_missing = self.data_matrix.data_matrix.isna().any().any()
+            if not has_missing:
+                mask = self.data_matrix.missing != 0
+                self.data_matrix._data_matrix[mask] = np.nan
+
+            data_matrix, missing = fill_missing_lc(
+                generator,
+                self.data_matrix.data_matrix,
+                self.data_matrix.feature_metadata,
+                mz_tolerance,
+                n_deviations,
+                estimate_not_found,
+                n_jobs,
+                verbose
+            )
+            self.data_matrix._data_matrix = data_matrix
+            # TODO: update DataContainer Status
+            self.data_matrix.missing = missing
+        else:
+            if verbose:
+                msg = "Data matrix doesn't contain missing data."
+                print(msg)
 
 
 class _AssayManager:
@@ -722,14 +848,6 @@ class _AssayManager:
         have been processed and which preprocessing steps has been applied.
 
     """
-    PROCESSING_STEPS = [
-            "detect_features",
-            "extract_features",
-            "describe_features",
-            "build_feature_table",
-            "match_features",
-            "fill_missing"
-    ]
 
     def __init__(
         self,
@@ -789,7 +907,7 @@ class _AssayManager:
         sm = _create_sample_metadata(sample_metadata, new_sample_names)
         sm = _normalize_sample_metadata(sm, new_sample_names)
         self.sample_metadata = pd.concat((self.sample_metadata, sm))
-        self.clear_data("build_feature_table", new_sample_names)
+        self.clear_data(c.BUILD_FEATURE_TABLE, new_sample_names)
 
     def create_assay_dir(self):
         """
@@ -799,10 +917,6 @@ class _AssayManager:
         # roi dir
         roi_dir_path = self.assay_path.joinpath(c.ROI_DIR)
         roi_dir_path.mkdir()
-        # dir for each sample roi
-        for s in self.get_sample_names():
-            sample_roi_path = roi_dir_path.joinpath(s)
-            sample_roi_path.mkdir()
 
         # feature tables dir
         ft_dir_path = self.assay_path.joinpath(c.FT_DIR)
@@ -823,22 +937,26 @@ class _AssayManager:
         PreprocessingOrderError : If the previous steps were not executed.
 
         """
-        steps = _AssayManager.PROCESSING_STEPS
         try:
-            ind = steps.index(step)
-            previous = steps[ind - 1]
+            ind = c.PREPROCESSING_STEPS.index(step)
+            previous = c.PREPROCESSING_STEPS[ind - 1]
         except ValueError:      # manage optional steps
-            if step == "annotate_isotopologues":
-                previous = steps[2]
-            elif step == "annotate_adducts":
-                previous = "annotate_isotopologues"
+            if step == c.ANNOTATE_ISOTOPOLOGUES:
+                previous = c.PREPROCESSING_STEPS[2]
+            elif step == c.ANNOTATE_ADDUCTS:
+                previous = c.ANNOTATE_ISOTOPOLOGUES
             else:
                 msg = "`{}` is not a valid preprocessing step".format(step)
                 raise ValueError(msg)
 
         # skip checking for the first step
-        if step == steps[0]:
+        if step == c.PREPROCESSING_STEPS[0]:
             check_okay = True
+        elif step == c.BUILD_FEATURE_TABLE:
+            # special case for describe features, to avoid optional annotation
+            # steps
+            previous = c.DESCRIBE_FEATURES
+            check_okay = self.params["preprocess_steps"][previous]
         else:
             check_okay = self.params["preprocess_steps"][previous]
 
@@ -858,17 +976,15 @@ class _AssayManager:
         Deletes old processed data.
 
         """
-        if step == "detect_features":
+        if step == c.DETECT_FEATURES:
             for sample in samples:
-                path_list = self.get_roi_list_path(sample)
-                for path in path_list:
-                    if path.is_file():
-                        path.unlink(missing_ok=True)
-        elif step == "describe_features":
+                path = self.get_roi_path(sample)
+                path.unlink(missing_ok=True)
+        elif step == c.DESCRIBE_FEATURES:
             for sample in samples:
                 path = self.get_feature_path(sample)
                 path.unlink(missing_ok=True)
-        elif step == "build_feature_table":
+        elif step == c.BUILD_FEATURE_TABLE:
             if samples:
                 file_name = c.FT_TABLE_FILENAME
                 table_path = self.assay_path.joinpath(file_name)
@@ -895,19 +1011,10 @@ class _AssayManager:
         self._check_sample_name(name)
         return self._sample_to_path.get(name)
 
-    def get_roi_dir_path(self, name: str) -> Path:
+    def get_roi_path(self, name: str) -> Path:
         self._check_sample_name(name)
         roi_path = self.assay_path.joinpath(c.ROI_DIR, name)
         return roi_path
-
-    def get_roi_list_path(self, name: str) -> List[Path]:
-        roi_path = self.get_roi_dir_path(name)
-        n_roi = len([x for x in roi_path.glob("*")])
-        roi_list_path = list()
-        for k in range(n_roi):
-            path = roi_path.joinpath("{}.pickle".format(k))
-            roi_list_path.append(path)
-        return roi_list_path
 
     def get_feature_path(self, name: str) -> Path:
         self._check_sample_name(name)
@@ -955,9 +1062,9 @@ class _AssayManager:
     def manage_step_before(self, step: str, kwargs: dict):
         self.check_step(step)
         self.send_samples_to_queue(step, kwargs)
-        if step in _AssayManager.PROCESSING_STEPS:
-            ind = _AssayManager.PROCESSING_STEPS.index(step)
-            for s in _AssayManager.PROCESSING_STEPS[ind:]:
+        if step in c.PREPROCESSING_STEPS:
+            ind = c.PREPROCESSING_STEPS.index(step)
+            for s in c.PREPROCESSING_STEPS[ind:]:
                 self.clear_data(s, self.sample_queue)
 
     def manage_step_after(self, step: str, kwargs: dict):
@@ -1006,11 +1113,11 @@ def _describe_features_default(roi_list: List[Roi], **kwargs) -> pd.DataFrame:
         ft_index = np.hstack(ft_index)
 
         ft_table = pd.DataFrame(data=descriptors_list)
-        ft_table["roi_index"] = roi_index_list
-        ft_table["ft_index"] = ft_index
+        ft_table[c.ROI_INDEX] = roi_index_list
+        ft_table[c.FT_INDEX] = ft_index
         ft_table = ft_table.dropna(axis=0)
-        ft_table["roi_index"] = ft_table["roi_index"].astype(int)
-        ft_table["ft_index"] = ft_table["ft_index"].astype(int)
+        ft_table[c.ROI_INDEX] = ft_table[c.ROI_INDEX].astype(int)
+        ft_table[c.FT_INDEX] = ft_table[c.FT_INDEX].astype(int)
     else:
         ft_table = pd.DataFrame()
     return ft_table
@@ -1123,7 +1230,7 @@ def _normalize_sample_metadata(df: pd.DataFrame, name_to_path: List[str]):
 
     if "order" in df:
         order_dtype = df["order"].dtype
-        is_int = order_dtype == int
+        is_int = np.issubdtype(order_dtype, np.integer)
         if not is_int:
             msg = "Order column dtype must be `int`. Got `{}`."
             raise TypeError(msg.format(order_dtype))
@@ -1139,7 +1246,7 @@ def _normalize_sample_metadata(df: pd.DataFrame, name_to_path: List[str]):
 
     if "batch" in df:
         batch_dtype = df["batch"].dtype
-        is_int = batch_dtype == int
+        is_int = np.issubdtype(batch_dtype, np.integer)
         if not is_int:
             msg = "Batch column dtype must be `int`. Got `{}`."
             raise TypeError(msg.format(batch_dtype))
@@ -1165,24 +1272,6 @@ def _normalize_assay_path(assay_path: Union[Path, str]):
     if assay_path.suffix != suffix:
         assay_path = Path(assay_path.parent / (assay_path.name + suffix))
     return assay_path.absolute()
-
-
-def _flatten_column_multindex(df: pd.DataFrame):
-    columns = df.columns
-    level_0 = columns.get_level_values(0)
-    level_1 = columns.get_level_values(1)
-    col_name_map = {
-        "mzmean": "mz",
-        "mzstd": "mz std",
-        "mzmin": "mz min",
-        "mzmax": "mz max",
-        "rtmean": "rt",
-        "rtstd": "rt std",
-        "rtmin": "rt min",
-        "rtmax": "rt max"
-    }
-    new_names = [col_name_map[x + y] for x, y in zip(level_0, level_1)]
-    return new_names
 
 
 def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
@@ -1221,11 +1310,27 @@ def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
     return path_list
 
 
-def _save_roi_list(dir_path: Path, roi_list: List[Roi]):
-    for k, roi in enumerate(roi_list):
-        save_path = dir_path.joinpath("{}.pickle".format(k))
-        with save_path.open("wb") as fin:
-            pickle.dump(roi, fin)
+def _save_roi_list(roi_path: Path, roi_list: List[Roi]):
+    header_template = "index_offset={:020n}\n"
+    # the dummy header is used as a placeholder to fill with the correct offset
+    # value after all ROI have been serialized
+    with open(roi_path, "w", newline="\n") as fin:
+        dummy_header = header_template.format(1)
+        fin.write(dummy_header)
+        offset = len(dummy_header)
+        index = list()
+        for roi in roi_list:
+            serialized_roi = roi.to_json() + '\n'
+            length = len(serialized_roi)
+            index.append([offset, length])
+            offset += len(serialized_roi)
+            fin.write(serialized_roi)
+        # write index
+        fin.write(json.dumps(index))
+        fin.seek(0)
+        # update header offset
+        header = header_template.format(offset)
+        fin.write(header)
 
 
 def compare_dict(d1: Optional[dict], d2: Optional[dict]) -> bool:
@@ -1260,34 +1365,10 @@ def _build_params_dict(ms_mode: str, separation: str, instrument: str):
             "separation": separation,
             "instrument": instrument,
         },
-        "detect_features": dict(),
-        "extract_features": dict(),
-        "describe_features": dict(),
-        "annotate_isotopologues": dict(),
-        "annotate_adducts": dict(),
-        "match_features": dict(),
-        "fill_missing": dict(),
-        "processed_samples": {
-            "detect_features": set(),
-            "extract_features": set(),
-            "describe_features": set(),
-            "annotate_isotopologues": set(),
-            "annotate_adducts": set(),
-            "build_feature_table": set(),
-            "match_features": set(),
-            "fill_missing": set(),
-        },
-        "preprocess_steps": {
-            "detect_features": False,
-            "extract_features": False,
-            "describe_features": False,
-            "annotate_isotopologues": False,
-            "annotate_adducts": False,
-            "build_feature_table": True,
-            "match_features": False,
-            "fill_missing": False,
-        }
+        "processed_samples": {x: set() for x in c.PREPROCESSING_STEPS},
+        "preprocess_steps": {x: False for x in c.PREPROCESSING_STEPS}
     }
+    params_dict.update({x: dict() for x in c.PREPROCESSING_STEPS})
     return params_dict
 
 
@@ -1324,37 +1405,3 @@ def _is_assay_dir(p: Path) -> int:
     else:
         status = 0
     return status
-
-
-def _lc_feature_data_from_feature_table(feature_table: pd.DataFrame):
-    # remove noise
-    rm_noise_mask = feature_table[c.LABEL] > -1
-    feature_data = feature_table[rm_noise_mask]
-
-    # feature names
-    cluster_to_ft = _cluster_to_feature_name(feature_table)
-
-    # compute aggregate statistics for each feature -> feature metadata
-    estimators = {"mz": ["mean", "std", "min", "max"],
-                  "rt": ["mean", "std", "min", "max"]}
-    feature_metadata = feature_data.groupby(c.LABEL).agg(estimators)
-    feature_metadata.columns = _flatten_column_multindex(feature_metadata)
-    feature_metadata.index = feature_metadata.index.map(cluster_to_ft)
-    feature_metadata.index.name = c.FEATURE
-
-    # make data matrix
-    data_matrix = feature_data.pivot(index=c.SAMPLE, columns=c.LABEL,
-                                     values=c.AREA)
-    data_matrix.columns = data_matrix.columns.map(cluster_to_ft)
-
-    return data_matrix, feature_metadata
-
-
-def _cluster_to_feature_name(feature_table: pd.DataFrame):
-    # feature names
-    unique_cluster = feature_table[c.LABEL].unique()
-    n_cluster = unique_cluster[unique_cluster > -1].size
-    max_n_chars_cluster = len(str(n_cluster))
-    template = "FT-{{:0{}d}}".format(max_n_chars_cluster)
-    cluster_to_ft = {k: template.format(k + 1) for k in range(n_cluster)}
-    return cluster_to_ft

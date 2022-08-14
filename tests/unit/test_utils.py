@@ -316,3 +316,41 @@ def test_get_filename(tmpdir):
     open(fullpath, 'a').close()
     name = os.path.splitext(filename)[0]
     assert name == utils.get_filename(fullpath)
+
+
+@pytest.mark.parametrize("size", [10, 100, 1000])
+def test_array1d_to_str_conversion_array_dtype_float(size):
+    x = np.random.normal(size=size)
+    x_str = utils.array1d_to_str(x)
+    x_from_str = utils.str_to_array1d(x_str)
+    assert np.array_equal(x, x_from_str)
+
+
+@pytest.mark.parametrize("size", [10, 100, 1000])
+def test_array1d_to_str_conversion_arange(size):
+    x = np.arange(size)
+    x_str = utils.array1d_to_str(x)
+    x_from_str = utils.str_to_array1d(x_str)
+    assert np.array_equal(x, x_from_str)
+
+
+@pytest.mark.parametrize("size", [10, 100, 1000])
+def test_array1d_to_str_conversion_array_dtype_int(size):
+    x = np.random.normal(size=size).astype(int)
+    x_str = utils.array1d_to_str(x)
+    x_from_str = utils.str_to_array1d(x_str)
+    assert np.array_equal(x, x_from_str)
+
+
+def test_array_to_str_conversion_empty_float_array():
+    x = np.array([], dtype=float)
+    x_str = utils.array1d_to_str(x)
+    x_from_str = utils.str_to_array1d(x_str)
+    assert np.array_equal(x, x_from_str)
+
+
+def test_array_to_str_conversion_empty_int_array():
+    x = np.array([], dtype=int)
+    x_str = utils.array1d_to_str(x)
+    x_from_str = utils.str_to_array1d(x_str)
+    assert np.array_equal(x, x_from_str)
