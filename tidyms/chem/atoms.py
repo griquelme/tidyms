@@ -124,12 +124,7 @@ class Element(object):
         return "Element(" + self.symbol + ")"
 
     def __str__(self):  # pragma: no cover
-        res = self.name + "\n" + "-" * len(self.name) + "\n"
-        res += "symbol: " + self.symbol + "\n"
-        res += "z: " + str(self.z) + "\n"
-        res += "nominal mass: " + str(self.nominal_mass) + "\n"
-        res += ("monoisotopic mass: " + "{:.4f}".format(self.monoisotopic_mass))
-        return res
+        return self.symbol
 
     def get_abundances(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
