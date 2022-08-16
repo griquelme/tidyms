@@ -5,11 +5,17 @@ from typing import Final, List
 HPLC: Final[str] = "hplc"
 UPLC: Final[str] = "uplc"
 LC_MODES: Final[List[str]] = [UPLC, HPLC]
+SEPARATION_MODES: Final[List[str]] = LC_MODES + []
 
 # instruments
 QTOF: Final[str] = "qtof"
 ORBITRAP: Final[str] = "orbitrap"
 MS_INSTRUMENTS: Final[List[str]] = [QTOF, ORBITRAP]
+
+# MS mode
+CENTROID: Final[str] = "centroid"
+PROFILE: Final[str] = "profile"
+MS_MODES: Final[List[str]] = [CENTROID, PROFILE]
 
 # feature descriptors
 FEATURE: Final[str] = "feature"
