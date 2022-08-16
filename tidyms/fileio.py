@@ -33,10 +33,11 @@ from pathlib import Path
 from typing import BinaryIO, Generator, List, Optional, TextIO, Tuple, Union
 from .container import DataContainer
 from ._names import *
+from . import _constants as c
 from . import lcms
 from . import validation as v
 from .utils import get_tidyms_path, gaussian_mixture
-from ._mzml import build_offset_list, get_spectrum, get_chromatogram
+from ._mzml import MZMLReader
 
 # TODO: test read_pickle valid file
 # TODO: delete read_data_matrix function
@@ -282,11 +283,16 @@ class MSData:
         instrument: str = "qtof",
         separation: str = "uplc"
     ):
-        sp_offset, chrom_offset, index_offset = build_offset_list(path)
-        self._spectra_offset = sp_offset
-        self._chromatogram_offset = chrom_offset
-        self._index_offset = index_offset
-        self.path = path
+        path = Path(path)
+        suffix = path.suffix
+        if suffix == ".mzML":
+            self._reader = MZMLReader(path)
+        elif suffix == "":
+            # used to intantiate SimulatedMSData
+            self._reader = None
+        else:
+            msg = "{} is not a valid format for MS data".format(suffix)
+            raise ValueError(msg)
 
         self.ms_mode = ms_mode
         self.instrument = instrument
@@ -298,7 +304,7 @@ class MSData:
 
     @ms_mode.setter
     def ms_mode(self, value: Optional[str]):
-        if value in ["centroid", "profile"]:
+        if value in c.MS_MODES:
             self._ms_mode = value
         else:
             msg = "mode must be `centroid` or `profile`. Got `{}`."
@@ -310,8 +316,7 @@ class MSData:
 
     @instrument.setter
     def instrument(self, value: str):
-        valid_instruments = ["qtof", "orbitrap"]
-        if value in valid_instruments:
+        if value in c.MS_INSTRUMENTS:
             self._instrument = value
         else:
             msg = "`instrument` must be `orbitrap` or `qtof`. Got `{}`."
@@ -324,11 +329,10 @@ class MSData:
 
     @separation.setter
     def separation(self, value: str):
-        valid_separation = ["uplc", "hplc"]
-        if value in valid_separation:
+        if value in c.LC_MODES:
             self._separation = value
         else:
-            msg = "`separation` must be any of {}".format(valid_separation)
+            msg = "`separation` must be any of {}".format(c.SEPARATION_MODES)
             raise ValueError(msg)
 
     def get_n_chromatograms(self) -> int:
@@ -340,7 +344,7 @@ class MSData:
         n_chromatograms : int
 
         """
-        return len(self._chromatogram_offset)
+        return self._reader.n_chromatograms
 
     def get_n_spectra(self) -> int:
         """
@@ -351,7 +355,7 @@ class MSData:
         n_spectra : int
 
         """
-        return len(self._spectra_offset)
+        return self._reader.n_spectra
 
     def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
         """
@@ -367,13 +371,7 @@ class MSData:
         chromatogram : lcms.Chromatogram
 
         """
-        chrom_data = get_chromatogram(
-            self.path,
-            self._spectra_offset,
-            self._chromatogram_offset,
-            self._index_offset,
-            n
-        )
+        chrom_data = self._reader.get_chromatogram(n)
         name = chrom_data["name"]
         chromatogram = lcms.Chromatogram(
             chrom_data["time"], chrom_data["spint"], mode=self.separation)
@@ -393,13 +391,7 @@ class MSData:
         MSSpectrum
 
         """
-        sp_data = get_spectrum(
-            self.path,
-            self._spectra_offset,
-            self._chromatogram_offset,
-            self._index_offset,
-            n
-        )
+        sp_data = self._reader.get_spectrum(n)
         sp_data["is_centroid"] = self.ms_mode == "centroid"
         return lcms.MSSpectrum(**sp_data)
 
@@ -454,11 +446,18 @@ class SimulatedMSData(MSData):  # pragma: no cover
     Emulates a MSData using simulated data. Used for tests.
 
     """
-    def __init__(self, mz_values: np.ndarray, rt_values: np.ndarray,
-                 mz_params: np.ndarray, rt_params: np.ndarray,
-                 ft_noise: Optional[np.ndarray] = None,
-                 noise: Optional[float] = None, ms_mode: str = "centroid",
-                 separation: str = "uplc", instrument: str = "qtof"):
+    def __init__(
+        self,
+        mz_values: np.ndarray,
+        rt_values: np.ndarray,
+        mz_params: np.ndarray,
+        rt_params: np.ndarray,
+        ft_noise: Optional[np.ndarray] = None,
+        noise: Optional[float] = None,
+        ms_mode: str = "centroid",
+        separation: str = "uplc",
+        instrument: str = "qtof"
+    ):
         """
         Constructor function
 
@@ -488,26 +487,53 @@ class SimulatedMSData(MSData):  # pragma: no cover
 
         """
         # MSData params
-        self._spectra_offset = None
-        self._chromatogram_offset = None
-        self._index_offset = None
-        self.path = None
+        super(SimulatedMSData, self).__init__(
+            "",
+            ms_mode=ms_mode,
+            instrument=instrument,
+            separation=separation
+        )
+        self._reader = _SimulatedReader(
+            mz_values,
+            rt_values,
+            mz_params,
+            rt_params,
+            ms_mode,
+            instrument,
+            ft_noise,
+            noise
+        )
 
+
+class _SimulatedReader:
+    """
+    Reader object for simulated data
+
+    """
+    def __init__(
+        self,
+        mz_values: np.ndarray,
+        rt_values: np.ndarray,
+        mz_params: np.ndarray,
+        rt_params: np.ndarray,
+        ms_mode: str,
+        instrument: str,
+        ft_noise: Optional[np.ndarray] = None,
+        noise: Optional[float] = None
+    ):
+        # simulation params
         self.ms_mode = ms_mode
         self.instrument = instrument
-        self.separation = separation
-
-        # simulation params
         self.mz = mz_values
         self.mz_params = mz_params
         self.rt = rt_values
-        self.n_scans = rt_values.size
+        self.n_spectra = rt_values.size
         self._seeds = None
         self._noise_level = None
         self.ft_noise = ft_noise
         # seeds are used to ensure that each time that a spectra is generated
         # with get_spectra its values are the same
-        self._seeds = np.random.choice(self.n_scans * 10, self.n_scans)
+        self._seeds = np.random.choice(self.n_spectra * 10, self.n_spectra)
         self._noise_level = noise
 
         if ft_noise is not None:
@@ -515,11 +541,8 @@ class SimulatedMSData(MSData):  # pragma: no cover
             rt_params[0] += np.random.normal(scale=ft_noise[1])
         self.rt_array = gaussian_mixture(rt_values, rt_params)
 
-    def get_n_spectra(self):
-        return self.n_scans
-
     def get_spectrum(self, scan_number: int):
-        is_valid_scan = (0 <= scan_number) and (self.n_scans > scan_number)
+        is_valid_scan = (0 <= scan_number) and (self.n_spectra > scan_number)
         if not is_valid_scan:
             msg = "Invalid scan number."
             raise ValueError(msg)
@@ -548,9 +571,15 @@ class SimulatedMSData(MSData):  # pragma: no cover
             noise = np.random.normal(size=mz.size, scale=self._noise_level)
             noise -= noise.min()
             spint += noise
-        sp = lcms.MSSpectrum(
-            mz, spint, time=rt, ms_level=1, instrument=self.instrument,
-            is_centroid=(self.ms_mode == "centroid"))
+
+        sp = {
+            "mz": mz,
+            "spint": spint,
+            "time": rt,
+            "ms_level": 1,
+            "instrument": self.instrument,
+            "is_centroid": (self.ms_mode == "centroid")
+        }
         return sp
 
 

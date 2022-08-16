@@ -13,7 +13,7 @@ def test_read_mzmine():
     try:
         fileio.read_mzmine(data_matrix_path, sample_metadata_path)
     except FileNotFoundError:
-        fileio._download_dataset(dataset_name)
+        fileio.download_dataset(dataset_name)
         fileio.read_mzmine(data_matrix_path, sample_metadata_path)
     assert True
 
@@ -27,7 +27,7 @@ def test_read_progenesis():
     try:
         fileio.read_progenesis(data_matrix_path)
     except FileNotFoundError:
-        fileio._download_dataset(dataset_name)
+        fileio.download_dataset(dataset_name)
         fileio.read_progenesis(data_matrix_path)
     assert True
 
@@ -43,7 +43,7 @@ def test_read_xcms():
         fileio.read_xcms(data_matrix_path, feature_metadata_path,
                          sample_metadata_path)
     except FileNotFoundError:
-        fileio._download_dataset(dataset_name)
+        fileio.download_dataset(dataset_name)
         fileio.read_xcms(data_matrix_path, feature_metadata_path,
                          sample_metadata_path)
     assert True
@@ -111,7 +111,6 @@ def test_get_spectra_iterator_start(centroid_mzml):
 
 def test_get_spectra_iterator_end(centroid_mzml):
     expected_end = 20
-    print(centroid_mzml.path)
     sp_iterator = centroid_mzml.get_spectra_iterator(end=expected_end)
     for scan, sp in sp_iterator:
         assert scan < expected_end
@@ -139,8 +138,7 @@ def test_get_spectra_iterator_end_time(centroid_mzml):
 
 
 def test_centroids(profile_mzml):
-    sp = profile_mzml.get_spectrum(0)
-    centroids = sp.find_centroids()
+    profile_mzml.get_spectrum(0).find_centroids()
     assert True
 
 
