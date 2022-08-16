@@ -1071,7 +1071,7 @@ class SeabornPlotMethods(object):   # pragma: no cover
     """
 
     def __init__(self, data: DataContainer):
-        self._data = data
+        self.data = data
 
     def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = _sample_class,
                    ignore_classes: Optional[List[str]] = None,
@@ -1114,10 +1114,10 @@ class SeabornPlotMethods(object):   # pragma: no cover
         y_name = "PC" + str(y_pc)
         n_comps = max(x_pc, y_pc)
         score, _, variance, total_var = \
-            self._data.metrics.pca(n_components=n_comps, scaling=scaling,
-                                   normalization=normalization,
-                                   ignore_classes=ignore_classes)
-        score = score.join(self._data.sample_metadata)
+            self.data.metrics.pca(n_components=n_comps, scaling=scaling,
+                                  normalization=normalization,
+                                  ignore_classes=ignore_classes)
+        score = score.join(self.data.sample_metadata)
 
         tmp_params = {"x": x_name, "y": y_name, "hue": hue, "kind": "scatter"}
         if relplot_params is None:
@@ -1126,14 +1126,14 @@ class SeabornPlotMethods(object):   # pragma: no cover
             relplot_params.update(tmp_params)
 
         if hue == _sample_type:
-            rev_map = _reverse_mapping(self._data.mapping)
+            rev_map = _reverse_mapping(self.data.mapping)
             score[_sample_type] = (score[_sample_class]
                                    .apply(lambda s: rev_map.get(s)))
             score = score[~pd.isna(score[_sample_type])]
         elif hue == _sample_batch:
             score[_sample_batch] = score[_sample_batch].astype(str)
         elif hue == _sample_class:
-            score[_sample_class] = self._data.classes
+            score[_sample_class] = self.data.classes
 
         g = sns.relplot(data=score, **relplot_params)
 
@@ -1141,7 +1141,7 @@ class SeabornPlotMethods(object):   # pragma: no cover
             for ind in score.index:
                 x = score.loc[ind, x_name] * 1.01
                 y = score.loc[ind, y_name] * 1.01
-                t = str(self._data.order[ind].astype(int))
+                t = str(self.data.order[ind].astype(int))
                 g.ax.annotate(t, (x, y))
 
         # set x and y label
@@ -1186,9 +1186,9 @@ class SeabornPlotMethods(object):   # pragma: no cover
         y_name = "PC" + str(y_pc)
         n_comps = max(x_pc, y_pc)
         _, loadings, variance, total_var = \
-            self._data.metrics.pca(n_components=n_comps, scaling=scaling,
-                                   normalization=normalization,
-                                   ignore_classes=ignore_classes)
+            self.data.metrics.pca(n_components=n_comps, scaling=scaling,
+                                  normalization=normalization,
+                                  ignore_classes=ignore_classes)
 
         tmp_params = {"x": x_name, "y": y_name, "kind": "scatter"}
         if relplot_params is None:
@@ -1221,12 +1221,12 @@ class SeabornPlotMethods(object):   # pragma: no cover
         if ignore_classes is None:
             ignore_classes = list()
 
-        df = (self._data.sample_metadata.join(self._data.data_matrix[ft]))
+        df = (self.data.sample_metadata.join(self.data.data_matrix[ft]))
         ignore_samples = df[_sample_class].isin(ignore_classes)
         df = df[~ignore_samples]
 
         if hue == _sample_type:
-            rev_map = _reverse_mapping(self._data.mapping)
+            rev_map = _reverse_mapping(self.data.mapping)
             df[_sample_type] = (df[_sample_class]
                                 .apply(lambda x: rev_map.get(x)))
             df = df[~df[_sample_type].isna()]
@@ -1238,6 +1238,50 @@ class SeabornPlotMethods(object):   # pragma: no cover
         g = sns.relplot(data=df, **relplot_params)
         return g
 
+    def correlation_histogram(
+            self, class_: Optional[str] = None, **hist_params):
+        """
+        Plots the distribution of correlation of feature pairs for a given class.
+
+        Used with groups of replicates to assess time-dependent variations.
+
+        Parameters
+        ----------
+        class_ : str or None, default=None
+
+        Other Parameters
+        ----------------
+        **hist_params : dict
+            Parameters to pass to seaborn histplot function.
+
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+
+        """
+
+        if class_ is None:
+            qc_classes = self.data.mapping["qc"]
+            if qc_classes is None:
+                msg = "qc class undefined in mapping."
+                raise ValueError(msg)
+            else:
+                class_ = qc_classes[0]
+
+        class_mask = self.data.classes == class_
+        # compute correlation for samples in class
+        X = self.data.data_matrix[class_mask].to_numpy()
+        n_sample, n_ft = X.shape
+        with np.errstate(divide="ignore"):
+            r = np.corrcoef(X.T)
+            r = r.flatten()
+        rm_index = np.hstack([np.arange(k + 1) + k * n_ft for k in range(n_ft)])
+        r = np.delete(r, rm_index)
+        r = r[~np.isnan(r)]
+        ax = sns.histplot(r, **hist_params)
+        ax.set_xlabel("Correlation")
+
 
 class PreprocessMethods:
     """
@@ -1248,6 +1292,7 @@ class PreprocessMethods:
     normalize(method, inplace=True): Adjust sample values.
     scale(method, inplace=True): Adjust feature distribution values.
     transform(method, inplace=True): element-wise transformations of data.
+
     """
 
     def __init__(self, dc: DataContainer):
