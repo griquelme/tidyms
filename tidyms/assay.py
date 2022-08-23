@@ -1311,7 +1311,7 @@ def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
 
 
 def _save_roi_list(roi_path: Path, roi_list: List[Roi]):
-    header_template = "index_offset={:020n}\n"
+    header_template = "index_offset={:020d}\n"
     # the dummy header is used as a placeholder to fill with the correct offset
     # value after all ROI have been serialized
     with open(roi_path, "w", newline="\n") as fin:
