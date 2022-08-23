@@ -12,3 +12,4 @@ In this section there is available a list of tutorials on specific topics.
 * :ref:`Processing complete datasets <processing-datasets>`
 * :ref:`Feature detection <peak-picking>`
 * :ref:`Feature correspondence <ft-correspondence>`
+* :ref:`Data curation <data-curation>`
