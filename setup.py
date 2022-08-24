@@ -1,5 +1,5 @@
 PACKAGE_NAME = "tidyms"
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 LICENSE = 'BSD (3-clause)'
 AUTHOR = "Bioanalytical Mass Spectrometry Group at CIBION-CONICET"
 AUTHOR_EMAIL = "griquelme.chm@gmail.com"
