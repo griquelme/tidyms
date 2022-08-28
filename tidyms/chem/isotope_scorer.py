@@ -10,12 +10,12 @@ from .formula_generator import FormulaGenerator
 from .atoms import find_isotope
 from ._isotope_distributions import make_coeff_abundances
 from ._isotope_distributions import _make_element_abundance_array
-from . _isotope_distributions import _combine_array_abundances
+from ._isotope_distributions import _combine_array_abundances
 from .utils import mz_to_mass, mass_to_mz
+
 abundance_dict_type = Optional[Dict[str, Tuple[int, int]]]
 scorer_type = Optional[Union[Callable, str]]
-IsotopicEnvelope = namedtuple("IsotopicEnvelope",
-                              ["nominal", "exact", "abundance"])
+IsotopicEnvelope = namedtuple("IsotopicEnvelope", ["nominal", "exact", "abundance"])
 
 
 class _IsotopeQuery:
@@ -36,8 +36,15 @@ class _IsotopeQuery:
     monoisotopic_index: int
         Index of the monoisotopic mass, used to generate candidate formulas.
     """
-    def __init__(self, mz: np.ndarray, abundance: np.ndarray, charge: int = 0,
-                 monoisotopic_index: int = 0, length: int = 10):
+
+    def __init__(
+        self,
+        mz: np.ndarray,
+        abundance: np.ndarray,
+        charge: int = 0,
+        monoisotopic_index: int = 0,
+        length: int = 10,
+    ):
 
         # compute nominal mass increments for each isotopologue
         isotope_index = mz - mz[0]
@@ -71,8 +78,9 @@ class _IsotopeQuery:
         """
         return mz_to_mass(self.mz, self.charge)
 
-    def get_mass_bounds(self, min_mz_tolerance: float = 0.005,
-                        max_mz_tolerance: float = 0.01):
+    def get_mass_bounds(
+        self, min_mz_tolerance: float = 0.005, max_mz_tolerance: float = 0.01
+    ):
         r"""
         Computes m/z bounds to filter formula candidates.
 
@@ -114,10 +122,16 @@ class IsotopeScorer:
     isotopic envelope of formula candidates.
     """
 
-    def __init__(self, fg: FormulaGenerator, scorer: scorer_type = "qtof",
-                 min_abundance: float = 0.01, max_length: int = 10,
-                 custom_abundances: Optional[dict] = None,
-                 min_p: float = 1e-10, scorer_params: Optional[dict] = None):
+    def __init__(
+        self,
+        fg: FormulaGenerator,
+        scorer: scorer_type = "qtof",
+        min_abundance: float = 0.01,
+        max_length: int = 10,
+        custom_abundances: Optional[dict] = None,
+        min_p: float = 1e-10,
+        scorer_params: Optional[dict] = None,
+    ):
         r"""
         find compatible formulas and creates an score based on the theoretical
         isotopic envelope of formula candidates.
@@ -212,16 +226,21 @@ class IsotopeScorer:
         if scorer_params is None:
             self.scorer_params = dict()
 
-        self._coefficient_envelopes = \
-            _make_isotopic_envelopes(fg, length=max_length, min_p=min_p,
-                                     abundances=custom_abundances)
+        self._coefficient_envelopes = _make_isotopic_envelopes(
+            fg, length=max_length, min_p=min_p, abundances=custom_abundances
+        )
         self._query = None
         self.envelopes = None
         self.scores = None
         self._valid_index = None
 
-    def generate_envelopes(self, mz: np.ndarray, sp: np.ndarray,
-                           charge: int = 0, monoisotopic_index: int = 0):
+    def generate_envelopes(
+        self,
+        mz: np.ndarray,
+        sp: np.ndarray,
+        charge: int = 0,
+        monoisotopic_index: int = 0,
+    ):
         """
         Generate isotopic envelopes using formula candidates.
 
@@ -239,21 +258,31 @@ class IsotopeScorer:
         """
         # query = _IsotopeQuery(mz, sp, charge=charge, length=self.max_length,
         #                       monoisotopic_index=monoisotopic_index,)
-        self._query = _IsotopeQuery(mz, sp, charge=charge,
-                                    length=self.max_length,
-                                    monoisotopic_index=monoisotopic_index)
+        self._query = _IsotopeQuery(
+            mz,
+            sp,
+            charge=charge,
+            length=self.max_length,
+            monoisotopic_index=monoisotopic_index,
+        )
         self.scores = None
         self._valid_index = None
         monoisotopic_mass = self._query.get_monoisotopic_mass()
         self.formula_generator.generate_formulas(monoisotopic_mass)
-        res = _merge_results(self.formula_generator.n_results,
-                             self.formula_generator._results,
-                             self._coefficient_envelopes, self.min_p)
+        res = _merge_results(
+            self.formula_generator.n_results,
+            self.formula_generator._results,
+            self._coefficient_envelopes,
+            self.min_p,
+        )
         self.envelopes = IsotopicEnvelope(*res)
 
-    def filter_envelopes(self, min_mz_tolerance: float = 0.005,
-                         max_mz_tolerance: float = 0.01,
-                         abundance_tolerance: float = 0.05):
+    def filter_envelopes(
+        self,
+        min_mz_tolerance: float = 0.005,
+        max_mz_tolerance: float = 0.01,
+        abundance_tolerance: float = 0.05,
+    ):
         r"""
         Remove candidates that aren't inside the specified m/z and abundance
         tolerance. Using this method before trying to score candidates greatly
@@ -283,14 +312,17 @@ class IsotopeScorer:
 
         """
         if self.envelopes is None:
-            msg = "envelopes must be generated  with the generate_envelopes " \
-                  "method to find valid envelopes"
+            msg = (
+                "envelopes must be generated  with the generate_envelopes "
+                "method to find valid envelopes"
+            )
             raise ValueError(msg)
         else:
             n_rows, n_cols = self.envelopes.exact.shape
             valid_index = np.arange(n_rows)
-            min_mass, max_mass = self._query.get_mass_bounds(min_mz_tolerance,
-                                                             max_mz_tolerance)
+            min_mass, max_mass = self._query.get_mass_bounds(
+                min_mz_tolerance, max_mz_tolerance
+            )
             envelope_exact = self.envelopes.exact
             query_size = min_mass.size
             envelope_abundance = self.envelopes.abundance
@@ -298,24 +330,27 @@ class IsotopeScorer:
             for k in range(query_size):
                 exact_k = envelope_exact[valid_index, k]
                 if min_mass[k] > 0:
-                    valid_mass = ((exact_k >= min_mass[k]) &
-                                  (exact_k <= max_mass[k]))
+                    valid_mass = (exact_k >= min_mass[k]) & (exact_k <= max_mass[k])
                     valid_index = valid_index[valid_mass]
                 max_abundance_k = self._query.abundance[k] + abundance_tolerance
                 min_abundance_k = self._query.abundance[k] - abundance_tolerance
                 min_abundance_k = max(0, min_abundance_k)
                 if min_abundance_k > 0:
                     env_abundance_k = envelope_abundance[valid_index, k]
-                    valid_abundance = ((env_abundance_k >= min_abundance_k) &
-                                       (env_abundance_k <= max_abundance_k))
+                    valid_abundance = (env_abundance_k >= min_abundance_k) & (
+                        env_abundance_k <= max_abundance_k
+                    )
                     valid_index = valid_index[valid_abundance]
 
             self._valid_index = valid_index
 
-    def find_valid_bounds(self, min_mz_tolerance: float = 0.005,
-                          max_mz_tolerance: float = 0.01,
-                          abundance_tolerance: float = 0.05,
-                          return_mz: bool = True):
+    def find_valid_bounds(
+        self,
+        min_mz_tolerance: float = 0.005,
+        max_mz_tolerance: float = 0.01,
+        abundance_tolerance: float = 0.05,
+        return_mz: bool = True,
+    ):
         """
         Find m/z and abundance bounds for each isotopologue based on formulas
         compatible with the monoisotopic mass. This can be used to test
@@ -345,19 +380,22 @@ class IsotopeScorer:
 
         """
         if self._valid_index is None:
-            self.filter_envelopes(min_mz_tolerance=min_mz_tolerance,
-                                  max_mz_tolerance=max_mz_tolerance,
-                                  abundance_tolerance=abundance_tolerance)
-        min_mass, max_mass = self._query.get_mass_bounds(min_mz_tolerance,
-                                                         max_mz_tolerance)
+            self.filter_envelopes(
+                min_mz_tolerance=min_mz_tolerance,
+                max_mz_tolerance=max_mz_tolerance,
+                abundance_tolerance=abundance_tolerance,
+            )
+        min_mass, max_mass = self._query.get_mass_bounds(
+            min_mz_tolerance, max_mz_tolerance
+        )
         if self._valid_index.size > 0:
             abundance = self.envelopes.abundance[self._valid_index]
             min_abundance = abundance.min(axis=0) - abundance_tolerance
             min_abundance[min_abundance < 0] = 0
             max_abundance = abundance.max(axis=0) + abundance_tolerance
-            min_abundance = min_abundance[:min_mass.size]
+            min_abundance = min_abundance[: min_mass.size]
             max_abundance[max_abundance > 1] = 1
-            max_abundance = max_abundance[:min_mass.size]
+            max_abundance = max_abundance[: min_mass.size]
             if return_mz:
                 min_mass = mass_to_mz(min_mass, self._query.charge)
                 max_mass = mass_to_mz(max_mass, self._query.charge)
@@ -372,8 +410,10 @@ class IsotopeScorer:
 
         """
         if self._query is None:
-            msg = "candidate envelopes must be generated with the " \
-                  "generate_envelopes method before scoring"
+            msg = (
+                "candidate envelopes must be generated with the "
+                "generate_envelopes method before scoring"
+            )
             raise ValueError(msg)
 
         mass, abundance = self._query.get_mass(), self._query.abundance
@@ -387,9 +427,13 @@ class IsotopeScorer:
         scores = np.zeros(n_results)
 
         for k, k_ind in enumerate(ind):
-            scores[k] = self.scorer(self.envelopes.exact[k_ind],
-                                    self.envelopes.abundance[k_ind],
-                                    mass, abundance, **self.scorer_params)
+            scores[k] = self.scorer(
+                self.envelopes.exact[k_ind],
+                self.envelopes.abundance[k_ind],
+                mass,
+                abundance,
+                **self.scorer_params
+            )
         self.scores = scores
 
     def get_top_results(self, n=10):
@@ -421,7 +465,7 @@ class IsotopeScorer:
         # sort coefficients using the score and keep the first n values
         top_n_index = np.argsort(self.scores)
         if n is not None:
-            top_n_index = top_n_index[:(-n - 1):-1]
+            top_n_index = top_n_index[: (-n - 1) : -1]
 
         scores = self.scores[top_n_index]
         coefficients = coefficients[top_n_index]
@@ -436,9 +480,12 @@ class IsotopeScorer:
         abundance /= abundance.sum(axis=1)[:, np.newaxis]
 
 
-def _make_isotopic_envelopes(fg: FormulaGenerator, length: int = 10,
-                             min_p: float = 1e-10,
-                             abundances: abundance_dict_type = None):
+def _make_isotopic_envelopes(
+    fg: FormulaGenerator,
+    length: int = 10,
+    min_p: float = 1e-10,
+    abundances: abundance_dict_type = None,
+):
 
     if abundances is None:
         abundances = dict()
@@ -449,9 +496,14 @@ def _make_isotopic_envelopes(fg: FormulaGenerator, length: int = 10,
     has_positive = p_coefficient.max() > 0
     if has_positive:
         p_bounds = [fg.bounds[x] for x in p_isotopes]
-        p_envelopes = make_coeff_abundances(p_bounds, p_coefficient, p_isotopes,
-                                            length, abundances=abundances,
-                                            min_p=min_p)
+        p_envelopes = make_coeff_abundances(
+            p_bounds,
+            p_coefficient,
+            p_isotopes,
+            length,
+            abundances=abundances,
+            min_p=min_p,
+        )
         p_envelopes = IsotopicEnvelope(*p_envelopes)
     else:
         p_envelopes = _make_empty_envelope(length)
@@ -461,9 +513,14 @@ def _make_isotopic_envelopes(fg: FormulaGenerator, length: int = 10,
     has_negative = n_coefficient.max() > 0
     if has_negative:
         n_bounds = [fg.bounds[x] for x in n_isotopes]
-        n_envelopes = make_coeff_abundances(n_bounds, n_coefficient, n_isotopes,
-                                            length, abundances=abundances,
-                                            min_p=min_p)
+        n_envelopes = make_coeff_abundances(
+            n_bounds,
+            n_coefficient,
+            n_isotopes,
+            length,
+            abundances=abundances,
+            min_p=min_p,
+        )
         n_envelopes = IsotopicEnvelope(*n_envelopes)
     else:
         n_envelopes = _make_empty_envelope(length)
@@ -472,8 +529,9 @@ def _make_isotopic_envelopes(fg: FormulaGenerator, length: int = 10,
         c12 = find_isotope("12C")
         c_min, c_max = fg.bounds[c12]
         c_abundance = abundances.get("C")
-        c_envelopes = _make_element_abundance_array(c12, c_min, c_max, length,
-                                                    abundance=c_abundance)
+        c_envelopes = _make_element_abundance_array(
+            c12, c_min, c_max, length, abundance=c_abundance
+        )
         c_envelopes = IsotopicEnvelope(*c_envelopes)
     else:
         c_envelopes = _make_empty_envelope(length)
@@ -489,19 +547,22 @@ def _make_empty_envelope(max_length: int):
     return IsotopicEnvelope(nominal, exact, abundance)
 
 
-def _make_results_envelope(index, envelopes: Tuple[IsotopicEnvelope],
-                           min_p):
+def _make_results_envelope(index, envelopes: Tuple[IsotopicEnvelope], min_p):
     shape = (index[0].size, envelopes[0].nominal.shape[1])
     nominal = np.zeros(shape, dtype=int)
     exact = np.zeros(shape, dtype=float)
     abundance = np.zeros(shape, dtype=float)
     abundance[:, 0] = 1
     for env, ind in zip(envelopes, index):
-        nominal, exact, abundance = \
-            _combine_array_abundances(nominal, exact, abundance,
-                                      env.nominal[ind], env.exact[ind],
-                                      env.abundance[ind],
-                                      min_p=min_p)
+        nominal, exact, abundance = _combine_array_abundances(
+            nominal,
+            exact,
+            abundance,
+            env.nominal[ind],
+            env.exact[ind],
+            env.abundance[ind],
+            min_p=min_p,
+        )
     return nominal, exact, abundance
 
 
@@ -515,8 +576,7 @@ def _merge_results(n_results, results, envelopes, min_p):
         # check that there are results
         if index[0].size > 0:
             end = start + index[0].size
-            tmp_nom, tmp_ex, tmp_ab = _make_results_envelope(index, envelopes,
-                                                             min_p)
+            tmp_nom, tmp_ex, tmp_ab = _make_results_envelope(index, envelopes, min_p)
             nominal[start:end] = tmp_nom
             exact[start:end] = tmp_ex
             abundance[start:end] = tmp_ab
@@ -524,14 +584,20 @@ def _merge_results(n_results, results, envelopes, min_p):
     return nominal, exact, abundance
 
 
-def score_isotope(mz: np.ndarray, sp: np.ndarray, mzq: np.ndarray,
-                  spq: np.ndarray, min_sigma_mz: float = 0.005,
-                  max_sigma_mz: float = 0.01, min_sigma_sp: float = 0.05,
-                  max_sigma_sp: float = 0.05):
+def score_isotope(
+    mz: np.ndarray,
+    sp: np.ndarray,
+    mzq: np.ndarray,
+    spq: np.ndarray,
+    min_sigma_mz: float = 0.005,
+    max_sigma_mz: float = 0.01,
+    min_sigma_sp: float = 0.05,
+    max_sigma_sp: float = 0.05,
+):
     mz_sigma = max_sigma_mz + (min_sigma_mz - max_sigma_mz) * spq
     sp_sigma = max_sigma_sp + (min_sigma_sp - max_sigma_sp) * spq
-    mz = mz[:mzq.size]
-    sp = sp[:mzq.size]
+    mz = mz[: mzq.size]
+    sp = sp[: mzq.size]
     # normalize again the candidate intensity to 1
     sp = sp / sp.sum()
 
