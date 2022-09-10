@@ -1,7 +1,8 @@
 import numpy as np
 from math import gcd
+import bisect
 from typing import Dict, List, Tuple
-from .atoms import Element, PTABLE
+from .atoms import Element, PTABLE, EM
 from .formula import Formula
 from ._isotope_distributions import make_coeff_abundances
 from .utils import cartesian_product_from_range_list
@@ -46,7 +47,8 @@ class MMIFinder:
         """
         self.rules = _create_rules_dict(bounds, max_mass, length, bin_size)
         self.bin_size = bin_size
-        self.max_charge = max_charge
+        self.max_charge = abs(max_charge)
+        self.polarity = 1 if max_charge >= 0 else -1
         self.max_mass = max_mass
         self.mz_tol = mz_tol
         self.p_tol = p_tol
@@ -54,8 +56,9 @@ class MMIFinder:
     def find(
         self,
         mz: np.ndarray,
-        sp: np.ndarray
-    ) -> Tuple[int, List[Tuple[int, int]]]:
+        sp: np.ndarray,
+        mono_index: int
+    ) -> List[Tuple[int, int]]:
 
         """
         Search MMI candidates using m/z and area information from a feature
@@ -67,26 +70,25 @@ class MMIFinder:
             Sorted array of m/z values of features
         sp : array
             Area array of features.
+        mono_index : int
+            Index of the most intense value in mz
 
         Returns
         -------
-        monoisotopic_candidate : int
-            Index of the most intense feature in the list
-        mmi_candidates: List[int]
+        mmi_candidates: List[Tuple[int, int]]
             List of candidates assuming that the monoisotopic index is part of
             the envelope but not the MMI.
 
         """
-        mono_index = int(np.argmax(sp))
         mono_sp = sp[mono_index]
         mono_mz = mz[mono_index]
         # monoisotopic m/z to possible mass values
         # charge sign and electron mass can be ignored as computations are done
         # using mass differences
         mono_M_list, charge_list = _get_valid_mono_mass(
-            mono_mz, self.max_charge, self.max_mass
+            mono_mz, self.max_charge, self.polarity, self.max_mass
         )
-        candidates = list()
+        candidates = [(mono_index, q) for q in charge_list]
         for M, charge in zip(mono_M_list, charge_list):
             M_bin = int(M // self.bin_size)
             mmi_rules = self.rules.get(M_bin)
@@ -97,18 +99,19 @@ class MMIFinder:
                         self.p_tol
                     )
                     candidates.extend(i_candidates)
-        return mono_index, candidates
+        return candidates
 
 
 def _get_valid_mono_mass(
     mz_mono: float,
     max_charge: int,
+    polarity: int,
     max_mass: float
 ) -> Tuple[List[float], List[int]]:
     charge_list = list()
     mono_M_list = list()
-    for q in range(1, abs(max_charge) + 1):
-        M = q * mz_mono
+    for q in range(1, max_charge + 1):
+        M = q * mz_mono - polarity * q * EM
         if M <= max_mass:
             charge_list.append(q)
             mono_M_list.append(M)
@@ -116,22 +119,23 @@ def _get_valid_mono_mass(
 
 
 def _find_candidate(
-        mz: np.ndarray,
-        sp: np.ndarray,
-        mono_M: float,
-        charge: int,
-        mono_sp: float,
-        i_rules: Dict,
-        mz_tol: float,
-        p_tol: float
+    mz: np.ndarray,
+    sp: np.ndarray,
+    mono_M: float,
+    charge: int,
+    mono_sp: float,
+    i_rules: Dict,
+    mz_tol: float,
+    p_tol: float
 ) -> List[Tuple[int, int]]:
     # search valid m/z values
     min_dM, max_dM = i_rules["dM"]
-    min_mz = mono_M - max_dM / charge - mz_tol
-    max_mz = mono_M - min_dM / charge + mz_tol
+    min_mz = (mono_M - max_dM) / charge - mz_tol
+    max_mz = (mono_M - min_dM) / charge + mz_tol
     min_qp = i_rules["qp"][0] - p_tol
     max_qp = i_rules["qp"][1] + p_tol
-    start, end = np.searchsorted(mz, [min_mz, max_mz])
+    start = bisect.bisect(mz, min_mz)
+    end = bisect.bisect(mz, max_mz)
     # if valid m/z where found, check if the abundance quotient qp is valid
     if start < end:
         candidates = np.arange(start, end)
