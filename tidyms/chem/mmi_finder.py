@@ -45,7 +45,8 @@ class MMIFinder:
             abundance tolerance used to search candidates.
 
         """
-        self.rules = _create_rules_dict(bounds, max_mass, length, bin_size)
+        self.rules = _create_rules_dict(
+            bounds, max_mass, length, bin_size, p_tol)
         self.bin_size = bin_size
         self.max_charge = abs(max_charge)
         self.polarity = 1 if max_charge >= 0 else -1
@@ -132,7 +133,7 @@ def _find_candidate(
     min_dM, max_dM = i_rules["dM"]
     min_mz = (mono_M - max_dM) / charge - mz_tol
     max_mz = (mono_M - min_dM) / charge + mz_tol
-    min_qp = i_rules["qp"][0] - p_tol
+    min_qp = i_rules["qp"][0]
     max_qp = i_rules["qp"][1] + p_tol
     start = bisect.bisect(mz, min_mz)
     end = bisect.bisect(mz, max_mz)
@@ -151,32 +152,36 @@ def _create_rules_dict(
     bounds: Dict[str, Tuple[int, int]],
     max_mass: float,
     length: int,
-    bin_size: int
+    bin_size: int,
+    p_tol: float
 ) -> Dict[int, List[Dict[str, Tuple[float, float]]]]:
     _, Ma, pa = _create_envelope_arrays(bounds, max_mass, length)
     # find the monoisotopic index, its Mass difference with the MMI (dM) and
     # its abundance quotient with the MMI (qp)
-    mono_index = np.argmax(pa, axis=1)
-    dM = Ma[np.arange(Ma.shape[0]), mono_index] - Ma[:, 0]
-    qp = pa[np.arange(Ma.shape[0]), mono_index] / pa[:, 0]
+    # mono_index = np.argmax(pa, axis=1)
+    # dM = Ma[np.arange(Ma.shape[0]), mono_index] - Ma[:, 0]
+    # qp = pa[np.arange(Ma.shape[0]), mono_index] / pa[:, 0]
     bins = (Ma[:, 0] // bin_size).astype(int)
 
     # find unique values for bins and monoisotopic index that will be used
     # as key for the rule dictionary
     unique_bins = np.unique(bins)
-    unique_mono_index = np.unique(mono_index)
-    unique_mono_index = unique_mono_index[unique_mono_index > 0]
+    # unique_mono_index = np.unique(mono_index)
+    # unique_mono_index = unique_mono_index[unique_mono_index > 0]
 
     rules = dict()
-
+    pa_max = np.max(pa, axis=1)
     for b in unique_bins:
         b_rules = list()
-        for mi in unique_mono_index:
-            mask = (mono_index == mi) & (bins == b)
-            if mask.any():
+        bin_mask = bins == b
+        for mi in range(1, length):
+            qp = pa[bin_mask, mi] / pa[bin_mask, 0]
+            dM = Ma[bin_mask, mi] - Ma[bin_mask, 0]
+            qp_mask = qp >= (1.0 - p_tol)
+            if qp_mask.any():
                 mi_rules = dict()
-                dM_b_mi = dM[mask]
-                qp_b_mi = qp[mask]
+                dM_b_mi = dM[qp_mask]
+                qp_b_mi = qp[qp_mask]
                 mi_rules["dM"] = dM_b_mi.min(), dM_b_mi.max()
                 mi_rules["qp"] = qp_b_mi.min(), qp_b_mi.max()
                 b_rules.append(mi_rules)

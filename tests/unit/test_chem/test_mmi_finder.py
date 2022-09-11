@@ -52,24 +52,26 @@ def test__get_relevant_elements():
 def test__get_monoisotopic_mass_candidates_positive_max_charge(max_charge):
     max_mass = 2000.0
     mono_M = 250.0
+    polarity = 1
     # all possible values should be lower than max_mass
     expected_charge = np.arange(1, abs(max_charge) + 1)
     expected_M = expected_charge * mono_M
     test_M, test_charge = mmi_finder._get_valid_mono_mass(
-        mono_M, max_charge, max_mass)
+        mono_M, max_charge, polarity, max_mass)
     assert np.allclose(expected_M, test_M)
     assert np.array_equal(expected_charge, test_charge)
 
 
-@pytest.mark.parametrize("max_charge", [-1, -2, -3, -4])
+@pytest.mark.parametrize("max_charge", [1, 2, 3, 4])
 def test__get_monoisotopic_mass_candidates_negative_max_charge(max_charge):
     max_mass = 2000.0
     mono_M = 250.0
+    polarity = -1
     # all possible values should be lower than max_mass
     expected_charge = np.arange(1, abs(max_charge) + 1)
     expected_M = np.abs(expected_charge) * mono_M
     test_M, test_charge = mmi_finder._get_valid_mono_mass(
-        mono_M, max_charge, max_mass)
+        mono_M, max_charge, polarity, max_mass)
     assert np.allclose(expected_M, test_M)
     assert np.array_equal(expected_charge, test_charge)
 
@@ -80,9 +82,10 @@ def test__get_monoisotopic_mass_candidates_mono_mass_greater_than_max_mass():
     # valid charges should be 1 and 2.
     max_charge = 3
     expected_charge = np.arange(1, 3)
+    polarity = 1
     expected_M = expected_charge * mono_M
     test_M, test_charge = mmi_finder._get_valid_mono_mass(
-        mono_M, max_charge, max_mass)
+        mono_M, max_charge, polarity, max_mass)
     assert np.allclose(expected_M, test_M)
     assert np.array_equal(expected_charge, test_charge)
 
@@ -98,7 +101,8 @@ def rules():
     max_mass = 2000.0
     length = 5
     bin_size = 100
-    r = mmi_finder._create_rules_dict(bounds, max_mass, length, bin_size)
+    p_tol = 0.05
+    r = mmi_finder._create_rules_dict(bounds, max_mass, length, bin_size, p_tol)
     return r, max_mass, length, bin_size
 
 
@@ -199,7 +203,6 @@ def test_MMIFinder():
     mono_index = 3
     mz = np.array([100.0, 300.0, mono_mz - dm_cl, mono_mz, 456.0])
     sp = np.array([100.0, 200.0, 500.0, 501.0, 34.0])
-    test_mono_index, test_mmi_index = finder.find(mz, sp)
-    expected_mmi_index = [(2, 1)]
+    test_mmi_index = finder.find(mz, sp, mono_index)
+    expected_mmi_index = [(3, 1), (3, 2), (3, 3), (2, 1)]
     assert test_mmi_index == expected_mmi_index
-    assert mono_index == test_mono_index
