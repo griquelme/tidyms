@@ -3,8 +3,9 @@ Functions to find isotopic envelopes candidates in a list of m/z values.
 """
 
 
+import bisect
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Set, Tuple
 from .atoms import Element, PTABLE
 
 
@@ -25,8 +26,6 @@ class EnvelopeFinder(object):
         estimation.
     mz_tolerance : float
         tolerance used to extend the element based bounds
-    max_charge : int
-        max charge to search envelopes
     max_length : int
         max length of the envelopes
 
@@ -56,21 +55,18 @@ class EnvelopeFinder(object):
         self,
         elements: List[str],
         mz_tolerance: float,
-        max_charge: int = 3,
         max_length: int = 5,
         min_p: float = 0.01,
     ):
         self._elements = [PTABLE[x] for x in elements]
         self._tolerance = mz_tolerance
-        self._max_charge = max_charge
         self._max_length = max_length
         self._bounds = _make_exact_mass_difference_bounds(self._elements, min_p)
 
     def find(
-        self,
-        mz: np.ndarray,
-        mmi_index: int
-    ) -> Dict[int, List[List[int]]]:
+        self, mz: np.ndarray, mmi_index: int, charge: int,
+        valid_indices: Set[int]
+    ) -> List[List[int]]:
         """
         Finds isotopic envelope candidates starting from the minimum mass
         isotopologue (MMI).
@@ -81,32 +77,31 @@ class EnvelopeFinder(object):
             sorted array of m/z values
         mmi_index : int
             index of the MMI
+        charge : int
+            Absolute value of the charge state of the envelope
 
         Returns
         -------
-        envelopes: dict
-            a dictionary from charge values to a list of lists with indices of
-            envelope candidates.
+        envelopes: List[List[int]]
+            List where each element is a list of indices in `mz` corresponding
+            to an envelope candidate.
 
         """
         return _find_envelopes(
-            mz,
-            mmi_index,
-            self._max_charge,
-            self._bounds,
-            self._max_length,
-            self._tolerance,
+            mz, mmi_index, valid_indices, charge, self._max_length,
+            self._tolerance, self._bounds
         )
 
 
 def _find_envelopes(
     mz: np.ndarray,
     mmi_index: int,
-    max_charge: int,
-    bounds: Dict[int, Tuple[float, float]],
+    valid_indices: Set,
+    charge: int,
     max_length: int,
     mz_tolerance: float,
-) -> Dict[int, List[List[int]]]:
+    bounds: Dict[int, Tuple[float, float]],
+) -> List[List[int]]:
     """
 
     Finds isotopic envelope candidates using multiple charge states.
@@ -117,13 +112,13 @@ def _find_envelopes(
         array of sorted m/z values
     mmi_index: int
         index of the first isotope in the envelope
-    bounds: dict
-        bounds obtained with _make_m_bounds
+    charge: int
+        Absolute value of the charge state of the isotopic envelope
     max_length: int
         maximum length ot the isotope candidates
-    max_charge: List[int]
-        charge state of the isotopic envelope
     mz_tolerance: float
+    bounds: dict
+        bounds obtained with _make_m_bounds
 
     Returns
     -------
@@ -132,31 +127,22 @@ def _find_envelopes(
         candidates.
 
     """
-    if max_charge == 0:
-        charge_list = [0]
-    else:
-        charge_list = list(range(1, abs(max_charge) + 1))
-
-    completed_candidates = dict()
-
-    for q in charge_list:
-        candidates = [[mmi_index]]
-        while candidates:
-            candidate = candidates.pop()
-            length = len(candidate)
-            min_mz, max_mz = _get_next_mz_search_interval(
-                mz[candidate], bounds, q, mz_tolerance)
-            start, end = np.searchsorted(mz, [min_mz, max_mz])
-
-            if (start < end) and (length < max_length):
-                tmp = [candidate + [x] for x in range(start, end)]
-                candidates.extend(tmp)
-            else:
-                q_candidates = completed_candidates.get(q)
-                if q_candidates is None:
-                    completed_candidates[q] = [candidate]
-                else:
-                    q_candidates.append(candidate)
+    completed_candidates = list()
+    candidates = [[mmi_index]]
+    while candidates:
+        candidate = candidates.pop()
+        length = len(candidate)
+        min_mz, max_mz = _get_next_mz_search_interval(
+            mz[candidate], bounds, charge, mz_tolerance)
+        start = bisect.bisect(mz, min_mz)
+        end = bisect.bisect(mz, max_mz)
+        new_elements = [x for x in range(start, end) if x in valid_indices]
+        if new_elements and (length < max_length):
+            tmp = [candidate + [x] for x in new_elements]
+            candidates.extend(tmp)
+        else:
+            completed_candidates.append(candidate)
+    completed_candidates = [x for x in completed_candidates if len(x) > 1]
     return completed_candidates
 
 
