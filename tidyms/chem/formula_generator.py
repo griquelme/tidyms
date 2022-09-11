@@ -5,9 +5,10 @@ functions to calculate compatible molecular formulas within a given tolerance.
 
 import numpy as np
 from collections import namedtuple
-from .utils import cartesian_product_from_range_list, convert_to_da
+from .utils import cartesian_product_from_range_list
 from typing import Union, Iterable, Dict, Optional, List, Tuple
 from .atoms import Isotope, find_isotope
+
 # from .formula_generator_utils import *
 
 
@@ -22,8 +23,8 @@ _Coefficients = namedtuple(
         "nominal_r",
         "defect",
         "r_to_defect",
-        "r_to_index"
-    ]
+        "r_to_index",
+    ],
 )
 _Coefficients.__doc__ = """\
 Named tuple with elements with positive/negative mass defect.
@@ -53,80 +54,21 @@ r_to_defect: np.array[float]
 """
 
 
-class _Tolerance(object):
-    """
-    manages mass tolerance in different units
-
-    Attributes
-    ----------
-    value : positive number
-    units : {"da", "mda", "ppm"}
-
-    """
-
-    def __init__(self, value: float, units: str):
-        self.value = value
-        self.units = units
-
-    def __repr__(self):
-        return "Tolerance({:.3f} {})".format(self.value, self.units)
-
-    @property
-    def value(self) -> float:
-        return self.__value
-
-    @value.setter
-    def value(self, val: float):
-        if (not isinstance(val, (float, int))) or (val <= 0):
-            raise ValueError("value should be greater than zero.")
-        self.__value = val
-
-    @property
-    def units(self) -> str:
-        return self.__units
-
-    @units.setter
-    def units(self, value: str):
-        if value not in {"da", "mda", "ppm"}:
-            raise ValueError("valid units are Da, mDa or ppm")
-        self.__units = value
-
-    def get_abs_tolerance(self, m: Optional[float] = None) -> float:
-        """
-        Calculate tolerance in Da.
-
-        Parameters
-        ----------
-        m : float, optional.
-            mass used for ppm calculations
-
-        Returns
-        -------
-        tol : float
-            tolerance in Da.
-
-        """
-        return convert_to_da(self.value, self.units, reference=m)
-
-
 class Bounds(dict):
     """
     Mapping from isotopes to upper and lower bounds
     """
+
     def __init__(
         self,
         isotopes: Iterable[Isotope],
-        bounds_range: Iterable[Tuple[int, int]], mass: float
+        bounds_range: Iterable[Tuple[int, int]],
+        mass: float,
     ):
         dict.__init__(self, zip(isotopes, bounds_range))
         self.mass = mass
 
-    def update_bounds(
-        self,
-        isotope: Union[Isotope, str],
-        lower: int,
-        upper: int
-    ):
+    def update_bounds(self, isotope: Union[Isotope, str], lower: int, upper: int):
         """
         modify or add new elements to bounds.
 
@@ -243,8 +185,9 @@ class Bounds(dict):
                 max_negative += min_tmp
         return min_positive, max_positive, min_negative, max_negative
 
-    def make_coefficients(self, return_sorted: bool = True,
-                          mode: Optional[str] = None) -> _Coefficients:
+    def make_coefficients(
+        self, return_sorted: bool = True, mode: Optional[str] = None
+    ) -> _Coefficients:
         """
         Generate coefficients for FormulaGenerator
 
@@ -259,15 +202,12 @@ class Bounds(dict):
         coefficients: Coefficients
 
         """
-        coefficients = _make_coefficients(
-            self, mode=mode, return_sorted=return_sorted)
+        coefficients = _make_coefficients(self, mode=mode, return_sorted=return_sorted)
         return coefficients
 
     @staticmethod
     def from_isotope_str(
-        isotopes: Iterable[str],
-        mass: float,
-        user_bounds: Optional[dict] = None
+        isotopes: Iterable[str], mass: float, user_bounds: Optional[dict] = None
     ):
         """
         Creates a _Bounds instance from a list of isotope strings.
@@ -394,13 +334,11 @@ class FormulaGenerator:
         self,
         elements: Iterable[str],
         mass: float,
-        tolerance: float,
-        tolerance_units: Optional[str] = "da",
         refine_h: bool = True,
         n_cluster: int = 5,
         user_bounds: Optional[dict] = None,
         min_defect: Optional[float] = None,
-        max_defect: Optional[float] = None
+        max_defect: Optional[float] = None,
     ):
         """
         FormulaGenerator constructor.
@@ -415,9 +353,6 @@ class FormulaGenerator:
             Maximum mass to evaluate. This value is used to estimate the maximum
              coefficient possible for each element used (eg: with a mass of 500
              for 31P, the maximum value is floor(500 / 30.97376) = 16.
-        tolerance: float
-            Mass tolerance used to search for compatible formulas.
-        tolerance_units: {"da", "mda", "ppm"}
         refine_h: bool, True
             Used to find a better bound for the maximum number of H atoms.
             See Notes.
@@ -448,10 +383,10 @@ class FormulaGenerator:
         of hydrogen is:math: `n_{H} < \frac{m}{7} + 2 n_{cluster}`
         """
 
-        self._tolerance = _Tolerance(tolerance, tolerance_units)
-        max_mass = mass + self._tolerance.get_abs_tolerance(mass)
+        max_mass = mass
         self.bounds = Bounds.from_isotope_str(
-            elements, max_mass, user_bounds=user_bounds)
+            elements, max_mass, user_bounds=user_bounds
+        )
         self._refine_h = refine_h
         self._n_cluster = n_cluster
         self._min_defect = min_defect
@@ -474,22 +409,16 @@ class FormulaGenerator:
         self.pos = pos_restrictions.make_coefficients(mode="positive")
         self.neg = neg_restrictions.make_coefficients(mode="negative")
 
-    def __repr__(self):
-        res = "FormulaGenerator\n----------------\ntolerance: {}\nbounds: {}"
-        res = res.format(self._tolerance, self.bounds)
-        return res
-
-    def _add_query(self, mass: float):
-        tolerance = self._tolerance.get_abs_tolerance(mass)
+    def _add_query(self, mass: float, tolerance: float):
         bounds = self.bounds.get_mass_query_bounds(mass + tolerance)
         if self._refine_h:
             bounds.refine_h_upper_bounds(n_cluster=self._n_cluster)
         self._query = _MassQuery(mass, tolerance, bounds)
 
-    def generate_formulas(self, mass: float):
+    def generate_formulas(self, mass: float, tolerance: float):
         """
         Computes formulas compatibles with the given query mass.
-        
+
         Computes formulas for neutral species. If charged species are used, mass
         values must be corrected using the electron mass.
         Results are stored in an internal format, use `results_to_array` or
@@ -498,18 +427,15 @@ class FormulaGenerator:
         Parameters
         ----------
         mass : float
-            Exact mass of the species. 
-        
+            Exact mass of the species.
+        tolerance : float
+            Tolerance to search compatible formulas.
         """
-        self._add_query(mass)
+        self._add_query(mass, tolerance)
         min_d = self._min_defect
         max_d = self._max_defect
         self._results, self.n_results = _generate_formulas2(
-            self._query,
-            self.pos,
-            self.neg,
-            min_defect=min_d,
-            max_defect=max_d
+            self._query, self.pos, self.neg, min_defect=min_d, max_defect=max_d
         )
 
     def results_to_array(self) -> Tuple[np.ndarray, List[str], np.ndarray]:
@@ -527,8 +453,9 @@ class FormulaGenerator:
             Mass associated to each row of coefficients.
         """
         if self._results:
-            return _results_to_array(self._results, self.n_results, self.pos,
-                                     self.neg, self.has_carbon)
+            return _results_to_array(
+                self._results, self.n_results, self.pos, self.neg, self.has_carbon
+            )
 
     def results_to_str(self, return_isotopes: bool = False):
         """
@@ -559,7 +486,7 @@ class FormulaGenerator:
         return res
 
     @staticmethod
-    def from_hmdb(mass: int, tolerance: Union[str, float], **kwargs):
+    def from_hmdb(mass: int, **kwargs):
         """
         Creates a FormulaGenerator instance using elemental bounds obtained
         from molecules present in the Human Metabolome database.
@@ -569,10 +496,6 @@ class FormulaGenerator:
         mass : {500, 1000, 1500, 2000}
             Creates a FormulaGenerator using molecular mass values lower than
             500, 1000, 1500 or 2000 respectively.
-        tolerance : "qtof", "orbitrap" or positive number
-            Mass tolerance used in the formula generator. By default, units
-            are in da. "qtof" set the tolerance to 0.005 Da. "orbitrap" sets
-            the tolerance to 0.001
         kwargs: key value parameters to pass to the FormulaGenerator
             constructor.
 
@@ -582,17 +505,41 @@ class FormulaGenerator:
 
         """
         if mass == 500:
-            bounds = {"C": (0, 34), "H": (0, 70), "N": (0, 10),
-                      "O": (0, 18), "P": (0, 4), "S": (0, 7)}
+            bounds = {
+                "C": (0, 34),
+                "H": (0, 70),
+                "N": (0, 10),
+                "O": (0, 18),
+                "P": (0, 4),
+                "S": (0, 7),
+            }
         elif mass == 1000:
-            bounds = {"C": (0, 70), "H": (0, 128), "N": (0, 15),
-                      "O": (0, 31), "P": (0, 8), "S": (0, 7)}
+            bounds = {
+                "C": (0, 70),
+                "H": (0, 128),
+                "N": (0, 15),
+                "O": (0, 31),
+                "P": (0, 8),
+                "S": (0, 7),
+            }
         elif mass == 1500:
-            bounds = {"C": (0, 100), "H": (0, 164), "N": (0, 23),
-                      "O": (0, 46), "P": (0, 8), "S": (0, 7)}
+            bounds = {
+                "C": (0, 100),
+                "H": (0, 164),
+                "N": (0, 23),
+                "O": (0, 46),
+                "P": (0, 8),
+                "S": (0, 7),
+            }
         elif mass == 2000:
-            bounds = {"C": (0, 108), "H": (0, 190), "N": (0, 23),
-                      "O": (0, 61), "P": (0, 8), "S": (0, 8)}
+            bounds = {
+                "C": (0, 108),
+                "H": (0, 190),
+                "N": (0, 23),
+                "O": (0, 61),
+                "P": (0, 8),
+                "S": (0, 8),
+            }
         else:
             msg = "Valid mass values are 500, 1000, 1500 or 2000"
             raise ValueError(msg)
@@ -602,12 +549,7 @@ class FormulaGenerator:
         kwargs["user_bounds"] = bounds
         elements = [str(x) for x in bounds]
 
-        if tolerance == "qtof":
-            tolerance = 0.005
-        elif tolerance == "orbitrap":
-            tolerance = 0.001
-
-        return FormulaGenerator(elements, mass, tolerance, **kwargs)
+        return FormulaGenerator(elements, mass, **kwargs)
 
 
 class InvalidMass(ValueError):
@@ -625,7 +567,7 @@ class InvalidBound(ValueError):
 def _validate_bounds(n_min: int, n_max: int):
     """
     Validates bounds for a given element
-    
+
     Parameters
     ----------
     n_min: int
@@ -652,11 +594,7 @@ def _add_dummy_isotope(pos: Bounds, neg: Bounds):
 
 
 def _results_to_array(
-    results: Dict,
-    n: int,
-    pos: _Coefficients,
-    neg: _Coefficients,
-    has_carbon: bool
+    results: Dict, n: int, pos: _Coefficients, neg: _Coefficients, has_carbon: bool
 ) -> Tuple[np.ndarray, List[str], np.ndarray]:
     """
     Converts results from guess_formula to a numpy array of coefficients.
@@ -680,12 +618,15 @@ def _results_to_array(
         res[start:end, i_neg:] = neg.coefficients[results[k][1], :]
         if has_carbon:
             res[start:end, ic] = results[k][2]
-            mass[start:end] = (pos.monoisotopic[results[k][0]] +
-                               12 * np.array(results[k][2]) +
-                               neg.monoisotopic[results[k][1]])
+            mass[start:end] = (
+                pos.monoisotopic[results[k][0]]
+                + 12 * np.array(results[k][2])
+                + neg.monoisotopic[results[k][1]]
+            )
         else:
-            mass[start:end] = (pos.monoisotopic[results[k][0]] +
-                               neg.monoisotopic[results[k][1]])
+            mass[start:end] = (
+                pos.monoisotopic[results[k][0]] + neg.monoisotopic[results[k][1]]
+            )
         start = end
     isotopes = [str(x) for x in isotopes]
     res, isotopes = _remove_dummy_isotopes(pos, neg, has_carbon, isotopes, res)
@@ -697,7 +638,7 @@ def _remove_dummy_isotopes(
     neg: _Coefficients,
     has_carbon: bool,
     isotopes: List[str],
-    res: np.array
+    res: np.array,
 ) -> Tuple[np.array, List[str]]:
 
     has_pos = pos.coefficients.max() > 0
@@ -730,9 +671,7 @@ def _make_coefficients_range(bounds: Bounds) -> List[range]:
 
 
 def _make_coefficients(
-    bounds: Bounds,
-    return_sorted: bool = True,
-    mode: Optional[str] = None
+    bounds: Bounds, return_sorted: bool = True, mode: Optional[str] = None
 ) -> _Coefficients:
     """
     make Coefficients for positive and negative mode.
@@ -781,8 +720,17 @@ def _make_coefficients(
     rd_array = _make_remainder_arrays(defect, nominal_r, fill_with=fill)
     ri_array = _make_remainder_arrays(np.arange(defect.size), nominal_r)
 
-    coefficients = (elements, coefficients, monoisotopic, nominal,
-                    nominal_q, nominal_r, defect, rd_array, ri_array)
+    coefficients = (
+        elements,
+        coefficients,
+        monoisotopic,
+        nominal,
+        nominal_q,
+        nominal_r,
+        defect,
+        rd_array,
+        ri_array,
+    )
     return _Coefficients(*coefficients)
 
 
@@ -817,372 +765,24 @@ def _make_remainder_arrays(x, r, fill_with=0):
         res *= fill_with
         for k in range(12):
             xk = r_to_x[k]
-            res[k, :xk.size] = xk
+            res[k, : xk.size] = xk
         return res
 
 
-def _filter_valid_n_carbon(
-    pos_coeff_index: np.ndarray,
-    neg_coeff_index: np.ndarray,
-    qp: np.ndarray,
-    qn: np.ndarray,
-    min_c: int,
-    max_c: int
-):
-    """
-    Auxiliary function to guess_formula. Computes the number of carbon of each
-    formula and filters by minimum and maximum number  of carbon atoms.
-
-    """
-    qc = qp - qn
-    valid_qc = (qc >= min_c) & (qc <= max_c)
-    pos_coeff_index = pos_coeff_index[valid_qc]
-    neg_coeff_index = neg_coeff_index[valid_qc]
-    qc = qc[valid_qc]
-    return pos_coeff_index, neg_coeff_index, qc
-
-
-def _generate_formulas(
-    mq: _MassQuery,
+def _solve_generate_formulas_i(
+    i: int,
+    r: int,
+    q: int,
+    d: float,
+    defect_bounds: Tuple[float, float, float, float],
+    c_bounds: Tuple[int, int],
+    tol: float,
     pos: _Coefficients,
     neg: _Coefficients,
-    min_defect: Optional[float] = -1,
-    max_defect: Optional[float] = None
-):
-    """
-    Computes formulas compatible with a given mass
-    Parameters
-    ----------
-    mq: _MassQuery
-    pos: _Coefficients
-    neg: _Coefficients
-
-    Returns
-    -------
-    res: dict
-        a dictionary were each key is a possible nominal mass, and the values
-        are a tuple of positive coefficients, negative coefficients and the
-        carbon coefficient.
-    n: integer
-        Number of formulas generated.
-    """
-
-    # Algorithm
-    # ---------
-    # The formula search is based on splitting the mass into nominal mass and
-    # mass defect: M = m + d (M: Monoisotopic mass, m: nominal mass, d: mass
-    # defect). Several combinations of m and d are possible, but only one of
-    # them is valid. The problem is solved for every combination of m and d.
-    # m = k_1 * m_1 + ... + k_n * m_n, where m_i is the nominal mass of each
-    # element, and n is the number of elements used. k_i is the formula
-    # coefficient for each element. In the same way, the defect d can be written
-    # as: d = k_1 * d_1 + ... + k_n * d_n.
-    #
-    # we want to find all k_1, ..., k_n such that:
-    # |M - k_1 * m_1 + ... + k_n * m_n - k_1 * d_1 + ... + k_n * d_n| <= tol
-    # If we suppose that we have estimated correctly m and d, the problem is
-    # reduced to |d - k_1 * d_1 + ... + k_n * d_n| <= tol
-    # To find all such K, the approach used is based on decomposing the
-    # contribution of d into positive contributions and negative contributions:
-    # d = dp + dn (dp: mass defect contribution of elements with positive mass
-    # defect; dn: is the analogous with negative mass defects).
-    # if we know all possible combinations of dn and dp, and sort them,
-    # finding the valid values is equivalent to search for each dp value in
-    # the interval [d - dn - tol, d - dn + tol]. Using a bisection search
-    # this can be achieved in O(#dp * log(#dn)) where #dp is the cardinality
-    # of dp.
-    # To perform this step, all combinations of K with their associated values
-    # of M, m, and d are generated for all elements, sorted by d and stored
-    # in `Coefficients` (More on the data stored in coefficients later on...)
-    #
-    # Once we know all combinations with valid mass defects, we need to check
-    # the validity of the nominal mass. This is done using the division
-    # algorithm and modular arithmetic properties of the integers.
-    # We can rewrite the nominal mass as m = mp + mn + mc (m: nominal mass,
-    # mn: negative nominal mass, mp, positive nominal mass, mc: carbon mass).
-    # If we use the algorithm of division we have:
-    # m = 12 * q + r; 0 <= r < 12
-    # mc = 12 * qc
-    # mn = 12 * qn + rn; 0 <= rn < 12
-    # mp = 12 * qp + rp; 0 <= rp < 12
-    # If we replace mp, mc, and mn we have:
-    # m = 12 * (qc + qp + qc) + rn + rp
-    # We have two cases:
-    #      1. rn + rp < 12
-    #      2. rn + rp >= 12
-    # In the first case, we have that q = qc + qp + qn. From this expression
-    # we can recover the number of carbons.
-    # In the other case, we have that
-    # m = 12 * (qc + qp + qc + 1) + (rn + rp) % 12
-    # From the uniqueness of q and r, we have that q = qc + qp + qn + 1
-    # and r = (rn + rp) % 12.
-    # It's easy to see that r < rp if and only if r < rn. If this is true,
-    # we are in the second case. Using this, the test for a valid number of
-    # carbon atoms is going to be:
-    # if r < rp then the formula is valid if r - rp + 12 == rn
-    # if r >= rp then the formula is valid if r - rp == rn
-    # to speed up calculations, `Coefficients` has a dictionary where each key
-    # is the remainder of the nominal mass and the values are the mass defects
-    # sorted. In this way, we can check in a quick way that the mass defect and
-    # the remainder is correct. The last step to check that the formula is valid
-    # is to examine the value of qc. If the molecule doesn't have carbon,
-    # qc = 0. Otherwise, qc > 0. qc value is checked based on restrictions
-    # on the number of carbons.
-
-    nominal, defects = mq.split_nominal_defect()
-    tol = mq.tolerance
-    c12 = find_isotope("12C")
-    if c12 in mq.bounds:
-        min_c, max_c = mq.bounds[c12]
-        c_bounds = mq.bounds[c12]
-    else:
-        min_c, max_c = 0, 0
-        c_bounds = 0, 0
-
-    if min_defect is None:
-        min_defect = -np.inf
-
-    if max_defect is None:
-        max_defect = np.inf
-
-    res = dict()
-    n = 0  # number of valid formulas
-    for nom, d in zip(nominal, defects):
-        if (d < min_defect) or (d > max_defect):
-            continue
-        q, r = divmod(nom, 12)
-
-        # min and max possible max defects for negative and positive elements
-        defect_bounds = mq.bound_negative_positive(d)
-        min_dp, max_dp, min_dn, max_dn = mq.bound_negative_positive(d)
-
-        # pos_coeff_index is an array of indices to positive coefficients with
-        # valid mass defects. neg_ri_slices is an array that for each has a
-        # range of indices of valid negative coefficients in the r_to_index
-        # array. neg_r is the remainder associated to each slice.
-        tmp = _solve_generate_formulas_i(
-            1, r, q, d, defect_bounds, c_bounds, tol, pos, neg)
-        pos_coeff_index, neg_ri_slices, neg_r = _find_valid_defect_index(
-            min_dp,
-            max_dp,
-            min_dn,
-            max_dn,
-            d,
-            r,
-            tol,
-            pos.r_to_defect,
-            pos.r_to_index,
-            neg.r_to_defect
-        )
-
-        if pos_coeff_index.size > 0:
-            # here pos_coeff_index and neg_ri_slices are converted into an array
-            # where each element has a matching index from positive and negative
-            # coefficients to generate a valid formula.
-            # qp is the quotient for the positive nominal minus the contribution
-            # from positive elements nominal mass.
-            pos_coeff_index, neg_coeff_index, qp, qn = _make_combinations(
-                pos.nominal_r,
-                pos.nominal_q,
-                neg.nominal_q,
-                neg.r_to_index,
-                pos_coeff_index,
-                neg_ri_slices,
-                neg_r,
-                r,
-                q
-            )
-
-            # check that number of carbons in each formula is in a valid range
-            res[nom] = _filter_valid_n_carbon(
-                pos_coeff_index,
-                neg_coeff_index,
-                qp,
-                qn,
-                min_c,
-                max_c
-            )
-            n += res[nom][0].size
-    return res, n
-
-
-def _make_flat_index(pos_ri_slices: np.ndarray):
-    """
-    Auxiliary function to find_valid_defect regions. Finds valid indices to
-    place pos_ri_slices slices.
-    """
-
-    res = np.zeros_like(pos_ri_slices)
-    tmp_diff = pos_ri_slices[1, :] - pos_ri_slices[0, :]
-    res[1, :] = tmp_diff.cumsum()
-    res[0, :] = res[1, :] - tmp_diff
-    return res
-
-
-def _find_valid_defect_index(
-    min_dp: float,
-    max_dp: float,
-    min_dn: float,
-    max_dn: float,
-    d: float,
-    r: float,
-    tol: float,
-    pos_r_to_d: np.ndarray,
-    pos_r_to_i: np.ndarray,
-    neg_r_to_d: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Auxiliary function to guess_formula. regions with valid remainder and mass
-    defects.
-
-    Returns
-    -------
-    pos_coeff_index: numpy.array
-        An array where each element is a index to a valid coefficient row in
-        `pos`.
-    neg_ri_slices: numpy.array
-        An array with two columns and the same number of rows that
-        pos_ri_slices.size. Each row has index to a slice with valid
-        coefficients in neg.ri_array.
-    neg_r: array
-
-    """
-    # max and min possible defects are analized relative to d, the same is done
-    # with r
-    tmp_max_dp = max_dp
-    max_dp = d - min_dp
-    min_dp = d - tmp_max_dp
-
-    rel_neg_r = r - np.arange(12)
-    rel_neg_r[rel_neg_r < 0] += 12
-
-    # find valid positive slices in pos_ri array
-    pos_ri_slices = np.zeros((2, 12), dtype=pos_r_to_i.dtype)
-    rel_pos_r_to_d = d - pos_r_to_d
-
-    for rp in range(rel_neg_r.size):
-        pos_ri_slices[:, rp] = \
-            np.searchsorted(rel_pos_r_to_d[rp, :], (min_dp, max_dp))
-
-    # convert slices to an array of indices
-    pos_ri_slices[1, :] += 1
-    pos_ri_index = _make_flat_index(pos_ri_slices)
-    pos_ri_size = (pos_ri_slices[1, :] - pos_ri_slices[0, :]).sum()
-
-    # find matching negative slices in ri and find positive coefficients
-    # indices
-    pos_coeff_index = np.zeros(pos_ri_size, dtype=int)
-    neg_ri_slices = np.zeros((pos_ri_size, 2), dtype=int)
-    neg_r = np.zeros(pos_ri_size, dtype=int)
-
-    for rp in range(rel_neg_r.size):
-        # left start, left end, right start, right end
-        rn = rel_neg_r[rp]
-        ls = pos_ri_index[0, rp]
-        le = pos_ri_index[1, rp]
-        rs = pos_ri_slices[0, rp]
-        re = pos_ri_slices[1, rp]
-
-        pos_coeff_index[ls:le] = pos_r_to_i[rp, rs:re]
-        neg_ri_slices[ls:le, 0] = np.searchsorted(
-            neg_r_to_d[rn, :], rel_pos_r_to_d[rp, rs:re] - tol)
-        neg_ri_slices[ls:le, 1] = np.searchsorted(
-            neg_r_to_d[rn, :], rel_pos_r_to_d[rp, rs:re] + tol)
-        neg_r[ls:le] = rn
-
-    # remove elements with empty negative regions.
-    neg_valid_slices = (neg_ri_slices[:, 1] - neg_ri_slices[:, 0]) > 0
-    pos_coeff_index = pos_coeff_index[neg_valid_slices]
-    neg_ri_slices = neg_ri_slices[neg_valid_slices, :]
-    neg_r = neg_r[neg_valid_slices]
-    return pos_coeff_index, neg_ri_slices, neg_r
-
-
-def _make_combinations(
-    pos_nominal_r: np.ndarray,
-    pos_nominal_q: np.ndarray,
-    neg_nominal_q: np.ndarray,
-    neg_r_to_index: np.ndarray,
-    pos_coeff_index: np.ndarray,
-    neg_coeff_slices: np.ndarray,
-    neg_r: float,
-    r: float,
-    q: float
-):
-    """
-    Auxiliary function to guess_formula. converts results to arrays where each
-    element in pos_coeff_index has a matching element in neg_coeff_index.
-
-    Returns
-    -------
-    pos_index: np.array:
-        An array where each element is a index to a valid coefficient row in
-        `pos`.
-    neg_index_flat: np.array:
-        An array with the same size as pos_index and where each element is a
-        index to a valid coefficient row in `neg`.
-    pos_q: np.array.
-        quotient of positive nominal mass associated to pos_coeff_index,
-        corrected by q and pos_r.
-    qn: np.array.
-        quotient of negative nominal mass associated to neg_coeff_slices.
-    """
-
-    pos_r = r - pos_nominal_r[pos_coeff_index]
-    pos_q = q - pos_nominal_q[pos_coeff_index]
-    rp_mask = pos_r < 0
-
-    # correct remainders and quotient values
-    pos_q[rp_mask] -= 1
-    pos_r[rp_mask] += 12
-
-    # remove invalid roi (pos_q must be >= 0)
-    neg_valid_slices = pos_q >= 0
-    pos_q = pos_q[neg_valid_slices]
-    pos_r = pos_r[neg_valid_slices]
-    pos_coeff_index = pos_coeff_index[neg_valid_slices]
-    neg_coeff_slices = neg_coeff_slices[neg_valid_slices, :]
-    neg_r = neg_r[neg_valid_slices]
-
-    # get the number of pairs of negative and positive coefficients
-    neg_ri_slices_diff = neg_coeff_slices[:, 1] - neg_coeff_slices[:, 0]
-    flat_size = neg_ri_slices_diff.sum()
-
-    neg_index_flat = np.zeros(flat_size, dtype=neg_coeff_slices.dtype)
-    pos_index_flat = np.repeat(pos_coeff_index, neg_ri_slices_diff)
-    pos_q_flat = np.repeat(pos_q, neg_ri_slices_diff)
-    counter = 0
-    neg_ri_slices_size = pos_coeff_index.size
-    start = 0
-    end = 0
-    size = 0
-    rn = 0
-    for k in range(neg_ri_slices_size):
-        start = neg_coeff_slices[k, 0]
-        end = neg_coeff_slices[k, 1]
-        rn = neg_r[k]
-        size = end - start
-        neg_index_flat[counter:counter + size] = neg_r_to_index[rn, start:end]
-        counter += size
-
-    qn = neg_nominal_q[neg_index_flat]
-    return pos_index_flat, neg_index_flat, pos_q_flat, qn
-
-
-def _solve_generate_formulas_i(
-        i: int,
-        r: int,
-        q: int,
-        d: float,
-        defect_bounds: Tuple[float, float, float, float],
-        c_bounds: Tuple[int, int],
-        tol: float,
-        pos: _Coefficients,
-        neg: _Coefficients
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     # bound positive and negative mass defects
     min_dp, max_dp, min_dn, max_dn = defect_bounds
-    dp_bounds = d - max_dp,  d - min_dp
+    dp_bounds = d - max_dp, d - min_dp
     # bounds for number of C atoms
     min_qc, max_qc = c_bounds
 
@@ -1201,18 +801,12 @@ def _solve_generate_formulas_i(
     valid_qp = (q - qp) >= min_qc
     p_index = p_index[valid_qp]
 
-    # fin valid negative mass defect values
+    # find valid negative mass defect values
     neg_r_to_d = neg.r_to_defect[rn]
     neg_index = neg.r_to_index[rn]
-    n_start = np.searchsorted(
-        neg_r_to_d,
-        pos_r_to_d[p_start:p_end][valid_qp] - tol
-    )
+    n_start = np.searchsorted(neg_r_to_d, pos_r_to_d[p_start:p_end][valid_qp] - tol)
 
-    n_end = np.searchsorted(
-        neg_r_to_d,
-        pos_r_to_d[p_start:p_end][valid_qp] + tol
-    )
+    n_end = np.searchsorted(neg_r_to_d, pos_r_to_d[p_start:p_end][valid_qp] + tol)
 
     n_index_size = n_end - n_start
     valid_dn = n_index_size > 0
@@ -1246,7 +840,7 @@ def _generate_formulas2(
     pos: _Coefficients,
     neg: _Coefficients,
     min_defect: Optional[float] = -1,
-    max_defect: Optional[float] = None
+    max_defect: Optional[float] = None,
 ):
     """
     Computes formulas compatible with a given mass
@@ -1351,7 +945,6 @@ def _generate_formulas2(
 
         # min and max possible max defects for negative and positive elements
         defect_bounds = mq.bound_negative_positive(d)
-        min_dp, max_dp, min_dn, max_dn = mq.bound_negative_positive(d)
 
         # pos_coeff_index is an array of indices to positive coefficients with
         # valid mass defects. neg_ri_slices is an array that for each has a
@@ -1363,7 +956,8 @@ def _generate_formulas2(
         qc = list()
         for i in range(12):
             i_pos_coeff, i_neg_coeff, i_qc = _solve_generate_formulas_i(
-                i, r, q, d, defect_bounds, c_bounds, tol, pos, neg)
+                i, r, q, d, defect_bounds, c_bounds, tol, pos, neg
+            )
             i_n = i_pos_coeff.size
             if i_n:
                 n += i_n
@@ -1371,9 +965,5 @@ def _generate_formulas2(
                 neg_index.append(i_neg_coeff)
                 qc.append(i_qc)
         if pos_index:
-            res[nom] = (
-                np.hstack(pos_index),
-                np.hstack(neg_index),
-                np.hstack(qc)
-            )
+            res[nom] = (np.hstack(pos_index), np.hstack(neg_index), np.hstack(qc))
     return res, n

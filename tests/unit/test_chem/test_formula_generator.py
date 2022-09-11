@@ -5,47 +5,7 @@ import tidyms.chem.formula_generator as fg
 from tidyms.chem import atoms
 from tidyms.chem import Formula
 import pytest
-from math import isclose
 import numpy as np
-
-invalid_tolerance_input = [(0, "ppm"), (-0.001, "da"), (0.005, "bad-unit")]
-
-
-@pytest.mark.parametrize("invalid_values,invalid_units",
-                         invalid_tolerance_input)
-def test_tolerance_invalid_input(invalid_values, invalid_units):
-    with pytest.raises((ValueError, TypeError)):
-        fg._Tolerance(invalid_values, invalid_units)
-
-
-tolerance_test_input = [(0.001, "da", None, 0.001),
-                        (0.001, "da", 350, 0.001),
-                        (5.2, "mda", None, 0.0052),
-                        (5.2, "mda", 350, 0.0052)]
-
-
-@pytest.mark.parametrize("values, units, mass, expected", tolerance_test_input)
-def test_get_absolute_tolerance_da_and_mda(values, units, mass, expected):
-    tol = fg._Tolerance(values, units).get_abs_tolerance(mass)
-    assert isclose(tol, expected)
-
-
-def test_get_absolute_tolerance():
-    ppm = 5
-    mass = 200
-    tol = fg._Tolerance(ppm, "ppm")
-    expected = ppm * mass / 1e6
-    assert isclose(tol.get_abs_tolerance(mass), expected)
-
-
-@pytest.mark.parametrize("mass", [None, "asd"])
-def test_invalid_ppm_mass(mass):
-    tol = fg._Tolerance(5, "ppm")
-    with pytest.raises(TypeError):
-        tol.get_abs_tolerance(mass)
-
-
-# Tests for _Bounds
 
 
 @pytest.fixture
@@ -148,7 +108,7 @@ def test_bounds_split_pos_neg(chnops_bounds, chn_bounds):
             assert n.defect < 0
             assert neg[n] == bounds[n]
 
-        # 12C is not in neither por or neg
+        # 12C is neither in pos or neg
         c12 = atoms.find_isotope("12C")
         for isotope in bounds:
             if not (isotope is c12):
@@ -236,7 +196,6 @@ def test_bruteforce(formula_str, formula_generator_params):
     elements = formula_generator_params["elements"]
     max_mass = formula_generator_params["mass"]
     tol = formula_generator_params["tolerance"]
-    units = formula_generator_params["tolerance_units"]
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
@@ -250,9 +209,8 @@ def test_bruteforce(formula_str, formula_generator_params):
     valid_coeff_bf = bf_coeff.coefficients[sorted_mass_index, :]
 
     # mass defect based solution
-    f = fg.FormulaGenerator(elements, max_mass, tol, tolerance_units=units,
-                            refine_h=False, min_defect=None)
-    f.generate_formulas(mass)
+    f = fg.FormulaGenerator(elements, max_mass, refine_h=False, min_defect=None)
+    f.generate_formulas(mass, tol)
     valid_coeff, valid_elements, valid_monoisotopic = f.results_to_array()
     valid_coeff = valid_coeff[np.argsort(valid_monoisotopic), :]
     assert np.array_equal(valid_coeff, valid_coeff_bf)
@@ -265,7 +223,6 @@ def test_formula_generator_only_positive_defect_elements():
     # parameters
     max_mass = 200
     tol = 0.001
-    units = "da"
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
@@ -279,9 +236,8 @@ def test_formula_generator_only_positive_defect_elements():
     valid_coeff_bf = bf_coeff.coefficients[sorted_mass_index, :]
 
     # mass defect based solution
-    f = fg.FormulaGenerator(elements, max_mass, tol, tolerance_units=units,
-                            refine_h=False, min_defect=None)
-    f.generate_formulas(mass)
+    f = fg.FormulaGenerator(elements, max_mass, refine_h=False, min_defect=None)
+    f.generate_formulas(mass, tol)
     valid_coeff, valid_elements, valid_monoisotopic = f.results_to_array()
     valid_coeff = valid_coeff[np.argsort(valid_monoisotopic), :]
     assert np.array_equal(valid_coeff, valid_coeff_bf)
@@ -294,7 +250,6 @@ def test_formula_generator_only_negative_defect_elements():
     # parameters
     max_mass = 200
     tol = 0.001
-    units = "da"
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
@@ -308,9 +263,8 @@ def test_formula_generator_only_negative_defect_elements():
     valid_coeff_bf = bf_coeff.coefficients[sorted_mass_index, :]
 
     # mass defect based solution
-    f = fg.FormulaGenerator(elements, max_mass, tol, tolerance_units=units,
-                            refine_h=False, min_defect=None)
-    f.generate_formulas(mass)
+    f = fg.FormulaGenerator(elements, max_mass, refine_h=False, min_defect=None)
+    f.generate_formulas(mass, tol)
     valid_coeff, valid_elements, valid_monoisotopic = f.results_to_array()
     valid_coeff = valid_coeff[np.argsort(valid_monoisotopic), :]
     assert np.array_equal(valid_coeff, valid_coeff_bf)
@@ -323,7 +277,6 @@ def test_formula_generator_no_carbon():
     # parameters
     max_mass = 200
     tol = 0.001
-    units = "da"
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
@@ -337,24 +290,27 @@ def test_formula_generator_no_carbon():
     valid_coeff_bf = bf_coeff.coefficients[sorted_mass_index, :]
 
     # mass defect based solution
-    f = fg.FormulaGenerator(elements, max_mass, tol, tolerance_units=units,
-                            refine_h=False, min_defect=None)
-    f.generate_formulas(mass)
+    f = fg.FormulaGenerator(elements, max_mass, refine_h=False, min_defect=None)
+    f.generate_formulas(mass, tol)
     valid_coeff, valid_elements, valid_monoisotopic = f.results_to_array()
     valid_coeff = valid_coeff[np.argsort(valid_monoisotopic), :]
     assert np.array_equal(valid_coeff, valid_coeff_bf)
 
 
-formula_str_list = [("C11H12N2O2", [11, 12, 2, 2, 0]),
-                    ("C6H12O6", [6, 12, 0, 6, 0]),
-                    ("C27H46O", [27, 46, 0, 1, 0])]
-
-@pytest.mark.parametrize("f_str,f_coeff", formula_str_list)
-def test_formula_generator_refine_h(formula_generator_params, f_str, f_coeff):
-    formula_generator_params["mass"] = 500
-    f = fg.FormulaGenerator(**formula_generator_params)
+@pytest.mark.parametrize(
+    "f_str,f_coeff",
+    [
+        ("C11H12N2O2", [11, 12, 2, 2, 0, 0]),
+        ("C6H12O6", [6, 12, 0, 6, 0, 0]),
+        ("C27H46O", [27, 46, 0, 1, 0, 0])
+    ]
+)
+def test_formula_generator_refine_h(f_str, f_coeff):
+    mass = 500
+    elements = ["C", "H", "N", "O", "P", "S"]
+    tol = 0.001
+    f = fg.FormulaGenerator(elements, mass)
     m = Formula(f_str).get_exact_mass()
-    f.generate_formulas(m)
+    f.generate_formulas(m, tol)
     coeff, _, _ = f.results_to_array()
     assert f_coeff in coeff
-
