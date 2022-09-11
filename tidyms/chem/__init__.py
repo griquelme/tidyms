@@ -13,9 +13,10 @@ Provides
 """
 
 from .formula_generator import FormulaGenerator
-from .isotope_scorer import IsotopeScorer
+from .isotope_scorer import IsotopeScorer, EnvelopeValidator
 from .formula import Formula
 from .envelope_finder import EnvelopeFinder
+from .mmi_finder import MMIFinder
 from .atoms import PTABLE, EM
 from . import _isotope_distributions
 from . import mmi_finder
