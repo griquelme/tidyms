@@ -1,78 +1,58 @@
 from tidyms.chem import atoms
-import numpy as np
 import pytest
 
 
-@pytest.fixture
-def isotope_data():
-    isotopes = [atoms.PTABLE["C"].isotopes[12],
-                atoms.PTABLE["H"].isotopes[2],
-                atoms.PTABLE["P"].isotopes[31]]
-    str_repr = ["12C", "2H", "31P"]
-    symbol = ["C", "H", "P"]
-    return isotopes, str_repr, symbol
+def test_periodic_table_get_element_from_symbol():
+    ptable = atoms.PeriodicTable()
+    c = ptable.get_element("C")
+    assert c.z == 6
+    assert c.symbol == "C"
 
 
-# Test Isotope
+def test_periodic_table_get_element_from_z():
+    ptable = atoms.PeriodicTable()
+    p = ptable.get_element(15)
+    assert p.symbol == "P"
+    assert p.z == 15
 
 
-def test_get_symbol_str(isotope_data):
-    isotopes, _, symbol = isotope_data
-    for i, s in zip(isotopes, symbol):
-        assert i.get_symbol() == s
+def test_periodic_table_get_isotope_from_symbol():
+    ptable = atoms.PeriodicTable()
+    cl37 = ptable.get_isotope("37Cl")
+    assert cl37.a == 37
+    assert cl37.get_symbol() == "Cl"
 
 
-def test_is_most_abundant(isotope_data):
-    isotopes, _, _ = isotope_data
-    is_most_abundant = [True, False, True]
-    for isotopes, expected_result in zip(isotopes, is_most_abundant):
-        assert isotopes.is_most_abundant() == expected_result
+def test_periodic_table_get_isotope_from_z_a():
+    ptable = atoms.PeriodicTable()
+    s33 = ptable.get_isotope((16, 33))
+    assert s33.a == 33
+    assert s33.get_symbol() == "S"
 
 
-def test_get_element(isotope_data):
-    isotopes, _, _ = isotope_data
-    expected_elements = [atoms.PTABLE[x] for x in ["C", "H", "P"]]
-    for i, e in zip(isotopes, expected_elements):
-        assert i.get_element() is e
+@pytest.mark.parametrize(
+    "z,a,m,abundance,expected_symbol",
+    [
+        [6, 12, 12.0, 0.9, "C"],    # Carbon. Dummy abundances and exact mass are used.
+        [1, 1, 1.0078, 0.9, "H"],   # Hydrogen
+        [15, 31, 30.099, 1.0, "P"]  # Phosphorus
+    ]
+)
+def test_get_symbol_str(z, a, m, abundance, expected_symbol):
+    isotope = atoms.Isotope(z, a, m, abundance)
+    assert isotope.get_symbol() == expected_symbol
+
 
 # Test Element
 
 
-@pytest.fixture
-def element_data():
-    elements = [atoms.PTABLE["C"], atoms.PTABLE["H"], atoms.PTABLE["P"]]
-    symbols = ["C", "H", "P"]
-    return elements, symbols
+def test_get_monoisotope():
+    element = atoms.PeriodicTable().get_element("B")
+    monoisotope = element.get_monoisotope()
+    assert monoisotope.a == 11
 
 
-def test_element_repr(element_data):
-    elements, expected_symbol = element_data
-    for e, s in zip(elements, expected_symbol):
-        assert e.symbol == s
-
-
-def test_get_abundance(element_data):
-    elements, _ = element_data
-    for e in elements:
-        nominal, exact, abundance = e.get_abundances()
-        assert np.isclose(abundance.sum(), 1.0)
-        assert (np.abs(nominal - exact) < 1).all()
-
-
-def test_get_most_abundant_isotope(element_data):
-    elements, _ = element_data
-    expected_nominal_mass = [12, 1, 31]
-    for e, em in zip(elements, expected_nominal_mass):
-        i = e.get_most_abundant_isotope()
-        assert i.a == em
-
-
-def test_find_isotopes(isotope_data):
-    isotope, isotope_str, _ = isotope_data
-    for i, i_str in zip(isotope, isotope_str):
-        assert atoms.find_isotope(i_str) is i
-
-
-def test_find_isotopes_bad_input():
-    with pytest.raises(ValueError):
-        atoms.find_isotope("AA")
+def test_get_mmi():
+    element = atoms.PeriodicTable().get_element("B")
+    mmi = element.get_mmi()
+    assert mmi.a == 10
