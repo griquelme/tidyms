@@ -87,7 +87,7 @@ class FormulaGenerator:
         >>> fg = ms.chem.FormulaGenerator(fg_bounds)
 
         """
-        self.bounds = _FormulaCoefficientBounds.from_isotope_str(bounds)
+        self.bounds = FormulaCoefficientBounds.from_isotope_str(bounds)
         if max_M is not None:
             self.bounds = self.bounds.bounds_from_mass(max_M)
         self._min_defect = min_defect
@@ -256,7 +256,7 @@ class FormulaGenerator:
         return FormulaGenerator(hmdb_bounds, min_defect, max_defect)
 
 
-class _FormulaCoefficientBounds:
+class FormulaCoefficientBounds:
     """
     Mapping from isotopes to upper and lower bounds
 
@@ -272,7 +272,7 @@ class _FormulaCoefficientBounds:
     def __getitem__(self, item):
         return self.bounds[item]
 
-    def bounds_from_mass(self, M: float) -> "_FormulaCoefficientBounds":
+    def bounds_from_mass(self, M: float) -> "FormulaCoefficientBounds":
         """
         Compute the mass-based bounds for each isotope.
 
@@ -284,7 +284,7 @@ class _FormulaCoefficientBounds:
             lower = max(0, lb)
             upper = min(int(M / i.m), ub)
             bounds[i] = lower, upper
-        return _FormulaCoefficientBounds(bounds)
+        return FormulaCoefficientBounds(bounds)
 
     def bound_negative_positive_defect(
         self, defect: float, tolerance: float
@@ -328,15 +328,15 @@ class _FormulaCoefficientBounds:
 
     def split_pos_neg(
         self,
-    ) -> Tuple["_FormulaCoefficientBounds", "_FormulaCoefficientBounds"]:
+    ) -> Tuple["FormulaCoefficientBounds", "FormulaCoefficientBounds"]:
         """
         creates two new Bound objects, one with elements with positive mass
         defect and other with elements with negative mass defects.
 
         Returns
         -------
-        pos: _FormulaCoefficientBounds
-        neg: _FormulaCoefficientBounds
+        pos: FormulaCoefficientBounds
+        neg: FormulaCoefficientBounds
 
         """
         pos_bounds = dict()
@@ -347,8 +347,8 @@ class _FormulaCoefficientBounds:
                 pos_bounds[isotope] = bounds
             elif defect < 0:
                 neg_bounds[isotope] = bounds
-        pos = _FormulaCoefficientBounds(pos_bounds)
-        neg = _FormulaCoefficientBounds(neg_bounds)
+        pos = FormulaCoefficientBounds(pos_bounds)
+        neg = FormulaCoefficientBounds(neg_bounds)
         return pos, neg
 
     def get_defect_bounds(self) -> Tuple[float, float, float, float]:
@@ -375,7 +375,7 @@ class _FormulaCoefficientBounds:
 
     def make_coefficients(
         self, max_M: float, reverse: bool = False
-    ) -> "_FormulaCoefficients":
+    ) -> "FormulaCoefficients":
         """
         Generate coefficients for FormulaGenerator
 
@@ -389,12 +389,12 @@ class _FormulaCoefficientBounds:
         coefficients: Coefficients
 
         """
-        return _FormulaCoefficients(self, max_M, True, reverse)
+        return FormulaCoefficients(self, max_M, True, reverse)
 
     @staticmethod
     def from_isotope_str(
         bounds: Dict[str, Tuple[int, int]]
-    ) -> "_FormulaCoefficientBounds":
+    ) -> "FormulaCoefficientBounds":
         """
         Creates a _Bounds instance from a list of isotope strings.
 
@@ -404,7 +404,7 @@ class _FormulaCoefficientBounds:
 
         Returns
         -------
-        _FormulaCoefficientBounds
+        FormulaCoefficientBounds
         """
 
         ptable = PeriodicTable()
@@ -420,10 +420,10 @@ class _FormulaCoefficientBounds:
                 )
                 raise ValueError(msg)
             res[isotope] = ib
-        return _FormulaCoefficientBounds(res)
+        return FormulaCoefficientBounds(res)
 
 
-class _FormulaCoefficients:
+class FormulaCoefficients:
     """
     Named tuple with elements with positive/negative mass defect.
 
@@ -447,7 +447,7 @@ class _FormulaCoefficients:
 
     def __init__(
         self,
-        bounds: _FormulaCoefficientBounds,
+        bounds: FormulaCoefficientBounds,
         max_mass: float,
         return_sorted: bool,
         return_reversed: bool,
@@ -521,7 +521,7 @@ class _MassQuery(object):
 
     """
 
-    def __init__(self, m: int, d: float, tol: float, bounds: _FormulaCoefficientBounds):
+    def __init__(self, m: int, d: float, tol: float, bounds: FormulaCoefficientBounds):
         self.m = m
         self.d = d
         self.q, self.r = divmod(m, 12)
@@ -536,7 +536,7 @@ class _MassQuery(object):
             self.nc_min, self.nc_max = 0, 0
 
 
-def _add_dummy_isotope(pos: _FormulaCoefficientBounds, neg: _FormulaCoefficientBounds):
+def _add_dummy_isotope(pos: FormulaCoefficientBounds, neg: FormulaCoefficientBounds):
     """
     Add dummy isotopes to positive or negative elements to solve the mass
     defect problem in cases that there aren't any positive/negative isotopes.
@@ -555,8 +555,8 @@ def _add_dummy_isotope(pos: _FormulaCoefficientBounds, neg: _FormulaCoefficientB
 def _results_to_array(
     results: Dict,
     n: int,
-    pos: _FormulaCoefficients,
-    neg: _FormulaCoefficients,
+    pos: FormulaCoefficients,
+    neg: FormulaCoefficients,
     has_carbon: bool,
 ) -> Tuple[np.ndarray, List[Isotope], np.ndarray]:
     """
@@ -594,8 +594,8 @@ def _results_to_array(
 
 
 def _remove_dummy_isotopes(
-    pos: _FormulaCoefficients,
-    neg: _FormulaCoefficients,
+    pos: FormulaCoefficients,
+    neg: FormulaCoefficients,
     has_carbon: bool,
     isotopes: List[Isotope],
     res: np.array,
@@ -645,9 +645,9 @@ def _make_remainder_arrays(x, r) -> Dict[int, np.ndarray]:
 def _generate_formulas(
     M: float,
     tol: float,
-    bounds: _FormulaCoefficientBounds,
-    pos: _FormulaCoefficients,
-    neg: _FormulaCoefficients,
+    bounds: FormulaCoefficientBounds,
+    pos: FormulaCoefficients,
+    neg: FormulaCoefficients,
     min_defect: Optional[float] = -1,
     max_defect: Optional[float] = None,
 ):
@@ -709,8 +709,8 @@ def _generate_formulas(
 def _generate_formulas_i(
     i: int,
     query: _MassQuery,
-    pos: _FormulaCoefficients,
-    neg: _FormulaCoefficients,
+    pos: FormulaCoefficients,
+    neg: FormulaCoefficients,
 ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
     Solve the mass defect problem for fixed rp and rn values.
