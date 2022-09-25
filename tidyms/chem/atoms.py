@@ -23,6 +23,7 @@ Exceptions
 import json
 import numpy as np
 import os.path
+from string import digits
 from typing import Dict, Final, Tuple, Union
 
 
@@ -189,15 +190,19 @@ class _PeriodicTable:
             element = self._symbol_to_element[element]
         return element
 
-    def get_isotope(self, x: Union[str, Tuple[int, int]]) -> Isotope:
+    def get_isotope(self, x: str, copy: bool = False) -> Isotope:
         """
         Returns an isotope object from a string representation or its atomic
         and mass numbers.
 
         Parameters
         ----------
-        x : str or (int, int)
-            A string representation of an isotope or a tuple of atomic and mass numbers.
+        x : str
+            A string representation of an isotope. If only the symbol is
+            provided in the string, the monoisotope is returned.
+        copy : bool
+            If True creates a new Isotope object.
+
         Returns
         -------
         Isotope
@@ -206,15 +211,17 @@ class _PeriodicTable:
         --------
         >>> import tidyms as ms
         >>> ptable = ms.chem.PeriodicTable()
-        >>> c12 = ptable.get_isotope(6, 12)
         >>> d = ptable.get_isotope("2H")
+        >>> cl35 = ptable.get_isotope("Cl")
 
         """
         try:
-            if isinstance(x, str):
+            if x[0] in digits:
                 isotope = self._str_to_isotope[x]
             else:
-                isotope = self._za_to_isotope[x]
+                isotope = self.get_element(x).get_monoisotope()
+            if copy:
+                isotope = Isotope(isotope.z, isotope.a, isotope.m, isotope.abundance)
             return isotope
         except KeyError:
             msg = "{} is not a valid input.".format(x)
