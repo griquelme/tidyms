@@ -19,7 +19,7 @@ import string
 from collections import Counter
 from copy import copy
 from typing import List, Tuple, Dict, Optional
-from .atoms import EM, find_isotope
+from .atoms import EM, Isotope, PeriodicTable
 from ._isotope_distributions import find_formula_abundances
 
 
@@ -72,7 +72,8 @@ class Formula:
             composition = _parse_formula(formula_str)
         else:
             composition, charge = args
-            composition = {find_isotope(k): v for k, v in composition.items()}
+            ptable = PeriodicTable()
+            composition = {ptable.get_isotope(k): v for k, v in composition.items()}
             composition = Counter(composition)
             for v in composition.values():
                 if not isinstance(v, int) or (v < 1):
@@ -139,10 +140,7 @@ class Formula:
         return nominal_mass
 
     def get_isotopic_envelope(
-        self,
-        n: int = 10,
-        abundance: _abundance_type = None,
-        min_p: float = 1e-10
+        self, n: int = 10, abundance: _abundance_type = None, min_p: float = 1e-10
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Computes the isotopic distribution of the formula.
@@ -173,9 +171,9 @@ class Formula:
         abundance: numpy.ndarray
             abundance of each isotopologue
         """
-        nominal, exact, abundance = \
-            find_formula_abundances(self.composition, n,
-                                    abundance=abundance)
+        nominal, exact, abundance = find_formula_abundances(
+            self.composition, n, p=abundance
+        )
         exact -= EM * self.charge
         abundance_mask = abundance > min_p
         nominal = nominal[abundance_mask]
@@ -228,7 +226,7 @@ def _parse_charge(formula: str) -> Tuple[str, int]:
             matching = _matching_parenthesis[formula[0]]
             start = 1
             end = formula.rfind(matching)
-            charge = sign * int(formula[end + 1:-1])
+            charge = sign * int(formula[end + 1 : -1])
             return formula[start:end], charge
         except (KeyError, ValueError):
             raise InvalidFormula
@@ -307,7 +305,7 @@ def _tokenize_element(formula: str, ind: int):
     else:
         end = ind + 1
     symbol = formula[ind:end]
-    isotope = find_isotope(symbol)
+    isotope = PeriodicTable().get_isotope(symbol)
     coefficient, end = _get_coefficient(formula, end)
     token = {isotope: coefficient}
     return token, end
@@ -323,7 +321,7 @@ def _tokenize_isotope(formula: str, ind: int):
 
     """
     end = _find_matching_parenthesis(formula, ind)
-    isotope = find_isotope(formula[ind + 1:end])
+    isotope = PeriodicTable().get_isotope(formula[ind + 1 : end])
     coefficient, end = _get_coefficient(formula, end + 1)
     token = {isotope: coefficient}
     return token, end
@@ -346,7 +344,7 @@ def _parse_formula(formula: str):
         else:
             # expression type evaluated recursively
             exp_end = _find_matching_parenthesis(formula, ind)
-            token = _parse_formula(formula[ind + 1:exp_end])
+            token = _parse_formula(formula[ind + 1 : exp_end])
             exp_coefficient, ind = _get_coefficient(formula, exp_end + 1)
             _multiply_formula_coefficients(token, exp_coefficient)
         composition.update(token)
@@ -354,6 +352,7 @@ def _parse_formula(formula: str):
 
 
 # functions to get a formula string from a Formula
+
 
 def _arg_sort_elements(symbol_list: List[str], mass_number_list: List[int]):
     """
@@ -364,56 +363,46 @@ def _arg_sort_elements(symbol_list: List[str], mass_number_list: List[int]):
     return sorted(range(len(symbol_list)), key=lambda x: zipped[x])
 
 
-def _symbol_to_subformula_str(symbol: str, a: int, coefficient: int,
-                              is_most_abundant=True) -> str:
-    """
-    convert a symbol, mass number and formula coefficient into a formula
-    substring.
-    """
-    res = symbol
-    if not is_most_abundant:
-        res = "(" + str(a) + res + ")"
-    if coefficient > 1:
-        res += str(coefficient)
-    return res
+class InvalidFormula(ValueError):
+    pass
 
 
-def _get_ch_string(symbols: List[str], mass_numbers: List[int],
-                   coefficients: List[int],
-                   is_monoisotope: List[bool]) -> str:
-    """
-    get the formula substring for C and H in a list of symbols, mass numbers
-    and coefficients. Remove occurrences of C and H from the lists.
-    """
-    ch = ["C", "H"]
-    res = ""
-    for c in ch:
-        try:
-            while True:
-                ind = symbols.index(c)
-                c_coefficient = coefficients.pop(ind)
-                c_symbol = symbols.pop(ind)
-                c_mass_number = mass_numbers.pop(ind)
-                c_repeated = is_monoisotope.pop(ind)
-                res += _symbol_to_subformula_str(c_symbol, c_mass_number,
-                                                 c_coefficient,
-                                                 is_most_abundant=c_repeated)
-        except ValueError:
-            continue
-    return res
+def _get_formula_str(composition, charge):
+
+    # get C str
+    c12 = PeriodicTable().get_isotope("12C")
+    c13 = PeriodicTable().get_isotope("13C")
+    h1 = PeriodicTable().get_isotope("1H")
+    h2 = PeriodicTable().get_isotope("2H")
+    ch = [c12, c13, h1, h2]
+
+    # ADD C and H to formula str
+    f_str = ""
+    for i in ch:
+        if i in composition:
+            f_str += isotope_coeff_to_f_str(i, composition[i])
+
+    # add other elements, sorted alphabetically
+    isotopes = set(composition)
+    isotopes = isotopes.difference(ch)
+    for i in sorted(isotopes, key=lambda x: x.get_symbol() + str(x.a)):
+        f_str += isotope_coeff_to_f_str(i, composition[i])
+
+    if charge:
+        charge_str = _get_charge_str(charge)
+        f_str = "[{}]{}".format(f_str, charge_str)
+
+    return f_str
 
 
-def _get_heteroatom_str(symbols: List[str], mass_numbers: List[int],
-                        coefficients: List[int], is_monoisotope: List) -> str:
-    """
-    Sort symbols and compute the formula substring.
-    """
-    res = ""
-    for k in range(len(symbols)):
-        res += _symbol_to_subformula_str(symbols[k], mass_numbers[k],
-                                         coefficients[k],
-                                         is_most_abundant=is_monoisotope[k])
-    return res
+def isotope_coeff_to_f_str(isotope: Isotope, coeff: int) -> str:
+    coeff_str = str(coeff) if coeff > 1 else ""
+    element = isotope.get_element()
+    if isotope.a == element.nominal_mass:
+        isotope_str = element.symbol
+    else:
+        isotope_str = "({})".format(isotope)
+    return "{}{}".format(isotope_str, coeff_str)
 
 
 def _get_charge_str(q: int):
@@ -425,39 +414,3 @@ def _get_charge_str(q: int):
         q_str = ""
     q_str = q_str + q_sign
     return q_str
-
-
-def _composition_to_list(composition: Counter) -> Tuple[list, list, list, list]:
-    symbols = [x.get_symbol() for x in composition]
-    a = [x.a for x in composition]  # mass  number
-    coefficients = [x for x in composition.values()]  # formula coefficient
-    # boolean indicating if the current element in the list is the most
-    # abundant isotope
-    is_most_abundant = [x.is_most_abundant() for x in composition]
-
-    # sort lists using symbols and mass number
-    sorted_index = _arg_sort_elements(symbols, a)
-    symbols = [symbols[x] for x in sorted_index]
-    a = [a[x] for x in sorted_index]
-    coefficients = [coefficients[x] for x in sorted_index]
-    is_most_abundant = [is_most_abundant[x] for x in sorted_index]
-    return symbols, a, coefficients, is_most_abundant
-
-
-def _get_formula_str(composition: Counter, charge: int):
-    """
-    Converts a formula composition and charge into a string representation.
-    """
-    symbols, a, coefficients, is_most_abundant = \
-        _composition_to_list(composition)
-    res = _get_ch_string(symbols, a, coefficients, is_most_abundant)
-    res += _get_heteroatom_str(symbols, a, coefficients, is_most_abundant)
-
-    if charge:
-        res = "[" + res + "]"
-        res = res + _get_charge_str(charge)
-    return res
-
-
-class InvalidFormula(ValueError):
-    pass
