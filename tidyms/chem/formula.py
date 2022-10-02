@@ -19,17 +19,13 @@ import string
 from collections import Counter
 from copy import copy
 from typing import List, Tuple, Dict, Optional
-from .atoms import EM, Isotope, PeriodicTable
-from ._isotope_distributions import find_formula_abundances
-
-
-_abundance_type = Optional[Dict[str, np.ndarray]]
+from .atoms import EM, InvalidIsotope, Isotope, PeriodicTable
+from ._isotope_distributions import find_formula_envelope
 
 
 class Formula:
     """
-    Represents a chemical formula as a mapping from isotopes to formula
-    coefficients.
+    Represents a chemical formula as a mapping from isotopes to formula coefficients.
 
     Attributes
     ----------
@@ -41,14 +37,9 @@ class Formula:
     Methods
     -------
     get_exact_mass()
-        Computes the exact mass of the formula.
     get_nominal_mass()
-        Computes the nominal mass of the formula.
     get_formula_str()
-        Return a string representation of the Formula.
-    get_isotopic_envelope(n=10, natural_abundance=True, custom_abundance=None)
-        Computes nominal mass, exact mass and abundance of the first n
-        isotopologues.
+    get_isotopic_envelope()
 
     Examples
     --------
@@ -71,89 +62,118 @@ class Formula:
             formula_str, charge = _parse_charge(formula_str)
             composition = _parse_formula(formula_str)
         else:
-            composition, charge = args
+            f_composition, charge = args
             ptable = PeriodicTable()
-            composition = {ptable.get_isotope(k): v for k, v in composition.items()}
-            composition = Counter(composition)
-            for v in composition.values():
+            composition = Counter()
+            for k, v in f_composition.items():
+                if isinstance(k, str):
+                    isotope = ptable.get_isotope(k)
+                elif isinstance(k, Isotope):
+                    isotope = k
+                else:
+                    msg = "Composition keys must be a string representation of an isotope or an isotope object"
+                    raise InvalidIsotope(msg)
+
                 if not isinstance(v, int) or (v < 1):
                     msg = "Formula coefficients must be positive integers"
                     raise ValueError(msg)
+                composition[isotope] = v
+
             if not isinstance(charge, int):
                 msg = "Charge must be an integer"
                 raise ValueError(msg)
         self.charge = charge
         self.composition = composition
 
-    def __add__(self, other: "Formula"):
+    def __add__(self, other: "Formula") -> "Formula":
         if not isinstance(other, Formula):
             msg = "sum operation is defined only for Formula objects"
             raise ValueError(msg)
         else:
             # copy Formula object and composition
-            f_comp = copy(self.composition)
-            new_f = copy(self)
-            new_f.composition = f_comp
-            new_f.composition.update(other.composition)
-            new_f.charge += other.charge
-            return new_f
+            sum_composition = copy(self.composition)
+            sum_composition.update(other.composition)
+            sum_charge = self.charge + other.charge
+            sum_f = Formula(sum_composition, sum_charge)
+            return sum_f
 
-    def __sub__(self, other: "Formula"):
+    def __sub__(self, other: "Formula") -> "Formula":
         if not isinstance(other, Formula):
             msg = "subtraction operation is defined only for Formula objects"
             raise ValueError(msg)
         else:
-            f_comp = copy(self.composition)
-            new_f = copy(self)
-            new_f.composition = f_comp
-            new_f.composition.subtract(other.composition)
-            new_f.charge += other.charge
-            for i, c in new_f.composition.items():
-                if c == 0:
-                    new_f.composition.pop(i)
-                elif c < 0:
-                    msg = "subtraction cannot generate negative coefficients"
-                    raise ValueError(msg)
-            return new_f
+            comp = copy(self.composition)
+            comp.subtract(other.composition)
+            charge = self.charge - other.charge
+            min_coeff = min(comp.values())
+            if min_coeff < 0:
+                msg = "subtraction cannot generate negative coefficients"
+                raise ValueError(msg)
+            comp = Counter({k: v for k, v in comp.items() if v > 0})
+            diff_f = Formula(comp, charge)
+            return diff_f
 
-    def get_exact_mass(self):
+    def __eq__(self, other: "Formula"):
+        return (self.charge == other.charge) and (self.composition == other.composition)
+
+    def get_exact_mass(self) -> float:
         """
         Computes the exact mass of the formula.
 
         Returns
         -------
         exact_mass: float
+
+        Examples
+        --------
+        >>> import tidyms as ms
+        >>> f = ms.chem.Formula("H2O")
+        >>> f.get_exact_mass()
+        18.010564684
+
         """
         exact_mass = sum(x.m * k for x, k in self.composition.items())
         exact_mass -= EM * self.charge
         return exact_mass
 
-    def get_nominal_mass(self):
+    def get_nominal_mass(self) -> int:
         """
         Computes the nominal mass of the formula.
 
         Returns
         -------
-        nominal_mass: float
+        int
+
+        Examples
+        --------
+        >>> import tidyms as ms
+        >>> f = ms.chem.Formula("H2O")
+        >>> f.get_nominal_mass()
+        18
+
         """
         nominal_mass = sum(x.a * k for x, k in self.composition.items())
         return nominal_mass
 
     def get_isotopic_envelope(
-        self, n: int = 10, abundance: _abundance_type = None, min_p: float = 1e-10
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        self,
+        n: int = 10,
+        p: Optional[Dict[str, np.ndarray]] = None,
+        min_p: float = 1e-10,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Computes the isotopic distribution of the formula.
+        Computes the isotopic envelope of the formula.
+
+        The natural abundance is assumed for each monoisotope, i.e., the most
+        abundant isotope. If others isotopes are present in the formula, they
+        are assumed to have abundance equal to 1. See the examples for a
+        clarification of this.
 
         Parameters
         ----------
         n: int
             the number of isotopes to include in the results.
-        abundance: bool
-            if True, uses the natural abundances when using the most abundant
-            isotope in the formula. If false assumes that each isotope in the
-            formula is pure.
-        abundance: dict, optional
+        p: Dict[str, array] or None, default=None
             used to pass custom abundances for elements. each key, value pair
             is composed of an element symbol str and a numpy array with the
             abundances. The sum of the abundances must be 1 and the size of
@@ -164,22 +184,37 @@ class Formula:
 
         Returns
         -------
-        nominal: numpy.ndarray
-            nominal mass of each isotopologue
-        exact: numpy.ndarray
-            exact mass of each isotopologue
-        abundance: numpy.ndarray
-            abundance of each isotopologue
+        M : numpy.ndarray
+            Exact mass of the envelope
+        p : numpy.ndarray
+            Abundance of the envelope
+
+        Examples
+        --------
+        If no isotopes are specified in the formula, the natural abundance
+        is asumed:
+
+        >>> import tidyms as ms
+        >>> f = ms.chem.Formula("C6H6")
+        >>> print(f)
+        C6H6
+        >>> f.get_isotopic_envelope(n=3)
+        (array([78.04695019, 79.05033578, 80.05373322]),
+         array([0.93686877, 0.06144402, 0.00168606]))
+
+        Using isotopes other than the monoisotope are treated as if they have
+        an abundance equal to one.
+
+        >>> f = ms.chem.Formula("(13C)6(2H)6")
+        >>> print(f)
+        (13C)6(2H)6
+        >>> f.get_isotopic_envelope()
+        (array([90.10473971]), array([1.]))
+
         """
-        nominal, exact, abundance = find_formula_abundances(
-            self.composition, n, p=abundance
-        )
-        exact -= EM * self.charge
-        abundance_mask = abundance > min_p
-        nominal = nominal[abundance_mask]
-        exact = exact[abundance_mask]
-        abundance = abundance[abundance_mask]
-        return nominal, exact, abundance
+        M, p = find_formula_envelope(self.composition, n, p=p, min_p=min_p)
+        M -= EM * self.charge
+        return M, p
 
     def __repr__(self):
         return "Formula({})".format(str(self))
@@ -209,6 +244,7 @@ def _parse_charge(formula: str) -> Tuple[str, int]:
     Returns
     -------
     formula_without_charge, charge: str, int
+
     """
 
     # check if there's a charge in the formula
@@ -271,7 +307,7 @@ def _find_matching_parenthesis(formula: str, ind: int):
             match_ind += 1
         return match_ind - 1
     except IndexError:
-        msg = "non matching parenthesis"
+        msg = "Formula string has non-matching parenthesis"
         raise InvalidFormula(msg)
 
 
@@ -405,12 +441,9 @@ def isotope_coeff_to_f_str(isotope: Isotope, coeff: int) -> str:
     return "{}{}".format(isotope_str, coeff_str)
 
 
-def _get_charge_str(q: int):
+def _get_charge_str(q: int) -> str:
     qa = abs(q)
     q_sign = "+" if q > 0 else "-"
-    if qa > 1:
-        q_str = str(qa)
-    else:
-        q_str = ""
+    q_str = str(qa) if qa > 1 else ""
     q_str = q_str + q_sign
     return q_str
