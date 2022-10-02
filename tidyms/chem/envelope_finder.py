@@ -1,14 +1,16 @@
 """
 Functions to find isotopic envelopes candidates in a list of m/z values.
+
 """
 
 
 import bisect
 import numpy as np
 from typing import List, Dict, Set, Tuple
-from .atoms import Element, PTABLE
+from .atoms import Element, PeriodicTable
 
 
+# name conventions
 # M is used for Molecular mass
 # m for nominal mass
 # p for abundances
@@ -21,10 +23,7 @@ class EnvelopeFinder(object):
     ----------
     elements : list of element symbols
         elements used to estimate m/z of isotopologues
-    min_p : number between 0 and 1.
-        The minimum abundance of the isotopes of each element to be used for m/z
-        estimation.
-    mz_tolerance : float
+    tolerance : float
         tolerance used to extend the element based bounds
     max_length : int
         max length of the envelopes
@@ -58,14 +57,27 @@ class EnvelopeFinder(object):
         max_length: int = 5,
         min_p: float = 0.01,
     ):
-        self._elements = [PTABLE[x] for x in elements]
-        self._tolerance = mz_tolerance
-        self._max_length = max_length
-        self._bounds = _make_exact_mass_difference_bounds(self._elements, min_p)
+        """
+
+        Parameters
+        ----------
+        elements : List[str]
+            List of elements used to compute mass difference windows.
+        mz_tolerance : float
+            m/z tolerance used to match candidates.
+        max_length : int, default=5
+            Maximum envelope length to search.
+        min_p : number between 0 and 1.
+            The minimum abundance of the isotopes of each element to be used for m/z estimation.
+        """
+
+        self.elements = [PeriodicTable().get_element(x) for x in elements]
+        self.tolerance = mz_tolerance
+        self.max_length = max_length
+        self.bounds = _make_exact_mass_difference_bounds(self.elements, min_p)
 
     def find(
-        self, mz: np.ndarray, mmi_index: int, charge: int,
-        valid_indices: Set[int]
+        self, mz: np.ndarray, mmi_index: int, charge: int, valid_indices: Set[int]
     ) -> List[List[int]]:
         """
         Finds isotopic envelope candidates starting from the minimum mass
@@ -79,6 +91,8 @@ class EnvelopeFinder(object):
             index of the MMI
         charge : int
             Absolute value of the charge state of the envelope
+        valid_indices : array
+            Indices of `mz` to search candidates.
 
         Returns
         -------
@@ -88,8 +102,8 @@ class EnvelopeFinder(object):
 
         """
         return _find_envelopes(
-            mz, mmi_index, valid_indices, charge, self._max_length,
-            self._tolerance, self._bounds
+            mz, mmi_index, valid_indices, charge, self.max_length,
+            self.tolerance, self.bounds
         )
 
 

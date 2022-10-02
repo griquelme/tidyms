@@ -1,5 +1,5 @@
 from tidyms.chem import envelope_finder as ef
-from tidyms.chem import PTABLE
+from tidyms.chem import PeriodicTable
 from tidyms.chem import Formula
 import pytest
 import numpy as np
@@ -49,7 +49,7 @@ def elements():
 def test__make_exact_mass_difference_bounds(elements, element_set):
     # test bounds for different element combinations
     elements = elements[element_set]
-    elements = [PTABLE[x] for x in elements]
+    elements = [PeriodicTable().get_element(x) for x in elements]
     bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
     # m and M are the bounds for each nominal mass increment
     for e in elements:
@@ -65,18 +65,18 @@ def test__make_exact_mass_difference_bounds(elements, element_set):
 @pytest.mark.parametrize("element_set", ["cho", "chnops"])
 def test__get_next_mz_search_interval_mz(elements, formulas, element_set):
     elements = elements[element_set]
-    elements = [PTABLE[x] for x in elements]
+    elements = [PeriodicTable().get_element(x) for x in elements]
     dM_bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
     # test bounds for different formulas
     for f_str in formulas[element_set]:
         f = Formula(f_str)
-        _, mz, _ = f.get_isotopic_envelope()
+        mz, _ = f.get_isotopic_envelope()
         length = len(mz)
         # test bounds for different mz lengths
-        for l in range(1, length - 1):
-            mz_l = mz[l]
+        for k in range(1, length - 1):
+            mz_l = mz[k]
             min_mz, max_mz = ef._get_next_mz_search_interval(
-                mz[:l], dM_bounds, 1, 0.005)
+                mz[:k], dM_bounds, 1, 0.005)
             assert (min_mz < mz_l) and (mz_l < max_mz)
 
 
@@ -84,11 +84,11 @@ def test__get_next_mz_search_interval_mz(elements, formulas, element_set):
 def test_get_k_bounds_multiple_charges(elements, formulas, charge):
     elements = elements["chnops"]
     formulas = formulas["chnops"]
-    elements = [PTABLE[x] for x in elements]
+    elements = [PeriodicTable().get_element(x) for x in elements]
     bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
     for f_str in formulas:
         f = Formula(f_str)
-        _, mz, _ = f.get_isotopic_envelope()
+        mz, _ = f.get_isotopic_envelope()
         mz = mz / charge
         length = len(mz)
         for k in range(1, length - 1):
@@ -106,7 +106,7 @@ def test__find_envelopes(formulas, elements, elements_set, charge):
     # formulas.
     elements = elements[elements_set]
     formulas = formulas[elements_set]
-    elements = [PTABLE[x] for x in elements]
+    elements = [PeriodicTable().get_element(x) for x in elements]
     bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
     max_length = 5
     mz_tol = 0.005
@@ -115,7 +115,7 @@ def test__find_envelopes(formulas, elements, elements_set, charge):
     for f_str in formulas:
         f_str = "[{}]{}+".format(f_str, charge)
         f = Formula(f_str)
-        _, M, _ = f.get_isotopic_envelope()
+        M, _ = f.get_isotopic_envelope()
         mz = M / f.charge
         results = ef._find_envelopes(mz, 0, valid_indices, charge, max_length, mz_tol, bounds)
         assert results[0] == expected
@@ -127,7 +127,7 @@ def test__find_envelopes_no_charge(formulas, elements, elements_set):
     # formulas.
     elements = elements[elements_set]
     formulas = formulas[elements_set]
-    elements = [PTABLE[x] for x in elements]
+    elements = [PeriodicTable().get_element(x) for x in elements]
     bounds = ef._make_exact_mass_difference_bounds(elements, 0.0)
     max_length = 5
     charge = 0
@@ -136,7 +136,7 @@ def test__find_envelopes_no_charge(formulas, elements, elements_set):
     valid_indices = set(expected)
     for f_str in formulas:
         f = Formula(f_str)
-        _, mz, _ = f.get_isotopic_envelope()
+        mz, _ = f.get_isotopic_envelope()
         results = ef._find_envelopes(mz, 0, valid_indices, charge, max_length, mz_tol, bounds)
         assert results[0] == expected
 
@@ -145,12 +145,12 @@ def test_EnvelopeFinder(elements, formulas):
     elements = elements["chnops"]
     formulas = formulas["chnops"]
     envelope_finder = ef.EnvelopeFinder(elements, 0.005)
-    max_length = envelope_finder._max_length
+    max_length = envelope_finder.max_length
     mmi_index = 0
     charge = 1
     for f_str in formulas:
         f = Formula(f_str)
-        _, mz, _ = f.get_isotopic_envelope(n=max_length)
+        mz, _ = f.get_isotopic_envelope(n=max_length)
         expected = np.arange(mz.size)
         valid_indices = set(expected)
         results = envelope_finder.find(mz, mmi_index, charge, valid_indices)
