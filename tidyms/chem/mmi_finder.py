@@ -2,10 +2,10 @@ import numpy as np
 from math import gcd
 import bisect
 from typing import Dict, List, Tuple
-from .atoms import Element, PTABLE, EM
+from .atoms import Element, PeriodicTable, EM
 from .formula import Formula
-from ._isotope_distributions import make_coeff_abundances
-from .utils import cartesian_product_from_range_list
+from ._formula_generator import FormulaCoefficientBounds
+from .isotope_scorer import make_formula_coefficients_envelopes
 
 
 class MMIFinder:
@@ -155,12 +155,9 @@ def _create_rules_dict(
     bin_size: int,
     p_tol: float
 ) -> Dict[int, List[Dict[str, Tuple[float, float]]]]:
-    _, Ma, pa = _create_envelope_arrays(bounds, max_mass, length)
+    Ma, pa = _create_envelope_arrays(bounds, max_mass, length)
     # find the monoisotopic index, its Mass difference with the MMI (dM) and
     # its abundance quotient with the MMI (qp)
-    # mono_index = np.argmax(pa, axis=1)
-    # dM = Ma[np.arange(Ma.shape[0]), mono_index] - Ma[:, 0]
-    # qp = pa[np.arange(Ma.shape[0]), mono_index] / pa[:, 0]
     bins = (Ma[:, 0] // bin_size).astype(int)
 
     # find unique values for bins and monoisotopic index that will be used
@@ -170,7 +167,6 @@ def _create_rules_dict(
     # unique_mono_index = unique_mono_index[unique_mono_index > 0]
 
     rules = dict()
-    pa_max = np.max(pa, axis=1)
     for b in unique_bins:
         b_rules = list()
         bin_mask = bins == b
@@ -191,22 +187,17 @@ def _create_rules_dict(
 
 
 def _create_envelope_arrays(
-    bounds: Dict[str, Tuple[int, int]],
-    max_mass: float,
-    length: int
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    elements = [PTABLE[x] for x in bounds]
+    bounds: Dict[str, Tuple[int, int]], M_max: float, max_length: int
+) -> Tuple[np.ndarray, np.ndarray]:
+    elements = [PeriodicTable().get_element(x) for x in bounds]
     elements = _get_relevant_elements(elements)
-    isotopes = [min(x.isotopes.values(), key=lambda x: x.a) for x in elements]
-    bounds = [bounds[x.symbol] for x in elements]
-    bound_range = [range(x, y + 1) for x, y in bounds]
-    coeff = cartesian_product_from_range_list(bound_range)
-    ma, Ma, pa = make_coeff_abundances(bounds, coeff, isotopes, length)
-    mask = Ma[:, 0] <= max_mass
-    ma = ma[mask, :]
-    Ma = Ma[mask, :]
-    pa = pa[mask, :]
-    return ma, Ma, pa
+    isotopes = [x.get_mmi() for x in elements]
+    bounds = FormulaCoefficientBounds({x: bounds[x.get_symbol()] for x in isotopes})
+    coeff = bounds.make_coefficients(M_max)
+    envelope = make_formula_coefficients_envelopes(bounds, coeff, max_length)
+    M = envelope.M
+    p = envelope.p
+    return M, p
 
 
 def _get_relevant_elements(e_list: List[Element]) -> List[Element]:
@@ -289,9 +280,9 @@ def _compare_abundance_equal_envelopes(e1: Element, e2: Element) -> bool:
     e2_m0 = min(e2.isotopes)
     lcm = _lcm(e1_m0, e2_m0)
     f1 = Formula(e1.symbol + str(lcm // e1_m0))
-    _, _, f1_p = f1.get_isotopic_envelope()
+    _, f1_p = f1.get_isotopic_envelope()
     f2 = Formula(e2.symbol + str(lcm // e2_m0))
-    _, _, f2_p = f2.get_isotopic_envelope()
+    _, f2_p = f2.get_isotopic_envelope()
     f1_p_argmax = np.argmax(f1_p)
     different_max = f1_p_argmax != np.argmax(f2_p)
     if different_max:
@@ -300,7 +291,7 @@ def _compare_abundance_equal_envelopes(e1: Element, e2: Element) -> bool:
         length = min(f1_p.size, f2_p.size)
         different_shape = f1_p[:length] < f2_p[:length]
         different_shape[f1_p_argmax] = False
-        res = different_shape.any()
+        res = np.any(different_shape)
     return res
 
 

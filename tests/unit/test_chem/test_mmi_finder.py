@@ -1,49 +1,49 @@
 from tidyms.chem import mmi_finder
-from tidyms.chem import PTABLE
+from tidyms.chem import PeriodicTable
 import pytest
 import numpy as np
 
 
 @pytest.mark.parametrize("e2", ["Na", "P"])
 def test__is_distort_envelope_e2_monoisotope(e2):
-    e1 = PTABLE["C"]
-    e2 = PTABLE[e2]
+    e1 = PeriodicTable().get_element("C")
+    e2 = PeriodicTable().get_element(e2)
     assert not mmi_finder._is_distort_envelope(e1, e2)
 
 
 @pytest.mark.parametrize("e2", ["O", "S"])
 def test__is_distort_envelope_different_n_isotopes(e2):
-    e1 = PTABLE["C"]
-    e2 = PTABLE[e2]
+    e1 = PeriodicTable().get_element("C")
+    e2 = PeriodicTable().get_element(e2)
     assert mmi_finder._is_distort_envelope(e1, e2)
 
 
 @pytest.mark.parametrize("e2", ["Cl", "Br"])
 def test__is_distort_envelope_different_nominal_mass_increments(e2):
-    e1 = PTABLE["C"]
-    e2 = PTABLE[e2]
+    e1 = PeriodicTable().get_element("C")
+    e2 = PeriodicTable().get_element(e2)
     assert mmi_finder._is_distort_envelope(e1, e2)
     
 
 @pytest.mark.parametrize("e2", ["H", "N"])
 def test__is_distort_envelope_equal_envelopes_e2_dont_distort(e2):
-    e1 = PTABLE["C"]
-    e2 = PTABLE[e2]
+    e1 = PeriodicTable().get_element("C")
+    e2 = PeriodicTable().get_element(e2)
     assert not mmi_finder._is_distort_envelope(e1, e2)
 
 
 @pytest.mark.parametrize("e2", ["B", "Li"])
 def test__is_distort_envelope_equal_envelopes_e2_distort(e2):
-    e1 = PTABLE["C"]
-    e2 = PTABLE[e2]
+    e1 = PeriodicTable().get_element("C")
+    e2 = PeriodicTable().get_element(e2)
     assert mmi_finder._is_distort_envelope(e1, e2)
 
 
 def test__get_relevant_elements():
     e_list = ["C", "H", "N", "O", "P", "S", "Li", "Na"]
-    e_list = [PTABLE[x] for x in e_list]
+    e_list = [PeriodicTable().get_element(x) for x in e_list]
     expected = ["C", "O", "S", "Li"]
-    expected = [PTABLE[x] for x in expected]
+    expected = [PeriodicTable().get_element(x) for x in expected]
     res = mmi_finder._get_relevant_elements(e_list)
     assert set(res) == set(expected)
 
@@ -110,7 +110,7 @@ def test__find_candidates(rules):
     rules, max_mass, length, bin_size = rules
     # create an m/z and sp list where the monoisotopic m/z is the M1 in the
     # isotopic envelope.
-    _, M_cl, _ = PTABLE["Cl"].get_abundances()
+    _, M_cl, _ = PeriodicTable().get_element("Cl").get_abundances()
     dm_cl = M_cl[1] - M_cl[0]
     mono_mz = 400.0
     charge = 1
@@ -135,7 +135,7 @@ def test__find_candidates_multiple_candidates(rules):
     rules, max_mass, length, bin_size = rules
     # create an m/z and sp list where the monoisotopic m/z is the M1 in the
     # isotopic envelope.
-    _, M_cl, _ = PTABLE["Cl"].get_abundances()
+    _, M_cl, _ = PeriodicTable().get_element("Cl").get_abundances()
     dm_cl = M_cl[1] - M_cl[0]
     mono_mz = 400.0
     charge = 1
@@ -162,7 +162,7 @@ def test__find_candidates_no_candidates(rules):
     rules, max_mass, length, bin_size = rules
     # create an m/z and sp list where the monoisotopic m/z is the M1 in the
     # isotopic envelope.
-    _, M_cl, _ = PTABLE["Cl"].get_abundances()
+    _, M_cl, _ = PeriodicTable().get_element("Cl").get_abundances()
     dm_cl = M_cl[1] - M_cl[0]
     mono_mz = 400.0
     charge = 1
@@ -181,6 +181,7 @@ def test__find_candidates_no_candidates(rules):
         mz, sp, mono_mz, charge, mono_sp, i_rules, mz_tol, p_tol)
     assert len(test_candidates) == 0
 
+
 def test_MMIFinder():
     bounds = {
         "C": (0, 108),
@@ -197,7 +198,7 @@ def test_MMIFinder():
     finder = mmi_finder.MMIFinder(
         bounds, max_mass, max_charge, length, bin_size, mz_tol, p_tol)
 
-    _, M_cl, _ = PTABLE["Cl"].get_abundances()
+    _, M_cl, _ = PeriodicTable().get_element("Cl").get_abundances()
     dm_cl = M_cl[1] - M_cl[0]
     mono_mz = 400.0
     mono_index = 3
