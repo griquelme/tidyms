@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-functions to calculate compatible molecular formulas within a given tolerance.
+Functions to calculate compatible molecular formulas within a given tolerance.
 
 """
 
@@ -32,7 +32,7 @@ from .atoms import Isotope, PeriodicTable
 
 class FormulaGenerator:
     """
-    Generates sum formulas based on exact mass.
+    Generates sum formulas based on exact mass values.
 
     Attributes
     ----------
@@ -46,10 +46,9 @@ class FormulaGenerator:
 
     Methods
     -------
-    generate_formulas: finds using an exact mass and a mass tolerance..
-    results_to_array : Converts the results to an array of formula coefficients.
-    results_to_str : return the results as a list of formula strings.
-    from_hmdb : Creates a FormulaGenerator using coefficients bounds computed from the HMDB.
+    generate_formulas
+    results_to_array
+    from_hmdb
 
     """
 
@@ -66,11 +65,10 @@ class FormulaGenerator:
         Parameters
         ----------
         bounds: Dict
-            A dictionary from strings with isotopes to lower and upper bounds to
-            generate formulas. Isotope strings can be an element symbol (eg:
+            A dictionary from strings with isotopes to lower and upper bounds of
+            formulas coefficients. Isotope strings can be an element symbol (eg:
             "C") or an isotope string representation (eg: "13C"). In the first
-            case, the element is converted to the most abundant isotope ("C" ->
-            "12C").
+            case, the element is converted to the most abundant isotope ("12C").
         max_M : float or None, default=None
             Maximum mass value for generated formulas. If specified it is used
             to update the bounds. For examples is ``max_M=300`` and the bounds
@@ -90,6 +88,8 @@ class FormulaGenerator:
         self.bounds = FormulaCoefficientBounds.from_isotope_str(bounds)
         if max_M is not None:
             self.bounds = self.bounds.bounds_from_mass(max_M)
+        else:
+            max_M = max(v[1] * k.m for k, v in self.bounds.bounds.items())
         self._min_defect = min_defect
         self._max_defect = max_defect
 
@@ -108,14 +108,18 @@ class FormulaGenerator:
         self.pos = pos_restrictions.make_coefficients(max_M, reverse=True)
         self.neg = neg_restrictions.make_coefficients(max_M)
 
+    def __repr__(self):
+        str_repr = "FormulaGenerator(bounds={}, min_defect={}, max_defect={})"
+        return str_repr.format(self.bounds.bounds, self._min_defect, self._max_defect)
+
     def generate_formulas(self, M: float, tolerance: float):
         """
         Computes formulas compatibles with the given query mass. The formulas
         are computed assuming neutral species. If charged species are used, mass
         values must be corrected using the electron mass.
 
-        Results are stored in an internal format, use `results_to_array` or
-        `results_to_str` to obtain the compatible formulas.
+        Results are stored in an internal format, use `results_to_array` to
+        obtain the compatible formulas.
 
         Parameters
         ----------
@@ -159,9 +163,9 @@ class FormulaGenerator:
         coefficients: np.array
             Formula coefficients. Each row is a formula, each column is an isotope.
         isotopes: list[Isotopes]
-            Isotopes associated to each column of coefficients.
+            Isotopes associated to each column of `coefficients`.
         M: array
-            Exact mass of each formula.
+            Exact mass associated to each row of `coefficients`.
 
         Examples
         --------
@@ -251,9 +255,9 @@ class FormulaGenerator:
         else:
             msg = "Valid mass values are 500, 1000, 1500 or 2000. Got {}."
             raise ValueError(msg.format(mass))
-
-        hmdb_bounds.update(bounds)
-        return FormulaGenerator(hmdb_bounds, min_defect, max_defect)
+        if bounds is not None:
+            hmdb_bounds.update(bounds)
+        return FormulaGenerator(hmdb_bounds, min_defect=min_defect, max_defect=max_defect)
 
 
 class FormulaCoefficientBounds:
@@ -268,6 +272,9 @@ class FormulaCoefficientBounds:
 
     def __init__(self, bounds: Dict[Isotope, Tuple[int, int]]):
         self.bounds = bounds
+
+    def __repr__(self):
+        return "FormulaCoefficientBounds({})".format(self.bounds)
 
     def __getitem__(self, item):
         return self.bounds[item]
