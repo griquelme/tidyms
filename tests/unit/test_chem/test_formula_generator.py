@@ -1,7 +1,7 @@
 """
 tests for formula module from formula-generator
 """
-import tidyms.chem.formula_generator as fg
+import tidyms.chem._formula_generator as fg
 from tidyms.chem import Formula, PeriodicTable
 from tidyms.chem.atoms import InvalidIsotope
 import pytest
@@ -9,17 +9,17 @@ import numpy as np
 
 
 @pytest.fixture
-def chnops_bounds() -> fg._FormulaCoefficientBounds:
+def chnops_bounds() -> fg.FormulaCoefficientBounds:
     chnops_str = ["C", "H", "N", "O", "P", "S"]
     bounds = {x: (0, 5) for x in chnops_str}
-    return fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    return fg.FormulaCoefficientBounds.from_isotope_str(bounds)
 
 
 def test__FormulaCoefficientBounds_from_isotope_str_negative_bounds_error():
     chnops_str = ["C", "H", "N", "O", "P", "S"]
     bounds = {x: [-1, 5] for x in chnops_str}
     with pytest.raises(ValueError):
-        fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+        fg.FormulaCoefficientBounds.from_isotope_str(bounds)
 
 
 def test__FormulaCoefficientBounds_from_isotope_str_ub_lt_lb_error():
@@ -28,7 +28,7 @@ def test__FormulaCoefficientBounds_from_isotope_str_ub_lt_lb_error():
     chnops_str = ["C", "H", "N", "O", "P", "S"]
     bounds = {x: [7, 5] for x in chnops_str}
     with pytest.raises(ValueError):
-        fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+        fg.FormulaCoefficientBounds.from_isotope_str(bounds)
 
 
 def test__FormulaCoefficientBounds_from_isotope_str_invalid_isotope():
@@ -37,7 +37,7 @@ def test__FormulaCoefficientBounds_from_isotope_str_invalid_isotope():
     isotopes = ["14C", "H", "N", "O", "P", "S"]
     bounds = {x: [0, 5] for x in isotopes}
     with pytest.raises(InvalidIsotope):
-        fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+        fg.FormulaCoefficientBounds.from_isotope_str(bounds)
 
 
 def test__FormulaCoefficientBounds_from_isotope_str_invalid_element():
@@ -46,7 +46,7 @@ def test__FormulaCoefficientBounds_from_isotope_str_invalid_element():
     isotopes = ["X", "H", "N", "O", "P", "S"]
     bounds = {x: [0, 5] for x in isotopes}
     with pytest.raises(InvalidIsotope):
-        fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+        fg.FormulaCoefficientBounds.from_isotope_str(bounds)
 
 
 def test__FormulaCoefficientBounds_bound_from_mass(chnops_bounds):
@@ -72,7 +72,7 @@ def test__FormulaCoefficientBounds_bound_negative_positive_defect_only_pos_d():
     # check results when using only isotopes with positive mass defect
     isotopes = ["H", "N"]
     bounds = {x: (0, 5) for x in isotopes}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     d = 0.01
     tol = 0.005
     dp_min, dp_max, dn_min, dn_max = bounds.bound_negative_positive_defect(d, tol)
@@ -86,7 +86,7 @@ def test__FormulaCoefficientBounds_bound_negative_positive_defect_only_neg_d():
     # check results when using only isotopes with positive mass defect
     isotopes = ["Cl", "O"]
     bounds = {x: (0, 5) for x in isotopes}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     d = -0.01
     tol = 0.005
     dp_min, dp_max, dn_min, dn_max = bounds.bound_negative_positive_defect(d, tol)
@@ -109,7 +109,7 @@ def test__FormulaCoefficientBounds_get_nominal_defect_candidates_d_gt_one():
     # than one
     isotopes = ["H"]
     bounds = {x: (190, 200) for x in isotopes}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     M = 195.5
     m_candidates, d_candidates = bounds.get_nominal_defect_candidates(M)
     assert len(m_candidates) == 1
@@ -129,7 +129,7 @@ def test__FormulaCoefficientBounds_split_pos_neg(chnops_bounds):
 def test__FormulaCoefficientBounds_split_pos_neg_no_positive_d():
     isotopes = ["Cl", "O"]
     bounds = {x: (0, 5) for x in isotopes}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     pos, neg = bounds.split_pos_neg()
     assert len(pos.bounds) == 0
 
@@ -140,7 +140,7 @@ def test__FormulaCoefficientBounds_split_pos_neg_no_positive_d():
 def test__FormulaCoefficientBounds_split_pos_neg_no_negative_d():
     isotopes = ["H", "N"]
     bounds = {x: (0, 5) for x in isotopes}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     pos, neg = bounds.split_pos_neg()
     assert len(neg.bounds) == 0
 
@@ -151,11 +151,11 @@ def test__FormulaCoefficientBounds_split_pos_neg_no_negative_d():
 @pytest.mark.parametrize("isotope", ["H", "O"])
 def test__FormulaCoefficients_one_isotope_empty(isotope):
     bounds = {x: (0, 0) for x in [isotope]}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     max_mass = 1000
     return_sorted = False
     return_reversed = False
-    coeff = fg._FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
+    coeff = fg.FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
     assert coeff.coefficients.shape == (1, 1)
     assert coeff.M.shape == (1,)
     assert coeff.q.shape == (1,)
@@ -167,11 +167,11 @@ def test__FormulaCoefficients_one_isotope_empty(isotope):
 def test__FormulaCoefficients_one_isotope(isotope):
     n = 10
     bounds = {x: (0, n) for x in [isotope]}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     max_mass = 1000
     return_sorted = False
     return_reversed = False
-    coeff = fg._FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
+    coeff = fg.FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
     assert coeff.coefficients.shape == (n + 1, 1)
     assert coeff.M.shape == (n + 1,)
     assert coeff.q.shape == (n + 1,)
@@ -183,11 +183,11 @@ def test__FormulaCoefficients_one_isotope(isotope):
 def test__FormulaCoefficients_one_isotope_return_sorted(isotope):
     n = 10
     bounds = {x: (0, n) for x in [isotope]}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     max_mass = 1000
     return_sorted = True
     return_reversed = False
-    coeff = fg._FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
+    coeff = fg.FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
     assert coeff.coefficients.shape == (n + 1, 1)
     assert coeff.M.shape == (n + 1,)
     assert coeff.q.shape == (n + 1,)
@@ -204,11 +204,11 @@ def test__FormulaCoefficients_one_isotope_return_sorted(isotope):
 def test__FormulaCoefficients_one_isotope_return_sorted_return_reversed(isotope):
     n = 10
     bounds = {x: (0, n) for x in [isotope]}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     max_mass = 1000
     return_sorted = True
     return_reversed = True
-    coeff = fg._FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
+    coeff = fg.FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
     assert coeff.coefficients.shape == (n + 1, 1)
     assert coeff.M.shape == (n + 1,)
     assert coeff.q.shape == (n + 1,)
@@ -230,11 +230,11 @@ def test__FormulaCoefficients_multiple_isotopes(isotopes):
     n_isotopes = len(isotopes)
     n_comb = (n + 1) ** n_isotopes
     bounds = {x: (0, n) for x in isotopes}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     max_mass = 1000
     return_sorted = False
     return_reversed = False
-    coeff = fg._FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
+    coeff = fg.FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
     assert coeff.coefficients.shape == (n_comb, n_isotopes)
     assert coeff.M.shape == (n_comb,)
     assert coeff.q.shape == (n_comb,)
@@ -251,11 +251,11 @@ def test__FormulaCoefficients_multiple_isotopes_return_sorted(isotopes):
     n_isotopes = len(isotopes)
     n_comb = (n + 1) ** n_isotopes
     bounds = {x: (0, n) for x in isotopes}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     max_mass = 1000
     return_sorted = True
     return_reversed = False
-    coeff = fg._FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
+    coeff = fg.FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
     assert coeff.coefficients.shape == (n_comb, n_isotopes)
     assert coeff.M.shape == (n_comb,)
     assert coeff.q.shape == (n_comb,)
@@ -277,11 +277,11 @@ def test__FormulaCoefficients_multiple_isotopes_return_reversed(isotopes):
     n_isotopes = len(isotopes)
     n_comb = (n + 1) ** n_isotopes
     bounds = {x: (0, n) for x in isotopes}
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(bounds)
     max_mass = 1000
     return_sorted = True
     return_reversed = True
-    coeff = fg._FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
+    coeff = fg.FormulaCoefficients(bounds, max_mass, return_sorted, return_reversed)
     assert coeff.coefficients.shape == (n_comb, n_isotopes)
     assert coeff.M.shape == (n_comb,)
     assert coeff.q.shape == (n_comb,)
@@ -307,7 +307,7 @@ def test_FormulaGenerator_bruteforce(formula_str):
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
     bf_coeff = bounds.make_coefficients(max_mass)
     bf_isotopes = bf_coeff.isotopes
     bf_coeff_M = bf_coeff.M
@@ -344,7 +344,7 @@ def test_FormulaGenerator_bruteforce_no_negative_isotopes(formula_str):
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
     bf_coeff = bounds.make_coefficients(max_mass)
     bf_isotopes = bf_coeff.isotopes
     bf_coeff_M = bf_coeff.M
@@ -381,7 +381,7 @@ def test_FormulaGenerator_bruteforce_no_positive_isotopes(formula_str):
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
     bf_coeff = bounds.make_coefficients(max_mass)
     bf_isotopes = bf_coeff.isotopes
     bf_coeff_M = bf_coeff.M
@@ -418,7 +418,7 @@ def test_FormulaGenerator_bruteforce_no_c12(formula_str):
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
     bf_coeff = bounds.make_coefficients(max_mass)
     bf_isotopes = bf_coeff.isotopes
     bf_coeff_M = bf_coeff.M
@@ -455,7 +455,7 @@ def test_FormulaGenerator_bruteforce_no_c12_no_negative(formula_str):
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
     bf_coeff = bounds.make_coefficients(max_mass)
     bf_isotopes = bf_coeff.isotopes
     bf_coeff_M = bf_coeff.M
@@ -492,7 +492,7 @@ def test_FormulaGenerator_bruteforce_no_c12_no_positive(formula_str):
     # brute force solution
     # compute al formula coefficients, sort coefficients by exact mass
     # and search the minimum and maximum valid mass using bisection search.
-    bounds = fg._FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
+    bounds = fg.FormulaCoefficientBounds.from_isotope_str(isotope_bounds)
     bf_coeff = bounds.make_coefficients(max_mass)
     bf_isotopes = bf_coeff.isotopes
     bf_coeff_M = bf_coeff.M
@@ -514,3 +514,25 @@ def test_FormulaGenerator_bruteforce_no_c12_no_positive(formula_str):
     col_sort = np.argsort([str(x) for x in isotopes])
     coeff = coeff[:, col_sort]
     assert np.array_equal(coeff, bf_coeff)
+
+
+def test_FormulaGenerator_generate_formulas_invalid_mass():
+    formula_generator = fg.FormulaGenerator.from_hmdb(500)
+    with pytest.raises(ValueError):
+        formula_generator.generate_formulas(-100, 0.005)
+
+
+def test_FormulaGenerator_generate_formulas_invalid_tolerance():
+    formula_generator = fg.FormulaGenerator.from_hmdb(500)
+    with pytest.raises(ValueError):
+        formula_generator.generate_formulas(100, -0.005)
+
+
+@pytest.mark.parametrize("mass", [500, 1000, 1500, 2000])
+def test_FormulaGenerator_from_hmdb(mass):
+    fg.FormulaGenerator.from_hmdb(mass)
+
+
+def test_FormulaGenerator_from_hmdb_invalid_mass():
+    with pytest.raises(ValueError):
+        fg.FormulaGenerator.from_hmdb(2450)
