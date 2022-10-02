@@ -90,7 +90,6 @@ class Element(object):
     """
 
     def __init__(self, symbol: str, name: str, isotopes: Dict[int, Isotope]):
-        _validate_element_params(symbol, name, isotopes)
         self.name = name
         self.symbol = symbol
         self.isotopes = isotopes
@@ -242,28 +241,6 @@ class _PeriodicTable:
         except KeyError:
             msg = "{} is not a valid input.".format(x)
             raise InvalidIsotope(msg)
-
-
-def _validate_element_params(
-    symbol: str, name: str, isotopes: Dict[int, Isotope]
-) -> None:
-    if not isinstance(symbol, str):
-        msg = "symbol must be a string"
-        raise TypeError(msg)
-    if not isinstance(name, str):
-        msg = "name must be a string"
-        raise TypeError(msg)
-
-    z = isotopes[list(isotopes.keys())[0]].z
-    total_abundance = 0
-    for isotope in isotopes.values():
-        if isotope.z != z:
-            msg = "Atomic number must be the same for all isotopes."
-            raise ValueError(msg)
-        total_abundance += isotope.abundance
-    if not np.isclose(total_abundance, 1):
-        msg = "the sum of the abundance of each isotope should be 1"
-        raise ValueError(msg)
 
 
 def _make_periodic_table() -> Dict[str, Element]:
