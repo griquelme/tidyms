@@ -3,20 +3,16 @@ Tools for working with Isotopes and Elements.
 
 Objects
 -------
-
-- Isotope
 - Element
+- Isotope
+- PeriodicTable
 
 Constants
 ---------
-
-- PTABLE: a dict with element symbols, Elements key-value pairs.
-- Z_TO_SYMBOL: a dict with atomic number, symbol key-value pairs.
 - EM: Mass of the electron.
 
 Exceptions
 ----------
-
 - InvalidIsotope
 
 """
@@ -37,17 +33,17 @@ class Isotope:
     Attributes
     ----------
     z: int
-        atomic number
+        Atomic number
     n: int
-        neutron number
+        Neutron number
     a: int
-        mass number
+        Mass number
     m: float
-        exact mass.
+        Exact mass.
     defect: float
-        difference between Exact mass and Mass number.
+        Difference between the exact mass and mass number.
     abundance: float
-        relative abundance of the isotope.
+        Relative abundance of the isotope.
 
     """
 
@@ -76,15 +72,18 @@ class Isotope:
 
 class Element(object):
     """
-    A representation of a chemical element
+    Representation of a chemical element.
 
     Attributes
     ----------
     name : str
+        Element name.
     symbol : str
+        Element symbol
     isotopes : Dict[int, Isotope]
         Mapping from mass number to an isotope
     z : int
+        Atomic number.
     nominal_mass : int
         Mass number of the most abundant isotope
 
@@ -143,12 +142,30 @@ class Element(object):
 
 
 def PeriodicTable():
+    """
+    Reference the PeriodicTable object.
+
+    Examples
+    --------
+    >>> import tidyms as ms
+    >>> ptable = ms.chem.PeriodicTable()
+
+    """
     if _PeriodicTable.instance is None:
         _PeriodicTable.instance = _PeriodicTable()
     return _PeriodicTable.instance
 
 
 class _PeriodicTable:
+    """
+    Periodic Table representation. Contains element and isotope information.
+
+    Methods
+    -------
+    get_element
+    get_isotope
+
+    """
 
     instance = None
 
@@ -192,8 +209,7 @@ class _PeriodicTable:
 
     def get_isotope(self, x: str, copy: bool = False) -> Isotope:
         """
-        Returns an isotope object from a string representation or its atomic
-        and mass numbers.
+        Returns an isotope object from a string representation.
 
         Parameters
         ----------
