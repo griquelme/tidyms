@@ -1,167 +1,218 @@
 import pytest
-from tidyms.chem import _isotope_distributions as ids
-from tidyms.chem.atoms import find_isotope
 import numpy as np
+from tidyms.chem import _isotope_distributions as ids
+from tidyms.chem import Formula, PeriodicTable
 from itertools import product
 
 
-@pytest.mark.parametrize("isotope", ["12C", "35Cl", "1H", "2H", "13C", "10B"])
-def test_find_n_atoms_abundances_zero_atoms(isotope):
-    isotope = find_isotope(isotope)
-    length = 5
-    nom, exact, ab = ids._find_n_atoms_abundances(isotope, 0, length)
-    expected_nominal = np.zeros(length, dtype=int)
-    expected_exact = np.zeros(length)
-    expected_abundance = np.zeros_like(expected_exact)
-    expected_abundance[0] = 1
-    assert np.array_equal(nom, expected_nominal)
-    assert np.allclose(exact, expected_exact)
-    assert np.allclose(ab, expected_abundance)
-
-comb = list(product(["12C", "1H", "35Cl"], [1, 3, 5, 7]))
+@pytest.mark.parametrize(
+    "isotope_symbol,n,max_length",
+    product(["2H", "31P"], [0, 1, 5], [1, 2, 5]))
+def test__get_n_isotopes_envelope(isotope_symbol: str, n: int, max_length: int):
+    isotope = PeriodicTable().get_isotope(isotope_symbol)
+    M, p = ids._get_n_isotopes_envelope(isotope, n, max_length)
+    M_expected = np.zeros(max_length)
+    M_expected[0] = n * isotope.m
+    p_expected = np.zeros(max_length)
+    p_expected[0] = 1.0
+    assert np.array_equal(M, M_expected)
+    assert np.array_equal(p, p_expected)
 
 
-@pytest.mark.parametrize("isotope,n", comb)
-def test_find_n_atoms_abundance_one_atom_most_abundant_isotope(isotope, n):
-    isotope = find_isotope(isotope)
-    element = isotope.get_element()
-    length = 15
-    test_nom, test_exact, test_ab = \
-        ids._find_n_atoms_abundances(isotope, n, length)
-    element_nom, element_exact, element_ab = element.get_abundances()
-
-    dexact = element_exact[1] - element_exact[0]
-    dnom = element_nom[1] - element_nom[0]
-    # nominal mass values that are not possible (eg. M + 1 with Cl)
-    # are set to zero. Also if the array was extended to match length
-    # the additional elements are set to zero.
-    expected_exact = element_exact[0] * n + np.arange(0, length) * dexact / dnom
-    expected_nom = element_nom[0] * n + np.arange(0, length)
-    set_to_zero_mask = ~np.isin(np.arange(length), np.arange(0, length, dnom))
-    expected_exact[set_to_zero_mask] = 0.0
-    expected_nom[set_to_zero_mask] = 0
-    if n * dnom < length:
-        expected_nom[n * dnom + 1:] = 0
-        expected_exact[n * dnom + 1:] = 0.0
+def test__validate_abundance_valid_value():
+    symbol = "C"
+    c = PeriodicTable().get_element(symbol)
+    mc, _, _ = c.get_abundances()
+    p = np.array([0.8, 0.2])
+    ids._validate_abundance(p, mc, symbol)
 
 
-    assert np.array_equal(test_nom, expected_nom)
-    assert np.allclose(test_exact, expected_exact)
-    assert np.isclose(test_ab.sum(), 1.0)
+def test__validate_abundance_negative_values():
+    symbol = "C"
+    c = PeriodicTable().get_element(symbol)
+    mc, _, _ = c.get_abundances()
+    p = np.array([0.8, -0.01])
+    with pytest.raises(ValueError):
+        ids._validate_abundance(p, mc, symbol)
 
 
-@pytest.mark.parametrize("isotope", ["13C", "37Cl", "2H", "10B"])
-def test_find_n_atoms_abundance_one_atom(isotope):
-    isotope = find_isotope(isotope)
-    n_atoms = 1
-    length = 5
-    test_nom, test_exact, test_ab = \
-        ids._find_n_atoms_abundances(isotope, n_atoms, length)
-    exp_nom = np.zeros(length, dtype=int)
-    exp_nom[0] = isotope.a
-    exp_exact = np.zeros(length, dtype=float)
-    exp_exact[0] = isotope.m
-    exp_ab = np.zeros(length, dtype=float)
-    exp_ab[0] = 1.0
-    assert np.array_equal(test_nom[:exp_nom.size], exp_nom)
-    assert np.allclose(test_exact[:exp_nom.size], exp_exact)
-    assert np.allclose(test_ab[:exp_nom.size], exp_ab)
+def test__validate_abundance_non_normalized():
+    symbol = "C"
+    c = PeriodicTable().get_element(symbol)
+    mc, _, _ = c.get_abundances()
+    p = np.array([0.8, 0.21])
+    with pytest.raises(ValueError):
+        ids._validate_abundance(p, mc, symbol)
 
 
-def test_find_n_atoms_abundance_custom_abundance():
-    isotope = find_isotope("12C")
-    custom_ab = np.array([0.9, 0.1])
-    element = isotope.get_element()
-    n = 4
-    length = 5
-    test_nom, test_exact, test_ab = \
-        ids._find_n_atoms_abundances(isotope, n, length, abundance=custom_ab)
-    element_nom, element_exact, _ = element.get_abundances()
-
-    dexact = element_exact[1] - element_exact[0]
-    dnom = element_nom[1] - element_nom[0]
-    # nominal mass values that are not possible (eg. M + 1 with Cl)
-    # are set to zero. Also if the array was extended to match length
-    # the additional elements are set to zero.
-    expected_exact = element_exact[0] * n + np.arange(0, length) * dexact / dnom
-    expected_nom = element_nom[0] * n + np.arange(0, length)
-    set_to_zero_mask = ~np.isin(np.arange(length), np.arange(0, length, dnom))
-    expected_exact[set_to_zero_mask] = 0.0
-    expected_nom[set_to_zero_mask] = 0
-    if n * dnom < length:
-        expected_nom[n * dnom + 1:] = 0
-        expected_exact[n * dnom + 1:] = 0.0
-
-    assert np.array_equal(test_nom, expected_nom)
-    assert np.allclose(test_exact, expected_exact)
-    assert np.isclose(test_ab.sum(), 1.0)
-
-@pytest.mark.parametrize("isotope,n", comb)
-def test_combine_element_abundance(isotope, n):
-    # combine equal abundances values should be equivalent to compute
-    # the abundances using find_n_atoms_abundances using 2 * n
-    length = 5
-    min_p = 1e-10
-    isotope = find_isotope(isotope)
-    expected_nom, expected_exact, expected_ab = \
-        ids._find_n_atoms_abundances(isotope, 2 * n, length)
-
-    expected_ab[expected_ab < min_p] = 0.0
-    expected_exact[expected_ab < min_p] = 0.0
-    expected_nom[expected_ab < min_p] = 0
-
-    nom1, ex1, ab1 = ids._find_n_atoms_abundances(isotope, n, length)
-    test_nom, test_exact, test_ab = \
-        ids._combine_element_abundances(nom1, ex1, ab1, nom1, ex1, ab1,
-                                        min_p=min_p)
-
-    assert np.allclose(expected_nom, test_nom)
-    assert np.allclose(expected_exact, test_exact)
-    assert np.allclose(expected_ab, test_ab)
-
-@pytest.mark.parametrize("n_min,n_max", [[0, 0], [1, 1], [0, 1], [0, 5],
-                                         [10, 20]])
-def test_make_element_envelope_array(n_min, n_max):
-    isotope = find_isotope("12C")
-    element = isotope.get_element()
-    nom = element.nominal_mass
-    length = 5
-    test_nom, test_ex, test_ab = \
-        ids._make_element_abundance_array(isotope, n_min, n_max, length)
-
-    n_array = np.arange(n_min, n_max + 1)
-    assert np.array_equal(n_array * nom, test_nom[:, 0])
+def test__validate_abundance_invalid_length():
+    symbol = "C"
+    c = PeriodicTable().get_element(symbol)
+    mc, _, _ = c.get_abundances()
+    p = np.array([0.8, 0.015, 0.05])
+    with pytest.raises(ValueError):
+        ids._validate_abundance(p, mc, symbol)
 
 
-@pytest.mark.parametrize("isotope,n_min,n_max", [["12C", 0, 0], ["12C", 0, 1],
-                                                 ["1H", 0, 3], ["11B", 0, 5],
-                                                 ["12C", 10, 20], ["32S", 0, 5]]
-                         )
-def test_combine_array_abundance(isotope, n_min, n_max):
-    # combine equal abundances values should be equivalent to compute
-    # the abundances using make_elements_abundance_array using 2 * n_min and
-    # 2 * n_max
-    length = 5
-    min_p = 1e-10
-    isotope = find_isotope(isotope)
-    expected_nom, expected_exact, expected_ab = \
-        ids._make_element_abundance_array(isotope, n_min * 2, n_max * 2, length)
+@pytest.mark.parametrize(
+    "n_isotopes,n",
+    [[1, 1], [1, 2], [1, 5], [1, 10], [2, 1], [2, 5], [2, 20], [5, 1], [5, 10]]
+)
+def test__find_n_isotopes_combination(n_isotopes, n):
+    comb = ids._find_n_isotope_combination(n_isotopes, n)
+    expected = [x for x in product(range(n + 1), repeat=n_isotopes) if sum(x) == n]
+    expected = np.array(expected)
+    # check that the row content is equal
+    for x in expected:
+        assert x in comb
+    for x in comb:
+        assert x in expected
 
-    # remove odd values that are not computed when combining arrays
-    expected_ab = expected_ab[::2, :]
-    expected_nom = expected_nom[::2, :]
-    expected_exact = expected_exact[::2, :]
 
-    expected_ab[expected_ab < min_p] = 0.0
-    expected_exact[expected_ab < min_p] = 0.0
-    expected_nom[expected_ab < min_p] = 0
+@pytest.mark.parametrize(
+    "element,max_length",
+    product(["C", "S"], [2, 5, 10]))
+def test__get_n_atoms_envelope_aux_n_1(element: str, max_length: int):
+    element = PeriodicTable().get_element(element)
+    me, Me, pe = element.get_abundances()
+    M, p = ids._get_n_atoms_envelope_aux(me, Me, pe, 1, max_length)
+    Me, pe = ids._fill_missing_nominal(me, Me, pe, max_length)
+    assert np.allclose(M, Me)
+    assert np.allclose(p, pe / np.sum(pe))
 
-    nom1, ex1, ab1 = ids._make_element_abundance_array(isotope, n_min, n_max,
-                                                       length)
-    test_nom, test_exact, test_ab = \
-        ids._combine_array_abundances(nom1, ex1, ab1, nom1, ex1, ab1,
-                                      min_p=min_p)
 
-    assert np.allclose(expected_nom, test_nom)
-    assert np.allclose(expected_exact, test_exact)
-    assert np.allclose(expected_ab, test_ab)
+def test__get_n_atoms_envelope_aux_c_n_3_max_length_3():
+    element = PeriodicTable().get_element("C")
+    m_c12 = 12
+    m_c13 = element.isotopes[13].m
+    me, Me, pe = element.get_abundances()
+    n = 3
+    max_length = 3
+    M, p = ids._get_n_atoms_envelope_aux(me, Me, pe, n, max_length)
+    M_expected = np.array([3 * m_c12, 2 * m_c12 + m_c13, 12 + 2 * m_c13])
+    assert np.allclose(M, M_expected)
+    assert np.allclose(np.sum(pe), 1.0)
+
+
+def test__get_n_atoms_envelope_aux_c_n_3_max_length_5():
+    element = PeriodicTable().get_element("C")
+    m_c12 = 12
+    m_c13 = element.isotopes[13].m
+    me, Me, pe = element.get_abundances()
+    n = 3
+    max_length = 5
+    M, p = ids._get_n_atoms_envelope_aux(me, Me, pe, n, max_length)
+    M_expected = np.array([3 * m_c12, 2 * m_c12 + m_c13, 12 + 2 * m_c13, 3 * m_c13, 0])
+    assert np.allclose(M, M_expected)
+    assert np.allclose(np.sum(pe), 1.0)
+
+
+def test__get_n_atoms_envelope_aux_s_n_2_max_length_3():
+    element = PeriodicTable().get_element("S")
+    me, Me, pe = element.get_abundances()
+    n = 2
+    max_length = 3
+    M, p = ids._get_n_atoms_envelope_aux(me, Me, pe, n, max_length)
+    assert np.array_equal(M.round().astype(int), np.array([64, 65, 66]))
+    assert np.allclose(np.sum(pe), 1.0)
+
+
+def test__get_n_atoms_envelope_aux_s_n_2_max_length_10():
+    element = PeriodicTable().get_element("S")
+    me, Me, pe = element.get_abundances()
+    n = 2
+    max_length = 10
+    M, p = ids._get_n_atoms_envelope_aux(me, Me, pe, n, max_length)
+    M_rounded = np.array([64, 65, 66, 67, 68, 69, 70,  0, 72, 0])
+    assert np.array_equal(M.round().astype(int), M_rounded)
+    assert np.allclose(np.sum(pe), 1.0)
+
+
+def test__get_n_atoms_envelope():
+    element = PeriodicTable().get_element("C")
+    c12 = element.isotopes[12]
+    me, Me, pe = element.get_abundances()
+    M, p = ids._get_n_atoms_envelope(c12, 1, 2)
+    assert np.allclose(M, Me)
+    assert np.allclose(p, pe)
+
+
+def test__get_n_atoms_envelope_custom_abundance():
+    element = PeriodicTable().get_element("C")
+    c12 = element.isotopes[12]
+    me, Me, pe = element.get_abundances()
+    pe = np.array([0.8, 0.2])
+    M, p = ids._get_n_atoms_envelope(c12, 1, 2, p=pe)
+    assert np.allclose(M, Me)
+    assert np.allclose(p, pe)
+
+
+def test__fill_missing_nominal_no_fill():
+    # carbon element do not need to feel missing values.
+    max_length = 5
+    m = np.array([24, 25, 26, 0, 0])
+    M = np.array([24.1, 24.2, 24.3, 0, 0])
+    p = np.array([0.5, 0.3, 0.2, 0, 0])
+    M_fill, p_fill = ids._fill_missing_nominal(m, M, p, max_length)
+    assert np.allclose(M_fill, M)
+    assert np.allclose(p_fill, p)
+
+
+def test__fill_missing_nominal_fill():
+    # Cl  does not have an M + 1 isotope and must be filled.
+    max_length = 5
+    m = np.array([105, 107, 109])
+    M = np.array([105.1, 107.2, 109.3])
+    p = np.array([0.5, 0.3, 0.2])
+    M_fill, p_fill = ids._fill_missing_nominal(m, M, p, max_length)
+    M_expected = np.array([M[0], 0, M[1], 0, M[2]])
+    p_expected = np.array([p[0], 0, p[1], 0, p[2]])
+    assert np.allclose(M_fill, M_expected)
+    assert np.allclose(p_fill, p_expected)
+
+
+def test__combine_envelopes_one_row_array():
+    c12 = PeriodicTable().get_isotope("12C")
+    max_length = 10
+    n1 = 2
+    n2 = 5
+    n = n1 + n2
+    M1, p1 = ids._get_n_atoms_envelope(c12, n1, max_length)
+    M1 = M1.reshape((1, M1.size))
+    p1 = p1.reshape((1, p1.size))
+    M2, p2 = ids._get_n_atoms_envelope(c12, n2, max_length)
+    M2 = M2.reshape((1, M1.size))
+    p2 = p2.reshape((1, p1.size))
+    M, p = ids.combine_envelopes(M1, p1, M2, p2)
+    M_expected, p_expected = ids._get_n_atoms_envelope(c12, n, max_length)
+    M_expected = M_expected.reshape((1, M_expected.size))
+    p_expected = p_expected.reshape((1, p_expected.size))
+    assert np.allclose(M, M_expected)
+    assert np.allclose(p, p_expected)
+
+
+def test__combine_envelopes_multiple_row_array():
+    c12 = PeriodicTable().get_isotope("12C")
+    n_rep = 5
+    max_length = 10
+    n1 = 2
+    n2 = 5
+    n = n1 + n2
+    M1, p1 = ids._get_n_atoms_envelope(c12, n1, max_length)
+    M1 = np.tile(M1, (n_rep, 1))
+    p1 = np.tile(p1, (n_rep, 1))
+    M2, p2 = ids._get_n_atoms_envelope(c12, n2, max_length)
+    M2 = np.tile(M2, (n_rep, 1))
+    p2 = np.tile(p2, (n_rep, 1))
+    M, p = ids.combine_envelopes(M1, p1, M2, p2)
+    M_expected, p_expected = ids._get_n_atoms_envelope(c12, n, max_length)
+    M_expected = np.tile(M_expected, (n_rep, 1))
+    p_expected = np.tile(p_expected, (n_rep, 1))
+    assert np.allclose(M, M_expected)
+    assert np.allclose(p, p_expected)
+
+
+def test_find_formula_abundances():
+    f = Formula("CO2")
+    max_length = 10
+    ids.find_formula_envelope(f.composition, max_length)
