@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from tidyms.chem import _isotope_distributions as ids
+from tidyms.chem import _envelope_utils as ids
 from tidyms.chem import Formula, PeriodicTable
 from itertools import product
 
