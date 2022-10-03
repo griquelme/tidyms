@@ -20,7 +20,7 @@ from collections import Counter
 from copy import copy
 from typing import List, Tuple, Dict, Optional
 from .atoms import EM, InvalidIsotope, Isotope, PeriodicTable
-from ._isotope_distributions import find_formula_envelope
+from ._envelope_utils import find_formula_envelope
 
 
 class Formula:

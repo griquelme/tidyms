@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 from .atoms import Element, PeriodicTable, EM
 from .formula import Formula
 from ._formula_generator import FormulaCoefficientBounds
-from .isotope_scorer import make_formula_coefficients_envelopes
+from .envelope_tools import make_formula_coefficients_envelopes
 
 
 class MMIFinder:
