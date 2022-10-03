@@ -14,7 +14,48 @@ formula_str_list = ["C11H12N2O2", "C6H12O6", "C27H46O", "CO2", "HCOOH"]
 
 
 @pytest.mark.parametrize("f_str", formula_str_list)
-def test_isotope_scorer(f_str, formula_generator):
+def test_EnvelopeValidator_find_valid_bounds(f_str, formula_generator):
+    max_length = 5
+    validator = EnvelopeValidator(formula_generator, max_length=max_length)
+    f = Formula(f_str)
+    M, p = f.get_isotopic_envelope(max_length)
+    tolerance = 0.005
+    validator.generate_envelopes(M, p, tolerance)
+    for k in range(M.size):
+        min_mz, max_mz, min_ab, max_ab = validator._find_bounds(k)
+        assert np.all(min_mz < M[k])
+        assert np.all(max_mz > M[k])
+        assert np.all(min_ab < p[k])
+        assert np.all(max_ab > p[k])
+
+
+def test_EnvelopeValidator_invalid_instrument(formula_generator):
+    with pytest.raises(ValueError):
+        EnvelopeValidator(formula_generator, instrument="bad-scorer")
+
+
+@pytest.mark.parametrize("f_str", formula_str_list)
+def test_EnvelopeValidator_validate(formula_generator, f_str):
+    max_length = 5
+    validator = EnvelopeValidator(formula_generator, max_length=max_length)
+    f = Formula(f_str)
+    M, p = f.get_isotopic_envelope(max_length)
+    validated_length = validator.validate(M, p)
+    assert validated_length == max_length
+
+
+def test_EnvelopeValidator_validate_invalid_envelope(formula_generator):
+    max_length = 5
+    validator = EnvelopeValidator(formula_generator, max_length=max_length)
+    f = Formula("C2H8B")
+    M, p = f.get_isotopic_envelope(max_length)
+    validated_length = validator.validate(M, p)
+    expected_length = 0
+    assert validated_length == expected_length
+
+
+@pytest.mark.parametrize("f_str", formula_str_list)
+def test_EnvelopeScorer(f_str, formula_generator):
     # test that the best scoring candidate has the same molecular formula
     f = Formula(f_str)
     max_length = 5
@@ -28,7 +69,7 @@ def test_isotope_scorer(f_str, formula_generator):
 
 
 @pytest.mark.parametrize("f_str", formula_str_list)
-def test_isotope_scorer_length_gt_scorer_max_length(f_str, formula_generator):
+def test_EnvelopeScorer_length_gt_scorer_max_length(f_str, formula_generator):
     # test that the best scoring candidate has the same molecular formula
     f = Formula(f_str)
     max_length = 3
@@ -44,23 +85,7 @@ def test_isotope_scorer_length_gt_scorer_max_length(f_str, formula_generator):
 
 
 @pytest.mark.parametrize("f_str", formula_str_list)
-def test_isotope_scorer_find_valid_bounds(f_str, formula_generator):
-    max_length = 5
-    validator = EnvelopeValidator(formula_generator, max_length=max_length)
-    f = Formula(f_str)
-    M, p = f.get_isotopic_envelope(max_length)
-    tolerance = 0.005
-    validator.generate_envelopes(M, p, tolerance)
-    for k in range(M.size):
-        min_mz, max_mz, min_ab, max_ab = validator._find_bounds(k)
-        assert np.all(min_mz < M[k])
-        assert np.all(max_mz > M[k])
-        assert np.all(min_ab < p[k])
-        assert np.all(max_ab > p[k])
-
-
-@pytest.mark.parametrize("f_str", formula_str_list)
-def test_isotope_scorer_custom_scorer(f_str, formula_generator):
+def test_EnvelopeScorer_custom_scorer(f_str, formula_generator):
 
     def cosine_scorer(mz1, ab1, mz2, ab2, **scorer_params):
         n1 = np.linalg.norm(ab1)
@@ -92,7 +117,7 @@ def positive_elements_scorer():
 
 
 @pytest.mark.parametrize("f_str", ["C2H3N", "N2H4", "C3N3H3"])
-def test_scorer_positive_defect_elements_only(f_str, positive_elements_scorer):
+def test_EnvelopeScorer_positive_defect_elements_only(f_str, positive_elements_scorer):
     f = Formula(f_str)
     max_length = positive_elements_scorer.max_length
     M, p = f.get_isotopic_envelope(max_length)
@@ -112,7 +137,7 @@ def negative_elements_scorer():
 
 
 @pytest.mark.parametrize("f_str", ["CS2", "C2OS2", "C3SO"])
-def test_scorer_negative_defect_elements_only(f_str, negative_elements_scorer):
+def test_EnvelopeScorer_negative_defect_elements_only(f_str, negative_elements_scorer):
     f = Formula(f_str)
     max_length = negative_elements_scorer.max_length
     M, p = f.get_isotopic_envelope(max_length)
@@ -131,7 +156,7 @@ def no_carbon_scorer():
 
 
 @pytest.mark.parametrize("f_str", ["H2O", "H3PO4", "H2SO4"])
-def test_scorer_no_carbon(f_str, no_carbon_scorer):
+def test_EnvelopeScorer_no_carbon(f_str, no_carbon_scorer):
     f = Formula(f_str)
     max_length = no_carbon_scorer.max_length
     M, p = f.get_isotopic_envelope(max_length)
@@ -145,28 +170,3 @@ def test_scorer_no_carbon(f_str, no_carbon_scorer):
 def test_EnvelopeScorer_invalid_scorer(formula_generator):
     with pytest.raises(ValueError):
         EnvelopeScorer(formula_generator, scorer="bad-scorer")
-
-
-def test_EnvelopeValidator_invalid_instrument(formula_generator):
-    with pytest.raises(ValueError):
-        EnvelopeValidator(formula_generator, instrument="bad-scorer")
-
-
-@pytest.mark.parametrize("f_str", formula_str_list)
-def test_EnvelopeValidator_validate(formula_generator, f_str):
-    max_length = 5
-    validator = EnvelopeValidator(formula_generator, max_length=max_length)
-    f = Formula(f_str)
-    M, p = f.get_isotopic_envelope(max_length)
-    validated_length = validator.validate(M, p)
-    assert validated_length == max_length
-
-
-def test_EnvelopeValidator_validate_invalid_envelope(formula_generator):
-    max_length = 5
-    validator = EnvelopeValidator(formula_generator, max_length=max_length)
-    f = Formula("C2H8B")
-    M, p = f.get_isotopic_envelope(max_length)
-    validated_length = validator.validate(M, p)
-    expected_length = 0
-    assert validated_length == expected_length
