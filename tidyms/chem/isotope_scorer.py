@@ -7,7 +7,7 @@ from scipy.special import erfc
 from typing import Optional, Dict, Tuple, Callable, Union, Generator
 from .atoms import PeriodicTable
 from ._formula_generator import FormulaGenerator, FormulaCoefficientBounds, FormulaCoefficients
-from ._isotope_distributions import combine_envelopes, make_envelope_arrays
+from ._envelope_utils import combine_envelopes, make_envelope_arrays
 from .. import _constants as c
 from .. import validation
 
