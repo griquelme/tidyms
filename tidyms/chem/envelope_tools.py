@@ -216,21 +216,13 @@ class EnvelopeValidator(_EnvelopeGenerator):
         """
         super(EnvelopeValidator, self).__init__(
             formula_generator, max_length, custom_abundances)
-        if instrument in c.MS_INSTRUMENTS:
-            params = _get_envelope_validator_params(instrument)
-            user_params = {
-                "p_tol": p_tol,
-                "min_M_tol": min_M_tol,
-                "max_M_tol": max_M_tol
-            }
-            user_params = {k: v for k, v in user_params.items() if v is not None}
-            params.update(user_params)
-            schema = _get_envelope_validator_schema()
-            validator = validation.ValidatorWithLowerThan(schema)
-            validation.validate(params, validator)
-        else:
-            msg = "Valid instruments are one of {}. Got {}"
-            raise ValueError(msg.format(c.MS_INSTRUMENTS, instrument))
+        params = _get_envelope_validator_params(instrument)
+        user_params = {"p_tol": p_tol, "min_M_tol": min_M_tol, "max_M_tol": max_M_tol}
+        user_params = {k: v for k, v in user_params.items() if v is not None}
+        params.update(user_params)
+        schema = _get_envelope_validator_schema()
+        validator = validation.ValidatorWithLowerThan(schema)
+        validation.validate(params, validator)
         self.p_tol = params["p_tol"]
         self.min_M_tol = params["min_M_tol"]
         self.max_M_tol = params["max_M_tol"]
@@ -345,7 +337,7 @@ class EnvelopeScorer(_EnvelopeGenerator):
         super(EnvelopeScorer, self).__init__(
             formula_generator, max_length, custom_abundances)
 
-        if scorer in c.MS_INSTRUMENTS:
+        if isinstance(scorer, str):
             self.scorer = score_envelope
             self.scorer_params = _get_envelope_scorer_params(scorer)
             self.scorer_params.update(kwargs)
@@ -660,31 +652,31 @@ def _make_results_envelope_aux(
 
 def _get_envelope_scorer_params(mode: str):
     res = {"min_sigma_p": 0.05, "max_sigma_p": 0.05}
-    if mode == "qtof":
+    if mode == c.QTOF:
         res["min_sigma_M"] = 0.005
         res["max_sigma_M"] = 0.01
-    elif mode == "orbitrap":
+    elif mode == c.ORBITRAP:
         res["min_sigma_M"] = 0.001
         res["max_sigma_M"] = 0.005
     else:
-        msg = "valid modes are `qtof` and `orbitrap`"
+        msg = "invalid `mode` value. Expected one of: {}"
+        msg = msg.format(", ".join(c.MS_INSTRUMENTS))
         raise ValueError(msg)
     return res
 
 
 def _get_envelope_validator_params(instrument: str) -> Dict[str, float]:
-    p_tol = 0.05
+    params = {"p_tol": 0.05}
     if instrument == c.QTOF:
-        min_M_tol = 0.005
-        max_M_tol = 0.01
+        params["min_M_tol"] = 0.005
+        params["max_M_tol"] = 0.01
     elif instrument == c.ORBITRAP:
-        min_M_tol = 0.0025
-        max_M_tol = 0.005
+        params["min_M_tol"] = 0.0025
+        params["max_M_tol"] = 0.005
     else:
         msg = "invalid `instrument` value. Expected one of: {}"
         msg = msg.format(", ".join(c.MS_INSTRUMENTS))
         raise ValueError(msg)
-    params = {"p_tol": p_tol, "min_M_tol": min_M_tol, "max_M_tol": max_M_tol}
     return params
 
 
