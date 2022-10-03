@@ -90,7 +90,14 @@ class FormulaGenerator:
             self.bounds = self.bounds.bounds_from_mass(max_M)
         else:
             max_M = max(v[1] * k.m for k, v in self.bounds.bounds.items())
+        dp_min, dp_max, dn_min, dn_max = self.bounds.get_defect_bounds()
+
+        if min_defect is None:
+            min_defect = dn_min + dp_min
         self._min_defect = min_defect
+
+        if max_defect is None:
+            max_defect = dp_max + dn_max
         self._max_defect = max_defect
 
         c12 = PeriodicTable().get_isotope("12C")
@@ -327,9 +334,9 @@ class FormulaCoefficientBounds:
 
         """
         dp_min, dp_max, dn_min, dn_max = self.get_defect_bounds()
-        m_min = int(M - dn_min - dp_min)
-        m_max = int(M - dp_max - dn_max) + 1
-        m_candidates = list(range(m_min, m_max + 1))
+        m_min = int(M - dn_max - dp_max) + 1
+        m_max = int(M - dp_min - dn_min) + 1
+        m_candidates = list(range(m_min, m_max))
         d_candidates = [M - x for x in m_candidates]
         return m_candidates, d_candidates
 
@@ -655,8 +662,8 @@ def _generate_formulas(
     bounds: FormulaCoefficientBounds,
     pos: FormulaCoefficients,
     neg: FormulaCoefficients,
-    min_defect: Optional[float] = -1,
-    max_defect: Optional[float] = None,
+    min_defect: float,
+    max_defect: float
 ):
     """
     Finds formulas compatible with a given mass.
@@ -681,13 +688,6 @@ def _generate_formulas(
     bounds = bounds.bounds_from_mass(M)
     # possible values of nominal mass and mass defect based on the coefficient bounds.
     m_candidates, d_candidates = bounds.get_nominal_defect_candidates(M)
-
-    if min_defect is None:
-        min_defect = -np.inf
-
-    if max_defect is None:
-        max_defect = np.inf
-
     res = dict()
     n = 0  # number of valid formulas
     for m, d in zip(m_candidates, d_candidates):
