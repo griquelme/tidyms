@@ -5,7 +5,7 @@ Functions to calculate compatible molecular formulas within a given tolerance.
 """
 
 import numpy as np
-from .utils import cartesian_product_from_range_list
+from .utils import cartesian_product
 from typing import Dict, List, Optional, Tuple
 from .atoms import Isotope, PeriodicTable
 
@@ -473,7 +473,7 @@ class FormulaCoefficients:
 
         # create coefficients array
         range_list = [range(lb, ub + 1) for lb, ub in bounds.bounds.values()]
-        coefficients = cartesian_product_from_range_list(*range_list)
+        coefficients = cartesian_product(*range_list)
 
         # sort coefficients by mass defect
         d = np.matmul(coefficients, i_d)
