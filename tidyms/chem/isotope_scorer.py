@@ -1,173 +1,15 @@
 """
 Scores sum formula candidates using the isotopic envelope.
+
 """
 import numpy as np
-from typing import Optional, Dict, Tuple, Callable, Union, Generator
 from scipy.special import erfc
+from typing import Optional, Dict, Tuple, Callable, Union, Generator
 from .atoms import PeriodicTable
 from ._formula_generator import FormulaGenerator, FormulaCoefficientBounds, FormulaCoefficients
 from ._isotope_distributions import combine_envelopes, make_envelope_arrays
 from .. import _constants as c
 from .. import validation
-
-
-class CoefficientEnvelope:
-
-    def __init__(self, M: np.ndarray, p: np.ndarray):
-        self.M = M
-        self.p = p
-        self._filter: Optional[np.ndarray] = None
-
-    def iterate_rows(self) -> Generator[Tuple[np.ndarray, np.ndarray], None, None]:
-        if self._filter is None:
-            ind = np.arange(self.get_envelope_size())
-        else:
-            ind = self._filter
-
-        for i in ind:
-            yield self.M[i], self.p[i]
-
-    def get_envelope_size(self) -> int:
-        if self._filter is None:
-            size = self.M.shape[0]
-        else:
-            size = self._filter.size
-        return size
-
-    def get_Mk(self, k):
-        if self._filter is None:
-            res = self.M[:, k]
-        else:
-            res = self.M[self._filter, k]
-        return res
-
-    def get_pk(self, k):
-        if self._filter is None:
-            res = self.p[:, k]
-        else:
-            res = self.p[self._filter, k]
-        return res
-
-    def filter(self, k: int, M_min: float, M_max: float, p_min: float, p_max: float):
-        Mk = self.get_Mk(k)
-        if self._filter is None:
-            self._filter = np.arange(self.M.shape[0])
-        if M_min > 0:
-            valid_M = (Mk >= M_min) & (Mk <= M_max)
-            self._filter = self._filter[valid_M]
-        if p_min > 0:
-            pk = self.get_pk(k)
-            valid_p = (pk >= p_min) & (pk <= p_max)
-            self._filter = self._filter[valid_p]
-
-
-def _find_result_envelopes(
-    fg: FormulaGenerator,
-    pos_env: CoefficientEnvelope,
-    neg_env: CoefficientEnvelope,
-    c_env: CoefficientEnvelope
-) -> CoefficientEnvelope:
-    shape = (fg.n_results, pos_env.M.shape[1])
-    M = np.zeros(shape, dtype=float)
-    p = np.zeros(shape, dtype=float)
-    start = 0
-    for k, (kp_index, kn_index, kc_index) in fg.results.items():
-        k_size = kp_index.size
-        if k_size > 0:
-            end = start + k_size
-            Mk, pk = _make_results_envelope_aux(
-                kp_index, kn_index, kc_index, pos_env, neg_env, c_env
-            )
-            M[start:end] = Mk
-            p[start:end] = pk
-            start = end
-    envelopes = CoefficientEnvelope(M, p)
-    return envelopes
-
-
-def _make_results_envelope_aux(
-        p_index: np.ndarray,
-        n_index: np.ndarray,
-        c_index: np.ndarray,
-        p_env: CoefficientEnvelope,
-        n_env: CoefficientEnvelope,
-        c_env: CoefficientEnvelope
-) -> Tuple[np.ndarray, np.ndarray]:
-    # combine positive and negative envelopes
-    M, p = combine_envelopes(
-        p_env.M[p_index], p_env.p[p_index], n_env.M[n_index], n_env.p[n_index])
-
-    # combine with 12C envelopes
-    M, p = combine_envelopes(M, p, c_env.M[c_index], c_env.p[c_index])
-
-    return M, p
-
-
-def make_formula_coefficients_envelopes(
-    bounds: FormulaCoefficientBounds,
-    coefficients: FormulaCoefficients,
-    max_length: int,
-    p: Optional[Dict[str, np.ndarray]] = None,
-):
-    """
-    Computes the isotopic envelopes for coefficient formulas.
-
-
-    """
-    if p is None:
-        p = dict()
-
-    # initialize envelopes
-    rows = coefficients.coefficients.shape[0]
-    M_arr = np.zeros((rows, max_length))
-    p_arr = np.zeros((rows, max_length))
-    p_arr[:, 0] = 1
-
-    for k, isotope in enumerate(coefficients.isotopes):
-        if isotope in bounds.bounds:
-            lb, ub = bounds.bounds[isotope]
-            symbol = isotope.get_symbol()
-            tmp_abundance = p.get(symbol)
-            Mi, pi = make_envelope_arrays(
-                isotope, lb, ub, max_length, p=tmp_abundance)
-            # lower corrects indices in cases when 0 is not the lower bound
-            Mk = Mi[coefficients.coefficients[:, k] - lb, :]
-            pk = pi[coefficients.coefficients[:, k] - lb, :]
-            M_arr, p_arr = combine_envelopes(M_arr, p_arr, Mk, pk)
-    envelope = CoefficientEnvelope(M_arr, p_arr)
-    return envelope
-
-
-class _EnvelopeQuery:
-    """
-    Container class for Envelope Queries
-
-    Attributes
-    ----------
-    M : array
-        Exact mass of the envelope
-    p : array
-        Abundance of the envelope, normalized to 1.
-
-    """
-
-    def __init__(self, M: np.ndarray, p: np.ndarray):
-        self.M = M
-        self.p = p
-
-    def get_mmi_mass(self):
-        return self.M[0]
-
-    def get_mass_tolerance(self, min_tol: float, max_tol: float):
-        mass_slope = max_tol - min_tol
-        mass_intercept = min_tol
-        return mass_intercept + (1 - self.p) * mass_slope
-
-    def get_mass_bounds(self, min_tol: float, max_tol: float):
-        mass_tolerance = self.get_mass_tolerance(min_tol, max_tol)
-        min_mass = np.maximum(self.M - mass_tolerance, 0.0)
-        max_mass = self.M + mass_tolerance
-        return min_mass, max_mass
 
 
 class _EnvelopeGenerator:
@@ -563,6 +405,88 @@ class EnvelopeScorer(_EnvelopeGenerator):
         return coefficients, elements, scores
 
 
+class CoefficientEnvelope:
+
+    def __init__(self, M: np.ndarray, p: np.ndarray):
+        self.M = M
+        self.p = p
+        self._filter: Optional[np.ndarray] = None
+
+    def iterate_rows(self) -> Generator[Tuple[np.ndarray, np.ndarray], None, None]:
+        if self._filter is None:
+            ind = np.arange(self.get_envelope_size())
+        else:
+            ind = self._filter
+
+        for i in ind:
+            yield self.M[i], self.p[i]
+
+    def get_envelope_size(self) -> int:
+        if self._filter is None:
+            size = self.M.shape[0]
+        else:
+            size = self._filter.size
+        return size
+
+    def get_Mk(self, k):
+        if self._filter is None:
+            res = self.M[:, k]
+        else:
+            res = self.M[self._filter, k]
+        return res
+
+    def get_pk(self, k):
+        if self._filter is None:
+            res = self.p[:, k]
+        else:
+            res = self.p[self._filter, k]
+        return res
+
+    def filter(self, k: int, M_min: float, M_max: float, p_min: float, p_max: float):
+        Mk = self.get_Mk(k)
+        if self._filter is None:
+            self._filter = np.arange(self.M.shape[0])
+        if M_min > 0:
+            valid_M = (Mk >= M_min) & (Mk <= M_max)
+            self._filter = self._filter[valid_M]
+        if p_min > 0:
+            pk = self.get_pk(k)
+            valid_p = (pk >= p_min) & (pk <= p_max)
+            self._filter = self._filter[valid_p]
+
+
+class _EnvelopeQuery:
+    """
+    Container class for Envelope Queries
+
+    Attributes
+    ----------
+    M : array
+        Exact mass of the envelope
+    p : array
+        Abundance of the envelope, normalized to 1.
+
+    """
+
+    def __init__(self, M: np.ndarray, p: np.ndarray):
+        self.M = M
+        self.p = p
+
+    def get_mmi_mass(self):
+        return self.M[0]
+
+    def get_mass_tolerance(self, min_tol: float, max_tol: float):
+        mass_slope = max_tol - min_tol
+        mass_intercept = min_tol
+        return mass_intercept + (1 - self.p) * mass_slope
+
+    def get_mass_bounds(self, min_tol: float, max_tol: float):
+        mass_tolerance = self.get_mass_tolerance(min_tol, max_tol)
+        min_mass = np.maximum(self.M - mass_tolerance, 0.0)
+        max_mass = self.M + mass_tolerance
+        return min_mass, max_mass
+
+
 def score_envelope(
     M: np.ndarray,
     p: np.ndarray,
@@ -655,6 +579,83 @@ def score_envelope(
     dsp = np.abs(p - pq) / (np.sqrt(2) * sp_sigma)
     score = erfc(dmz).prod() * erfc(dsp).prod()
     return score
+
+
+def make_formula_coefficients_envelopes(
+    bounds: FormulaCoefficientBounds,
+    coefficients: FormulaCoefficients,
+    max_length: int,
+    p: Optional[Dict[str, np.ndarray]] = None,
+):
+    """
+    Computes the isotopic envelopes for coefficient formulas.
+
+
+    """
+    if p is None:
+        p = dict()
+
+    # initialize envelopes
+    rows = coefficients.coefficients.shape[0]
+    M_arr = np.zeros((rows, max_length))
+    p_arr = np.zeros((rows, max_length))
+    p_arr[:, 0] = 1
+
+    for k, isotope in enumerate(coefficients.isotopes):
+        if isotope in bounds.bounds:
+            lb, ub = bounds.bounds[isotope]
+            symbol = isotope.get_symbol()
+            tmp_abundance = p.get(symbol)
+            Mi, pi = make_envelope_arrays(
+                isotope, lb, ub, max_length, p=tmp_abundance)
+            # lower corrects indices in cases when 0 is not the lower bound
+            Mk = Mi[coefficients.coefficients[:, k] - lb, :]
+            pk = pi[coefficients.coefficients[:, k] - lb, :]
+            M_arr, p_arr = combine_envelopes(M_arr, p_arr, Mk, pk)
+    envelope = CoefficientEnvelope(M_arr, p_arr)
+    return envelope
+
+
+def _find_result_envelopes(
+    fg: FormulaGenerator,
+    pos_env: CoefficientEnvelope,
+    neg_env: CoefficientEnvelope,
+    c_env: CoefficientEnvelope
+) -> CoefficientEnvelope:
+    shape = (fg.n_results, pos_env.M.shape[1])
+    M = np.zeros(shape, dtype=float)
+    p = np.zeros(shape, dtype=float)
+    start = 0
+    for k, (kp_index, kn_index, kc_index) in fg.results.items():
+        k_size = kp_index.size
+        if k_size > 0:
+            end = start + k_size
+            Mk, pk = _make_results_envelope_aux(
+                kp_index, kn_index, kc_index, pos_env, neg_env, c_env
+            )
+            M[start:end] = Mk
+            p[start:end] = pk
+            start = end
+    envelopes = CoefficientEnvelope(M, p)
+    return envelopes
+
+
+def _make_results_envelope_aux(
+        p_index: np.ndarray,
+        n_index: np.ndarray,
+        c_index: np.ndarray,
+        p_env: CoefficientEnvelope,
+        n_env: CoefficientEnvelope,
+        c_env: CoefficientEnvelope
+) -> Tuple[np.ndarray, np.ndarray]:
+    # combine positive and negative envelopes
+    M, p = combine_envelopes(
+        p_env.M[p_index], p_env.p[p_index], n_env.M[n_index], n_env.p[n_index])
+
+    # combine with 12C envelopes
+    M, p = combine_envelopes(M, p, c_env.M[c_index], c_env.p[c_index])
+
+    return M, p
 
 
 def _get_envelope_scorer_params(mode: str):
