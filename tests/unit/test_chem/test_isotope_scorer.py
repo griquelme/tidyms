@@ -140,3 +140,33 @@ def test_scorer_no_carbon(f_str, no_carbon_scorer):
     coeff, isotopes, score = no_carbon_scorer.get_top_results(5)
     expected_coeff = [f.composition[x] for x in isotopes]
     assert np.array_equal(expected_coeff, coeff[0])
+
+
+def test_EnvelopeScorer_invalid_scorer(formula_generator):
+    with pytest.raises(ValueError):
+        EnvelopeScorer(formula_generator, scorer="bad-scorer")
+
+
+def test_EnvelopeValidator_invalid_instrument(formula_generator):
+    with pytest.raises(ValueError):
+        EnvelopeValidator(formula_generator, instrument="bad-scorer")
+
+
+@pytest.mark.parametrize("f_str", formula_str_list)
+def test_EnvelopeValidator_validate(formula_generator, f_str):
+    max_length = 5
+    validator = EnvelopeValidator(formula_generator, max_length=max_length)
+    f = Formula(f_str)
+    M, p = f.get_isotopic_envelope(max_length)
+    validated_length = validator.validate(M, p)
+    assert validated_length == max_length
+
+
+def test_EnvelopeValidator_validate_invalid_envelope(formula_generator):
+    max_length = 5
+    validator = EnvelopeValidator(formula_generator, max_length=max_length)
+    f = Formula("C2H8B")
+    M, p = f.get_isotopic_envelope(max_length)
+    validated_length = validator.validate(M, p)
+    expected_length = 0
+    assert validated_length == expected_length
