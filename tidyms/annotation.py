@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from .lcms import LCRoi, Peak
 from .chem import EnvelopeFinder, EnvelopeValidator, FormulaGenerator, MMIFinder
-from .chem.atoms import EM, PTABLE
+from .chem.atoms import EM, PeriodicTable
 from . import _constants as c
 from typing import Callable, Dict, List, Optional, Set, Tuple
 from scipy.integrate import trapz
@@ -56,7 +56,7 @@ def create_annotator_lc(
 
     """
     # remove elements with only 1 stable isotope
-    bounds = {k: bounds[k] for k in bounds if len(PTABLE[k].isotopes) > 1}
+    bounds = {k: bounds[k] for k in bounds if len(PeriodicTable().get_element(k).isotopes) > 1}
 
     min_overlap = 0.5
     bin_size = 100
@@ -67,9 +67,7 @@ def create_annotator_lc(
         bounds, max_mass, max_charge, max_length, bin_size, max_M_tol, p_tol
     )
     envelope_finder = EnvelopeFinder(elements, max_M_tol, max_length, min_p)
-    formula_generator = FormulaGenerator(
-        elements, max_mass, min_M_tol, user_bounds=bounds
-    )
+    formula_generator = FormulaGenerator(elements, max_mass, user_bounds=bounds)
     envelope_validator = EnvelopeValidator(
         formula_generator, max_length, p_tol, min_M_tol, max_M_tol
     )
