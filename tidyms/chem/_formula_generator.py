@@ -52,13 +52,7 @@ class FormulaGenerator:
 
     """
 
-    def __init__(
-        self,
-        bounds: Dict[str, Tuple[int, int]],
-        max_M: Optional[float] = None,
-        min_defect: Optional[float] = None,
-        max_defect: Optional[float] = None,
-    ):
+    def __init__(self, bounds: Dict[str, Tuple[int, int]], max_M: Optional[float] = None):
         """
         FormulaGenerator constructor.
 
@@ -73,10 +67,6 @@ class FormulaGenerator:
             Maximum mass value for generated formulas. If specified it is used
             to update the bounds. For examples is ``max_M=300`` and the bounds
             for 32S are ``(0, 10)``, then they are updated to ``(0, 9)``.
-        min_defect: float or None, default=None
-            Minimum mass defect allowed for the results. If None, all values are allowed.
-        max_defect: float or None, default=None
-            Maximum mass defect allowed for the results. If None, all values are allowed.
 
         Examples
         --------
@@ -86,19 +76,10 @@ class FormulaGenerator:
 
         """
         self.bounds = FormulaCoefficientBounds.from_isotope_str(bounds)
-        if max_M is not None:
-            self.bounds = self.bounds.bounds_from_mass(max_M)
-        else:
-            max_M = max(v[1] * k.m for k, v in self.bounds.bounds.items())
         dp_min, dp_max, dn_min, dn_max = self.bounds.get_defect_bounds()
 
-        if min_defect is None:
-            min_defect = dn_min + dp_min
-        self._min_defect = min_defect
-
-        if max_defect is None:
-            max_defect = dp_max + dn_max
-        self._max_defect = max_defect
+        self._min_defect = dn_min + dp_min
+        self._max_defect = dp_max + dn_max
 
         c12 = PeriodicTable().get_isotope("12C")
         self._has_carbon = c12 in self.bounds.bounds
@@ -119,7 +100,13 @@ class FormulaGenerator:
         str_repr = "FormulaGenerator(bounds={}, min_defect={}, max_defect={})"
         return str_repr.format(self.bounds.bounds, self._min_defect, self._max_defect)
 
-    def generate_formulas(self, M: float, tolerance: float):
+    def generate_formulas(
+        self,
+        M: float,
+        tolerance: float,
+        min_defect: Optional[float] = None,
+        max_defect: Optional[float] = None
+    ):
         """
         Computes formulas compatibles with the given query mass. The formulas
         are computed assuming neutral species. If charged species are used, mass
@@ -134,6 +121,10 @@ class FormulaGenerator:
             Exact mass used for formula generation.
         tolerance : float
             Tolerance to search compatible formulas.
+        min_defect: float or None, default=None
+            Minimum mass defect allowed for the results. If None, all values are allowed.
+        max_defect: float or None, default=None
+            Maximum mass defect allowed for the results. If None, all values are allowed.
 
         Examples
         --------
@@ -151,14 +142,17 @@ class FormulaGenerator:
             msg = "`tolerance` must be a positive number. Got {}".format(tolerance)
             raise ValueError(msg)
 
+        min_defect = self._min_defect if min_defect is None else min_defect
+        max_defect = self._max_defect if max_defect is None else max_defect
+
         self.results, self.n_results = _generate_formulas(
             M,
             tolerance,
             self.bounds,
             self.pos,
             self.neg,
-            min_defect=self._min_defect,
-            max_defect=self._max_defect,
+            min_defect=min_defect,
+            max_defect=max_defect
         )
 
     def results_to_array(self) -> Tuple[np.ndarray, List[Isotope], np.ndarray]:
@@ -191,9 +185,7 @@ class FormulaGenerator:
     @staticmethod
     def from_hmdb(
         mass: int,
-        bounds: Optional[Dict[str, Tuple[int, int]]] = None,
-        min_defect: Optional[float] = None,
-        max_defect: Optional[float] = None,
+        bounds: Optional[Dict[str, Tuple[int, int]]] = None
     ):
         """
         Creates a FormulaGenerator using elemental bounds obtained from
@@ -206,10 +198,6 @@ class FormulaGenerator:
             Bounds are created using molecules with molecular mass lower than this value.
         bounds: Dict[str, Tuple[int, int]] or None, default=None
             Passes additional isotopes to the generator.
-        min_defect: float or None, default=None
-            minimum mass defect allowed for the results. If None, all values are allowed.
-        max_defect: float or None, default=None
-            maximum mass defect allowed for the results. If None, all values are allowed.
 
         Returns
         -------
@@ -264,7 +252,7 @@ class FormulaGenerator:
             raise ValueError(msg.format(mass))
         if bounds is not None:
             hmdb_bounds.update(bounds)
-        return FormulaGenerator(hmdb_bounds, min_defect=min_defect, max_defect=max_defect)
+        return FormulaGenerator(hmdb_bounds)
 
 
 class FormulaCoefficientBounds:
@@ -430,7 +418,6 @@ class FormulaCoefficientBounds:
         ptable = PeriodicTable()
         res = dict()
         for i, ib in bounds.items():
-            lb, ub = ib
             try:
                 element = ptable.get_element(i)
                 isotope = element.get_mmi()
