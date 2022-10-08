@@ -278,6 +278,12 @@ class FormulaCoefficientBounds:
     """
 
     def __init__(self, bounds: Dict[Isotope, Tuple[int, int]]):
+        for i, (lb, ub) in bounds.items():
+            invalid_lb = (not isinstance(lb, int)) or (lb < 0)
+            invalid_ub = (not isinstance(ub, int)) or (ub < lb)
+            if invalid_lb or invalid_ub:
+                msg = "Invalid bounds for {}. Expected non-negative integers. Got {}."
+                raise ValueError(msg.format(i, (lb, ub)))
         self.bounds = bounds
 
     def __repr__(self):
@@ -425,14 +431,11 @@ class FormulaCoefficientBounds:
         res = dict()
         for i, ib in bounds.items():
             lb, ub = ib
-            isotope = ptable.get_isotope(i)
-            invalid_lb = (not isinstance(lb, int)) or (lb < 0)
-            invalid_ub = (not isinstance(ub, int)) or (ub < lb)
-            if invalid_lb or invalid_ub:
-                msg = "Invalid bounds for {}. Bounds must be non-negative integers. Got {}.".format(
-                    i, ib
-                )
-                raise ValueError(msg)
+            try:
+                element = ptable.get_element(i)
+                isotope = element.get_mmi()
+            except KeyError:
+                isotope = ptable.get_isotope(i)
             res[isotope] = ib
         return FormulaCoefficientBounds(res)
 
