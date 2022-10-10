@@ -76,6 +76,10 @@ class FormulaGenerator:
 
         """
         self.bounds = FormulaCoefficientBounds.from_isotope_str(bounds)
+        if max_M is not None:
+            self.bounds = self.bounds.bounds_from_mass(max_M)
+        else:
+            max_M = max(v[1] * k.m for k, v in self.bounds.bounds.items())
         dp_min, dp_max, dn_min, dn_max = self.bounds.get_defect_bounds()
 
         self._min_defect = dn_min + dp_min
@@ -210,49 +214,15 @@ class FormulaGenerator:
         # Also include chlorine to the bounds.
         >>> fg = ms.chem.FormulaGenerator.from_hmdb(500, bounds={"Cl": (0, 2)})
 
+        See Also
+        --------
+        get_chnops_bounds
+
         """
-        if mass == 500:
-            hmdb_bounds = {
-                "C": (0, 34),
-                "H": (0, 70),
-                "N": (0, 10),
-                "O": (0, 18),
-                "P": (0, 4),
-                "S": (0, 7),
-            }
-        elif mass == 1000:
-            hmdb_bounds = {
-                "C": (0, 70),
-                "H": (0, 128),
-                "N": (0, 15),
-                "O": (0, 31),
-                "P": (0, 8),
-                "S": (0, 7),
-            }
-        elif mass == 1500:
-            hmdb_bounds = {
-                "C": (0, 100),
-                "H": (0, 164),
-                "N": (0, 23),
-                "O": (0, 46),
-                "P": (0, 8),
-                "S": (0, 7),
-            }
-        elif mass == 2000:
-            hmdb_bounds = {
-                "C": (0, 108),
-                "H": (0, 190),
-                "N": (0, 23),
-                "O": (0, 61),
-                "P": (0, 8),
-                "S": (0, 8),
-            }
-        else:
-            msg = "Valid mass values are 500, 1000, 1500 or 2000. Got {}."
-            raise ValueError(msg.format(mass))
+        chnops_bounds = get_chnops_bounds(mass)
         if bounds is not None:
-            hmdb_bounds.update(bounds)
-        return FormulaGenerator(hmdb_bounds)
+            chnops_bounds.update(bounds)
+        return FormulaGenerator(chnops_bounds)
 
 
 class FormulaCoefficientBounds:
@@ -538,6 +508,70 @@ class _MassQuery(object):
             self.nc_min, self.nc_max = bounds.bounds[c12]
         else:
             self.nc_min, self.nc_max = 0, 0
+
+
+def get_chnops_bounds(m: int) -> Dict[str, Tuple[int, int]]:
+    """
+    Generates a dictionary of formula coefficient bounds for the CHNOPS elements
+    based on molecules in the `Human Metabolome Database <https://hmdb.ca>`_
+
+    Parameters
+    ----------
+    m : {500, 1000, 1500, 2000}
+        Maximum mass of molecules used to build bounds.
+
+    Returns
+    -------
+    bounds: Dict
+
+    Examples
+    --------
+    >>> import tidyms as ms
+    >>> ms.chem.get_chnops_bounds(500)
+    {'C': (0, 34), 'H': (0, 70), 'N': (0, 10),
+     'O': (0, 18), 'P': (0, 4), 'S': (0, 7)}
+
+    """
+    if m == 500:
+        bounds = {
+            "C": (0, 34),
+            "H": (0, 70),
+            "N": (0, 10),
+            "O": (0, 18),
+            "P": (0, 4),
+            "S": (0, 7),
+        }
+    elif m == 1000:
+        bounds = {
+            "C": (0, 70),
+            "H": (0, 128),
+            "N": (0, 15),
+            "O": (0, 31),
+            "P": (0, 8),
+            "S": (0, 7),
+        }
+    elif m == 1500:
+        bounds = {
+            "C": (0, 100),
+            "H": (0, 164),
+            "N": (0, 23),
+            "O": (0, 46),
+            "P": (0, 8),
+            "S": (0, 7),
+        }
+    elif m == 2000:
+        bounds = {
+            "C": (0, 108),
+            "H": (0, 190),
+            "N": (0, 23),
+            "O": (0, 61),
+            "P": (0, 8),
+            "S": (0, 8),
+        }
+    else:
+        msg = "Valid mass values are 500, 1000, 1500 or 2000. Got {}."
+        raise ValueError(msg.format(m))
+    return bounds
 
 
 def _add_dummy_isotope(pos: FormulaCoefficientBounds, neg: FormulaCoefficientBounds):
