@@ -2,18 +2,14 @@ import bisect
 import numpy as np
 import pandas as pd
 from .lcms import LCRoi, Peak
-from .chem import EnvelopeFinder, EnvelopeValidator, FormulaGenerator, MMIFinder
+from .chem import EnvelopeFinder, EnvelopeValidator,  MMIFinder
 from .chem.atoms import EM, PeriodicTable
 from . import _constants as c
 from typing import Callable, Dict, List, Optional, Set, Tuple
 from scipy.integrate import trapz
 
-# TODO: clean code, test border cases, add functions to create annotators,
-#   Parallelize code. Add min_M_tol and max_M_tol to parameters in
-#   FormulaGenerator
 
-
-def create_annotator_lc(
+def create_annotator(
     bounds: Dict[str, Tuple[int, int]],
     max_mass: float,
     max_charge: int,
@@ -67,15 +63,17 @@ def create_annotator_lc(
         bounds, max_mass, max_charge, max_length, bin_size, max_M_tol, p_tol
     )
     envelope_finder = EnvelopeFinder(elements, max_M_tol, max_length, min_p)
-    formula_generator = FormulaGenerator(elements, max_mass, user_bounds=bounds)
     envelope_validator = EnvelopeValidator(
-        formula_generator, max_length, p_tol, min_M_tol, max_M_tol
+        bounds,
+        max_M=max_mass,
+        max_length=max_length,
+        min_M_tol=min_M_tol,
+        max_M_tol=max_M_tol,
+        p_tol=p_tol
     )
-
     similarity_checker = _SimilarityChecker(
         min_similarity, _feature_similarity_lc, min_overlap=min_overlap
     )
-
     annotator = _IsotopologueEnvelopeAnnotator(
         mmi_finder,
         envelope_finder,
@@ -90,10 +88,32 @@ def _annotate(
     feature_table: pd.DataFrame,
     roi_list: List[LCRoi],
     annotator: "_IsotopologueEnvelopeAnnotator",
-):
+) -> None:
+    """
+    Annotates isotopologues in a sample.
+
+    Annotations are added as three columns in the feature table:
+
+    envelope_label
+        An integer that groups isotopologues. ``-1`` is used for features that
+        do not belong to any group.
+    envelope_index
+        An integer that labels the nominal mass relative to the MMI.  ``-1`` is
+        used for features that do not belong to any group.
+    charge
+        Charge state of the envelope. ``-1`` is used for features that do not
+        belong to any group.
+
+    Parameters
+    ----------
+    feature_table : DataFrame
+    roi_list : List[ROI]
+    annotator : _IsotopologueEnvelopeAnnotator
+
+    """
     annotator.load_data(feature_table, roi_list)
     mono_index = annotator.get_next_monoisotopologue_index()
-    while mono_index:
+    while mono_index > -1:
         annotator.annotate(mono_index)
         mono_index = annotator.get_next_monoisotopologue_index()
     annotator.add_annotations(feature_table)
@@ -108,7 +128,7 @@ class _IsotopologueEnvelopeAnnotator:
     ----------
     mmi_finder : MMIFinder
     envelope_finder : EnvelopeFinder
-    envelope_validator : EnvelopeValidator
+    validator : EnvelopeValidator
     similarity_checker : _SimilarityChecker
     polarity: 1 or -1
 
@@ -124,12 +144,11 @@ class _IsotopologueEnvelopeAnnotator:
     ):
         self.mmi_finder = mmi_finder
         self.envelope_finder = envelope_finder
-        self.envelope_validator = validator
+        self.validator = validator
         self.polarity = polarity
         self.similarity_checker = similarity_checker
 
         # sample data
-        self.similarity_checker: Optional[_SimilarityChecker] = None
         self._roi_list: Optional[List[LCRoi]] = None
         self._mz_order: Optional[np.ndarray] = None
         self._mz: Optional[np.ndarray] = None
@@ -148,13 +167,13 @@ class _IsotopologueEnvelopeAnnotator:
         Deletes data from a sample.
 
         """
+        self.similarity_checker.clear_data()
         self._roi_list = None
         self._mz = None
         self._mz_order = None
         self._area = None
         self._roi_index = None
         self._ft_index = None
-        self.similarity_checker = None
         self._non_annotated = None
         self._mono_candidates = None
         self._envelope_label = None
@@ -184,15 +203,38 @@ class _IsotopologueEnvelopeAnnotator:
 
     def get_next_monoisotopologue_index(self) -> int:
         """
-        Gets the next, non-annotated, monoisotopologue index.
+        Gets the next, non-annotated, monoisotopologue index. If all features
+        are annotated, returns ``-1``.
+
         """
-        mono_index = None
-        while mono_index not in self._non_annotated:
-            if self._mono_candidates:
-                mono_index = self._mono_candidates.pop()
-            else:
-                mono_index = None
-        return mono_index
+        next_mono_index = -1
+        while self._mono_candidates:
+            mono_index = self._mono_candidates.pop()
+            if mono_index in self._non_annotated:
+                next_mono_index = mono_index
+                break
+        return next_mono_index
+
+    def _get_mmi_candidates(self, mono_index: int):
+        mmi_candidates = self.mmi_finder.find(self._mz, self._area, mono_index)
+
+        # check the similarity between the monoisotopologue and the mmi
+        mmi_candidates = self.similarity_checker.filter_mmi_candidates(
+            mmi_candidates, mono_index, self._non_annotated
+        )
+        return mmi_candidates
+
+    def _get_envelope_candidates(self, mono_index: int, mmi: int, q: int):
+        candidates = self.envelope_finder.find(self._mz, mmi, q,
+                                               self._non_annotated)
+
+        # remove candidates where the monoisotopologue is not present
+        if mmi != mono_index:
+            candidates = [x for x in candidates if mono_index in x]
+
+        candidates = self.similarity_checker.filter_envelope_candidates(
+            candidates)
+        return candidates
 
     def annotate(self, mono_index: int):
         """
@@ -202,30 +244,17 @@ class _IsotopologueEnvelopeAnnotator:
         only the monoisotopologue candidate is removed.
 
         """
-        mmi_candidates = self.mmi_finder.find(self._mz, self._area, mono_index)
-
-        # check the similarity between the monoisotopologue and the mmi
-        mmi_candidates = self.similarity_checker.filter_mmi_candidates(
-            mmi_candidates, mono_index, self._non_annotated
-        )
+        mmi_candidates = self._get_mmi_candidates(mono_index)
         validated_index = None
         validated_length = 1
         validated_charge = -1
-        for mmi_index, q in mmi_candidates:
-            candidates = self.envelope_finder.find(
-                self._mz, mmi_index, q, self._non_annotated
-            )
-
-            # remove candidates where the monoisotopologue is not present
-            if mmi_index != mono_index:
-                candidates = [x for x in candidates if mono_index in x]
-
-            candidates = self.similarity_checker.filter_envelope_candidates(candidates)
+        for mmi, q in mmi_candidates:
+            candidates = self._get_envelope_candidates(mono_index, mmi, q)
             for candidate in candidates:
                 candidate_length = len(candidate)
                 if candidate_length > validated_length:
                     M, p = self._get_candidate_envelope(candidate, q)
-                    candidate_validated_length = self.envelope_validator.validate(M, p)
+                    candidate_validated_length = self.validator.validate(M, p)
                     if candidate_validated_length > validated_length:
                         validated_index = candidate[:candidate_validated_length]
                         validated_length = candidate_validated_length
@@ -240,9 +269,6 @@ class _IsotopologueEnvelopeAnnotator:
             self._label_counter += 1
             for x in validated_index:
                 self._non_annotated.remove(x)
-
-    def is_annotation_incomplete(self) -> bool:
-        return bool(self._non_annotated)
 
     def add_annotations(self, feature_table: pd.DataFrame):
         """
@@ -339,7 +365,7 @@ class _SimilarityChecker:
         """
         Loads data from a samples.
         """
-        self._roi_list = (roi_list,)
+        self._roi_list = roi_list
         self._ft_index = ft_index
         self._roi_index = roi_index
         self._cache = dict()
