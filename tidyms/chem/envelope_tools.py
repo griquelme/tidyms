@@ -4,11 +4,10 @@ Scores sum formula candidates using the isotopic envelope.
 """
 import numpy as np
 from scipy.special import erfc
-from typing import Optional, Dict, Tuple, Callable, Union, Generator
+from typing import Callable, Dict, Generator, Optional, Tuple
 from .atoms import PeriodicTable
-from ._formula_generator import FormulaGenerator, FormulaCoefficientBounds, FormulaCoefficients
+from ._formula_generator import FormulaGenerator, FormulaCoefficients
 from ._envelope_utils import combine_envelopes, make_envelope_arrays
-from .. import _constants as c
 from .. import validation
 
 
@@ -20,7 +19,8 @@ class _EnvelopeGenerator:
     """
     def __init__(
         self,
-        formula_generator: FormulaGenerator,
+        bounds: Dict[str, Tuple[int, int]],
+        max_M: Optional[float] = None,
         max_length: int = 10,
         custom_abundances: Optional[dict] = None
     ):
@@ -29,7 +29,15 @@ class _EnvelopeGenerator:
 
         Parameters
         ----------
-        formula_generator : FormulaGenerator
+        bounds: Dict
+            A dictionary from strings with isotopes to lower and upper bounds of
+            formulas coefficients. Isotope strings can be an element symbol (eg:
+            "C") or an isotope string representation (eg: "13C"). In the first
+            case, the element is converted to the most abundant isotope ("12C").
+        max_M : float or None, default=None
+            Maximum mass value for generated formulas. If specified it is used
+            to update the bounds. For examples is ``max_M=300`` and the bounds
+            for 32S are ``(0, 10)``, then they are updated to ``(0, 9)``.
         max_length : int, 10
             Length of the generated envelopes.
         custom_abundances : dict, optional
@@ -40,24 +48,24 @@ class _EnvelopeGenerator:
             array([0.15, 0.85]) for isotopes with nominal mass 12 and 13.
 
         """
-        self.formula_generator = formula_generator
+        self._formula_generator = FormulaGenerator(bounds, max_M)
         self.max_length = max_length
         self._pos_env = make_formula_coefficients_envelopes(
-            formula_generator.bounds,
-            formula_generator.pos,
+            bounds,
+            self._formula_generator.pos,
             max_length,
             p=custom_abundances
         )
 
         self._neg_env = make_formula_coefficients_envelopes(
-            formula_generator.bounds,
-            formula_generator.neg,
+            bounds,
+            self._formula_generator.neg,
             max_length,
             p=custom_abundances)
 
         c12 = PeriodicTable().get_isotope("12C")
-        if c12 in formula_generator.bounds.bounds:
-            nc_min, nc_max = formula_generator.bounds.bounds.get(c12)
+        if c12 in self._formula_generator.bounds.bounds:
+            nc_min, nc_max = self._formula_generator.bounds.bounds.get(c12)
         else:
             nc_min, nc_max = 0, 0
         if custom_abundances is None:
@@ -97,9 +105,9 @@ class _EnvelopeGenerator:
         p = p[:self.max_length]
         p = p / np.sum(p)
         self._query = _EnvelopeQuery(M, p)
-        self.formula_generator.generate_formulas(self._query.get_mmi_mass(), tolerance)
+        self._formula_generator.generate_formulas(self._query.get_mmi_mass(), tolerance)
         self.results = _find_result_envelopes(
-            self.formula_generator, self._pos_env, self._neg_env, self._c_env
+            self._formula_generator, self._pos_env, self._neg_env, self._c_env
         )
 
     def filter(self, min_M_tol: float, max_M_tol: float, p_tol: float, k: int):
@@ -154,25 +162,18 @@ class EnvelopeValidator(_EnvelopeGenerator):
 
     def __init__(
         self,
-        formula_generator: FormulaGenerator,
-        instrument: str = "qtof",
+        bounds: Dict[str, Tuple[int, int]],
+        max_M: Optional[float] = None,
         max_length: int = 10,
-        p_tol: Optional[float] = None,
-        min_M_tol: Optional[float] = None,
-        max_M_tol: Optional[float] = None,
+        p_tol: float = 0.05,
+        min_M_tol: float = 0.01,
+        max_M_tol: float = 0.01,
         custom_abundances: Optional[dict] = None
     ):
         r"""
 
         Parameters
         ----------
-        formula_generator : FormulaGenerator
-        instrument : {"qtof", "orbitrap"}
-            Sets default values for `p_tol`, `min_M_tol` and `max_M_tol`. If
-            ``qtof`` is used, the values are set to ``0.05``, ``0.005`` and
-            ``0.01`` respectively. If ``orbitrap`` is used, the values are set
-            to ``0.05``, ``0.0025`` and ``0.005``. These values can be
-            overwritten by setting their value in each parameter.
         max_length : int, default=10
             Maximum length of the envelopes.
         min_M_tol : float or None, default=None
@@ -215,17 +216,14 @@ class EnvelopeValidator(_EnvelopeGenerator):
 
         """
         super(EnvelopeValidator, self).__init__(
-            formula_generator, max_length, custom_abundances)
-        params = _get_envelope_validator_params(instrument)
-        user_params = {"p_tol": p_tol, "min_M_tol": min_M_tol, "max_M_tol": max_M_tol}
-        user_params = {k: v for k, v in user_params.items() if v is not None}
-        params.update(user_params)
+            bounds, max_M, max_length, custom_abundances)
+        params = {"p_tol": p_tol, "min_M_tol": min_M_tol, "max_M_tol": max_M_tol}
         schema = _get_envelope_validator_schema()
         validator = validation.ValidatorWithLowerThan(schema)
         validation.validate(params, validator)
-        self.p_tol = params["p_tol"]
-        self.min_M_tol = params["min_M_tol"]
-        self.max_M_tol = params["max_M_tol"]
+        self.p_tol = p_tol
+        self.min_M_tol = min_M_tol
+        self.max_M_tol = max_M_tol
 
     def _find_bounds(self, k: int) -> Optional[Tuple[float, float, float, float]]:
         """
@@ -244,10 +242,7 @@ class EnvelopeValidator(_EnvelopeGenerator):
             maximum abundance for each peak
 
         """
-        self.filter(self.min_M_tol, self.max_M_tol, self.p_tol, k)
-
-        M_tol = self._query.get_mass_tolerance(self.min_M_tol, self.max_M_tol)
-        M_tol = M_tol[k]
+        M_tol = self._query.get_mass_tolerance(self.min_M_tol, self.max_M_tol, k)
         if self.results.get_envelope_size():
 
             # abundance bounds
@@ -265,52 +260,69 @@ class EnvelopeValidator(_EnvelopeGenerator):
             return None
 
     def validate(self, M: np.ndarray, p: np.ndarray) -> int:
-        size = M.size
         length = 0
-        tolerance = p[0] * self.min_M_tol + (1 - p[0]) * self.max_M_tol
-        self.generate_envelopes(M, p, tolerance)
-        for k in range(size):
-            bounds = self._find_bounds(k)
-            if bounds is None:
-                break
-            else:
-                min_Mk, max_Mk, min_pk, max_pk = bounds
-                valid = (
-                    (M[k] >= min_Mk) and (M[k] <= max_Mk) and
-                    (p[k] >= min_pk) and (p[k] <= max_pk)
-                )
-                if valid:
-                    length += 1
-                else:
+        tol = p[0] * self.min_M_tol + (1 - p[0]) * self.max_M_tol
+        self.generate_envelopes(M, p, tol)
+        while (M.size >= 2) and (length <= 1):
+            for k in range(M.size):
+                bounds = self._find_bounds(k)
+                if bounds is None:
                     break
+                else:
+                    min_Mk, max_Mk, min_pk, max_pk = bounds
+                    valid = (
+                        (M[k] >= min_Mk) and (M[k] <= max_Mk) and
+                        (p[k] >= min_pk) and (p[k] <= max_pk)
+                    )
+                    if valid:
+                        length = k + 1
+                        self.filter(self.min_M_tol, self.max_M_tol, self.p_tol, k)
+                    else:
+                        break
+            if (length <= 1) and (M.size > 2):
+                length = 0
+                M = M[:M.size - 1]
+                p = p[:p.size - 1]
+                p = p / np.sum(p)
+                self.results.reset_filter()
+                self.results.crop(M.size)
+            else:
+                break
+
         return length
 
 
 class EnvelopeScorer(_EnvelopeGenerator):
+    """
+    Ranks formula candidates by comparing a measured isotopic envelope against
+    the theoretical envelopes of candidates.
+
+    Methods
+    -------
+    score : Generates formulas candidates and score them.
+    get_top_results : Shows the top ranked results.
+
+    """
 
     def __init__(
         self,
-        formula_generator: FormulaGenerator,
-        scorer: Union[str, Callable] = "qtof",
+        bounds: Dict[str, Tuple[int, int]],
+        max_M: Optional[float] = None,
         max_length: int = 10,
+        scorer: Optional[Callable] = None,
         custom_abundances: Optional[dict] = None,
         **kwargs
     ):
         """
+        Constructor method.
 
         Parameters
         ----------
         formula_generator : FormulaGenerator
-        scorer : {"qtof", "orbitrap"} or Callable, default="qtof"
-            If the ``"qtof"`` or ``"orbitrap"`` are used, the `score_envelopes` function
-            is used. For ``"qtof"``, the values of `min_sigma_p`, `max_sigma_p`,
-            `min_sigma_M` and `max_sigma_M` are set to 0.05, 0.05, 0.005 and
-            0.01 respectively. For ``"orbitrap"`` the defaults are 0.05, 0.05,
-            0.001 and 0.005. These defaults can be overwritten by passing
-            them as key values arguments.
-
-            A custom scoring function can be passed with the following
-            signature:
+        scorer : Callable or None, default=None
+            Function used to score formula candidate envelopes. If ``None``,
+            the function :func:`score_envelope` is used. A custom scoring
+            function can be passed with the following signature:
 
             .. code-block:: python
 
@@ -322,7 +334,7 @@ class EnvelopeScorer(_EnvelopeGenerator):
         max_length : int, 10
             Length of the generated envelopes.
         custom_abundances : dict, optional
-            Provides custom elemental abundances. A mapping from element
+            Overrides natural abundances of elements.A mapping from element
             symbols str to an abundance array. The abundance array must have
             the same size that the natural abundance and its sum must be equal
             to one. For example, for "C", an alternative abundance can be
@@ -335,24 +347,35 @@ class EnvelopeScorer(_EnvelopeGenerator):
 
         """
         super(EnvelopeScorer, self).__init__(
-            formula_generator, max_length, custom_abundances)
+            bounds, max_M, max_length, custom_abundances)
 
-        if isinstance(scorer, str):
+        if callable(scorer):
+            self.scorer = scorer
+            self.scorer_params = kwargs
+        else:
             self.scorer = score_envelope
-            self.scorer_params = _get_envelope_scorer_params(scorer)
-            self.scorer_params.update(kwargs)
+            self.scorer_params = kwargs
             schema = _get_envelope_scorer_schema()
             validator = validation.ValidatorWithLowerThan(schema)
             validation.validate(self.scorer_params, validator)
-        else:
-            self.scorer = scorer
-            self.scorer_params = kwargs
         self.scores = None
 
     def score(self, M: np.ndarray, p: np.ndarray, tol: float):
         """
         Scores the isotopic envelope. The results can be recovered using the
         `get_top_results` method.
+
+        Formulas are generated assuming that the first element in the envelope
+        is the minimum mass isotopologue.
+
+        Parameters
+        ----------
+        M : array
+            Exact mass of the envelope.
+        p : array
+            Abundance of the envelope.
+        tol : float
+            Mass tolerance used in formula generation.
 
         """
         self.generate_envelopes(M, p, tol)
@@ -367,11 +390,11 @@ class EnvelopeScorer(_EnvelopeGenerator):
 
     def get_top_results(self, n: Optional[int] = 10):
         """
-        Return the scores for each formula candidate.
+        Return the top ranked formula candidates and their score.
 
         Parameters
         ----------
-        n: int, default
+        n: int or None, default=10
             number of first n results to return. If ``None``, return all formula candidates.
 
         Returns
@@ -385,7 +408,7 @@ class EnvelopeScorer(_EnvelopeGenerator):
             The corresponding score to each row of `coefficients`.
 
         """
-        coefficients, elements, _ = self.formula_generator.results_to_array()
+        coefficients, elements, _ = self._formula_generator.results_to_array()
 
         # sort coefficients using the score and keep the first n values
         top_n_index = np.argsort(self.scores)
@@ -446,6 +469,22 @@ class CoefficientEnvelope:
             valid_p = (pk >= p_min) & (pk <= p_max)
             self._filter = self._filter[valid_p]
 
+    def reset_filter(self):
+        self._filter = None
+
+    def crop(self, size: int):
+        if size == self.M.shape[0]:
+            pass
+        elif size >= 2:
+            self.M = self.M[:, :size]
+            self.p = self.p[:, :size]
+            normalization = np.sum(self.p, axis=1)
+            normalization = normalization.reshape((normalization.size, 1))
+            self.p = self.p / normalization
+        else:
+            msg = "Minimum size is 2. Got {}".format(size)
+            raise ValueError(msg)
+
 
 class _EnvelopeQuery:
     """
@@ -467,15 +506,15 @@ class _EnvelopeQuery:
     def get_mmi_mass(self):
         return self.M[0]
 
-    def get_mass_tolerance(self, min_tol: float, max_tol: float):
+    def get_mass_tolerance(self, min_tol: float, max_tol: float, k: int):
         mass_slope = max_tol - min_tol
         mass_intercept = min_tol
-        return mass_intercept + (1 - self.p) * mass_slope
+        return mass_intercept + (1 - self.p[k]) * mass_slope
 
     def get_mass_bounds(self, min_tol: float, max_tol: float):
-        mass_tolerance = self.get_mass_tolerance(min_tol, max_tol)
-        min_mass = np.maximum(self.M - mass_tolerance, 0.0)
-        max_mass = self.M + mass_tolerance
+        tol = [self.get_mass_tolerance(min_tol, max_tol, k) for k in range(self.M.size)]
+        min_mass = np.maximum(self.M - tol, 0.0)
+        max_mass = self.M + tol
         return min_mass, max_mass
 
 
@@ -484,10 +523,10 @@ def score_envelope(
     p: np.ndarray,
     Mq: np.ndarray,
     pq: np.ndarray,
-    min_sigma_M,
-    max_sigma_M,
-    min_sigma_p,
-    max_sigma_p,
+    min_sigma_M: float = 0.01,
+    max_sigma_M: float = 0.01,
+    min_sigma_p: float = 0.05,
+    max_sigma_p: float = 0.05,
 ):
     r"""
     Scores the similarity between two isotopes.
@@ -574,7 +613,7 @@ def score_envelope(
 
 
 def make_formula_coefficients_envelopes(
-    bounds: FormulaCoefficientBounds,
+    bounds: Dict[str, Tuple[int, int]],
     coefficients: FormulaCoefficients,
     max_length: int,
     p: Optional[Dict[str, np.ndarray]] = None,
@@ -594,16 +633,29 @@ def make_formula_coefficients_envelopes(
     p_arr[:, 0] = 1
 
     for k, isotope in enumerate(coefficients.isotopes):
-        if isotope in bounds.bounds:
-            lb, ub = bounds.bounds[isotope]
-            symbol = isotope.get_symbol()
+        isotope_str = str(isotope)
+        symbol = isotope.get_symbol()
+        # if a symbol is passed in bounds, e.g. "C", the column in coefficients
+        # will be the isotope "12C". to find the abundance, the element symbol
+        # is used in bounds. If an isotope is specified, it is assumed that it
+        # has no envelope.
+        if isotope_str in bounds:
+            lb, ub = bounds[isotope_str]
             tmp_abundance = p.get(symbol)
-            Mi, pi = make_envelope_arrays(
-                isotope, lb, ub, max_length, p=tmp_abundance)
-            # lower corrects indices in cases when 0 is not the lower bound
-            Mk = Mi[coefficients.coefficients[:, k] - lb, :]
-            pk = pi[coefficients.coefficients[:, k] - lb, :]
-            M_arr, p_arr = combine_envelopes(M_arr, p_arr, Mk, pk)
+        elif symbol in bounds:
+            isotope = PeriodicTable().get_isotope(symbol)
+            lb, ub = bounds[symbol]
+            tmp_abundance = None
+        else:
+            # ignore dummy elements used to solve the formula generation problem
+            # This occurs only in cases where there are only isotopes with positive
+            # or negative mass defects.
+            continue
+        Mi, pi = make_envelope_arrays(isotope, lb, ub, max_length, p=tmp_abundance)
+        # lower corrects indices in cases when 0 is not the lower bound
+        Mk = Mi[coefficients.coefficients[:, k] - lb, :]
+        pk = pi[coefficients.coefficients[:, k] - lb, :]
+        M_arr, p_arr = combine_envelopes(M_arr, p_arr, Mk, pk)
     envelope = CoefficientEnvelope(M_arr, p_arr)
     return envelope
 
@@ -612,7 +664,7 @@ def _find_result_envelopes(
     fg: FormulaGenerator,
     pos_env: CoefficientEnvelope,
     neg_env: CoefficientEnvelope,
-    c_env: CoefficientEnvelope
+    c_env: CoefficientEnvelope,
 ) -> CoefficientEnvelope:
     shape = (fg.n_results, pos_env.M.shape[1])
     M = np.zeros(shape, dtype=float)
@@ -629,6 +681,7 @@ def _find_result_envelopes(
             p[start:end] = pk
             start = end
     envelopes = CoefficientEnvelope(M, p)
+    envelopes.crop(M.size)
     return envelopes
 
 
@@ -648,36 +701,6 @@ def _make_results_envelope_aux(
     M, p = combine_envelopes(M, p, c_env.M[c_index], c_env.p[c_index])
 
     return M, p
-
-
-def _get_envelope_scorer_params(mode: str):
-    res = {"min_sigma_p": 0.05, "max_sigma_p": 0.05}
-    if mode == c.QTOF:
-        res["min_sigma_M"] = 0.005
-        res["max_sigma_M"] = 0.01
-    elif mode == c.ORBITRAP:
-        res["min_sigma_M"] = 0.001
-        res["max_sigma_M"] = 0.005
-    else:
-        msg = "invalid `mode` value. Expected one of: {}"
-        msg = msg.format(", ".join(c.MS_INSTRUMENTS))
-        raise ValueError(msg)
-    return res
-
-
-def _get_envelope_validator_params(instrument: str) -> Dict[str, float]:
-    params = {"p_tol": 0.05}
-    if instrument == c.QTOF:
-        params["min_M_tol"] = 0.005
-        params["max_M_tol"] = 0.01
-    elif instrument == c.ORBITRAP:
-        params["min_M_tol"] = 0.0025
-        params["max_M_tol"] = 0.005
-    else:
-        msg = "invalid `instrument` value. Expected one of: {}"
-        msg = msg.format(", ".join(c.MS_INSTRUMENTS))
-        raise ValueError(msg)
-    return params
 
 
 def _get_envelope_validator_schema():
