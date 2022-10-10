@@ -11,7 +11,7 @@ from . import validation as val
 from . import raw_data_utils
 from .container import DataContainer
 from .correspondence import match_features
-from .fileio import MSData
+from .fileio import MSData, read_pickle
 from .lcms import Roi, LCRoi
 from .utils import get_progress_bar
 from ._plot_bokeh import _LCAssayPlotter
@@ -707,6 +707,7 @@ class Assay:
         """
         process_samples = self.manager.sample_queue
         n_samples = len(process_samples)
+        dc_path = self.manager.assay_path.joinpath(c.DATA_MATRIX_FILENAME)
         if n_samples:
             sample_metadata = self.manager.get_sample_metadata()
             data_matrix, feature_metadata = build_data_matrix(
@@ -719,11 +720,10 @@ class Assay:
                 merge_threshold
             )
             dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
-            dc.save(self.manager.assay_path.joinpath(c.DATA_MATRIX_FILENAME))
+            dc.save(dc_path)
             self.data_matrix = dc
         else:
-            pass
-
+            self.data_matrix = read_pickle(dc_path)
         return self.data_matrix
 
     def annotate_isotopologues(self, **kwargs):
@@ -1311,7 +1311,7 @@ def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
 
 
 def _save_roi_list(roi_path: Path, roi_list: List[Roi]):
-    header_template = "index_offset={:020n}\n"
+    header_template = "index_offset={:020d}\n"
     # the dummy header is used as a placeholder to fill with the correct offset
     # value after all ROI have been serialized
     with open(roi_path, "w", newline="\n") as fin:

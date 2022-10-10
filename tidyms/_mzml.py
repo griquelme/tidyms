@@ -15,6 +15,7 @@ import re
 import zlib
 from os import SEEK_END
 from os.path import getsize
+from pathlib import Path
 from typing import Dict, List, Tuple
 from xml.etree.ElementTree import fromstring
 from xml.etree.ElementTree import Element
@@ -82,7 +83,38 @@ DATA_TYPES = {
 }
 
 
-def build_offset_list(filename: str) -> Tuple[List[int], List[int], int]:
+class MZMLReader:
+
+    def __init__(self, path: Path):
+        self.path = path
+        sp_offset, chrom_offset, index_offset = build_offset_list(path)
+        self.spectra_offset = sp_offset
+        self.chromatogram_offset = chrom_offset
+        self.index_offset = index_offset
+
+        self.n_chromatograms = len(self.chromatogram_offset)
+        self.n_spectra = len(self.spectra_offset)
+
+    def get_spectrum(self, index: int) -> dict:
+        return get_spectrum(
+            self.path,
+            self.spectra_offset,
+            self.chromatogram_offset,
+            self.index_offset,
+            index
+        )
+
+    def get_chromatogram(self, index: int) -> dict:
+        return get_chromatogram(
+            self.path,
+            self.spectra_offset,
+            self.chromatogram_offset,
+            self.index_offset,
+            index
+        )
+
+
+def build_offset_list(filename: Path) -> Tuple[list[int], list[int], int]:
     """
     Finds the offset values in the file where Spectrum or Chromatogram elements
     start.
@@ -116,7 +148,7 @@ def build_offset_list(filename: str) -> Tuple[List[int], List[int], int]:
 
 
 def get_spectrum(
-    filename: str,
+    filename: Path,
     spectra_offset: List[int],
     chromatogram_offset: List[int],
     index_offset: int,
@@ -126,8 +158,7 @@ def get_spectrum(
     Extracts m/z, intensity, polarity , time, and ms level from the nth scan.
     Parameters
     ----------
-    filename : str
-        path to mzML file.
+    filename : path to mzML file.
     spectra_offset : list
         Offset list obtained from `_build_offset_list`.
     chromatogram_offset : list
@@ -171,7 +202,7 @@ def get_spectrum(
 
 
 def get_chromatogram(
-    filename: str,
+    filename: Path,
     spectra_offset: List[int],
     chromatogram_offset: List[int],
     index_offset: int,
@@ -218,14 +249,13 @@ class ReverseReader:
 
     """
 
-    def __init__(self, filename: str, buffer_size: int, **kwargs):
+    def __init__(self, filename: Path, buffer_size: int, **kwargs):
         """
         Constructor object
 
         Parameters
         ----------
-        filename : str,
-            Path to the file
+        filename : Path to the file
         buffer_size : int
             size of the chunk to get when using the `read_chunk` method
         **kwargs :
@@ -331,7 +361,7 @@ def _read_binary_data_array(element: Element) -> Tuple[np.ndarray, str]:
     return data, kind
 
 
-def _parse_binary_data_list(element: Element) -> Dict[str, np.ndarray]:
+def _parse_binary_data_list(element: Element) -> Dict:
     """
     Extracts the data from a binaryDataArrayList.
 
@@ -351,13 +381,13 @@ def _parse_binary_data_list(element: Element) -> Dict[str, np.ndarray]:
     return res
 
 
-def is_indexed(filename: str) -> bool:
+def is_indexed(filename: Path) -> bool:
     """
     Checks if a mzML file is indexed.
 
     Parameters
     ----------
-    filename: str
+    filename: Path
 
     Returns
     -------
@@ -376,13 +406,13 @@ def is_indexed(filename: str) -> bool:
     return res
 
 
-def _get_index_offset(filename: str) -> int:
+def _get_index_offset(filename: Path) -> int:
     """
     Search the byte offset where the indexListOffset element starts.
 
     Parameters
     ----------
-    filename : str
+    filename : Path
 
     Returns
     -------
@@ -392,7 +422,7 @@ def _get_index_offset(filename: str) -> int:
     tag = "<indexListOffset>"
     # reads mzml backwards until the tag is found
     # we exploit the fact that according to the mzML schema the
-    # indexListOffset should have neither attributes nor subelements
+    # indexListOffset should have neither attributes nor sub elements
     with ReverseReader(filename, 1024, mode="r") as fin:
         xml = ""
         ind = -1
@@ -409,14 +439,14 @@ def _get_index_offset(filename: str) -> int:
 
 
 def _build_offset_list_non_indexed(
-        filename: str
-) -> Tuple[List[int], List[int]]:
+        filename: Path
+) -> Tuple[list[int], list[int]]:
     """
     Builds manually the indices for non-indexed mzML files.
 
     Parameters
     ----------
-    filename : str
+    filename : Path
 
     Returns
     -------
@@ -467,15 +497,15 @@ def _find_chromatogram_tag_offset(line: str, regex: re.Pattern) -> int:
 
 
 def _build_offset_list_indexed(
-    filename: str,
+    filename: Path,
     index_offset: int
-) -> Tuple[List[int], List[int]]:
+) -> Tuple[list[int], list[int]]:
     """
     Builds a list of offsets where spectra and chromatograms are stored.
 
     Parameters
     ----------
-    filename : str
+    filename : Path
     index_offset : int
         offset obtained from _get_index_offset
 
@@ -508,7 +538,7 @@ def _build_offset_list_indexed(
 
 
 def _get_xml_data(
-    filename: str,
+    filename: Path,
     spectra_offset: List[int],
     chromatogram_offset: List[int],
     index_offset: int,

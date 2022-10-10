@@ -1,5 +1,5 @@
 PACKAGE_NAME = "tidyms"
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 LICENSE = 'BSD (3-clause)'
 AUTHOR = "Bioanalytical Mass Spectrometry Group at CIBION-CONICET"
 AUTHOR_EMAIL = "griquelme.chm@gmail.com"
@@ -21,7 +21,7 @@ CLASSIFIERS = [
 
 PACKAGES = ["tidyms"]
 
-PYTHON_REQUIRES = ">=3.8"
+PYTHON_REQUIRES = ">=3.9"
 
 INSTALL_REQUIRES = [
     "bokeh>=2.4",
@@ -46,8 +46,8 @@ if __name__ == "__main__":
     from sys import version_info
     from Cython.Build import cythonize
 
-    if version_info[:2] < (3, 8):
-        msg = "tidyms requires Python >= 3.8."
+    if version_info[:2] < (3, 9):
+        msg = "tidyms requires Python >= 3.9."
         raise RuntimeError(msg)
 
     ext_modules = cythonize(["tidyms/chem/*.pyx"],
