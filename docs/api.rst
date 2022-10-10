@@ -39,6 +39,17 @@ List of available filters and processors
     tidyms.filter.PrevalenceFilter
     tidyms.filter.VariationFilter
 
+Tools for working with chemical data
+------------------------------------
+
+.. autosummary::
+    :toctree: generated
+
+    tidyms.chem.Formula
+    tidyms.chem.PeriodicTable
+    tidyms.chem.FormulaGenerator
+    tidyms.chem.EnvelopeScorer
+
 Module reference
 ----------------
 
@@ -53,3 +64,7 @@ Module reference
     tidyms.peaks
     tidyms.raw_data_utils
     tidyms.utils
+    tidyms.chem.atoms
+    tidyms.chem.envelope_tools
+    tidyms.chem.formula
+
