@@ -503,7 +503,6 @@ class SimulatedMSData(MSData):  # pragma: no cover
         self.rt = rt_values
         self.n_scans = rt_values.size
         self._seeds = None
-        self._noise_level = None
         self.ft_noise = ft_noise
         # seeds are used to ensure that each time that a spectra is generated
         # with get_spectra its values are the same
