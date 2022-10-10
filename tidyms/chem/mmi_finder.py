@@ -140,7 +140,7 @@ def _find_candidate(
     # if valid m/z where found, check if the abundance quotient qp is valid
     if start < end:
         candidates = np.arange(start, end)
-        qp_ind = sp[candidates] / mono_sp
+        qp_ind = mono_sp / sp[candidates]
         valid_mask = (qp_ind >= min_qp) & (qp_ind <= max_qp)
         candidates = [(x, charge) for x in candidates[valid_mask]]
     else:
@@ -191,9 +191,9 @@ def _create_envelope_arrays(
 ) -> Tuple[np.ndarray, np.ndarray]:
     elements = [PeriodicTable().get_element(x) for x in bounds]
     elements = _get_relevant_elements(elements)
-    isotopes = [x.get_mmi() for x in elements]
-    bounds = FormulaCoefficientBounds({x: bounds[x.get_symbol()] for x in isotopes})
-    coeff = bounds.make_coefficients(M_max)
+    isotopes = [x.get_monoisotope() for x in elements]
+    f_bounds = FormulaCoefficientBounds({x: bounds[x.get_symbol()] for x in isotopes})
+    coeff = f_bounds.make_coefficients(M_max)
     envelope = make_formula_coefficients_envelopes(bounds, coeff, max_length)
     M = envelope.M
     p = envelope.p
