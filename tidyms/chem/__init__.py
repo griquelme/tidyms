@@ -22,7 +22,7 @@ Constants
 
 """
 
-from ._formula_generator import FormulaGenerator
+from ._formula_generator import FormulaGenerator, get_chnops_bounds
 from .envelope_tools import EnvelopeScorer, EnvelopeValidator
 from .formula import Formula
 from .envelope_finder import EnvelopeFinder
