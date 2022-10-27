@@ -84,7 +84,7 @@ def create_annotator(
     return annotator
 
 
-def _annotate(
+def annotate(
     feature_table: pd.DataFrame,
     roi_list: List[LCRoi],
     annotator: "_IsotopologueEnvelopeAnnotator",
