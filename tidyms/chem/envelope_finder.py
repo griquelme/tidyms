@@ -21,8 +21,6 @@ class EnvelopeFinder(object):
 
     Attributes
     ----------
-    elements : list of element symbols
-        elements used to estimate m/z of isotopologues
     tolerance : float
         tolerance used to extend the element based bounds
     max_length : int
@@ -71,10 +69,10 @@ class EnvelopeFinder(object):
             The minimum abundance of the isotopes of each element to be used for m/z estimation.
         """
 
-        self.elements = [PeriodicTable().get_element(x) for x in elements]
+        elements = [PeriodicTable().get_element(x) for x in elements]
         self.tolerance = mz_tolerance
         self.max_length = max_length
-        self.bounds = _make_exact_mass_difference_bounds(self.elements, min_p)
+        self.bounds = _make_exact_mass_difference_bounds(elements, min_p)
 
     def find(
         self, mz: np.ndarray, mmi_index: int, charge: int, valid_indices: Set[int]
