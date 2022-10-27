@@ -11,13 +11,13 @@ from typing import Dict, List, Optional, Set, Tuple
 
 
 def build_data_matrix(
-        feature_table: pd.DataFrame,
-        sample_metadata: pd.DataFrame,
-        separation: str,
-        merge_close_features: bool,
-        mz_merge: Optional[float],
-        rt_merge: Optional[float],
-        merge_threshold: Optional[float]
+    feature_table: pd.DataFrame,
+    sample_metadata: pd.DataFrame,
+    separation: str,
+    merge_close_features: bool,
+    mz_merge: Optional[float],
+    rt_merge: Optional[float],
+    merge_threshold: Optional[float],
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Creates a data matrix and feature metadata with aggregated descriptors from
@@ -60,35 +60,23 @@ def build_data_matrix(
     labels = feature_table[c.LABEL]
     cluster_to_ft = _cluster_to_feature_name(labels)
 
-    data_matrix = _build_data_matrix(
-        feature_table,
-        sample_metadata,
-        cluster_to_ft
-    )
+    data_matrix = _build_data_matrix(feature_table, sample_metadata, cluster_to_ft)
 
     if separation in c.LC_MODES:
-        feature_metadata = _build_lc_feature_metadata(
-            feature_table,
-            cluster_to_ft
-        )
+        feature_metadata = _build_lc_feature_metadata(feature_table, cluster_to_ft)
     else:
         raise NotImplementedError
 
     if merge_close_features:
         if separation in c.LC_MODES:
             _lc_merge_close_features(
-                data_matrix,
-                feature_metadata,
-                mz_merge,
-                rt_merge,
-                merge_threshold
+                data_matrix, feature_metadata, mz_merge, rt_merge, merge_threshold
             )
     return data_matrix, feature_metadata
 
 
 def _build_lc_feature_metadata(
-    feature_table: pd.DataFrame,
-    cluster_to_ft_name: Dict[int, str]
+    feature_table: pd.DataFrame, cluster_to_ft_name: Dict[int, str]
 ) -> pd.DataFrame:
     """
     Computes aggregated descriptors for Features in an LC feature table.
@@ -112,11 +100,7 @@ def _build_lc_feature_metadata(
         "rt start": ["mean"],
         "rt end": ["mean"],
     }
-    feature_metadata = (
-        feature_table
-        .groupby(c.LABEL)
-        .agg(estimators)
-    )   # type: pd.DataFrame
+    feature_metadata: pd.DataFrame = feature_table.groupby(c.LABEL).agg(estimators)
 
     # flatten MultiIndex column
     columns = feature_metadata.columns  # type: pd.MultiIndex
@@ -146,7 +130,7 @@ def _build_lc_feature_metadata(
 def _build_data_matrix(
     feature_table: pd.DataFrame,
     sample_metadata: pd.DataFrame,
-    cluster_to_ft_name: Dict[int, str]
+    cluster_to_ft_name: Dict[int, str],
 ) -> pd.DataFrame:
     """
     Creates a data matrix from a feature table.
@@ -165,20 +149,12 @@ def _build_data_matrix(
     data_matrix: DataFrame
 
     """
-    data_matrix = feature_table.pivot(
-        index=c.SAMPLE,
-        columns=c.LABEL,
-        values=c.AREA
-    )
+    data_matrix = feature_table.pivot(index=c.SAMPLE, columns=c.LABEL, values=c.AREA)
     data_matrix.columns = data_matrix.columns.map(cluster_to_ft_name)
 
     # add samples without features as rows of missing values
     missing_index = sample_metadata.index.difference(data_matrix.index)
-    missing = pd.DataFrame(
-        data=nan,
-        index=missing_index,
-        columns=data_matrix.columns
-    )
+    missing = pd.DataFrame(data=nan, index=missing_index, columns=data_matrix.columns)
     data_matrix = pd.concat((data_matrix, missing))
     # sort data_matrix using sample metadata indices
     data_matrix = data_matrix.loc[sample_metadata.index, :]
@@ -219,7 +195,7 @@ def _lc_merge_close_features(
     feature_metadata: pd.DataFrame,
     mz_merge: float,
     rt_merge: float,
-    merge_threshold: float
+    merge_threshold: float,
 ):
     rt = feature_metadata[c.RT]
     mz = feature_metadata[c.MZ]
@@ -229,10 +205,12 @@ def _lc_merge_close_features(
     while len(feature_set):
         ft = feature_set.pop()
         candidates = _find_merge_candidates(
-            ft, mz, rt, features, feature_set, mz_merge, rt_merge)
+            ft, mz, rt, features, feature_set, mz_merge, rt_merge
+        )
         for ft2 in candidates:
             merged_ft = _merge_features(
-                data_matrix, merged_dict, feature_set, ft, ft2, merge_threshold)
+                data_matrix, merged_dict, feature_set, ft, ft2, merge_threshold
+            )
             if merged_ft != ft:
                 break
     _add_merged_features_to_feature_metadata(merged_dict, feature_metadata)
@@ -246,13 +224,12 @@ def _find_merge_candidates(
     features: pd.Index,
     feature_set: Set[str],
     mz_merge: float,
-    rt_merge: float
+    rt_merge: float,
 ) -> pd.Index:
     ft_mz = mz[ft]
     ft_rt = rt[ft]
-    merge_candidates_mask = (
-            ((rt - ft_rt).abs() < rt_merge) &
-            ((mz - ft_mz).abs() < mz_merge)
+    merge_candidates_mask = ((rt - ft_rt).abs() < rt_merge) & (
+        (mz - ft_mz).abs() < mz_merge
     )
     merge_candidates_mask[ft] = False
     return features[merge_candidates_mask].intersection(feature_set)
@@ -264,7 +241,7 @@ def _merge_features(
     feature_set: Set[str],
     ft1: str,
     ft2: str,
-    merge_threshold: float
+    merge_threshold: float,
 ) -> Optional[str]:
     x1 = data_matrix[ft1]
     x2 = data_matrix[ft2]
@@ -303,8 +280,7 @@ def _merge_features(
 
 
 def _add_merged_features_to_feature_metadata(
-    merged_dict: Dict[str, List[str]],
-    feature_metadata: pd.DataFrame
+    merged_dict: Dict[str, List[str]], feature_metadata: pd.DataFrame
 ):
     # create a Series with of comma-separated feature names
     s = dict()
@@ -323,7 +299,7 @@ def _add_merged_features_to_feature_metadata(
 def _remove_merged_features(
     merged_dict: Dict[str, List[str]],
     data_matrix: pd.DataFrame,
-    feature_metadata: pd.DataFrame
+    feature_metadata: pd.DataFrame,
 ):
     rm_features = list()
     for v in merged_dict.values():
