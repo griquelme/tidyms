@@ -831,7 +831,7 @@ class BokehPlotMethods:  # pragma: no cover
         draw: bool = True,
         fig_params: Optional[dict] = None,
         scatter_params: Optional[dict] = None,
-    ) -> bokeh.plotting.Figure:
+    ) -> bokeh.plotting.figure:
         """
         plots PCA scores
 
@@ -959,7 +959,7 @@ class BokehPlotMethods:  # pragma: no cover
         draw: bool = True,
         fig_params: Optional[dict] = None,
         scatter_params: Optional[dict] = None,
-    ) -> bokeh.plotting.Figure:
+    ) -> bokeh.plotting.figure:
         """
         plots PCA loadings.
 
@@ -1036,7 +1036,7 @@ class BokehPlotMethods:  # pragma: no cover
         draw: bool = True,
         fig_params: Optional[dict] = None,
         scatter_params: Optional[dict] = None,
-    ) -> bokeh.plotting.Figure:
+    ) -> bokeh.plotting.figure:
         """
         plots a feature intensity as a function of the run order.
 

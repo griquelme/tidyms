@@ -65,7 +65,7 @@ def palette_cycler(palette: List[str]) -> Generator[str, None, None]:
 
 
 def add_line(
-    figure: bokeh.plotting.Figure,
+    figure: bokeh.plotting.figure,
     x: np.ndarray,
     y: np.ndarray,
     line_params: Optional[dict] = None
@@ -90,7 +90,7 @@ def add_line(
     figure.line(x, y, **line_params)
 
 
-def set_chromatogram_axis_params(fig: bokeh.plotting.Figure):
+def set_chromatogram_axis_params(fig: bokeh.plotting.figure):
     bokeh_settings = get_bokeh_settings()
     xaxis_params = bokeh_settings["chromatogram"]["xaxis"]
     yaxis_params = bokeh_settings["chromatogram"]["yaxis"]
@@ -98,7 +98,7 @@ def set_chromatogram_axis_params(fig: bokeh.plotting.Figure):
     fig.yaxis.update(**yaxis_params)
 
 
-def set_ms_spectrum_axis_params(fig: bokeh.plotting.Figure):
+def set_ms_spectrum_axis_params(fig: bokeh.plotting.figure):
     bokeh_settings = get_bokeh_settings()
     xaxis_params = bokeh_settings["spectrum"]["xaxis"]
     yaxis_params = bokeh_settings["spectrum"]["yaxis"]
@@ -107,7 +107,7 @@ def set_ms_spectrum_axis_params(fig: bokeh.plotting.Figure):
 
 
 def fill_area(
-    figure: bokeh.plotting.Figure,
+    figure: bokeh.plotting.figure,
     x: np.ndarray,
     y: np.ndarray,
     start: int,
@@ -126,7 +126,7 @@ def fill_area(
 
 
 def add_stems(
-    fig: bokeh.plotting.Figure,
+    fig: bokeh.plotting.figure,
     x: np.ndarray,
     y: np.ndarray,
     line_params: Optional[Dict] = None
@@ -177,7 +177,7 @@ class _LCAssayPlotter:     # pragma: no cover
             .astype(int)
         )
 
-    def roi(self, sample: str, show: bool = True) -> bokeh.plotting.Figure:
+    def roi(self, sample: str, show: bool = True) -> bokeh.plotting.figure:
         """
         Plots m/z vs time dispersion of the ROI in a sample. Detected features
         are highlighted using circles.
@@ -235,7 +235,7 @@ class _LCAssayPlotter:     # pragma: no cover
         cluster: int,
         include_classes: Optional[List[str]] = None,
         show: bool = True
-    ) -> bokeh.plotting.Figure:
+    ) -> bokeh.plotting.figure:
         """
         Plots chromatograms of a feature detected across different samples.
 
