@@ -12,7 +12,7 @@ Provides
 
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.1"
 
 from . import fileio
 from . import container
