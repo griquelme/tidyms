@@ -112,20 +112,23 @@ class DataContainer(object):
 
     """
 
-    def __init__(self, data_matrix: pd.DataFrame,
-                 feature_metadata: pd.DataFrame,
-                 sample_metadata: pd.DataFrame,
-                 mapping: Optional[dict] = None,
-                 plot_mode: str = "bokeh"):
-        
+    def __init__(
+        self,
+        data_matrix: pd.DataFrame,
+        feature_metadata: pd.DataFrame,
+        sample_metadata: pd.DataFrame,
+        mapping: Optional[dict] = None,
+        plot_mode: str = "bokeh",
+    ):
+
         """
         See help(DataContainer) for more details
-        
+
         Parameters
         ----------
         data_matrix : pandas.DataFrame.
             Feature values for each measured sample. Each row is a sample and
-            each column is a feature.                  
+            each column is a feature.
         sample_metadata : pandas.DataFrame.
             Metadata for each sample. class is a required column.
         feature_metadata : pandas.DataFrame.
@@ -137,18 +140,21 @@ class DataContainer(object):
             The package used to generate plots with the plot methods
 
         """
-        validation.validate_data_container(data_matrix, feature_metadata,
-                                           sample_metadata)
+        validation.validate_data_container(
+            data_matrix, feature_metadata, sample_metadata
+        )
 
         # sort columns and indices of each DataFrame
         data_matrix = data_matrix.sort_index()
         data_matrix = data_matrix.reindex(sorted(data_matrix.columns), axis=1)
         sample_metadata = sample_metadata.sort_index()
         sample_metadata = sample_metadata.reindex(
-            sorted(sample_metadata.columns), axis=1)
+            sorted(sample_metadata.columns), axis=1
+        )
         feature_metadata = feature_metadata.sort_index()
-        feature_metadata = feature_metadata.reindex(sorted(
-            feature_metadata.columns), axis=1)
+        feature_metadata = feature_metadata.reindex(
+            sorted(feature_metadata.columns), axis=1
+        )
 
         # check and convert order and batch information
         try:
@@ -156,8 +162,7 @@ class DataContainer(object):
             try:
                 batch = sample_metadata.pop(_sample_batch)
             except KeyError:
-                batch = pd.Series(data=np.ones_like(order.values),
-                                  index=order.index)
+                batch = pd.Series(data=np.ones_like(order.values), index=order.index)
             order = _convert_to_interbatch_order(order, batch)
             sample_metadata[_sample_order] = order
             sample_metadata[_sample_batch] = batch
@@ -184,35 +189,35 @@ class DataContainer(object):
         self.metrics = MetricMethods(self)
         self.preprocess = PreprocessMethods(self)
         self.set_plot_mode(plot_mode)
-    
+
     @property
     def data_matrix(self) -> pd.DataFrame:
         return self._data_matrix.loc[self._sample_mask, self._feature_mask]
-    
+
     @data_matrix.setter
     def data_matrix(self, value: pd.DataFrame):
         self._data_matrix = value
-        
+
     @property
     def feature_metadata(self) -> pd.DataFrame:
         return self._feature_metadata.loc[self._feature_mask, :]
-    
+
     @feature_metadata.setter
     def feature_metadata(self, value: pd.DataFrame):
         self._feature_metadata = value
-    
+
     @property
     def sample_metadata(self) -> pd.DataFrame:
         return self._sample_metadata.loc[self._sample_mask, :]
-    
+
     @sample_metadata.setter
     def sample_metadata(self, value: pd.DataFrame):
         self._sample_metadata = value
-               
+
     @property
     def mapping(self):
         return self._mapping
-    
+
     @mapping.setter
     def mapping(self, mapping: dict):
         self._mapping = _make_empty_mapping()
@@ -229,16 +234,16 @@ class DataContainer(object):
     @id.setter
     def id(self, value: pd.Series):
         self._sample_metadata.loc[self._sample_mask, _sample_id] = value
-        
+
     @property
     def classes(self) -> pd.Series:
         """pd.Series[str] : class of each sample."""
         return self._sample_metadata.loc[self._sample_mask, _sample_class]
-    
+
     @classes.setter
     def classes(self, value: pd.Series):
         self._sample_metadata.loc[self._sample_mask, _sample_class] = value
-    
+
     @property
     def batch(self) -> pd.Series:
         """pd.Series[int]. Analytical batch number"""
@@ -246,13 +251,12 @@ class DataContainer(object):
             return self._sample_metadata.loc[self._sample_mask, _sample_batch]
         except KeyError:
             raise BatchInformationError("No batch information available.")
-            
+
     @batch.setter
     def batch(self, value: pd.Series):
 
-        self._sample_metadata.loc[self._sample_mask,
-                                  _sample_batch] = value.astype(int)
-    
+        self._sample_metadata.loc[self._sample_mask, _sample_batch] = value.astype(int)
+
     @property
     def order(self) -> pd.Series:
         """
@@ -263,12 +267,13 @@ class DataContainer(object):
             return self._sample_metadata.loc[self._sample_mask, _sample_order]
         except KeyError:
             raise RunOrderError("No run order information available")
-    
+
     @order.setter
     def order(self, value: pd.Series):
         if utils.is_unique(value):
-            self._sample_metadata.loc[self._sample_mask,
-                                      _sample_order] = value.astype(int)
+            self._sample_metadata.loc[self._sample_mask, _sample_order] = value.astype(
+                int
+            )
         else:
             msg = "order values must be unique"
             raise ValueError(msg)
@@ -276,8 +281,7 @@ class DataContainer(object):
     @property
     def dilution(self) -> pd.Series:
         try:
-            return self._sample_metadata.loc[self._sample_mask,
-                                             _sample_dilution]
+            return self._sample_metadata.loc[self._sample_mask, _sample_dilution]
         except KeyError:
             msg = "No dilution information available."
             raise DilutionInformationError(msg)
@@ -289,7 +293,7 @@ class DataContainer(object):
     def is_valid_class_name(self, test_class: Union[str, List[str]]) -> bool:
         """
         Check if at least one sample class is`class_name`.
-        
+
         Parameters
         ----------
         test_class : str or list[str]
@@ -319,20 +323,20 @@ class DataContainer(object):
         axis : {"features", "samples"}
 
         """
-        
+
         if not self._is_valid(remove, axis):
             msg = "Some samples/features aren't in the DataContainer"
             raise ValueError(msg)
-        
+
         if axis == "features":
             self._feature_mask = self._feature_mask.difference(remove)
         elif axis == "samples":
             self._sample_mask = self._sample_mask.difference(remove)
-        
+
     def _is_valid(self, index: Iterable[str], axis: str) -> bool:
         """
         Check if all samples/features are present in the DataContainer.
-        
+
         Parameters
         ----------
         index: list[str]
@@ -348,12 +352,12 @@ class DataContainer(object):
         else:
             msg = "axis must be `features` or `samples`."
             raise ValueError(msg)
-            
+
     def diagnose(self) -> dict:
         """
         Check if DataContainer has information to perform several correction
         types
-        
+
         Returns
         -------
         diagnostic : dict
@@ -364,7 +368,7 @@ class DataContainer(object):
             if there is batch number information associated to the samples.
 
         """
-        
+
         diagnostic = dict()
         diagnostic["empty"] = self.data_matrix.empty
         diagnostic["missing"] = self.data_matrix.isna().any().any()
@@ -376,13 +380,13 @@ class DataContainer(object):
             diagnostic[_sample_order] = self.order.any()
         except RunOrderError:
             diagnostic[_sample_order] = False
-        
+
         try:
             diagnostic[_sample_batch] = self.batch.any()
         except BatchInformationError:
             diagnostic[_sample_batch] = False
         return diagnostic
-   
+
     def reset(self, reset_mapping: bool = True):
         """
         Reloads the original data matrix.
@@ -400,8 +404,9 @@ class DataContainer(object):
         if reset_mapping:
             self.mapping = None
 
-    def select_features(self, mzq: float, rtq: float, mz_tol: float = 0.01,
-                        rt_tol: float = 5) -> pd.Index:
+    def select_features(
+        self, mzq: float, rtq: float, mz_tol: float = 0.01, rt_tol: float = 5
+    ) -> pd.Index:
         """
         Find feature names within the defined mass-to-charge and retention time
         tolerance.
@@ -494,8 +499,9 @@ class DataContainer(object):
             msg = "plot mode must be `seaborn` or `bokeh`"
             raise ValueError(msg)
 
-    def add_order_from_csv(self, path: Union[str, TextIO],
-                           interbatch_order: bool = True) -> None:
+    def add_order_from_csv(
+        self, path: Union[str, TextIO], interbatch_order: bool = True
+    ) -> None:
         """
         adds sample order and sample batch using information from a csv file.
         A column with the name `sample`  with the same values as the index of
@@ -583,18 +589,22 @@ class MetricMethods:
     pca: Computes the PCA scores, loadings and  PC variance.
 
     """
-    
+
     def __init__(self, data: DataContainer):
         self.__data = data
-    
-    def cv(self, groupby: Union[str, List[str], None] = "class",
-           robust: bool = False, fill_value: float = np.inf):
+
+    def cv(
+        self,
+        groupby: Union[str, List[str], None] = "class",
+        robust: bool = False,
+        fill_value: float = np.inf,
+    ):
         """
         Computes the Coefficient of variation for each feature.
 
         The coefficient of variation is the quotient between the standard
         deviation and the mean of a feature.
-        
+
         Parameters
         ----------
         groupby: str, List[str] or None
@@ -622,8 +632,9 @@ class MetricMethods:
                 by = self.__data.sample_metadata[groupby]
             else:
                 by = [self.__data.sample_metadata[x] for x in groupby]
-            result = (self.__data.data_matrix.groupby(by)
-                      .apply(cv_func, fill_value=fill_value))
+            result = self.__data.data_matrix.groupby(by).apply(
+                cv_func, fill_value=fill_value
+            )
         else:
             result = cv_func(self.__data.data_matrix, fill_value=fill_value)
         return result
@@ -635,7 +646,7 @@ class MetricMethods:
 
         The D-Ratio is useful to compare technical to biological variation and
         non informative features.
-        
+
         Parameters
         ----------
         robust: bool
@@ -663,15 +674,15 @@ class MetricMethods:
         sample_data = self.__data.data_matrix[is_sample_class]
         qc_data = self.__data.data_matrix[is_qc_class]
         # NaN are filled to inf to make filtration easier.
-        dratio = utils.sd_ratio(qc_data, sample_data, robust=robust,
-                                fill_value=np.inf)
+        dratio = utils.sd_ratio(qc_data, sample_data, robust=robust, fill_value=np.inf)
         return dratio
-    
-    def detection_rate(self, groupby: Union[str, List[str], None] = "class",
-                       threshold=0):
+
+    def detection_rate(
+        self, groupby: Union[str, List[str], None] = "class", threshold=0
+    ):
         """
         Computes the fraction of samples where a feature was detected.
-        
+
         Parameters
         ----------
         groupby : str, List[str] or None
@@ -687,20 +698,25 @@ class MetricMethods:
                 by = self.__data.sample_metadata[groupby]
             else:
                 by = [self.__data.sample_metadata[x] for x in groupby]
-            result = (self.__data.data_matrix.groupby(by)
-                      .apply(utils.detection_rate, threshold=threshold))
+            result = self.__data.data_matrix.groupby(by).apply(
+                utils.detection_rate, threshold=threshold
+            )
         else:
-            result = (self.__data.data_matrix
-                      .apply(utils.detection_rate, threshold=threshold))
+            result = self.__data.data_matrix.apply(
+                utils.detection_rate, threshold=threshold
+            )
         return result
 
-    def pca(self, n_components: Optional[int] = 2,
-            normalization: Optional[str] = None,
-            scaling: Optional[str] = None,
-            ignore_classes: Optional[List[str]] = None):
+    def pca(
+        self,
+        n_components: Optional[int] = 2,
+        normalization: Optional[str] = None,
+        scaling: Optional[str] = None,
+        ignore_classes: Optional[List[str]] = None,
+    ):
         """
         Computes PCA score, loadings and  PC variance of each component.
-        
+
         Parameters
         ----------
         n_components: int
@@ -711,7 +727,7 @@ class MetricMethods:
             normalizing method
         ignore_classes : list[str], optional
             classes in the data to ignore to build the PCA model.
-        
+
         Returns
         -------
         scores: np.array
@@ -737,20 +753,21 @@ class MetricMethods:
 
         pca = PCA(n_components=n_components)
         scores = pca.fit_transform(data)
-        n_components = pca.n_components_    # effective number of pc
+        n_components = pca.n_components_  # effective number of pc
         loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
         variance = pca.explained_variance_
         pc_str = ["PC" + str(x) for x in range(1, n_components + 1)]
         scores = pd.DataFrame(data=scores, index=ind, columns=pc_str)
-        loadings = pd.DataFrame(data=loadings,
-                                index=self.__data.data_matrix.columns,
-                                columns=pc_str)
+        loadings = pd.DataFrame(
+            data=loadings, index=self.__data.data_matrix.columns, columns=pc_str
+        )
         variance = pd.Series(data=variance, index=pc_str)
         total_variance = data.var().sum()
         return scores, loadings, variance, total_variance
 
-    def correlation(self, field: str, mode: str = "ols",
-                    classes: Optional[List[str]] = None):
+    def correlation(
+        self, field: str, mode: str = "ols", classes: Optional[List[str]] = None
+    ):
         """
         Correlates features with sample metadata properties.
 
@@ -798,19 +815,26 @@ class BokehPlotMethods:  # pragma: no cover
     pca_loadings()
     feature()
     """
+
     def __init__(self, data: DataContainer):
         self._data_container = data
 
-    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = _sample_class,
-                   ignore_classes: Optional[List[str]] = None,
-                   show_order: bool = False, scaling: Optional[str] = None,
-                   normalization: Optional[str] = None, draw: bool = True,
-                   fig_params: Optional[dict] = None,
-                   scatter_params: Optional[dict] = None
-                   ) -> bokeh.plotting.Figure:
+    def pca_scores(
+        self,
+        x_pc: int = 1,
+        y_pc: int = 2,
+        hue: str = _sample_class,
+        ignore_classes: Optional[List[str]] = None,
+        show_order: bool = False,
+        scaling: Optional[str] = None,
+        normalization: Optional[str] = None,
+        draw: bool = True,
+        fig_params: Optional[dict] = None,
+        scatter_params: Optional[dict] = None,
+    ) -> bokeh.plotting.Figure:
         """
         plots PCA scores
-        
+
         Parameters
         ----------
         x_pc: int
@@ -836,7 +860,7 @@ class BokehPlotMethods:  # pragma: no cover
             Optional parameters to pass to bokeh figure
         scatter_params: dict, optional
             Optional parameters to pass to bokeh scatter plot.
-        
+
         Returns
         -------
         bokeh.plotting.Figure.
@@ -855,26 +879,28 @@ class BokehPlotMethods:  # pragma: no cover
             default_scatter_params.update(scatter_params)
             scatter_params = default_scatter_params
 
-        tooltips = [(_sample_class, "@{}".format(_sample_class)),
-                    (_sample_order, "@{}".format(_sample_order)),
-                    (_sample_batch, "@{}".format(_sample_batch)),
-                    (_sample_id, "@{}".format(_sample_id))]
+        tooltips = [
+            (_sample_class, "@{}".format(_sample_class)),
+            (_sample_order, "@{}".format(_sample_order)),
+            (_sample_batch, "@{}".format(_sample_batch)),
+            (_sample_id, "@{}".format(_sample_id)),
+        ]
         fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
 
         x_name = "PC" + str(x_pc)
         y_name = "PC" + str(y_pc)
         n_comps = max(x_pc, y_pc)
-        score, _, variance, total_var = \
-            self._data_container.metrics.pca(n_components=n_comps,
-                                             ignore_classes=ignore_classes,
-                                             normalization=normalization,
-                                             scaling=scaling)
+        score, _, variance, total_var = self._data_container.metrics.pca(
+            n_components=n_comps,
+            ignore_classes=ignore_classes,
+            normalization=normalization,
+            scaling=scaling,
+        )
         score = score.join(self._data_container.sample_metadata)
 
         if hue == _sample_type:
             rev_map = _reverse_mapping(self._data_container.mapping)
-            score[_sample_type] = (score[_sample_class]
-                                   .apply(lambda x: rev_map.get(x)))
+            score[_sample_type] = score[_sample_class].apply(lambda x: rev_map.get(x))
             score = score[~pd.isna(score[_sample_type])]
         elif hue == _sample_batch:
             score[_sample_batch] = score[_sample_batch].astype(str)
@@ -884,12 +910,17 @@ class BokehPlotMethods:  # pragma: no cover
         score = ColumnDataSource(score)
         cmap = Category10[10]
         palette = cmap * (int(unique_values.size / len(cmap)) + 1)
-        palette = palette[:unique_values.size]
+        palette = palette[: unique_values.size]
         # TODO: Category10_3 should be in a parameter file
 
-        fig.scatter(source=score, x=x_name, y=y_name,
-                    color=factor_cmap(hue, palette, unique_values),
-                    legend_group=hue, **scatter_params)
+        fig.scatter(
+            source=score,
+            x=x_name,
+            y=y_name,
+            color=factor_cmap(hue, palette, unique_values),
+            legend_group=hue,
+            **scatter_params
+        )
 
         #  figure appearance
         x_label = x_name + " ({:.1f} %)"
@@ -902,21 +933,33 @@ class BokehPlotMethods:  # pragma: no cover
         fig.xaxis.axis_label_text_font_style = "bold"
 
         if show_order:
-            labels = LabelSet(x=x_name, y=y_name, text=_sample_order,
-                              level="glyph", x_offset=3, y_offset=3,
-                              source=score, render_mode="canvas",
-                              text_font_size="8pt")
+            labels = LabelSet(
+                x=x_name,
+                y=y_name,
+                text=_sample_order,
+                level="glyph",
+                x_offset=3,
+                y_offset=3,
+                source=score,
+                render_mode="canvas",
+                text_font_size="8pt",
+            )
             fig.add_layout(labels)
 
         if draw:
             bokeh.plotting.show(fig)
         return fig
 
-    def pca_loadings(self, x_pc=1, y_pc=2, scaling: Optional[str] = None,
-                     normalization: Optional[str] = None, draw: bool = True,
-                     fig_params: Optional[dict] = None,
-                     scatter_params: Optional[dict] = None
-                     ) -> bokeh.plotting.Figure:
+    def pca_loadings(
+        self,
+        x_pc=1,
+        y_pc=2,
+        scaling: Optional[str] = None,
+        normalization: Optional[str] = None,
+        draw: bool = True,
+        fig_params: Optional[dict] = None,
+        scatter_params: Optional[dict] = None,
+    ) -> bokeh.plotting.Figure:
         """
         plots PCA loadings.
 
@@ -952,17 +995,20 @@ class BokehPlotMethods:  # pragma: no cover
         if scatter_params is None:
             scatter_params = dict()
 
-        tooltips = [("feature", "@feature"), ("m/z", "@mz"),
-                    ("rt", "@rt"), ("charge", "@charge")]
+        tooltips = [
+            ("feature", "@feature"),
+            ("m/z", "@mz"),
+            ("rt", "@rt"),
+            ("charge", "@charge"),
+        ]
         fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
 
         x_name = "PC" + str(x_pc)
         y_name = "PC" + str(y_pc)
         n_comps = max(x_pc, y_pc)
-        _, loadings, variance, total_var = \
-            self._data_container.metrics.pca(n_components=n_comps,
-                                             normalization=normalization,
-                                             scaling=scaling)
+        _, loadings, variance, total_var = self._data_container.metrics.pca(
+            n_components=n_comps, normalization=normalization, scaling=scaling
+        )
         loadings = loadings.join(self._data_container.feature_metadata)
         loadings = ColumnDataSource(loadings)
 
@@ -982,11 +1028,15 @@ class BokehPlotMethods:  # pragma: no cover
             bokeh.plotting.show(fig)
         return fig
 
-    def feature(self, ft: str, hue: str = _sample_class,
-                ignore_classes: Optional[List[str]] = None,
-                draw: bool = True,
-                fig_params: Optional[dict] = None,
-                scatter_params: Optional[dict] = None) -> bokeh.plotting.Figure:
+    def feature(
+        self,
+        ft: str,
+        hue: str = _sample_class,
+        ignore_classes: Optional[List[str]] = None,
+        draw: bool = True,
+        fig_params: Optional[dict] = None,
+        scatter_params: Optional[dict] = None,
+    ) -> bokeh.plotting.Figure:
         """
         plots a feature intensity as a function of the run order.
 
@@ -1022,16 +1072,16 @@ class BokehPlotMethods:  # pragma: no cover
         if ignore_classes is None:
             ignore_classes = list()
 
-        source = (self._data_container.sample_metadata
-                  .join(self._data_container.data_matrix[ft]))
+        source = self._data_container.sample_metadata.join(
+            self._data_container.data_matrix[ft]
+        )
 
         ignore_samples = source[_sample_class].isin(ignore_classes)
         source = source[~ignore_samples]
 
         if hue == _sample_type:
             rev_map = _reverse_mapping(self._data_container.mapping)
-            source[_sample_type] = (source[_sample_class]
-                                    .apply(lambda x: rev_map.get(x)))
+            source[_sample_type] = source[_sample_class].apply(lambda x: rev_map.get(x))
             source = source[~source[_sample_type].isna()]
         elif hue == _sample_batch:
             source[_sample_batch] = source[_sample_batch].astype(str)
@@ -1040,18 +1090,26 @@ class BokehPlotMethods:  # pragma: no cover
         unique_values = source[hue].unique().astype(str)
         cmap = Category10[10]
         palette = cmap * (int(unique_values.size / len(cmap)) + 1)
-        palette = palette[:unique_values.size]
+        palette = palette[: unique_values.size]
 
         source = ColumnDataSource(source)
 
-        tooltips = [(_sample_class, "@{}".format(_sample_class)),
-                    (_sample_order, "@{}".format(_sample_order)),
-                    (_sample_batch, "@{}".format(_sample_batch)),
-                    (_sample_id, "@{}".format(_sample_id))]
+        tooltips = [
+            (_sample_class, "@{}".format(_sample_class)),
+            (_sample_order, "@{}".format(_sample_order)),
+            (_sample_batch, "@{}".format(_sample_batch)),
+            (_sample_id, "@{}".format(_sample_id)),
+        ]
         fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
         cmap_factor = factor_cmap(hue, palette, unique_values)
-        fig.scatter(source=source, x=_sample_order, y=ft, color=cmap_factor,
-                    legend_group=hue, **scatter_params)
+        fig.scatter(
+            source=source,
+            x=_sample_order,
+            y=ft,
+            color=cmap_factor,
+            legend_group=hue,
+            **scatter_params
+        )
 
         fig.xaxis.axis_label = "Run order"
         fig.yaxis.axis_label = "{} intensity [au]".format(ft)
@@ -1065,7 +1123,7 @@ class BokehPlotMethods:  # pragma: no cover
         return fig
 
 
-class SeabornPlotMethods(object):   # pragma: no cover
+class SeabornPlotMethods(object):  # pragma: no cover
     """
     Methods to plot feature data from a DataContainer using Matplotlib/Seaborn.
     """
@@ -1073,12 +1131,17 @@ class SeabornPlotMethods(object):   # pragma: no cover
     def __init__(self, data: DataContainer):
         self.data = data
 
-    def pca_scores(self, x_pc: int = 1, y_pc: int = 2, hue: str = _sample_class,
-                   ignore_classes: Optional[List[str]] = None,
-                   show_order: bool = False,
-                   scaling: Optional[str] = None,
-                   normalization: Optional[str] = None,
-                   relplot_params: Optional[dict] = None):
+    def pca_scores(
+        self,
+        x_pc: int = 1,
+        y_pc: int = 2,
+        hue: str = _sample_class,
+        ignore_classes: Optional[List[str]] = None,
+        show_order: bool = False,
+        scaling: Optional[str] = None,
+        normalization: Optional[str] = None,
+        relplot_params: Optional[dict] = None,
+    ):
         """
         plots PCA scores using seaborn relplot function.
 
@@ -1113,10 +1176,12 @@ class SeabornPlotMethods(object):   # pragma: no cover
         x_name = "PC" + str(x_pc)
         y_name = "PC" + str(y_pc)
         n_comps = max(x_pc, y_pc)
-        score, _, variance, total_var = \
-            self.data.metrics.pca(n_components=n_comps, scaling=scaling,
-                                  normalization=normalization,
-                                  ignore_classes=ignore_classes)
+        score, _, variance, total_var = self.data.metrics.pca(
+            n_components=n_comps,
+            scaling=scaling,
+            normalization=normalization,
+            ignore_classes=ignore_classes,
+        )
         score = score.join(self.data.sample_metadata)
 
         tmp_params = {"x": x_name, "y": y_name, "hue": hue, "kind": "scatter"}
@@ -1127,8 +1192,7 @@ class SeabornPlotMethods(object):   # pragma: no cover
 
         if hue == _sample_type:
             rev_map = _reverse_mapping(self.data.mapping)
-            score[_sample_type] = (score[_sample_class]
-                                   .apply(lambda s: rev_map.get(s)))
+            score[_sample_type] = score[_sample_class].apply(lambda s: rev_map.get(s))
             score = score[~pd.isna(score[_sample_type])]
         elif hue == _sample_batch:
             score[_sample_batch] = score[_sample_batch].astype(str)
@@ -1153,11 +1217,15 @@ class SeabornPlotMethods(object):   # pragma: no cover
         g.ax.set_ylabel(y_label)
         return g
 
-    def pca_loadings(self, x_pc: int = 1, y_pc: int = 2,
-                     ignore_classes: Optional[List[str]] = None,
-                     scaling: Optional[str] = None,
-                     normalization: Optional[str] = None,
-                     relplot_params: Optional[dict] = None):
+    def pca_loadings(
+        self,
+        x_pc: int = 1,
+        y_pc: int = 2,
+        ignore_classes: Optional[List[str]] = None,
+        scaling: Optional[str] = None,
+        normalization: Optional[str] = None,
+        relplot_params: Optional[dict] = None,
+    ):
         """
         plots PCA scores using seaborn relplot function.
 
@@ -1185,10 +1253,12 @@ class SeabornPlotMethods(object):   # pragma: no cover
         x_name = "PC" + str(x_pc)
         y_name = "PC" + str(y_pc)
         n_comps = max(x_pc, y_pc)
-        _, loadings, variance, total_var = \
-            self.data.metrics.pca(n_components=n_comps, scaling=scaling,
-                                  normalization=normalization,
-                                  ignore_classes=ignore_classes)
+        _, loadings, variance, total_var = self.data.metrics.pca(
+            n_components=n_comps,
+            scaling=scaling,
+            normalization=normalization,
+            ignore_classes=ignore_classes,
+        )
 
         tmp_params = {"x": x_name, "y": y_name, "kind": "scatter"}
         if relplot_params is None:
@@ -1207,12 +1277,15 @@ class SeabornPlotMethods(object):   # pragma: no cover
         g.ax.set_ylabel(y_label)
         return g
 
-    def feature(self, ft: str, hue: str = _sample_class,
-                ignore_classes: Optional[List[str]] = None,
-                relplot_params: Optional[dict] = None):
+    def feature(
+        self,
+        ft: str,
+        hue: str = _sample_class,
+        ignore_classes: Optional[List[str]] = None,
+        relplot_params: Optional[dict] = None,
+    ):
 
-        tmp_params = {"x": _sample_order, "y": ft, "hue": hue,
-                      "kind": "scatter"}
+        tmp_params = {"x": _sample_order, "y": ft, "hue": hue, "kind": "scatter"}
         if relplot_params is None:
             relplot_params = tmp_params
         else:
@@ -1221,14 +1294,13 @@ class SeabornPlotMethods(object):   # pragma: no cover
         if ignore_classes is None:
             ignore_classes = list()
 
-        df = (self.data.sample_metadata.join(self.data.data_matrix[ft]))
+        df = self.data.sample_metadata.join(self.data.data_matrix[ft])
         ignore_samples = df[_sample_class].isin(ignore_classes)
         df = df[~ignore_samples]
 
         if hue == _sample_type:
             rev_map = _reverse_mapping(self.data.mapping)
-            df[_sample_type] = (df[_sample_class]
-                                .apply(lambda x: rev_map.get(x)))
+            df[_sample_type] = df[_sample_class].apply(lambda x: rev_map.get(x))
             df = df[~df[_sample_type].isna()]
         elif hue == _sample_batch:
             df[_sample_batch] = df[_sample_batch].astype(str)
@@ -1238,8 +1310,7 @@ class SeabornPlotMethods(object):   # pragma: no cover
         g = sns.relplot(data=df, **relplot_params)
         return g
 
-    def correlation_histogram(
-            self, class_: Optional[str] = None, **hist_params):
+    def correlation_histogram(self, class_: Optional[str] = None, **hist_params):
         """
         Plots the distribution of correlation of feature pairs for a given class.
 
@@ -1305,7 +1376,7 @@ class PreprocessMethods:
         threshold: float = 0.0,
         frac: Optional[float] = None,
         n_jobs: Optional[int] = None,
-        verbose: bool = False
+        verbose: bool = False,
     ):
         r"""
         Correct time dependant systematic bias along samples due to variation in
@@ -1382,12 +1453,7 @@ class PreprocessMethods:
         data_matrix = self.__data.data_matrix
 
         rm_features = _batch_corrector.find_invalid_features(
-            data_matrix,
-            sample_metadata,
-            sample_class,
-            qc_class,
-            threshold,
-            min_qc_dr
+            data_matrix, sample_metadata, sample_class, qc_class, threshold, min_qc_dr
         )
         self.__data.remove(rm_features, "features")
         if verbose:
@@ -1406,12 +1472,13 @@ class PreprocessMethods:
             frac=frac,
             first_n=first_n_qc,
             n_jobs=n_jobs,
-            verbose=verbose
+            verbose=verbose,
         )
         self.__data.data_matrix = corrected
 
-    def normalize(self, method: str, inplace: bool = True,
-                  feature: Optional[str] = None) -> Optional[pd.DataFrame]:
+    def normalize(
+        self, method: str, inplace: bool = True, feature: Optional[str] = None
+    ) -> Optional[pd.DataFrame]:
         """
         Normalize samples.
 
@@ -1431,15 +1498,13 @@ class PreprocessMethods:
         -------
         normalized: pandas.DataFrame
         """
-        normalized = utils.normalize(self.__data.data_matrix, method,
-                                     feature=feature)
+        normalized = utils.normalize(self.__data.data_matrix, method, feature=feature)
         if inplace:
             self.__data.data_matrix = normalized
         else:
             return normalized
 
-    def scale(self, method: str,
-              inplace: bool = True) -> Optional[pd.DataFrame]:
+    def scale(self, method: str, inplace: bool = True) -> Optional[pd.DataFrame]:
         """
         scales features using different methods.
 
@@ -1464,8 +1529,7 @@ class PreprocessMethods:
         else:
             return scaled
 
-    def transform(self, method: str,
-                  inplace: bool = True) -> Optional[pd.DataFrame]:
+    def transform(self, method: str, inplace: bool = True) -> Optional[pd.DataFrame]:
         """
         Perform element-wise data transformations.
 
@@ -1493,6 +1557,7 @@ class BatchInformationError(Exception):
     """
     Error class when there is no batch information
     """
+
     pass
 
 
@@ -1500,6 +1565,7 @@ class RunOrderError(Exception):
     """
     Error class raised when there is no run order information
     """
+
     pass
 
 
@@ -1507,6 +1573,7 @@ class ClassNameError(Exception):
     """
     Error class raised when using invalid class names
     """
+
     pass
 
 
@@ -1514,6 +1581,7 @@ class EmptyDataContainerError(Exception):
     """
     Error class raised when remove leaves an empty DataContainer.
     """
+
     pass
 
 
@@ -1521,6 +1589,7 @@ class DilutionInformationError(Exception):
     """
     Error class raised when no dilution factor information has been provided.
     """
+
     pass
 
 
@@ -1536,8 +1605,7 @@ def _validate_mapping(mapping, valid_samples):
                     raise ValueError(msg)
 
 
-def _convert_to_interbatch_order(order: pd.Series,
-                                 batch: pd.Series) -> pd.Series:
+def _convert_to_interbatch_order(order: pd.Series, batch: pd.Series) -> pd.Series:
     """
     Convert the order values from a per-batch order to a interbatch order.
 
