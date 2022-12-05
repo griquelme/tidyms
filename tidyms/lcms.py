@@ -126,6 +126,9 @@ class MSSpectrum:
                 params["min_snr"] = min_snr
 
             centroid, area = peaks.find_centroids(self.mz, self.spint, **params)
+            ord = np.argsort(centroid)
+            centroid = centroid[ord]
+            area = area[ord]
         return centroid, area
 
     def plot(
