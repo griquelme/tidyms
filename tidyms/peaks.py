@@ -227,7 +227,7 @@ def find_centroids(mz: np.ndarray, spint: np.ndarray, min_snr: float,
 
     # peak centroid and total intensity computation
     # if m[0], ...,  m[n] is the m/z array and i[0], ..., i[n] is the
-    # intensity array, for a peak with start and indices k and l respectively,
+    # intensity array, for a peak with start and end indices k and l respectively,
     # the total intensity A is A = \sum_{j=k}^{l} i[j] and the centroid C,
     # computed as the weighted mean of the m/z is
     # C = \sum_{j=k}^{l} m[j] * i[j] / A
@@ -247,7 +247,7 @@ def find_centroids(mz: np.ndarray, spint: np.ndarray, min_snr: float,
         start_weight = weights[start - 1]
         if start[0] == 0:
             start_weight[0] = 0
-        centroid = (weights[end] - start_weight) / total_spint
+        centroid = (weights[end - 1] - start_weight) / total_spint
     else:
         centroid = np.array([])
         total_spint = np.array([])
