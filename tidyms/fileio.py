@@ -287,20 +287,15 @@ class MSData:
             del kwargs["data_import_mode"]
         
         if data_import_mode.lower() == c.SIMULATED:
-            print("creating simulated MSData")
             return SimulatedMSData()
         if data_import_mode.lower() == c.INFILE and "path" in kwargs:
             path = Path(kwargs["path"])
             suffix = path.suffix
-            print(path, suffix)
             if suffix == "":
-                print("creating simulated MSData")
                 return MSDataFromFile(*args, **kwargs)
         if data_import_mode.lower() == c.INFILE:
-            print("importing file method")
             return MSDataFromFile(*args, **kwargs)
         elif data_import_mode.lower() == c.MEMORY:
-            print("importing memory method")
             return MSDataInMemory(*args, **kwargs)
 
         raise Exception("Unknown data_import_mode parameter '%s'. Must be either 'file', 'memory', 'simulated'"%(data_import_mode))
