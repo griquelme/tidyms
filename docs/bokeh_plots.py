@@ -15,7 +15,7 @@ def create_chromatogram() -> ms.Chromatogram:
     path = Path(ms.fileio.get_tidyms_path())
     path = path.joinpath(dataset, filename)
 
-    ms_data = ms.MSData(
+    ms_data = ms.MSData.create_MSData_instance(
         path,
         ms_mode="centroid",
         instrument="qtof",

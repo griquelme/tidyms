@@ -14,7 +14,7 @@ def ms_data_centroid() -> ms.MSData:
     tidyms_path = ms.fileio.get_tidyms_path()
     filename = "centroid-data-zlib-indexed-compressed.mzML"
     data_path = os.path.join(tidyms_path, "test-raw-data", filename)
-    return ms.MSData(data_path)
+    return ms.MSData.create_MSData_instance(data_path)
 
 
 def test_ms_data_invalid_ms_mode_setter(ms_data_centroid):

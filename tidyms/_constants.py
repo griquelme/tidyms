@@ -17,6 +17,13 @@ CENTROID: Final[str] = "centroid"
 PROFILE: Final[str] = "profile"
 MS_MODES: Final[List[str]] = [CENTROID, PROFILE]
 
+# Data loading
+MEMORY: Final[str] = "memory"
+INFILE: Final[str] = "file"
+SIMULATED: Final[str] = "simulated"
+DATA_LOAD_MODES: Final[List[str]] = [MEMORY, INFILE, SIMULATED]
+DEFAULT_DATA_LOAD_MODE = INFILE
+
 # feature descriptors
 FEATURE: Final[str] = "feature"
 MZ: Final[str] = "mz"

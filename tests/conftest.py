@@ -88,7 +88,7 @@ def centroid_mzml():
     dataset_name = "test-raw-data"
     filename = "centroid-data-zlib-indexed-compressed.mzML"
     data_path = os.path.join(cache_path, dataset_name, filename)
-    ms_data = fileio.MSData(data_path, ms_mode="profile")
+    ms_data = fileio.MSData.create_MSData_instance(data_path, ms_mode="profile")
     return ms_data
 
 
@@ -97,5 +97,5 @@ def profile_mzml():
     cache_path = get_tidyms_path()
     filename = "profile-data-zlib-indexed-compressed.mzML"
     data_path = os.path.join(cache_path, "test-raw-data", filename)
-    ms_data = fileio.MSData(data_path, ms_mode="profile")
+    ms_data = fileio.MSData.create_MSData_instance(data_path, ms_mode="profile")
     return ms_data
