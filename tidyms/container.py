@@ -789,8 +789,8 @@ class MetricMethods:
         pandas.Series or pandas.DataFrame
 
         """
-        if mode not in ["ols", "spearman"]:
-            msg = "Valid modes are `ols` or `spearman`"
+        if mode not in ["ols", "spearman", "pearson"]:
+            msg = "Valid modes are 'ols', 'spearman' or 'pearson'"
             raise ValueError(msg)
 
         if classes is None:
