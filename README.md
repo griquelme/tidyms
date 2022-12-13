@@ -36,6 +36,15 @@ Examples
 Jupyter notebooks with examples are available
 [here](https://github.com/griquelme/tidyms-notebooks).
 
+Tests
+-----
+
+TidyMS uses unit tests for most of its functionality. 
+The tests can be executed with 
+```
+    python setup.py test
+```
+
 Documentation
 -------------
 

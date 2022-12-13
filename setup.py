@@ -64,4 +64,7 @@ if __name__ == "__main__":
           packages=PACKAGES,
           python_requires=PYTHON_REQUIRES,
           install_requires=INSTALL_REQUIRES,
-          include_package_data=True)
+          include_package_data=True,
+          
+          setup_requires=["pytest-runner"],
+          tests_require=["pytest"],)
