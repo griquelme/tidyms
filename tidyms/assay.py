@@ -129,6 +129,7 @@ class Assay:
             separation,
             data_import_mode
         )
+        self.ms_mode = ms_mode
         self.separation = separation
         self.instrument = instrument
         self.data_import_mode = c.DEFAULT_DATA_LOAD_MODE
@@ -138,6 +139,18 @@ class Assay:
         self.feature_table = None   # type: Optional[pd.DataFrame]
         self.data_matrix = None  # type: Optional[DataContainer]
         self.feature_metrics = dict()
+
+    @property
+    def ms_mode(self) -> str:
+        return self._msMode
+
+    @ms_mode.setter
+    def ms_mode(self, value: str):
+        if value in c.MS_MODES:
+            self._ms_mode = value
+        else:
+            msg = "{} is not a valid ms mode. Valid values are: {}"
+            raise ValueError(msg.format(value, c.MS_MODES))
 
     @property
     def separation(self) -> str:
@@ -607,7 +620,7 @@ class Assay:
         else:
             if verbose:
                 print("All samples are processed already.")
-            return self
+        return self
 
     @_manage_preprocessing_step
     def build_feature_table(self):
@@ -845,6 +858,7 @@ class Assay:
             if verbose:
                 msg = "Data matrix doesn't contain missing data."
                 print(msg)
+        return self
 
 
 class _AssayManager:
