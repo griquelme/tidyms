@@ -112,7 +112,9 @@ class Assay:
         ms_mode: str = "centroid",
         instrument: str = "qtof",
         separation: str = "uplc",
-        data_import_mode: str = None
+        data_import_mode: str = None,
+
+        n_jobs: int = 1
     ):
         if data_import_mode is None:
             data_import_mode = c.DEFAULT_DATA_LOAD_MODE
@@ -139,6 +141,8 @@ class Assay:
         self.feature_table = None   # type: Optional[pd.DataFrame]
         self.data_matrix = None  # type: Optional[DataContainer]
         self.feature_metrics = dict()
+
+        self.n_jobs = n_jobs
 
     @property
     def ms_mode(self) -> str:
@@ -175,6 +179,20 @@ class Assay:
         else:
             msg = "{} is not a valid instrument. Valid values are: {}."
             raise ValueError(msg.format(value, c.MS_INSTRUMENTS))
+
+    @property
+    def n_jobs(self) -> str:
+        return self._n_jobs
+
+    @n_jobs.setter
+    def n_jobs(self, value: str):
+        if value >= 1 or value == -1:
+            self._n_jobs = value
+        else:
+            msg = "n_jobs must be set to a positive, non-zero integer value to use a specific number of parallel workers. -1 indicates all processors. Provided value is {}."
+            raise ValueError(msg.format(value))
+
+
 
     @staticmethod
     def _get_feature_detection_strategy(
@@ -456,6 +474,9 @@ class Assay:
         process_samples = self.manager.sample_queue
         n_samples = len(process_samples)
 
+        if n_jobs is None:
+            n_jobs = self.n_jobs
+
         if n_samples:
 
             def iter_func(sample_list):
@@ -535,6 +556,10 @@ class Assay:
         extract_features_func = self._get_feature_extraction_strategy(strategy)
         process_samples = self.manager.sample_queue
         n_samples = len(process_samples)
+    
+        if n_jobs is None:
+            n_jobs = self.n_jobs
+
         if n_samples:
 
             def iterator():
@@ -593,6 +618,10 @@ class Assay:
         """
         process_samples = self.manager.sample_queue
         n_samples = len(process_samples)
+
+        if n_jobs is None:
+            n_jobs = self.n_jobs
+        
         if n_samples:
 
             def iterator():
@@ -833,6 +862,10 @@ class Assay:
         """
         process_samples = self.manager.sample_queue
         n_samples = len(process_samples)
+
+        if n_jobs is None:
+            n_jobs = self.n_jobs
+            
         if n_samples:
             samples = self.manager.get_sample_names()
             generator = ((x, self.get_ms_data(x)) for x in samples)
