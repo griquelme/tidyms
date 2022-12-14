@@ -287,7 +287,7 @@ class MSData:
             del kwargs["data_import_mode"]
         
         if data_import_mode.lower() == c.SIMULATED:
-            return SimulatedMSData()
+            return MSDataSimulated()
         if data_import_mode.lower() == c.INFILE and "path" in kwargs:
             path = Path(kwargs["path"])
             suffix = path.suffix
@@ -458,7 +458,7 @@ class MSDataFromFile(MSData):
         if suffix == ".mzML":
             self._reader = MZMLReader(path)
         elif suffix == "":
-            # used to intantiate SimulatedMSData
+            # used to intantiate MSDataSimulated
             self._reader = None
         else:
             msg = "{} is not a valid format for MS data".format(suffix)
@@ -591,7 +591,7 @@ class MSDataInMemory(MSData):
 
 
 
-class SimulatedMSData(MSData):  # pragma: no cover
+class MSDataSimulated(MSData):  # pragma: no cover
     """
     Emulates a MSData using simulated data. Used for tests.
 
