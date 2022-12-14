@@ -39,7 +39,7 @@ downloaded using the following code:
     dataset = "test-nist-raw-data"
     ms.fileio.download_tidyms_data(dataset, [filename], download_dir=".")
 
-    ms_data = ms.MSData(
+    ms_data = ms.MSData.create_MSData_instance(
         filename,
         ms_mode="centroid",
         instrument="qtof",

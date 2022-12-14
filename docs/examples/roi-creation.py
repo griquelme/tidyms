@@ -15,6 +15,10 @@ ftp.close()
 
 # specifying instrument and separation used in the experiments provides better
 # default values for several functions used in
-ms_data = ms.MSData(filename, ms_mode="centroid", instrument="qtof",
-                    separation="uplc")
+ms_data = ms.MSData.create_MSData_instance(
+    filename, 
+    ms_mode="centroid", 
+    instrument="qtof",
+    separation="uplc"
+    )
 roi_list = ms_data.make_roi()

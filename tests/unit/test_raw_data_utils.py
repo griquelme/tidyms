@@ -1,4 +1,4 @@
-from tidyms.fileio import SimulatedMSData
+from tidyms.fileio import MSData_simulated
 from tidyms.lcms import Chromatogram
 from tidyms.raw_data_utils import _match_mz
 import pytest
@@ -23,7 +23,7 @@ def sim_ms_data():
     rt_params = rt_params.T
 
     noise_level = 0.1
-    sim_exp = SimulatedMSData(mz, rt, mz_params, rt_params, noise=noise_level)
+    sim_exp = MSData_simulated(mz, rt, mz_params, rt_params, noise=noise_level)
     return sim_exp
 
 

@@ -1,4 +1,5 @@
 from tidyms import assay
+from tidyms import _constants as c
 from tidyms.lcms import LCRoi, Peak
 import pytest
 from pathlib import Path
@@ -51,7 +52,8 @@ def create_dummy_assay_manager(
         sample_metadata=metadata,
         ms_mode="centroid",
         instrument="qtof",
-        separation="uplc"
+        separation="uplc",
+        data_import_mode = c.SIMULATED
     )
 
 
@@ -391,6 +393,9 @@ class DummyAssay(assay.Assay):
     n_roi = 5
     roi_length = 20
     n_ft = 5
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs, data_import_mode = c.SIMULATED)
 
     def get_ms_data(self, sample: str):
         return sample

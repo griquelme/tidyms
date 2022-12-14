@@ -18,6 +18,7 @@ from ._plot_bokeh import _LCAssayPlotter
 from .fill_missing import fill_missing_lc
 from ._build_data_matrix import build_data_matrix
 import json
+import copy
 
 # TODO: add id_ column to sample metadata
 # TODO: add make_roi params to each column in sample metadata for cases where
@@ -111,7 +112,11 @@ class Assay:
         ms_mode: str = "centroid",
         instrument: str = "qtof",
         separation: str = "uplc",
+        data_import_mode: str = None
     ):
+        if data_import_mode is None:
+            data_import_mode = c.DEFAULT_DATA_LOAD_MODE
+        
         if isinstance(assay_path, str):
             assay_path = Path(assay_path)
 
@@ -121,10 +126,14 @@ class Assay:
             sample_metadata,
             ms_mode,
             instrument,
-            separation
+            separation,
+            data_import_mode
         )
         self.separation = separation
         self.instrument = instrument
+        self.data_import_mode = c.DEFAULT_DATA_LOAD_MODE
+        if data_import_mode is not None:
+            self.data_import_mode = data_import_mode
         self.plot = _create_assay_plotter(self)
         self.feature_table = None   # type: Optional[pd.DataFrame]
         self.data_matrix = None  # type: Optional[DataContainer]
@@ -223,7 +232,29 @@ class Assay:
 
         """
         sample_path = self.manager.get_sample_path(sample)
-        return MSData(sample_path, **self.manager.params["MSData"])
+        ms_data = None
+
+        temp = copy.deepcopy(self.manager.params["MSData"])
+        if "data_import_mode" in temp:
+            temp.pop("data_import_mode")
+        if self.data_import_mode.lower() == c.MEMORY:
+            if sample_path not in self._MSData_cached_in_memory:
+                ms_data = MSData.create_MSData_instance(data_import_mode = c.MEMORY, path = sample_path, **temp)
+            ms_data = self._MSData_cached_in_memory[sample_path]
+        elif self.data_import_mode.lower() == c.INFILE:
+            path = Path(sample_path)
+            suffix = path.suffix
+            if suffix == "":
+                ms_data = MSData.create_MSData_instance(data_import_mode = c.SIMULATED, path = sample_path, **temp)
+            else:
+                ms_data = MSData.create_MSData_instance(data_import_mode = c.INFILE, path = sample_path, **temp)
+        elif self.data_import_mode.lower() == c.SIMULATED:
+            ms_data = MSData.create_MSData_instance(data_import_mode = c.SIMULATED, path = sample_path, **temp)
+
+        if ms_data is None: 
+            raise RuntimeError("Error: file '%s' not found"%(sample_path))
+
+        return ms_data
 
     def get_sample_metadata(self) -> pd.DataFrame:
         """
@@ -853,17 +884,21 @@ class _AssayManager:
         self,
         assay_path: Path,
         data_path: Union[str, List[str], Path],
-        sample_metadata: Optional[Union[str, Path, pd.DataFrame]],
-        ms_mode: str,
-        instrument: str,
-        separation: str,
+        sample_metadata: Optional[Union[str, Path, pd.DataFrame]] = None,
+        ms_mode: str = "centroid",
+        instrument: str = "qtof",
+        separation: str = "uplc",
+        data_import_mode: Optional[str] = None
     ):
         self.assay_path = assay_path
         self._sample_to_path = None
         self.sample_metadata = None
         self.sample_queue = None
         self.add_samples(data_path, sample_metadata)
-        self.params = _build_params_dict(ms_mode, separation, instrument)
+        self.data_import_mode = c.DEFAULT_DATA_LOAD_MODE
+        if data_import_mode is not None:
+            self.data_import_mode = data_import_mode
+        self.params = _build_params_dict(ms_mode, separation, instrument, self.data_import_mode)
 
     def add_samples(
         self,
@@ -1149,11 +1184,13 @@ def _create_assay_manager(
     sample_metadata,
     ms_mode,
     instrument,
-    separation
+    separation,
+    data_import_mode
 ) -> _AssayManager:
     assay_path = _normalize_assay_path(assay_path)
 
     status = _is_assay_dir(assay_path)
+    
     if status == 1:  # valid assay dir, load assay
         metadata_path = assay_path.joinpath(c.MANAGER_FILENAME)
         with open(metadata_path, "rb") as fin:
@@ -1166,6 +1203,7 @@ def _create_assay_manager(
             ms_mode,
             instrument,
             separation,
+            data_import_mode,
         )
         manager.create_assay_dir()
         manager.save()
@@ -1358,12 +1396,13 @@ def compare_dict(d1: Optional[dict], d2: Optional[dict]) -> bool:
     return res
 
 
-def _build_params_dict(ms_mode: str, separation: str, instrument: str):
+def _build_params_dict(ms_mode: str, separation: str, instrument: str, data_import_mode: str):
     params_dict = {
         "MSData": {
             "ms_mode": ms_mode,
             "separation": separation,
             "instrument": instrument,
+            "data_import_mode": data_import_mode
         },
         "processed_samples": {x: set() for x in c.PREPROCESSING_STEPS},
         "preprocess_steps": {x: False for x in c.PREPROCESSING_STEPS}
