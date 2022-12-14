@@ -439,6 +439,104 @@ class MSData:
         """
         pass
 
+
+
+
+class MSData_subset_spectra:
+    """
+    Subset of another MSData object.
+
+
+    Attributes
+    ----------
+    start_ind: integer (including)
+    end_ind: integer (including, must be greater or equal to start_ind)
+    from_MSData_object: MSData object
+
+    """
+    @abc.abstractmethod
+    def __init__(self, 
+        start_ind: int,
+        end_ind: int,
+        from_MSData_object: MSData
+    ):
+        if start_ind > 0 and start_ind < from_MSData_object.get_n_spectra() and end_ind > 0 and end_ind < from_MSData_object.get_n_spectra() and start_ind < end_ind:
+            super().__init__()
+
+            self.start_ind = start_ind
+            self.end_ind = end_ind
+            self._from_MSData_object = from_MSData_object
+
+        else:
+            raise ValueError("Incorrect attributes provided for MSData_subset_spectra object generation")
+
+    @property
+    def ms_mode(self) -> str:
+        return self._from_MSData_object.ms_mode
+
+    @ms_mode.setter
+    def ms_mode(self, value: Optional[str]):
+        msg = "ms_mode cannot be set on a subset object."
+        raise ValueError(msg.format(value))
+
+    @property
+    def instrument(self) -> str:
+        return self._from_MSData_object._instrument
+
+    @instrument.setter
+    def instrument(self, value: str):
+        msg = "instrument cannot be set on a subset object."
+        raise ValueError(msg.format(value))
+
+    @property
+    def separation(self) -> str:
+        return self._from_MSData_object._separation
+
+    @separation.setter
+    def separation(self, value: str):
+        msg = "separation cannot be set on a subset object."
+        raise ValueError(msg.format(value))
+
+    def get_n_chromatograms(self) -> int:
+        return self._from_MSData_object.get_n_chromatograms()
+    
+    def get_n_spectra(self) -> int:
+        return self.end_ind - self.start_ind + 1
+    
+    @abc.abstractmethod
+    def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
+        return self._from_MSData_object.get_chromatogram(n)
+
+    @abc.abstractmethod
+    def get_spectrum(self, n: int) -> lcms.MSSpectrum:
+        if n + self.start_ind >= self._from_MSData_object.get_n_spectra() or n + self.start_ind > self.end_ind:
+            raise ValueError("Spectrum index %d is invalid. There are only %d spectra in the MSData object"%(n, self.end_ind - self.start_ind + 1))
+        return self._from_MSData_object.get_spectrum(n + self.start_ind)
+
+    @abc.abstractmethod
+    def get_spectra_iterator(
+            self,
+            ms_level: int = 1,
+            start: int = 0,
+            end: Optional[int] = None,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None
+    ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
+        if end is None:
+            end = self.get_n_spectra()
+        elif end > self.get_n_spectra():
+            msg = "End must be lower than the number of spectra in the file."
+            raise ValueError(msg)
+
+        for k in range(start, end):
+            sp = self.get_spectrum(k)
+            is_valid_level = ms_level == sp.ms_level
+            is_valid_time = ((start_time <= sp.time) and
+                             ((end_time is None) or (end_time > sp.time)))
+            if is_valid_level and is_valid_time:
+                yield k, sp
+
+
 class MSData_from_file(MSData):
     """
     Class for reading data from files without storing too much data in the memory

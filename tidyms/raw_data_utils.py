@@ -5,7 +5,7 @@ Functions used to extract information from raw data.
 
 import numpy as np
 from .lcms import Chromatogram, LCRoi, MSSpectrum, Roi
-from .fileio import MSData
+from .fileio import MSData, MSData_subset_spectra
 from .utils import find_closest
 from . import _constants as c
 from . import validation as val
@@ -998,7 +998,7 @@ def _filter_invalid_mz(
     valid_mz : np.ndarray
         sorted array of m/z values.
     mz: array
-        m/z values to filter
+        m/z values to filter.
     sp : array
         intensity values associated to each m/z.
     tolerance : float
@@ -1127,3 +1127,37 @@ def _match_mz(
     sp_no_match = sp2[no_match_mask]
 
     return match_index, mz_match, sp_match, mz_no_match, sp_no_match
+
+
+
+def subset_MSData_chronogram(msData, separation_indices_for_spectra):
+    ret = []
+
+    for startInd, endInd in separation_indices_for_spectra:
+        msSub = MSData_subset_spectra(start_ind = startInd, end_ind = endInd, from_MSData_object = msData)
+        ret.append(msSub)
+
+    return ret
+
+def get_separate_chronogram_indices(msData, intensityThreshold = 0.00001):
+    separationInds = []
+    ticInts = [sum(msData.get_spectrum(i).spint) for i in range(msData.get_n_spectra())]
+    startInd = None
+    endInd = None
+    for i, inte in enumerate(ticInts):
+        if inte >= intensityThreshold:
+            if startInd is None:
+                startInd = i
+            endInd = i
+            
+        else:
+            if startInd is not None:
+                separationInds.append((startInd, endInd))
+                startInd = None
+                endInd = None
+    
+    if startInd is not None:
+        separationInds.append((startInd, endInd))
+
+    return separationInds
+
