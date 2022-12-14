@@ -306,9 +306,9 @@ class MSData:
         instrument: str = "qtof",
         separation: str = "uplc"
     ):
-        self._ms_mode = ms_mode
-        self._instrument = instrument
-        self._separation = separation
+        self.ms_mode = ms_mode
+        self.instrument = instrument
+        self.separation = separation
 
     @property
     def ms_mode(self) -> str:
