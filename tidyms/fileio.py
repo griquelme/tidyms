@@ -287,16 +287,16 @@ class MSData:
             del kwargs["data_import_mode"]
         
         if data_import_mode.lower() == c.SIMULATED:
-            return MSDataSimulated()
+            return MSData_simulated()
         if data_import_mode.lower() == c.INFILE and "path" in kwargs:
             path = Path(kwargs["path"])
             suffix = path.suffix
             if suffix == "":
-                return MSDataFromFile(*args, **kwargs)
+                return MSData_from_file(*args, **kwargs)
         if data_import_mode.lower() == c.INFILE:
-            return MSDataFromFile(*args, **kwargs)
+            return MSData_from_file(*args, **kwargs)
         elif data_import_mode.lower() == c.MEMORY:
-            return MSDataInMemory(*args, **kwargs)
+            return MSData_in_memory(*args, **kwargs)
 
         raise Exception("Unknown data_import_mode parameter '%s'. Must be either 'file', 'memory', 'simulated'"%(data_import_mode))
 
@@ -439,7 +439,7 @@ class MSData:
         """
         pass
 
-class MSDataFromFile(MSData):
+class MSData_from_file(MSData):
     """
     Class for reading data from files without storing too much data in the memory
 
@@ -458,7 +458,7 @@ class MSDataFromFile(MSData):
         if suffix == ".mzML":
             self._reader = MZMLReader(path)
         elif suffix == "":
-            # used to intantiate MSDataSimulated
+            # used to intantiate MSData_simulated
             self._reader = None
         else:
             msg = "{} is not a valid format for MS data".format(suffix)
@@ -505,7 +505,7 @@ class MSDataFromFile(MSData):
                 yield k, sp
 
 
-class MSDataInMemory(MSData):
+class MSData_in_memory(MSData):
     """
     Class for reading the entire file once to memory.
 
@@ -591,7 +591,7 @@ class MSDataInMemory(MSData):
 
 
 
-class MSDataSimulated(MSData):  # pragma: no cover
+class MSData_simulated(MSData):  # pragma: no cover
     """
     Emulates a MSData using simulated data. Used for tests.
 
