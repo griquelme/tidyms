@@ -19,6 +19,7 @@ from .fill_missing import fill_missing_lc
 from ._build_data_matrix import build_data_matrix
 import json
 import copy
+import tempfile
 
 # TODO: add id_ column to sample metadata
 # TODO: add make_roi params to each column in sample metadata for cases where
@@ -106,23 +107,26 @@ class Assay:
 
     def __init__(
         self,
-        assay_path: Union[str, Path],
-        data_path: Optional[Union[str, List[str], Path]],
+        assay_path: Union[str, Path] = None,
+        data_path: Optional[Union[str, List[str], Path]] = None,
         sample_metadata: Optional[Union[pd.DataFrame, str, Path]] = None,
         ms_mode: str = "centroid",
         instrument: str = "qtof",
         separation: str = "uplc",
         data_import_mode: str = None,
 
-        n_jobs: int = 1
+        n_jobs: int = 1,
+        cache_MSData_objects: bool = False
     ):
         if data_import_mode is None:
             data_import_mode = c.DEFAULT_DATA_LOAD_MODE
         
         if isinstance(assay_path, str):
             assay_path = Path(assay_path)
+        if assay_path is None:
+            assay_path = tempfile.mkdtemp()
 
-        self.manager = _create_assay_manager(
+        self._manager = _create_assay_manager(
             assay_path,
             data_path,
             sample_metadata,
@@ -143,6 +147,16 @@ class Assay:
         self.feature_metrics = dict()
 
         self.n_jobs = n_jobs
+        self._cache_MSData_objects = cache_MSData_objects
+        self._MSData_objects_cache = {}
+
+    @property
+    def manager(self):
+        return self._manager
+
+    @manager.setter
+    def manager(self, value: None):
+        raise RuntimeError("Setting the manager is not allowed")
 
     @property
     def ms_mode(self) -> str:
@@ -265,27 +279,35 @@ class Assay:
         sample_path = self.manager.get_sample_path(sample)
         ms_data = None
 
-        temp = copy.deepcopy(self.manager.params["MSData"])
-        if "data_import_mode" in temp:
-            temp.pop("data_import_mode")
-        if self.data_import_mode.lower() == c.MEMORY:
-            if sample_path not in self._MSData_cached_in_memory:
+        if self._cache_MSData_objects and sample_path in self._MSData_objects_cache:
+            ms_data = self._MSData_objects_cache[sample_path]
+        
+        else:
+            temp = copy.deepcopy(self.manager.params["MSData"])
+            if "data_import_mode" in temp:
+                temp.pop("data_import_mode")
+            if self.data_import_mode.lower() == c.MEMORY:
                 ms_data = MSData.create_MSData_instance(data_import_mode = c.MEMORY, path = sample_path, **temp)
-            ms_data = self._MSData_cached_in_memory[sample_path]
-        elif self.data_import_mode.lower() == c.INFILE:
-            path = Path(sample_path)
-            suffix = path.suffix
-            if suffix == "":
+            elif self.data_import_mode.lower() == c.INFILE:
+                path = Path(sample_path)
+                suffix = path.suffix
+                if suffix == "":
+                    ms_data = MSData.create_MSData_instance(data_import_mode = c.SIMULATED, path = sample_path, **temp)
+                else:
+                    ms_data = MSData.create_MSData_instance(data_import_mode = c.INFILE, path = sample_path, **temp)
+            elif self.data_import_mode.lower() == c.SIMULATED:
                 ms_data = MSData.create_MSData_instance(data_import_mode = c.SIMULATED, path = sample_path, **temp)
-            else:
-                ms_data = MSData.create_MSData_instance(data_import_mode = c.INFILE, path = sample_path, **temp)
-        elif self.data_import_mode.lower() == c.SIMULATED:
-            ms_data = MSData.create_MSData_instance(data_import_mode = c.SIMULATED, path = sample_path, **temp)
 
-        if ms_data is None: 
-            raise RuntimeError("Error: file '%s' not found"%(sample_path))
+            if ms_data is None: 
+                raise RuntimeError("Error: file '%s' not found"%(sample_path))
+
+            if self._cache_MSData_objects:
+                self._MSData_objects_cache[sample_path] = ms_data
 
         return ms_data
+
+    def clear_MSData_objects_cache(self):
+        self._MSData_objects_cache = {}
 
     def get_sample_metadata(self) -> pd.DataFrame:
         """
