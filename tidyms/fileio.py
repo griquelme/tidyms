@@ -304,11 +304,13 @@ class MSData:
     def __init__(self, 
         ms_mode: str = "centroid",
         instrument: str = "qtof",
-        separation: str = "uplc"
+        separation: str = "uplc",
+        is_virtual_sample: bool = False
     ):
         self.ms_mode = ms_mode
         self.instrument = instrument
         self.separation = separation
+        self._is_virtual_sample = is_virtual_sample
 
     @property
     def ms_mode(self) -> str:
@@ -344,8 +346,16 @@ class MSData:
         if value in c.LC_MODES:
             self._separation = value
         else:
-            msg = "`separation` must be any of {}".format(c.SEPARATION_MODES)
+            msg = "`separation` must be any of {}. Got `{}`".format(c.LC_MODES, value)
             raise ValueError(msg)
+
+    @property
+    def is_virtual_sample(self) -> bool:
+        return self._is_virtual_sample
+
+    @is_virtual_sample.setter
+    def is_virtual_sample(self, value: bool):
+        raise ValueError("Cannot change sample virtuallity after creation.")
 
     @abc.abstractmethod
     def get_n_chromatograms(self) -> int:
@@ -442,7 +452,7 @@ class MSData:
 
 
 
-class MSData_subset_spectra:
+class MSData_subset_spectra(MSData):
     """
     Subset of another MSData object.
 
@@ -461,8 +471,8 @@ class MSData_subset_spectra:
         from_MSData_object: MSData
     ):
         if start_ind > 0 and start_ind < from_MSData_object.get_n_spectra() and end_ind > 0 and end_ind < from_MSData_object.get_n_spectra() and start_ind < end_ind:
-            super().__init__()
-
+            #super().__init__(is_virtual_sample = True)
+            self._is_virtual_sample = True
             self.start_ind = start_ind
             self.end_ind = end_ind
             self._from_MSData_object = from_MSData_object
@@ -476,8 +486,8 @@ class MSData_subset_spectra:
 
     @ms_mode.setter
     def ms_mode(self, value: Optional[str]):
-        msg = "ms_mode cannot be set on a subset object."
-        raise ValueError(msg.format(value))
+        msg = "Warning: ms_mode cannot be set on a subset object. No changes will be made."
+        print(msg.format(value))
 
     @property
     def instrument(self) -> str:
@@ -485,8 +495,8 @@ class MSData_subset_spectra:
 
     @instrument.setter
     def instrument(self, value: str):
-        msg = "instrument cannot be set on a subset object."
-        raise ValueError(msg.format(value))
+        msg = "Warning: instrument cannot be set on a subset object. No changes will be made."
+        print(msg.format(value))
 
     @property
     def separation(self) -> str:
@@ -494,8 +504,8 @@ class MSData_subset_spectra:
 
     @separation.setter
     def separation(self, value: str):
-        msg = "separation cannot be set on a subset object."
-        raise ValueError(msg.format(value))
+        msg = "Warning: separation cannot be set on a subset object. No changes will be made."
+        print(msg.format(value))
 
     def get_n_chromatograms(self) -> int:
         return self._from_MSData_object.get_n_chromatograms()
@@ -550,7 +560,7 @@ class MSData_from_file(MSData):
         instrument: str = "qtof",
         separation: str = "uplc"
     ):
-        super().__init__(ms_mode = ms_mode, instrument = instrument, separation = separation)
+        super().__init__(ms_mode = ms_mode, instrument = instrument, separation = separation, is_virtual_sample = False)
         path = Path(path)
         suffix = path.suffix
         if suffix == ".mzML":
@@ -615,7 +625,7 @@ class MSData_in_memory(MSData):
         instrument: str = "qtof",
         separation: str = "uplc"
     ):
-        super().__init__()
+        super().__init__(ms_mode = ms_mode, instrument = instrument, separation = separation, is_virtual_sample = False)
         path = Path(path)
         suffix = path.suffix
 
@@ -706,7 +716,7 @@ class MSData_simulated(MSData):  # pragma: no cover
         separation: str = "uplc",
         instrument: str = "qtof"
     ):
-        super().__init__()
+        super().__init__(ms_mode = ms_mode, instrument = instrument, separation = separation, is_virtual_sample = True)
         # MSData params
         self._ms_mode = ms_mode
         self._instrument = instrument
