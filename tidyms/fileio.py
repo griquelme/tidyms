@@ -449,6 +449,19 @@ class MSData:
         """
         pass
 
+    def get_closest_spectrum_to_RT(
+        self, 
+        time: float = 0.0
+    ) -> lcms.MSSpectrum:
+        bestK = None
+        bestK_timeDiff = None
+        for k, sp in self.get_spectra_iterator:
+            if bestK is None or abs(sp.time - time) <= abs(bestK_timeDiff):
+                bestK = k
+                bestK_timeDiff = sp.time - time
+
+        return bestK, bestK_timeDiff
+
 
 
 
