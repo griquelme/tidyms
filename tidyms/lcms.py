@@ -131,6 +131,13 @@ class MSSpectrum:
             area = area[ord]
         return centroid, area
 
+    def get_closest_mz(
+        self, 
+        mz: float = 100.
+    ) -> Tuple[int, float, float, float, float]:
+        ind = np.argmin(np.abs(self.mz - mz))
+        return ind, self.mz[ind], self.mz[ind] - mz, (self.mz[ind] - mz) / mz * 1E6, self.spint[ind]
+
     def plot(
         self,
         fig_params: Optional[dict] = None,
