@@ -69,8 +69,8 @@ SECONDS = "UO:0000010"
 MINUTES = "UO:0000031"
 
 # data types
-FLOAT16 = "MS:1000521"
-FLOAT32 = "MS:1000518"
+FLOAT16 = "UNKNOWN" ## TODO check "MS:1000521"
+FLOAT32 = "MS:1000521"
 FLOAT64 = "MS:1000523"
 INT32 = "MS:1000519"
 INT64 = "MS:1000522"
@@ -333,8 +333,9 @@ def _read_binary_data_array(element: Element) -> Tuple[np.ndarray, str]:
         tag = e.tag
         if tag == "binary":
             data = e.text
-        else:
+        elif tag == "cvParam":
             accession = e.attrib.get("accession")
+            value = e.attrib.get("name")
             if accession in UNSUPPORTED_COMPRESSION:
                 msg = "Currently only zlib compression is supported."
                 raise NotImplementedError(msg)
