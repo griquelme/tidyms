@@ -455,7 +455,7 @@ class MSData:
     ) -> lcms.MSSpectrum:
         bestK = None
         bestK_timeDiff = None
-        for k, sp in self.get_spectra_iterator:
+        for k, sp in self.get_spectra_iterator():
             if bestK is None or abs(sp.time - time) <= abs(bestK_timeDiff):
                 bestK = k
                 bestK_timeDiff = sp.time - time
@@ -483,7 +483,7 @@ class MSData_subset_spectra(MSData):
         end_ind: int,
         from_MSData_object: MSData
     ):
-        if start_ind > 0 and start_ind < from_MSData_object.get_n_spectra() and end_ind > 0 and end_ind < from_MSData_object.get_n_spectra() and start_ind < end_ind:
+        if start_ind >= 0 and start_ind < from_MSData_object.get_n_spectra() and end_ind >= 0 and end_ind < from_MSData_object.get_n_spectra() and start_ind <= end_ind:
             #super().__init__(is_virtual_sample = True)
             self._is_virtual_sample = True
             self.start_ind = start_ind
@@ -491,7 +491,7 @@ class MSData_subset_spectra(MSData):
             self._from_MSData_object = from_MSData_object
 
         else:
-            raise ValueError("Incorrect attributes provided for MSData_subset_spectra object generation")
+            raise ValueError("Incorrect attributes provided for MSData_subset_spectra object generation (start_ind = %s, end_ind = %s, from_MSData_object with %d spectra)"%(start_ind, end_ind, from_MSData_object.get_n_spectra()))
 
     @property
     def ms_mode(self) -> str:
