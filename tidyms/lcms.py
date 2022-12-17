@@ -133,10 +133,13 @@ class MSSpectrum:
 
     def get_closest_mz(
         self, 
-        mz: float = 100.
+        mz: float = 100.,
+        max_offset_absolute = 0.001
     ) -> Tuple[int, float, float, float, float]:
         ind = np.argmin(np.abs(self.mz - mz))
-        return ind, self.mz[ind], self.mz[ind] - mz, (self.mz[ind] - mz) / mz * 1E6, self.spint[ind]
+        if abs(self.mz[ind] - mz) <= max_offset_absolute:
+            return ind, self.mz[ind], self.mz[ind] - mz, (self.mz[ind] - mz) / mz * 1E6, self.spint[ind]
+        return None, None, None, None, None
 
     def plot(
         self,
