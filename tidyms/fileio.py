@@ -462,6 +462,82 @@ class MSData:
 
         return bestK, bestK_timeDiff
 
+class MSData_Proxy(MSData):
+    
+    def __init__(self, 
+        to_MSData_object
+    ):
+        self.to_MSData_object = to_MSData_object
+
+    @property
+    def to_MSData_object(self) -> MSData:
+        return self._to_MSData_object
+
+    @to_MSData_object.setter
+    def to_MSData_object(self, obj: MSData): 
+        self._to_MSData_object = obj
+
+    @property
+    def ms_mode(self) -> str:
+        return self.self._to_MSData_object.ms_mode
+
+    @ms_mode.setter
+    def ms_mode(self, value: Optional[str]):
+        self.self._to_MSData_object.ms_mode = value
+
+    @property
+    def instrument(self) -> str:
+        return self._to_MSData_object.instrument
+
+    @instrument.setter
+    def instrument(self, value: str):
+        self._to_MSData_object.instrument = value
+
+    @property
+    def separation(self) -> str:
+        return self._to_MSData_object.separation
+
+    @separation.setter
+    def separation(self, value: str):
+        self._to_MSData_object.separation = value
+
+    @property
+    def is_virtual_sample(self) -> bool:
+        return self._to_MSData_object.is_virtual_sample
+
+    @is_virtual_sample.setter
+    def is_virtual_sample(self, value: bool):
+        self._to_MSData_object.is_virtual_sample = value
+
+    def get_n_chromatograms(self) -> int:
+        return self._to_MSData_object.get_n_chromatograms()
+    
+    def get_n_spectra(self) -> int:
+        return self._to_MSData_object.get_n_spectra()
+    
+    def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
+        return self._to_MSData_object.get_chromatogram(n)
+
+    def get_spectrum(self, n: int) -> lcms.MSSpectrum:
+        return self._to_MSData_object.get_spectrum(n)
+
+    @abc.abstractmethod
+    def get_spectra_iterator(
+            self,
+            ms_level: int = 1,
+            start: int = 0,
+            end: Optional[int] = None,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None
+    ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
+        return self._to_MSData_object.get_spectra_iterator(
+            ms_level = ms_level,
+            start = start,
+            end = end,
+            start_time = start_time,
+            end_time = end_time
+        )
+
 
 
 
