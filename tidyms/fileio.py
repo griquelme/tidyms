@@ -296,7 +296,7 @@ class MSData:
         if data_import_mode.lower() == c.INFILE:
             return MSData_from_file(*args, **kwargs)
         elif data_import_mode.lower() == c.MEMORY:
-            return MSData_in_memory(*args, **kwargs)
+            return MSData_in_memory.generate_from_file(*args, **kwargs)
 
         raise Exception("Unknown data_import_mode parameter '%s'. Must be either 'file', 'memory', 'simulated'"%(data_import_mode))
 
@@ -479,7 +479,7 @@ class MSData_Proxy(MSData):
 
     @property
     def ms_mode(self) -> str:
-        return self.self._to_MSData_object.ms_mode
+        return self._to_MSData_object.ms_mode
 
     @ms_mode.setter
     def ms_mode(self, value: Optional[str]):
@@ -537,7 +537,6 @@ class MSData_Proxy(MSData):
             start_time = start_time,
             end_time = end_time
         )
-
 
 
 
@@ -707,31 +706,81 @@ class MSData_in_memory(MSData):
     Class for reading the entire file once to memory.
 
     """
+
+    @abc.abstractmethod
+    def generate_from_MSData_object(msDataObj):
+        mz_perScan = []
+        spint_perScan = []
+        time_perScan = []
+        ms_level_perScan = []
+        polarity_perScan = []
+        instrument_perScan = []
+        is_centroid_perScan = []
+
+        for k, spectrum in msDataObj.get_spectra_iterator():
+            mz_perScan.append(spectrum.mz)
+            spint_perScan.append(spectrum.spint)
+            time_perScan.append(spectrum.time)
+            ms_level_perScan.append(spectrum.ms_level)
+            polarity_perScan.append(spectrum.polarity)
+            instrument_perScan.append(spectrum.instrument)
+            is_centroid_perScan.append(spectrum.is_centroid)
+        
+        temp = MSData_in_memory(
+            ms_mode = msDataObj.ms_mode,
+            instrument = msDataObj.instrument,
+            separation = msDataObj.separation
+        )
+
+        for i in range(len(mz_perScan)):
+            spectrum = lcms.MSSpectrum(
+                mz_perScan[i],
+                spint_perScan[i],
+                time_perScan[i],
+                ms_level_perScan[i],
+                polarity_perScan[i],
+                instrument_perScan[i],
+                is_centroid_perScan[i]
+            )
+            temp._spectra.append(spectrum)
+        
+        return temp
+
+    @abc.abstractmethod
+    def generate_from_file(path, ms_mode: str = "centroid", instrument: str = "qtof", separation: str = "uplc"):
+        temp = MSData_in_memory(
+            ms_mode = ms_mode, 
+            instrument = instrument, 
+            separation = separation
+        )
+        
+        path = Path(path)
+        suffix = path.suffix
+        if suffix == ".mzML":
+            reader = MZMLReader(path)
+            for i in range(reader.n_spectra):
+                sp_data = reader.get_spectrum(i)
+                sp_data["is_centroid"] = ms_mode == "centroid"
+                temp._spectra.append(lcms.MSSpectrum(**sp_data))
+        else:
+            msg = "{} is not a valid format for MS data".format(suffix)
+            raise ValueError(msg)
+
+        return temp
+
     def __init__(
         self,
-        path: Union[str, Path],
         ms_mode: str = "centroid",
         instrument: str = "qtof",
         separation: str = "uplc"
     ):
         super().__init__(ms_mode = ms_mode, instrument = instrument, separation = separation, is_virtual_sample = False)
-        path = Path(path)
-        suffix = path.suffix
-
+        
         self._ms_mode = ms_mode
         self._instrument = instrument
         self._separation = separation
 
         self._spectra = []
-        if suffix == ".mzML":
-            reader = MZMLReader(path)
-            for i in range(reader.n_spectra):
-                sp_data = reader.get_spectrum(i)
-                sp_data["is_centroid"] = self.ms_mode == "centroid"
-                self._spectra.append(lcms.MSSpectrum(**sp_data))
-        else:
-            msg = "{} is not a valid format for MS data".format(suffix)
-            raise ValueError(msg)
 
     def get_n_chromatograms(self) -> int:
         return self._reader.n_chromatograms

@@ -4,7 +4,8 @@ from typing import Final, List
 # separation modes
 HPLC: Final[str] = "hplc"
 UPLC: Final[str] = "uplc"
-LC_MODES: Final[List[str]] = [UPLC, HPLC]
+DART: Final[str] = "None/DART"
+LC_MODES: Final[List[str]] = [UPLC, HPLC, DART]
 SEPARATION_MODES: Final[List[str]] = LC_MODES + []
 
 # instruments

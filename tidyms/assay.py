@@ -333,6 +333,11 @@ class Assay:
 
         return ms_data
 
+    def set_ms_data(self, sample: str, msdata: MSData):
+        sample_path = self.manager.get_sample_path(sample)
+        self._MSData_objects_cache[sample_path] = msdata
+
+
     def clear_MSData_objects_cache(self):
         self._MSData_objects_cache = {}
 
