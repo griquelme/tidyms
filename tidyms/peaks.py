@@ -627,6 +627,8 @@ def _include_first_and_last_index(x: np.ndarray,
 
 def _merge_close_peaks(mz: np.ndarray, spint: np.ndarray,
                        min_distance: float) -> Tuple[np.ndarray, np.ndarray]:
+    if mz.shape[0] < 2:
+        return mz, spint
     dmz = np.diff(mz)
     is_close_mask = (dmz < min_distance) & (np.roll(dmz, -1) > min_distance)
     is_close_mask[-1] = (mz[-1] - mz[-2]) < min_distance    # boundary case
