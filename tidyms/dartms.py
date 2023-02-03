@@ -15,6 +15,27 @@ import datetime
 import math
 import scipy
 import warnings
+import functools
+
+
+
+
+
+
+
+def weighted_avg_and_std(values, weights):
+    """
+    Return the weighted average and standard deviation.
+
+    values, weights -- Numpy ndarrays with the same shape.
+    """
+    average = np.average(values, weights=weights)
+    # Fast and numerically precise:
+    variance = np.average((values-average)**2, weights=weights)
+    return (average, math.sqrt(variance))
+
+
+
 
 
 
@@ -156,7 +177,8 @@ def add_chronograms_samples_to_assay(assay, sepInds, msData, filename, fileNameC
         )
 
 
-def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument, centroid_profileMode = True, fileNameChangeFunction = None):
+def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument, centroid_profileMode = True, fileNameChangeFunction = None, 
+                                        use_signal_function = None):
     """
     Generates a new assay from a series of chronograms and a spot_file
 
@@ -168,6 +190,7 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
     Returns:
         Assay: The new generated assay object with the either automatically or user-guided spots from the spot_file
     """    
+
     assay = ms.assay.Assay(
         data_path = None,
         sample_metadata = None,
@@ -184,7 +207,7 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
 
         msData = None
         if os.path.exists(filename + ".pickle") and os.path.isfile(filename + ".pickle"):
-            print(" // loaded from pickle file")
+            print("  // loaded from pickle file")
             with open(filename + ".pickle", "rb") as fin:
                 msData = pickle.load(fin)
         else:
@@ -201,29 +224,6 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
                 print("      .. centroiding")
                 for k, spectrum in msData.get_spectra_iterator():
                     mzs, intensities = spectrum.find_centroids()
-                    if k == 50 and False:
-                        temp = {
-                            "mz": [],
-                            "intensity": [],
-                            "mode":[]
-                        }
-                        temp["mz"].extend(spectrum.mz)
-                        temp["intensity"].extend(spectrum.spint)
-                        temp["mode"].extend(("profile" for i in spectrum.mz))
-                        
-                        temp["mz"].extend(mzs)
-                        temp["intensity"].extend(intensities)
-                        temp["mode"].extend(("centroid" for i in intensities))
-
-                        import plotnine as p9
-                        import pandas as pd
-
-                        temp = pd.DataFrame(temp)
-
-                        p = (p9.ggplot(data = temp, mapping = p9.aes(x = "mz", ymin = 0, ymax = "intensity", colour = "mode"))
-                            + p9.geom_linerange()
-                        )
-                        print(p)
 
                     spectrum.mz = mzs
                     spectrum.spint = intensities
@@ -231,6 +231,12 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
 
             with open(filename + ".pickle", "wb") as fout:
                 pickle.dump(msData, fout)
+
+        if use_signal_function is not None:
+            for spectrumi, spectrum in msData.get_spectra_iterator():
+                useInds = use_signal_function(spectrum.mz, spectrum.spint)
+                spectrum.mz = spectrum.mz[useInds]
+                spectrum.spint = spectrum.spint[useInds]
 
         sepInds = ms.dartms.get_separate_chronogram_indices(msData, os.path.splitext(os.path.basename(filename))[0], spot_file, intensityThreshold = 1E3)
         if len(sepInds) == 0:
@@ -341,7 +347,7 @@ def normalize_to_internal_standard(assay, std, multiplication_factor = 1, plot =
                 totalSTDInt = totalSTDInt + np.sum(spectrum.spint[use])
         
         if totalSTDInt > 0:
-            print("   .. sample '%35s' STD intensity (sum) %12.1ff * %12.1f"%(sample, totalSTDInt, multiplication_factor))
+            print("   .. sample '%35s' STD intensity (sum) %12.1f * %12.1f"%(sample, totalSTDInt, multiplication_factor))
             for k, spectrum in msDataObj.get_spectra_iterator():
                 spectrum.spint = spectrum.spint / totalSTDInt * multiplication_factor
             temp["sample"].append(sample)
@@ -419,6 +425,16 @@ def get_MZ_offsets(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_devi
 
     return pd.DataFrame(temp)
 
+def _revMZ(mz, correctby, *args, **kwargs):
+    if correctby == "mzDeviationPPM":
+        transformFactor = kwargs["transformFactor"]
+        return mz / (1. - transformFactor / 1E6)
+    elif correctby == "mzDeviation":
+        transformFactor = kwargs["transformFactor"]
+        return mz + transformFactor
+    else:
+        raise RuntimeError("Unknown correctby option '%s' specified. Must be either of ['mzDeviationPPM', 'mzDeviation']"%(correctby))
+
 def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_deviation_absolute = 0.1, correctby = "mzDeviationPPM", max_deviationPPM_to_use_for_correction = 80, plot = False, verbose = True):
     """
     Function to correct systematic shifts of mz values in individual spot samples
@@ -467,13 +483,22 @@ def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007
 
             for k, spectrum in msDataObj.get_spectra_iterator():
                 spectrum.original_mz = spectrum.mz
+                if not ("reverseMZ" in dir(spectrum) and callable(spectrum.reverseMZ)):
+                    spectrum.reverseMZ = None
+                    spectrum.reverseMZDesc = "None"
                 if correctby == "mzDeviationPPM":
-                    spectrum.mz = spectrum.mz * (1 - transformFactor / 1E6)
+                    spectrum.mz = spectrum.mz * (1. - transformFactor / 1E6)
+                    spectrum.reverseMZ = functools.partial(_revMZ, correctby = "mzDeviationPPM", transformFactor = transformFactor)   ## TODO chain reverseMZ lambdas here
+                    spectrum.reverseMZDesc = "mzDeviationPPM by %.5f (%s)"%(transformFactor, spectrum.reverseMZ)
                 elif correctby == "mzDeviation":
                     spectrum.mz = spectrum.mz - transformFactor
+                    spectrum.reverseMZ = functools.partial(_revMZ, correctby = "mzDeviation", transformFactor = transformFactor)
+                    spectrum.reverseMZDesc = "mzDeviation by %.5f (%s)"%(transformFactor, spectrum.reverseMZ)
+                else:
+                    raise RuntimeError("Unknown mz correction method provided. Must be one of ['mzDeviationPPM', 'mzDeviation']")
 
-        if verbose:
-            print("    .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"%(samplei, len(assay.manager.get_sample_names()), sample, transformFactor, correctby))
+            if verbose:
+                print("    .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"%(samplei+1, len(assay.manager.get_sample_names()), sample, transformFactor, correctby))
 
     tempMod["mode"] = "corrected MZs (by %s)"%(correctby)
     temp_ = pd.concat([temp, tempMod], axis = 0, ignore_index = True).reset_index(drop = False)
@@ -529,12 +554,14 @@ def crude_cluster_mz_list(sample, mz, intensity, min_difference_ppm):
 import numba
 global refine_clustering
 @numba.jit(nopython=True)
-def refine_clustering(sample, mzs, intensities, spectrumID, clusts, expected_mz_deviation_ppm = 15, closest_signal_max_deviation_ppm = 15, max_mz_deviation_ppm = None):
+def refine_clustering(sample, mzs, intensities, spectrumID, clusts, expected_mz_deviation_ppm = 15, closest_signal_max_deviation_ppm = 20, max_mz_deviation_ppm = None):
     clustInds = np.unique(clusts)
     maxClust = np.max(clusts)
     newClusts = np.copy(clusts)
 
-    #degubPrint_ = True
+    degubPrint_ = False
+    debugPrintMZ = 358.3079
+    debugPrintError = 1
     
     for i, clust in enumerate(clustInds):
         n = np.sum(clusts == i)
@@ -548,9 +575,9 @@ def refine_clustering(sample, mzs, intensities, spectrumID, clusts, expected_mz_
             used = np.zeros((mzs_.shape[0]), dtype = numba.int32)
             usedMZs = np.zeros_like(mzs_)
 
-            #if degubPrint_ and abs(np.mean(mzs_) - 412) < 1: print("\n\nsample", sample)
-            #if degubPrint_ and abs(np.mean(mzs_) - 412) < 1: print("starting new cluster")
-            #if degubPrint_ and abs(np.mean(mzs_) - 412) < 1: print("mzs_ is", mzs_)
+            if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError: print("\n\nsample", sample)
+            if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError: print("starting new cluster")
+            if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError: print("mzs_ is", mzs_.shape, mzs_)
             
             while sum(used == 0) > 0:
                 c = np.argmax(intensities_ * (used == 0))
@@ -559,7 +586,7 @@ def refine_clustering(sample, mzs, intensities, spectrumID, clusts, expected_mz_
                 newClusts[pos[c]] = maxClust + 1
                 lastPPMDev = 0
                 
-                #if degubPrint_ and abs(np.mean(mzs_) - 412) < 1: print("seed mz is", usedMZs[c])
+                if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError: print("seed mz is", usedMZs[c])
         
                 cont = sum(used == 0) > 0
                 while cont:
@@ -574,10 +601,9 @@ def refine_clustering(sample, mzs, intensities, spectrumID, clusts, expected_mz_
                     usedMZs[closest] = mzs_[closest]
                     newClusts[pos[closest]] = maxClust + 1
 
-                    mzdevRSTD = np.std(usedMZs[used == 1]) / np.mean(usedMZs[used == 1])
                     newPPMDev = (np.max(usedMZs[used == 1]) - np.min(usedMZs[used == 1])) / np.average(usedMZs[used == 1]) * 1E6
-                    #if degubPrint_ and abs(np.mean(mzs_) - 412) < 1: print("closest new mz is ", usedMZs[closest], "added ppm deviation", (newPPMDev - lastPPMDev), "min/max are ", np.min(usedMZs[used == 1]), np.max(usedMZs[used == 1]), "RSTD mz", mzdevRSTD)
-                    if sum(used == 0) == 0 or (newPPMDev - lastPPMDev) > closest_signal_max_deviation_ppm or (max_mz_deviation_ppm is not None and newPPMDev > max_mz_deviation_ppm):
+                    if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError: print("closest new mz is ", usedMZs[closest], "added ppm deviation", (newPPMDev - lastPPMDev), "min/max are ", np.min(usedMZs[used == 1]), np.max(usedMZs[used == 1]))
+                    if (newPPMDev - lastPPMDev) > closest_signal_max_deviation_ppm or (max_mz_deviation_ppm is not None and newPPMDev > max_mz_deviation_ppm):
                         cont = False
         
                         used[closest] = 0
@@ -587,7 +613,15 @@ def refine_clustering(sample, mzs, intensities, spectrumID, clusts, expected_mz_
                         used = -np.abs(used)
                         usedMZs = usedMZs * 0.
                         maxClust = maxClust + 1
-                        #if degubPrint_ and abs(np.mean(mzs_) - 412) < 1: print("closing cluster", sum(used == 0) == 0,  (newPPMDev > 3*lastPPMDev and lastPPMDev > 0 and newPPMDev > expected_mz_deviation_ppm), (max_mz_deviation_ppm is not None and newPPMDev > max_mz_deviation_ppm), "\n")
+                        if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError: print("closing cluster, remaining elements", sum(used == 0) == 0, (newPPMDev - lastPPMDev) > closest_signal_max_deviation_ppm, (max_mz_deviation_ppm is not None and newPPMDev > max_mz_deviation_ppm), "\n")
+                    
+                    elif sum(used == 0) == 0:
+                        if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError: print("closing cluster, last element""\n")
+                        cont = False
+
+                        used = -np.abs(used)
+                        usedMZs = usedMZs * 0.
+                        maxClust = maxClust + 1
                     
                     else:
                         lastPPMDev = (np.max(usedMZs[used == 1]) - np.min(usedMZs[used == 1])) / np.average(usedMZs[used == 1]) * 1E6
@@ -663,20 +697,35 @@ def describe_MZ_cluster(mz, intensity, clust):
     return mzDesc
     
 
-def collapse_mz_info(mz, intensity, cluster, intensity_collapse_method = "sum"):
+def collapse_mz_info(mz, intensity, time, cluster, intensity_collapse_method = "sum"):
     clusts, ns = np.unique(cluster, return_counts = True)
     if -1 in clusts:
         clusts = clusts[1:]
         ns = ns[1:]
     
-    mz_ = np.zeros(clusts.shape[0])
-    intensity_ = np.zeros(clusts.shape[0])
+    mz_ = np.zeros(clusts.shape[0], dtype = np.float32)
+    intensity_ = np.zeros(clusts.shape[0], dtype = np.float32)
+
+    usedFeatures = {}
+    for i in range(clusts.shape[0]):
+        usedFeatures[i] = np.zeros((ns[i], 3), dtype = np.float32)
 
     for i in range(mz.shape[0]):
         j = cluster[i]
-        if j >= 0:
-            mz_[j] += mz[i] * intensity[i]
-            intensity_[j] += intensity[i]
+
+        assert j >= 0
+        
+        mz_[j] += mz[i] * intensity[i]
+        intensity_[j] += intensity[i]
+
+        toPut = 0
+        while usedFeatures[j][toPut, 0] > 0:
+            toPut = toPut + 1
+            assert toPut < usedFeatures[j].shape[0]
+
+        usedFeatures[j][toPut, 0] = mz[i]
+        usedFeatures[j][toPut, 1] = intensity[i]
+        usedFeatures[j][toPut, 2] = time[i]
     
     mz_ = mz_ / intensity_
     if intensity_collapse_method == "sum":
@@ -689,7 +738,7 @@ def collapse_mz_info(mz, intensity, cluster, intensity_collapse_method = "sum"):
         raise RuntimeError("Unknown option for parameter intensity_collapse_method, allowed are 'sum' and 'average'")
 
     ord = np.argsort(mz_)
-    return mz_[ord], intensity_[ord]
+    return mz_[ord], intensity_[ord], [usedFeatures[i] for i in ord]
 
 
 def cluster_quality_check_function__peak_form(sample, msDataObj, spectrumIDs, time, mz, intensity, cluster, min_correlation_for_cutoff = 0.5):
@@ -756,9 +805,9 @@ def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectru
 
     return cluster
 
-def calculate_concensus_spectra_per_sample(assay, min_difference_ppm = 30, min_signals_per_cluster = 10, cluster_quality_check_functions = None, aggregation_function = "sum", exportAsFeatureML = True, featureMLlocation = ".", verbose = True):
+def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_signals_per_cluster = 10, minimum_intensity_for_signals = 0, cluster_quality_check_functions = None, aggregation_function = "sum", exportAsFeatureML = True, featureMLlocation = ".", verbose = True):
     """
-    Function to collapse several spectra into a single concensus spectrum per spot
+    Function to collapse several spectra into a single consensus spectrum per spot
 
     Args:
         assay (Assay): The assay of the experiment
@@ -801,6 +850,7 @@ def calculate_concensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
         clustInds, ns = np.unique(temp["cluster"], return_counts = True)
         clustNs = ns[temp["cluster"]]
         temp["cluster"][clustNs < min_signals_per_cluster] = -1
+        temp["cluster"][temp["intensity"] <= minimum_intensity_for_signals] = -1
         
         keep = temp["cluster"] >= 0
         temp["sample"] = temp["sample"][keep]
@@ -831,6 +881,10 @@ def calculate_concensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
         temp["intensity"] = temp["intensity"][keep]
         temp["cluster"] = reindex_cluster(temp["cluster"][keep])
 
+        if len(temp["cluster"]) == 0:
+            print("   .. Error: no signals to be used for sample '%35s'"%(sample))
+            next
+
         if exportAsFeatureML:
             with open(os.path.join(featureMLlocation, "%s.featureML"%(sample)).replace(":", "_"), "w") as fout:
                 minRT = np.min(temp["time"])
@@ -842,7 +896,7 @@ def calculate_concensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
                 fout.write('  <featureMap version="1.4" id="fm_16311276685788915066" xsi:noNamespaceSchemaLocation="http://open-ms.sourceforge.net/schemas/FeatureXML_1_4.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n')
                 fout.write('    <dataProcessing completion_time="%s">\n'%datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
                 fout.write('      <software name="tidyms" version="%s" />\n'%(ms.__version__))
-                fout.write('      <software name="tidyms.dartms.calculate_concensus_spectra_per_sample" version="%s" />\n'%(ms.__version__))
+                fout.write('      <software name="tidyms.dartms.calculate_consensus_spectra_per_sample" version="%s" />\n'%(ms.__version__))
                 fout.write('    </dataProcessing>\n')
                 fout.write('    <featureList count="%d">\n'%(ns.shape[0]))
 
@@ -870,9 +924,9 @@ def calculate_concensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
                 fout.write('  </featureMap>\n')
 
         if verbose:
-            print("   .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"%(samplei, len(assay.manager.get_sample_names()), sample, summary_totalSpectra, summary_totalSignals, summary_clusterAfterCrude, summary_clusterAfterFine, summary_clusterAfterQualityFunctions, np.unique(temp["cluster"]).shape[0]))
+            print("   .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"%(samplei + 1, len(assay.manager.get_sample_names()), sample, summary_totalSpectra, summary_totalSignals, summary_clusterAfterCrude, summary_clusterAfterFine, summary_clusterAfterQualityFunctions, np.unique(temp["cluster"]).shape[0]))
 
-        mzs, intensities = ms.dartms.collapse_mz_info(temp["mz"], temp["intensity"], temp["cluster"], intensity_collapse_method = aggregation_function)
+        mzs, intensities, usedFeatures = ms.dartms.collapse_mz_info(temp["mz"], temp["intensity"], temp["time"], temp["cluster"], intensity_collapse_method = aggregation_function)
         
         sampleObjNew = ms.fileio.MSData_in_memory.generate_from_MSData_object(msDataObj)
         startRT = sampleObjNew.get_spectrum(0).time
@@ -881,8 +935,11 @@ def calculate_concensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
         spectrum = sampleObjNew.get_spectrum(0)
         spectrum.mz = mzs
         spectrum.spint = intensities
+        spectrum.usedFeatures = usedFeatures
         spectrum.startRT = startRT
         spectrum.endRT = endRT
+
+        msDataObj.original_MSData_object = msDataObj.to_MSData_object
         msDataObj.to_MSData_object = sampleObjNew
 
 
@@ -904,7 +961,7 @@ def calculate_concensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
 
 
 
-def write_concensus_spectrum_to_featureML(assay, widthRT = 40):
+def write_consensus_spectrum_to_featureML(assay, widthRT = 40):
     for samplei, sample in tqdm.tqdm(enumerate(assay.manager.get_sample_names()), total = len(assay.manager.get_sample_names())):
 
         with open(os.path.join(".", "%s.featureML"%(sample)).replace(":", "_"), "w") as fout:
@@ -971,126 +1028,254 @@ def print_sample_overview(assay):
 def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False):
     temp = {
         "sample": [],
-        "sampleType": [],
+        "spectrumInd": [], 
+        "time": [],
         "mz": [],
-        "original_mz": [],
+        "intensity": [],
+        "original_usedFeatures": [],
         "startRT": [],
         "endRT": [],
-        "intensity": [],
         "cluster": [],
     }
+    
+    for samplei, sample in tqdm.tqdm(enumerate(assay.manager.get_sample_names()), total = len(assay.manager.get_sample_names())):
+        msDataObj = assay.get_ms_data(sample)
+        for k, spectrum in msDataObj.get_spectra_iterator():
+            temp["sample"].extend((sample for i in range(spectrum.mz.shape[0])))
+            temp["spectrumInd"].extend((k for i in range(spectrum.mz.shape[0])))
+            temp["time"].extend((spectrum.time for i in range(spectrum.mz.shape[0])))
+            temp["mz"].extend((mz for mz in spectrum.mz))
+            temp["intensity"].extend((np.log10(inte) for inte in spectrum.spint))
+            temp["original_usedFeatures"].extend((spectrum.usedFeatures[i] for i in range(len(spectrum.usedFeatures))))
+            temp["startRT"].extend((spectrum.startRT for mz in spectrum.mz))
+            temp["endRT"].extend((spectrum.endRT for mz in spectrum.mz))
+            temp["cluster"].extend((0 for inte in spectrum.spint))
+
+    temp["sample"] = np.array(temp["sample"])
+    temp["spectrumInd"] = np.array(temp["spectrumInd"])
+    temp["time"] = np.array(temp["time"])
+    temp["mz"] = np.array(temp["mz"], dtype = np.float64)
+    temp["intensity"] = np.array(temp["intensity"])
+    #temp["original_usedFeatures"] = temp["original_usedFeatures"]
+    temp["startRT"] = np.array(temp["startRT"])
+    temp["endRT"] = np.array(temp["endRT"])
+    temp["cluster"] = np.array(temp["cluster"])
+
+
+    if False:  ## used for development purposes TODO remove all code in this if
+        print("Restricting", end = "")
+        keep = np.abs(temp["mz"] - 358.3079) < 0.06
+        useInds = np.argwhere(keep)[:,0]
+        
+        temp["sample"] = temp["sample"][useInds]
+        temp["spectrumInd"] = temp["spectrumInd"][useInds]
+        temp["time"] = temp["time"][useInds]
+        temp["mz"] = temp["mz"][useInds]
+        temp["intensity"] = temp["intensity"][useInds]
+        temp["original_usedFeatures"] = [temp["original_usedFeatures"][i] for i in useInds]
+        temp["startRT"] = temp["startRT"][useInds]
+        temp["endRT"] = temp["endRT"][useInds]
+        temp["cluster"] = temp["cluster"][useInds]
+        print("... done")
+
+
+
+
+    ## clusering v2
+    ## Iterative cluster generation with the same algorithm used for calculating the consensus spectra. 
+    ## This algorithm is greedy and extends clusters based on their mean mz value and the difference to the next closest feature
+    if True:
+        min_difference_ppm = 100
+        min_signals_per_cluster = 2
+        temp["cluster"] = ms.dartms.crude_cluster_mz_list(sample, temp["mz"], temp["intensity"], min_difference_ppm = min_difference_ppm)
+        
+        ## remove any cluster with less than min_signals_per_cluster signals
+        clustInds, ns = np.unique(temp["cluster"], return_counts = True)
+        clustNs = ns[temp["cluster"]]
+        temp["cluster"][clustNs < min_signals_per_cluster] = -1
+        keep = temp["cluster"] >= 0
+
+        temp["sample"] = temp["sample"][keep]
+        temp["spectrumInd"] = temp["spectrumInd"][keep]
+        temp["time"] = temp["time"][keep]
+        temp["mz"] = temp["mz"][keep]
+        temp["intensity"] = temp["intensity"][keep]
+        temp["original_usedFeatures"] = [temp["original_usedFeatures"][i] for i in range(temp["cluster"].shape[0]) if keep[i]]
+        temp["startRT"] = temp["startRT"][keep]
+        temp["endRT"] = temp["endRT"][keep]
+        temp["cluster"] = reindex_cluster(temp["cluster"][keep])
+
+        ## refine cluster
+        temp["cluster"] = ms.dartms.refine_clustering("", temp["mz"], temp["intensity"], temp["spectrumInd"], temp["cluster"])
+
+        ## remove wrong cluster
+        keep = temp["cluster"] >= 0
+
+        temp["sample"] = temp["sample"][keep]
+        temp["spectrumInd"] = temp["spectrumInd"][keep]
+        temp["time"] = temp["time"][keep]
+        temp["mz"] = temp["mz"][keep]
+        temp["intensity"] = temp["intensity"][keep]
+        temp["original_usedFeatures"] = [temp["original_usedFeatures"][i] for i in range(temp["cluster"].shape[0]) if keep[i]]
+        temp["startRT"] = temp["startRT"][keep]
+        temp["endRT"] = temp["endRT"][keep]
+        temp["cluster"] = reindex_cluster(temp["cluster"][keep])
+        
+
+
+
+
+    ## Clustering version 1
+    ## This algorithm starts with the highest abundant features and adds all other features to that particular cluster.
+    ## It has the drawback that certain overlapping mz values can be predatory. 
+    if False:
+        cclust = 0
+        while np.sum(temp["cluster"] == 0) > 0:
+            c = np.argmax(temp["intensity"] * (temp["cluster"] == 0))
+            cmz = temp["mz"][c]
+
+            assign = np.where(np.abs(temp["mz"] - cmz) / temp["mz"] * 1E6 <= max_ppm_deviation)
+            temp["cluster"][assign] = cclust
+
+            cclust = cclust + 1
+            
+
+
+
+
     tempClusterInfo = {
         "cluster": [],
         "meanMZ": [],
         "minMZ": [],
         "maxMZ": [],
         "mzDevPPM": [],
-        "assignedSamples": [],
         "uniqueSamples": [],
         "featureMLInfo": []
     }
-    
-    sample_metadata = assay.manager.get_sample_metadata()
-    for samplei, sample in tqdm.tqdm(enumerate(assay.manager.get_sample_names()), total = len(assay.manager.get_sample_names())):
-        msDataObj = assay.get_ms_data(sample)
-        sampleType = sample_metadata.loc[sample, "group"]
-        for k, spectrum in msDataObj.get_spectra_iterator():
-            temp["sample"].extend((sample for i in range(spectrum.mz.shape[0])))
-            temp["sampleType"].extend((sampleType for i in range(spectrum.mz.shape[0])))
-            temp["mz"].extend((mz for mz in spectrum.mz))
-            temp["original_mz"].extend((mz for mz in spectrum.original_mz))
-            temp["startRT"].extend((spectrum.startRT for mz in spectrum.mz))
-            temp["endRT"].extend((spectrum.endRT for mz in spectrum.mz))
-            temp["intensity"].extend((np.log10(inte) for inte in spectrum.spint))
-            temp["cluster"].extend((0 for inte in spectrum.spint))
-    
-    cclust = 1
-    temp["sample"] = np.array(temp["sample"])
-    temp["sampleType"] = np.array(temp["sampleType"])
-    temp["mz"] = np.array(temp["mz"])
-    temp["original_mz"] = np.array(temp["original_mz"])
-    temp["startRT"] = np.array(temp["startRT"])
-    temp["endRT"] = np.array(temp["endRT"])
-    temp["intensity"] = np.array(temp["intensity"])
-    temp["cluster"] = np.array(temp["cluster"])
 
-    while np.sum(temp["cluster"] == 0) > 0:
-        c = np.argmax(temp["intensity"] * (temp["cluster"] == 0))
-        cmz = temp["mz"][c]
+    temp["cluster"] = reindex_cluster(temp["cluster"])
+    clusts = np.unique(temp["cluster"])
+    for clust in tqdm.tqdm(clusts):
+        
+        assign = [i for i in range(len(temp["cluster"])) if temp["cluster"][i] == clust]
 
-        assign = np.where(np.abs(temp["mz"] - cmz) / temp["mz"] * 1E6 <= max_ppm_deviation)
-        temp["cluster"][assign] = cclust
-
-        tempClusterInfo["cluster"].append(cclust)
+        tempClusterInfo["cluster"].append(clust)
         mzs = temp["mz"][assign]
         tempClusterInfo["meanMZ"].append(np.mean(mzs))
         tempClusterInfo["minMZ"].append(np.min(mzs))
         tempClusterInfo["maxMZ"].append(np.max(mzs))
         tempClusterInfo["mzDevPPM"].append((np.max(mzs) - np.min(mzs)) / np.mean(mzs) * 1E6)
-        tempClusterInfo["assignedSamples"].append(assign[0].size)
         tempClusterInfo["uniqueSamples"].append(np.unique(temp["sample"][assign]).shape[0])
         tempClusterInfo["featureMLInfo"].append({})
+        
+        tempClusterInfo["featureMLInfo"][clust]["overallquality"] = tempClusterInfo["uniqueSamples"][clust]
+        tempClusterInfo["featureMLInfo"][clust]["meanMZ"] = tempClusterInfo["meanMZ"][clust]
+        tempClusterInfo["featureMLInfo"][clust]["mzDevPPM"] = tempClusterInfo["mzDevPPM"][clust]
 
-        cclust = cclust + 1
-
-    
-    ns = len(tempClusterInfo["cluster"])
-    for j in range(ns):
-        clust = tempClusterInfo["cluster"][j]
-        tempClusterInfo["featureMLInfo"][j]["overallquality"] = tempClusterInfo["assignedSamples"][j]
-        tempClusterInfo["featureMLInfo"][j]["meanMZ"] = tempClusterInfo["meanMZ"][j]
-        tempClusterInfo["featureMLInfo"][j]["mzDevPPM"] = tempClusterInfo["mzDevPPM"][j]
-
-        omzs = temp["original_mz"][temp["cluster"] == clust]
+        fs = [temp["original_usedFeatures"][i] for i in range(len(temp["original_usedFeatures"])) if temp["cluster"][i] == clust]
         startRTs = temp["startRT"][temp["cluster"] == clust]
         endRTs   = temp["endRT"  ][temp["cluster"] == clust]
         samples  = temp["sample" ][temp["cluster"] == clust]
 
-        tempClusterInfo["featureMLInfo"][j]["sampleHulls"] = {}
+        tempClusterInfo["featureMLInfo"][clust]["sampleHulls"] = {}
         for samplei, sample in enumerate(assay.manager.get_sample_names()):
             use = samples == sample
             if np.sum(use) > 0:
-                domzs = omzs[use]
+                domzs = np.ndarray.flatten(np.concatenate([np.array(fs[i][:,0]) for i in range(len(fs)) if use[i]]))
                 startRT = startRTs[use][0]
                 endRT = endRTs[use][0]
-                tempClusterInfo["featureMLInfo"][j]["sampleHulls"][sample] = [(startRT, np.min(domzs)), (startRT, np.max(domzs)), (endRT, np.max(domzs)), (endRT, np.min(domzs))]
+                tempClusterInfo["featureMLInfo"][clust]["sampleHulls"][sample] = [(startRT, np.min(domzs)), (startRT, np.max(domzs)), (endRT, np.max(domzs)), (endRT, np.min(domzs))]
     
     if show_diagnostic_plots:
+        print("   .. generating diagnostic plot")
+        temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
+        for featurei in tqdm.tqdm(range(len(tempClusterInfo["minMZ"]))):
+            for samplei, sample in enumerate(assay.manager.get_sample_names()):
+                msDataObj = assay.get_ms_data(sample)
+                sample_metadata = assay.manager.get_sample_metadata()
+                for k, spectrum in msDataObj.get_spectra_iterator():
+                    usei = np.where(np.logical_and(spectrum.mz >= tempClusterInfo["minMZ"][featurei], spectrum.mz <= tempClusterInfo["maxMZ"][featurei]))[0]
+                    if usei.size > 0:
+                        for i in usei:
+                            temp["rt"].append(spectrum.time)
+                            temp["mz"].append(spectrum.mz[i])
+                            temp["intensity"].append(spectrum.spint[i])
+                            temp["sample"].append(sample)
+                            temp["file"].append(sample.split("::")[0])
+                            temp["group"].append(sample_metadata.loc[sample, "group"])
+                            temp["type"].append("modified")
+                            temp["feature"].append(featurei)
+
+                            temp["rt"].append(spectrum.time)
+                            temp["mz"].append(spectrum.original_mz[i])
+                            temp["intensity"].append(spectrum.spint[i])
+                            temp["sample"].append(sample)
+                            temp["file"].append(sample.split("::")[0])
+                            temp["group"].append(sample_metadata.loc[sample, "group"])
+                            temp["type"].append("consensus")
+                            temp["feature"].append(featurei)
+
+                            for j in range(spectrum.usedFeatures[i].shape[0]):
+                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
+                                temp["mz"].append(spectrum.usedFeatures[i][j, 0])
+                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
+                                temp["sample"].append(sample)
+                                temp["file"].append(sample.split("::")[0])
+                                temp["group"].append(sample_metadata.loc[sample, "group"])
+                                temp["type"].append("original")
+                                temp["feature"].append(featurei)
         temp = pd.DataFrame(temp)
-        p = (p9.ggplot(data = temp, mapping = p9.aes(x = "sample", y = "mz", group = "cluster", colour = "cluster", symbol = "sampleType", alpha = "intensity"))
-            + p9.geom_point()
-            + p9.geom_line()
-            #+ p9.facet_wrap("~sample")
-            #+ p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.05, 'left':0.15})
-            + p9.theme_minimal()
-            + p9.ggtitle("All samples")
-            + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
-            + p9.theme(legend_position = "bottom")
-            )
-        print(p)
+        
 
-        temp = pd.DataFrame(tempClusterInfo)
-        p = (p9.ggplot(data = temp, mapping = p9.aes(x = "assignedSamples", y = "mzDevPPM"))
-            + p9.geom_point(alpha = 0.2)
-            #+ p9.facet_wrap("~sample")
-            #+ p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.05, 'left':0.15})
-            + p9.theme_minimal()
-            + p9.ggtitle("All samples")
-            + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
-            + p9.theme(legend_position = "bottom")
-            )
-        print(p)
+        dat = pd.concat([
+                temp.groupby(["feature", "type"])["mz"].count(),
+                temp.groupby(["feature", "type"])["mz"].min(),    
+                temp.groupby(["feature", "type"])["mz"].mean(),    
+                temp.groupby(["feature", "type"])["mz"].max(),
+                temp.groupby(["feature", "type"])["intensity"].mean(),
+                temp.groupby(["feature", "type"])["intensity"].std()
+            ],
+            axis = 1
+        )
+        dat.set_axis(["Count", "mzMin", "mzMean", "mzMax", "intMean", "intStd"], axis = 1, inplace = True)
+        dat = dat.reset_index()
+        dat["mzDevPPM"] = (dat["mzMax"] - dat["mzMin"]) / dat["mzMean"] * 1E6
+        dat["intMean"] = np.log2(dat["intMean"])
+        dat = dat[dat["Count"] > 1]
 
-        p = (p9.ggplot(data = temp, mapping = p9.aes(x = "assignedSamples", y = "uniqueSamples"))
-            + p9.geom_point(alpha = 0.2)
-            #+ p9.facet_wrap("~sample")
+        p = (p9.ggplot(data = dat, mapping = p9.aes(x = "mzDevPPM", group = "type"))
+            + p9.geom_histogram()
+            + p9.facet_wrap("~ type")
             #+ p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.05, 'left':0.15})
             + p9.theme_minimal()
-            + p9.ggtitle("All samples")
+            + p9.ggtitle("Deviation of feature cluster in ppm")
             + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
             + p9.theme(legend_position = "bottom")
             )
-        print(p)
+        #print(p)
+
+        p = (p9.ggplot(data = dat, mapping = p9.aes(x = "intMean", y = "mzDevPPM", group = "type"))
+            + p9.geom_point(alpha = 0.3)
+            + p9.facet_wrap("~ type")
+            #+ p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.05, 'left':0.15})
+            + p9.theme_minimal()
+            + p9.ggtitle("Deviation of feature cluster in ppm")
+            + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
+            + p9.theme(legend_position = "bottom")
+            )
+        #print(p)
+
+        p = (p9.ggplot(data = dat, mapping = p9.aes(x = "mzMean", y = "mzDevPPM", group = "type", colour = "type"))
+            + p9.geom_point(alpha = 0.15)
+            + p9.facet_wrap("~ type")
+            #+ p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.05, 'left':0.15})
+            + p9.theme_minimal()
+            + p9.ggtitle("Deviation of feature cluster")
+            + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
+            + p9.theme(legend_position = "bottom")
+            )
+        #print(p)
+
 
     return [e for e in zip(tempClusterInfo["minMZ"], tempClusterInfo["meanMZ"], tempClusterInfo["maxMZ"], tempClusterInfo["featureMLInfo"])]
 
@@ -1126,7 +1311,7 @@ def write_brac_results_to_featureML(bracRes, featureMLlocation = "./bracketedRes
             fout.write('  </convexhull>\n')
 
             for samplei, sample in enumerate(bracRes[j]["sampleHulls"]):
-                fout.write('  <convexhull nr="%d">\n'%(samplei))
+                fout.write('  <convexhull nr="%d">\n'%(samplei + 1))
                 fout.write('    <pt x="%f" y="%f" />\n'%(bracRes[j]["sampleHulls"][sample][0][0], bracRes[j]["sampleHulls"][sample][0][1]))
                 fout.write('    <pt x="%f" y="%f" />\n'%(bracRes[j]["sampleHulls"][sample][1][0], bracRes[j]["sampleHulls"][sample][1][1]))
                 fout.write('    <pt x="%f" y="%f" />\n'%(bracRes[j]["sampleHulls"][sample][2][0], bracRes[j]["sampleHulls"][sample][2][1]))
@@ -1142,20 +1327,43 @@ def write_brac_results_to_featureML(bracRes, featureMLlocation = "./bracketedRes
     
 
 ## Generate data matrix from bracketing information
-def build_data_matrix(assay, bracketing_results):
+## This step also automatically re-integrates the results
+## TODO implement code to use the original spectra for the integration
+def build_data_matrix(assay, bracketing_results, on = "processedData", originalData_mz_deviation_multiplier_PPM = 0):
     sampleNames = assay.manager.get_sample_names()
     sampleNamesToRowI = dict(((sample, i) for i, sample in enumerate(sampleNames)))
+
     dataMatrix = np.zeros((len(sampleNames), len(bracketing_results)))
     for samplei, sample in tqdm.tqdm(enumerate(sampleNames), total = len(sampleNames)):
         msDataObj = assay.get_ms_data(sample)
         spectrum = msDataObj.get_spectrum(0)
-        for braci, (mzmin, meanmz, mzmax, _) in enumerate(bracketing_results):
-            use = np.logical_and(spectrum.mz >= mzmin, spectrum.mz <= mzmax)
-            if np.sum(use) > 0:
-                s = np.sum(spectrum.spint[use])
-                dataMatrix[sampleNamesToRowI[sample], braci] = s
+
+        for braci, (mzmin, mzmean, mzmax, _) in enumerate(bracketing_results):
+            if on == "processedData":
+                use = np.logical_and(spectrum.mz >= mzmin, spectrum.mz <= mzmax)
+                if np.sum(use) > 0:
+                    s = np.sum(spectrum.spint[use])
+                    dataMatrix[sampleNamesToRowI[sample], braci] = s
+                else:
+                    dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
+
+            elif on == "originalData":
+                _mzmin, _mzmean, _mzmax = spectrum.reverseMZ(mzmin), spectrum.reverseMZ(mzmean), spectrum.reverseMZ(mzmax)
+                _mzmin, _mzmax = _mzmin * (1. - originalData_mz_deviation_multiplier_PPM / 1E6), _mzmax * (1. + originalData_mz_deviation_multiplier_PPM / 1E6)
+
+                s = 0
+                for oSpectrumi, oSpectrum in msDataObj.original_MSData_object.get_spectra_iterator():
+                    use = np.logical_and(oSpectrum.mz >= _mzmin, oSpectrum.mz <= _mzmax)
+                    if np.sum(use) > 0:
+                        s += np.sum(oSpectrum.spint[use])
+
+                if s > 0:
+                    dataMatrix[sampleNamesToRowI[sample], braci] = s
+                else:
+                    dataMatrix[sampleNamesToRowI[sample], braci] = np.nan                    
+
             else:
-                dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
+                raise RuntimeError("Unknown option for parameter on. Must be either of ['processedData', 'originalData']")
     
     return sampleNames, bracketing_results, dataMatrix
 
@@ -1170,17 +1378,10 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
     sigInds = []
     comparisons = []
 
-    debugPrint = False
-
     for featurei in range(dat.shape[1]):
         blankInds = [i for i, group in enumerate(groups) if group == blankGroup]
         valsBlanks = dat[blankInds, featurei]
         notInBlanks = False
-
-        
-        if debugPrint and abs(features[featurei][1] - 872.8) <= 1:
-            print(features[featurei][1])
-            print("blanks are", valsBlanks)
 
         if np.sum(~np.isnan(dat[:,featurei])) < minDetected:
             continue
@@ -1190,20 +1391,14 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
 
         valsBlanks = valsBlanks[~np.isnan(valsBlanks)]
 
-        if debugPrint and abs(features[featurei][1] - 872.8) <= 1:
-            print("blanks are", valsBlanks)
-            print("notInBlanks", notInBlanks)
-
         for toTestGroup in toTestGroups:
             toTestInds = [i for i, group in enumerate(groups) if group == toTestGroup]
             valsGroup = dat[toTestInds, featurei]
 
             if np.sum(~np.isnan(valsGroup)) < minDetected:
-                if debugPrint and abs(features[featurei][1] - 872.8) <= 1: print("1")
                 pass
 
             elif notInBlanks:
-                if debugPrint and abs(features[featurei][1] - 872.8) <= 1: print(2)
                 pval = -np.inf
                 fold = np.inf
 
@@ -1216,7 +1411,6 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
                 keeps[featurei] -= 1
 
             else:
-                if debugPrint and abs(features[featurei][1] - 872.8) <= 1: print(3)
                 valsGroup = valsGroup[~np.isnan(valsGroup)]
                 pval = scipy.stats.ttest_ind(valsBlanks, valsGroup, equal_var = False, alternative = 'two-sided', trim = 0)[1]
                 fold = np.mean(valsGroup) / np.mean(valsBlanks)
@@ -1230,13 +1424,6 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
                 folds.append(np.log2(fold))
                 sigInds.append("group >> blank" if sigInd else "-")
                 comparisons.append("'%s' vs '%s'"%(toTestGroup, blankGroup))
-
-            if debugPrint and abs(features[featurei][1] - 872.8) <= 1:
-                print("    ", notInBlanks, valsBlanks, valsGroup, pval, fold, sigInd, toTestGroup, keeps[featurei])
-        if debugPrint and abs(features[featurei][1] - 872.8) <= 1:
-            print("decision is", keeps[featurei])
-            print("")
-
 
     if plot:
         folds = np.array(folds)
@@ -1405,37 +1592,198 @@ def annotate_features(dat, features, samples, plot = False):
 def print_results_overview(dat, groups):
     print("There are %d features (columns) and %d samples (rows) in the dataset"%(dat.shape[1], dat.shape[0]))
     print("   .. %d (%.1f%%) features have at least one missing value (np.nan)"%(np.sum(np.isnan(dat).any(axis = 0)), np.sum(np.isnan(dat).any(axis = 0)) / dat.shape[1] * 100))
-    maxGroupSize = 0
-    print("Groups are")
-    for grp in set(groups):
-        temp = sum((group == grp for group in groups))
-        print("   .. '%s' with %d samples"%(grp, temp))
-        maxGroupSize = max(maxGroupSize, temp)
+
+    maxGroupSize = max((sum((grp == group for grp in groups)) for group in set(groups))) 
+    maxGroupLabelSize = max((len(group) for group in groups))  
     a = {}
     for grp in set(groups):
         groupInd = [i for i, group in enumerate(groups) if group == grp]
-        a[grp] = [0 for i in range(maxGroupSize + 1)]
+        a[grp] = dict([(i, 0) for i in range(maxGroupSize + 1)])
+        total = 0
         for featurei in range(dat.shape[1]):
             vals = dat[groupInd, featurei]
             f = np.sum(~np.isnan(vals))
             a[grp][f] += 1
-    print("Overview of detections in replicates")
-    print("%30s         Detected in x samples"%(""))
-    print("%30s         "%(""), end = "")
-    for i in range(maxGroupSize + 1):
-        print("%8d   "%(i), end = "")
-    print("%8s"%("total"), end = "")
+            if f > 0:
+                total += 1
+        a[grp]["total"] = total
+
+    print("Detected   ", end = "")
+    for group in sorted(list(set(groups))):
+        print("%%%ds  "%(maxGroupLabelSize)%(group), end = "")
     print("")
-    for grp in sorted(list(set(groups))):
-        nSamples = sum((group == grp for group in groups))
-        print("%30s (%3d)   "%(grp, nSamples), end = "")
-        for i in range(maxGroupSize + 1):
-            if i <= nSamples:
-                print("%8d   "%(a[grp][i]), end = "")
-            else:
-                print("%8s   "%(""), end = "")
-        print("%8d   "%(sum(a[grp][1:])), end = "")
+
+    for det in range(0, maxGroupSize + 1):
+        print("%%%dd   "%(maxGroupLabelSize)%(det), end = "")
+        for group in sorted(list(set(groups))):
+            print("%%%ds  "%(maxGroupLabelSize)%(a[group][det] if a[group][det] > 0 else ""), end = "")
         print("")
+    print("%%%ds   "%(maxGroupLabelSize)%("total"), end = "")
+    for group in sorted(list(set(groups))):
+        print("%%%ds  "%(maxGroupLabelSize)%(a[group]["total"] if a[group]["total"] > 0 else ""), end = "")
+    print("")
+
+
+
+
+
+
+def show_mz_deviation_overview(assay, brackRes):
+    dat = {"avgMZ": [], "stdMZ": [], "avgInt": [], "stdInt": [], "type": [], "feature": [], "calcType": []}
+    for featureInd in tqdm.tqdm(range(len(brackRes))):
+        temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
+        for samplei, sample in enumerate(assay.manager.get_sample_names()):
+            msDataObj = assay.get_ms_data(sample)
+            sample_metadata = assay.manager.get_sample_metadata()
+            for k, spectrum in msDataObj.get_spectra_iterator():
+                usei = np.where(np.logical_and(spectrum.mz >= brackRes[featureInd][0], spectrum.mz <= brackRes[featureInd][2]))[0]
+                if usei.size > 0:
+                    for i in usei:
+                        temp["rt"].append(spectrum.time)
+                        temp["mz"].append(spectrum.mz[i])
+                        temp["intensity"].append(spectrum.spint[i])
+                        temp["sample"].append(sample)
+                        temp["file"].append(sample.split("::")[0])
+                        temp["group"].append(sample_metadata.loc[sample, "group"])
+                        temp["type"].append("modified")
+                        temp["feature"].append(featureInd)
+
+                        temp["rt"].append(spectrum.time)
+                        temp["mz"].append(spectrum.original_mz[i])
+                        temp["intensity"].append(spectrum.spint[i])
+                        temp["sample"].append(sample)
+                        temp["file"].append(sample.split("::")[0])
+                        temp["group"].append(sample_metadata.loc[sample, "group"])
+                        temp["type"].append("consensus")
+                        temp["feature"].append(featureInd)
+
+                        for j in range(spectrum.usedFeatures[i].shape[0]):
+                            temp["rt"].append(spectrum.usedFeatures[i][j, 2])
+                            temp["mz"].append(spectrum.usedFeatures[i][j, 0])
+                            temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
+                            temp["sample"].append(sample)
+                            temp["file"].append(sample.split("::")[0])
+                            temp["group"].append(sample_metadata.loc[sample, "group"])
+                            temp["type"].append("original")
+                            temp["feature"].append(featureInd)
+
+        temp = pd.DataFrame(temp)
+        for name, group in temp.groupby(["type", "feature"]):
+            avgMZW, stdMZW = ms.dartms.weighted_avg_and_std(group["mz"], group["intensity"])
+            avgInt, stdInt = np.mean(group["intensity"]), np.std(group["intensity"])
+            dat["avgMZ"].append(avgMZW)
+            dat["stdMZ"].append(stdMZW)
+            dat["avgInt"].append(avgInt)
+            dat["stdInt"].append(stdInt)
+            dat["type"].append(name[0])
+            dat["feature"].append(name[1])
+            dat["calcType"].append("weighted")
+            
+            dat["avgMZ"].append(np.mean(group["mz"]))
+            dat["stdMZ"].append(np.std(group["mz"]))
+            dat["avgInt"].append(avgInt)
+            dat["stdInt"].append(stdInt)
+            dat["type"].append(name[0])
+            dat["feature"].append(name[1])
+            dat["calcType"].append("unweighted")
+
+    dat = pd.DataFrame(dat)
+
+
+    dat["stdMZPPM"] = dat["stdMZ"] / dat["avgMZ"] * 1E6
+    dat = dat[dat["stdMZPPM"] > 1]
+    p = (p9.ggplot(data = dat, mapping = p9.aes(x = "avgMZ", y = "stdMZPPM", colour = "type"))
+        + p9.geom_point(alpha = 0.3)
+        + p9.facet_grid("calcType ~ type")
+        + p9.theme_minimal()
+        + p9.ggtitle("Overview of mz average and std (weighted) of bracketed features")
+        + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
+        + p9.theme(legend_position = "bottom")
+        )
+    print(p)
+
+    dat["avgInt"] = np.log2(dat["avgInt"])
+    p = (p9.ggplot(data = dat, mapping = p9.aes(x = "avgInt", y = "stdMZPPM", colour = "type"))
+        + p9.geom_point(alpha = 0.3)
+        + p9.facet_grid("calcType ~ type")
+        + p9.theme_minimal()
+        + p9.ggtitle("Overview of mz average and std (weighted) of bracketed features")
+        + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
+        + p9.theme(legend_position = "bottom")
+        )
+    print(p)
+
+def plot_feature_mz_deviations(assay, features, featureInd, types = None):
+    if types is None:
+        types = ["modified", "consensus", "original"]
+    temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
+
+    for featureInd in [featureInd]:
+        for samplei, sample in enumerate(assay.manager.get_sample_names()):
+            msDataObj = assay.get_ms_data(sample)
+            sample_metadata = assay.manager.get_sample_metadata()
+            for k, spectrum in msDataObj.get_spectra_iterator():
+                usei = np.where(np.logical_and(spectrum.mz >= features[featureInd][0], spectrum.mz <= features[featureInd][2]))[0]
+                if usei.size > 0:
+                    for i in usei:
+                        if "modified" in types:
+                            temp["rt"].append(spectrum.time)
+                            temp["mz"].append(spectrum.mz[i])
+                            temp["intensity"].append(spectrum.spint[i])
+                            temp["sample"].append(sample)
+                            temp["file"].append(sample.split("::")[0])
+                            temp["group"].append(sample_metadata.loc[sample, "group"])
+                            temp["type"].append("modified")
+                            temp["feature"].append(featureInd)
+
+                        if "consensus" in types:
+                            temp["rt"].append(spectrum.time)
+                            temp["mz"].append(spectrum.original_mz[i])
+                            temp["intensity"].append(spectrum.spint[i])
+                            temp["sample"].append(sample)
+                            temp["file"].append(sample.split("::")[0])
+                            temp["group"].append(sample_metadata.loc[sample, "group"])
+                            temp["type"].append("consensus")
+                            temp["feature"].append(featureInd)
+
+                        if "original" in types:
+                            for j in range(spectrum.usedFeatures[i].shape[0]):
+                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
+                                temp["mz"].append(spectrum.usedFeatures[i][j, 0])
+                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
+                                temp["sample"].append(sample)
+                                temp["file"].append(sample.split("::")[0])
+                                temp["group"].append(sample_metadata.loc[sample, "group"])
+                                temp["type"].append("original")
+                                temp["feature"].append(featureInd)
+    
+
+    temp = pd.DataFrame(temp)
+
+    p = (p9.ggplot(data = temp, mapping = p9.aes(x = "rt", y = "mz", colour = "group", shape = "file"))
+        + p9.geom_hline(data = temp.groupby(["type", "file"]).mean("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.5, alpha = 0.5, colour = "slategrey")
+        + p9.geom_hline(data = temp.groupby(["type", "file"]).min("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
+        + p9.geom_hline(data = temp.groupby(["type", "file"]).max("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
+        + p9.geom_point()
+        + p9.facet_wrap("file + type")
+        + p9.theme_minimal()
+        + p9.ggtitle("Feature %.5f (%.5f - %.5f)\nmz deviation overall: %.1f (ppm, original) and %.1f (ppm, modified)"%(features[featureInd][1], features[featureInd][0], features[featureInd][2], 
+            (temp[temp["type"] == "original"]["mz"].max() - temp[temp["type"] == "original"]["mz"].min()) / temp[temp["type"] == "original"]["mz"].mean() * 1E6,
+            (temp[temp["type"] == "modified"]["mz"].max() - temp[temp["type"] == "modified"]["mz"].min()) / temp[temp["type"] == "modified"]["mz"].mean() * 1E6))
+        + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
+        + p9.theme(legend_position = "bottom")
+        )
+    print(p)
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1455,17 +1803,16 @@ def plot_RSDs_per_group(dat, groups, type = "points"):
             if np.all(np.isnan(vals)):
                 next
 
-            if np.any(np.isnan(vals)) and np.any(~np.isnan(vals)):
-                vals_ = np.copy(vals)
-                vals_ = vals_[~np.isnan(vals_)]
-                if vals_.shape[0] > 1:
-                    temp["rsd"].append(rsd(vals_))
-                    temp["mean"].append(np.log2(np.mean(vals_)))
-                    temp["sd"].append(np.log2(np.std(vals_)))
-                    temp["featurei"].append(featurei)
-                    temp["group"].append(grp)
-                    temp["type"].append("without np.nan")
-        
+            vals_ = np.copy(vals)
+            vals_ = vals_[~np.isnan(vals_)]
+            if vals_.shape[0] > 1:
+                temp["rsd"].append(rsd(vals_))
+                temp["mean"].append(np.log2(np.mean(vals_)))
+                temp["sd"].append(np.log2(np.std(vals_)))
+                temp["featurei"].append(featurei)
+                temp["group"].append(grp)
+                temp["type"].append("without np.nan")
+    
             vals_ = np.copy(vals)
             vals_[np.isnan(vals_)] = 0
             if np.sum(vals_ > 0) > 1:
