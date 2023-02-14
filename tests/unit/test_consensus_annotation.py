@@ -33,7 +33,7 @@ def feature_table():
 
 
 def test__build_graph(feature_table):
-    graph, annotations = votation.vote_annotations(feature_table)
+    graph, annotations = consensus_annotation.vote_annotations(feature_table)
     assert len(annotations) == 3
     for ft_label, ft_data in annotations.items():
         assert ft_data[c.CHARGE] == 1
@@ -42,7 +42,7 @@ def test__build_graph(feature_table):
 
 
 def test__build_graph_nodes(feature_table):
-    nodes = votation._build_graph_nodes(feature_table)
+    nodes = consensus_annotation._build_graph_nodes(feature_table)
     expected = {
         0: {c.CHARGE: 1, c.ENVELOPE_INDEX: 0},
         1: {c.CHARGE: 1, c.ENVELOPE_INDEX: 1},
@@ -51,7 +51,7 @@ def test__build_graph_nodes(feature_table):
     assert nodes == expected
 
 def test__build_graph_edges(feature_table):
-    edges = votation._build_graph_edges(feature_table)
+    edges = consensus_annotation._build_graph_edges(feature_table)
     edge_count = Counter(edges)
     expected = Counter({(0, 1): 4, (0, 2): 4})
     assert edge_count == expected
