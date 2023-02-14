@@ -7,7 +7,7 @@ feature table.
 import pandas as pd
 from numpy import nan
 from . import _constants as c
-from .votation import vote_annotations
+from .consensus_annotation import vote_annotations
 from typing import Dict, List, Optional, Set, Tuple
 
 
