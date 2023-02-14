@@ -19,8 +19,6 @@ CLASSIFIERS = [
     "Topic :: Scientific/Engineering :: Medical Science Apps."
 ]
 
-PACKAGES = ["tidyms"]
-
 PYTHON_REQUIRES = ">=3.9"
 
 INSTALL_REQUIRES = [
@@ -42,7 +40,7 @@ INSTALL_REQUIRES = [
 ]
 
 if __name__ == "__main__":
-    from setuptools import setup
+    from setuptools import setup, find_packages
     from sys import version_info
     # from Cython.Build import cythonize
 
@@ -65,7 +63,7 @@ if __name__ == "__main__":
           long_description_content_type=LONG_DESCRIPTION_CONTENT_TYPE,
           url=URL,
           classifiers=CLASSIFIERS,
-          packages=PACKAGES,
+          packages=find_packages(),
           python_requires=PYTHON_REQUIRES,
           install_requires=INSTALL_REQUIRES,
           include_package_data=True,
