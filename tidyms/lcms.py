@@ -133,7 +133,7 @@ class MSSpectrum:
         fig_params: Optional[dict] = None,
         line_params: Optional[dict] = None,
         show: bool = True
-    ) -> bokeh.plotting.Figure:     # pragma: no cover
+    ) -> bokeh.plotting.figure:     # pragma: no cover
         """
         Plot the spectrum using Bokeh.
 
@@ -142,13 +142,13 @@ class MSSpectrum:
         fig_params : dict or None, default=None
             key-value parameters to pass to ``bokeh.plotting.figure``.
         line_params : dict, or None, default=None
-            key-value parameters to pass to ``bokeh.plotting.Figure.line``.
+            key-value parameters to pass to ``bokeh.plotting.figure.line``.
         show : bool, default=True
             If True calls ``bokeh.plotting.show`` on the Figure.
 
         Returns
         -------
-        bokeh.plotting.Figure
+        bokeh.plotting.figure
 
         """
         default_fig_params = _plot_bokeh.get_spectrum_figure_params()
@@ -157,7 +157,7 @@ class MSSpectrum:
             fig_params = default_fig_params
         else:
             fig_params = default_fig_params
-        fig = bokeh.plotting.Figure(**fig_params)
+        fig = bokeh.plotting.figure(**fig_params)
 
         if self.is_centroid:
             plotter = _plot_bokeh.add_stems
@@ -202,9 +202,9 @@ class Roi:
 
     def plot(
         self,
-        figure: Optional[bokeh.plotting.Figure] = None,
+        figure: Optional[bokeh.plotting.figure] = None,
         show: bool = True
-    ) -> bokeh.plotting.Figure:     # pragma: no cover
+    ) -> bokeh.plotting.figure:     # pragma: no cover
         raise NotImplementedError
 
     def extract_features(self, **kwargs) -> List["Feature"]:
@@ -413,27 +413,27 @@ class LCRoi(Roi):
 
     def plot(
         self,
-        figure: Optional[bokeh.plotting.Figure] = None,
+        figure: Optional[bokeh.plotting.figure] = None,
         show: bool = True
-    ) -> bokeh.plotting.Figure:     # pragma: no cover
+    ) -> bokeh.plotting.figure:     # pragma: no cover
         """
         Plot the ROI.
 
         Parameters
         ----------
-        figure : bokeh.plotting.Figure or None, default=None
+        figure : bokeh.plotting.figure or None, default=None
             Figure to add the plot. If None, a new figure is created.
         show : bool, default=True
             If True calls ``bokeh.plotting.show`` on the Figure.
 
         Returns
         -------
-        bokeh.plotting.Figure
+        bokeh.plotting.figure
 
         """
         if figure is None:
             fig_params = _plot_bokeh.get_chromatogram_figure_params()
-            figure = bokeh.plotting.Figure(**fig_params)
+            figure = bokeh.plotting.figure(**fig_params)
 
         _plot_bokeh.add_line(figure, self.time, self.spint)
         if self.features:
@@ -584,7 +584,7 @@ class Feature:
     def plot(
         self,
         roi: Roi,
-        figure: bokeh.plotting.Figure,
+        figure: bokeh.plotting.figure,
         color: str,
         **varea_params
     ):
