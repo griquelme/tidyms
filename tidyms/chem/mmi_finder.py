@@ -1,9 +1,7 @@
 import numpy as np
-from math import gcd
 import bisect
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from .atoms import Element, PeriodicTable, EM
-from .formula import Formula
 from ._formula_generator import FormulaCoefficientBounds
 from .envelope_tools import make_formula_coefficients_envelopes
 
@@ -22,7 +20,8 @@ class MMIFinder:
         length: int,
         bin_size: int,
         mz_tol: float,
-        p_tol: float
+        p_tol: float,
+        custom_abundances: Optional[Dict[str, np.ndarray]] = None
     ):
         """
         Constructor method.
@@ -43,10 +42,16 @@ class MMIFinder:
             m/z tolerance to search candidates.
         p_tol : float
             abundance tolerance used to search candidates.
+        custom_abundances : dict, optional
+            Provides custom elemental abundances. A mapping from element
+            symbols str to an abundance array. The abundance array must have
+            the same size that the natural abundance and its sum must be equal
+            to one. For example, for "C", an alternative abundance can be
+            array([0.15, 0.85]) for isotopes with nominal mass 12 and 13.
 
         """
         self.rules = _create_rules_dict(
-            bounds, max_mass, length, bin_size, p_tol)
+            bounds, max_mass, length, bin_size, p_tol, custom_abundances)
         self.bin_size = bin_size
         self.max_charge = abs(max_charge)
         self.polarity = 1 if max_charge >= 0 else -1
@@ -153,9 +158,10 @@ def _create_rules_dict(
     max_mass: float,
     length: int,
     bin_size: int,
-    p_tol: float
+    p_tol: float,
+    custom_abundances: Optional[Dict[str, np.ndarray]]
 ) -> Dict[int, List[Dict[str, Tuple[float, float]]]]:
-    Ma, pa = _create_envelope_arrays(bounds, max_mass, length)
+    Ma, pa = _create_envelope_arrays(bounds, max_mass, length, custom_abundances)
     # find the monoisotopic index, its Mass difference with the MMI (dM) and
     # its abundance quotient with the MMI (qp)
     bins = (Ma[:, 0] // bin_size).astype(int)
@@ -187,117 +193,68 @@ def _create_rules_dict(
 
 
 def _create_envelope_arrays(
-    bounds: Dict[str, Tuple[int, int]], M_max: float, max_length: int
+    bounds: Dict[str, Tuple[int, int]],
+    M_max: float,
+    max_length: int,
+    custom_abundances: Optional[Dict[str, np.ndarray]]
 ) -> Tuple[np.ndarray, np.ndarray]:
-    elements = [PeriodicTable().get_element(x) for x in bounds]
-    elements = _get_relevant_elements(elements)
-    isotopes = [x.get_monoisotope() for x in elements]
+    elements = _select_elements(list(bounds), custom_abundances)
+    isotopes = [x.get_mmi() for x in elements]
     f_bounds = FormulaCoefficientBounds({x: bounds[x.get_symbol()] for x in isotopes})
     coeff = f_bounds.make_coefficients(M_max)
-    envelope = make_formula_coefficients_envelopes(bounds, coeff, max_length)
+    envelope = make_formula_coefficients_envelopes(bounds, coeff, max_length, custom_abundances)
     M = envelope.M
     p = envelope.p
     return M, p
 
 
-def _get_relevant_elements(e_list: List[Element]) -> List[Element]:
-    res = set(e_list)
-    for e in e_list:
-        if len(e.isotopes) > 1:
-            tmp = _get_different_elements(e_list, e)
-            res = res.intersection(tmp)
-    res = list(res)
-    return res
+def _select_two_isotope_element(
+    e_list: List[str],
+    dm: int,
+    custom_abundances: Dict[str, np.ndarray]
+) -> List[str]:
+    selected = list()
+    p_dm_max = 0
+    best_p0_greater_than_pi = None
+    for s in e_list:
+        e = PeriodicTable().get_element(s)
+        n_isotopes = len(e.isotopes)
+        m, _, p = e.get_abundances()
+        if n_isotopes == 2:
+            e_dm = m[-1] - m[0]
+            if e_dm == dm:
+                p0, pi = custom_abundances.get(s, p)
+                if pi > p0:
+                    selected.append(s)
+                elif pi > p_dm_max:
+                    p_dm_max = pi
+                    best_p0_greater_than_pi = s
+    if best_p0_greater_than_pi is not None:
+        selected.append(best_p0_greater_than_pi)
+    return selected
 
 
-def _get_different_elements(
-    e_list: List[Element],
-    e_ref: Element
+def _select_multiple_isotope_elements(e_list: List[str]) -> List[str]:
+    selected = list()
+    for s in e_list:
+        e = PeriodicTable().get_element(s)
+        n_isotopes = len(e.isotopes)
+        if n_isotopes > 2:
+            selected.append(s)
+    return selected
+
+
+def _select_elements(
+        e_list: List[str], custom_abundances: Optional[Dict[str, np.ndarray]] = None
 ) -> List[Element]:
-    """
-    Filter elements based on if they affect the envelope of formulas in a
-    different way than e_ref
-    Parameters
-    ----------
-    e_list : List[Element]
-    e_ref : Element
-
-    Returns
-    -------
-    List[Element]
-    """
-    res = list()
-    for e in e_list:
-        if e == e_ref:
-            res.append(e)
-        elif _is_distort_envelope(e_ref, e):
-            res.append(e)
-    return res
-
-
-def _is_distort_envelope(e1: Element, e2: Element) -> bool:
-    """
-    Checks if an element distorts the isotopic envelope of a formula with in a
-    different way than e1.
-
-    Parameters
-    ----------
-    e1 : Element
-    e2 : Element
-
-    Returns
-    -------
-    bool
-
-    """
-    e1_m, _, e1_p = e1.get_abundances()
-    e2_m, _, e2_p = e2.get_abundances()
-
-    if e2_p.size == 1:
-        # if the length is 1, no contribution is made to the envelope shape
-        res = False
-    elif e1_p.size != e2_p.size:
-        # different shapes imply different contributions to the envelope shape
-        res = True
-    else:
-        e1_m0 = e1_m[0]
-        e2_m0 = e2_m[0]
-        e1_dm = e1_m - e1_m0
-        e2_dm = e2_m - e2_m0
-        if np.array_equal(e1_dm, e2_dm):
-            res = _compare_abundance_equal_envelopes(e1, e2)
-        else:
-            # If the relative nominal mass differences are different, the
-            # contribution to the shape is different
-            res = True
-    return res
-
-
-def _compare_abundance_equal_envelopes(e1: Element, e2: Element) -> bool:
-    # computes a formula with the same nominal mass using only e1 and e2
-    # and compares the abundances
-    e1_m0 = min(e1.isotopes)
-    e2_m0 = min(e2.isotopes)
-    lcm = _lcm(e1_m0, e2_m0)
-    f1 = Formula(e1.symbol + str(lcm // e1_m0))
-    _, f1_p = f1.get_isotopic_envelope()
-    f2 = Formula(e2.symbol + str(lcm // e2_m0))
-    _, f2_p = f2.get_isotopic_envelope()
-    f1_p_argmax = np.argmax(f1_p)
-    different_max = f1_p_argmax != np.argmax(f2_p)
-    if different_max:
-        res = True
-    else:
-        length = min(f1_p.size, f2_p.size)
-        different_shape = f1_p[:length] < f2_p[:length]
-        different_shape[f1_p_argmax] = False
-        res = np.any(different_shape)
-    return res
-
-
-def _lcm(a: int, b: int) -> int:
-    """
-    Computes the least common multiple between a and b.
-
-    """
-    return abs(a * b) // gcd(a, b)
+    if custom_abundances is None:
+        custom_abundances = dict()
+    two_isotope_dm1 = _select_two_isotope_element(e_list, 1, custom_abundances)
+    two_isotope_dm2 = _select_two_isotope_element(e_list, 2, custom_abundances)
+    selected = _select_multiple_isotope_elements(e_list)
+    if two_isotope_dm1 is not None:
+        selected.extend(two_isotope_dm1)
+    if two_isotope_dm2 is not None:
+        selected.extend(two_isotope_dm2)
+    selected = [PeriodicTable().get_element(x) for x in selected]
+    return selected

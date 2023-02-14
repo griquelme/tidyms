@@ -4,48 +4,181 @@ import pytest
 import numpy as np
 
 
-@pytest.mark.parametrize("e2", ["Na", "P"])
-def test__is_distort_envelope_e2_monoisotope(e2):
-    e1 = PeriodicTable().get_element("C")
-    e2 = PeriodicTable().get_element(e2)
-    assert not mmi_finder._is_distort_envelope(e1, e2)
-
-
-@pytest.mark.parametrize("e2", ["O", "S"])
-def test__is_distort_envelope_different_n_isotopes(e2):
-    e1 = PeriodicTable().get_element("C")
-    e2 = PeriodicTable().get_element(e2)
-    assert mmi_finder._is_distort_envelope(e1, e2)
-
-
-@pytest.mark.parametrize("e2", ["Cl", "Br"])
-def test__is_distort_envelope_different_nominal_mass_increments(e2):
-    e1 = PeriodicTable().get_element("C")
-    e2 = PeriodicTable().get_element(e2)
-    assert mmi_finder._is_distort_envelope(e1, e2)
-    
-
-@pytest.mark.parametrize("e2", ["H", "N"])
-def test__is_distort_envelope_equal_envelopes_e2_dont_distort(e2):
-    e1 = PeriodicTable().get_element("C")
-    e2 = PeriodicTable().get_element(e2)
-    assert not mmi_finder._is_distort_envelope(e1, e2)
-
-
-@pytest.mark.parametrize("e2", ["B", "Li"])
-def test__is_distort_envelope_equal_envelopes_e2_distort(e2):
-    e1 = PeriodicTable().get_element("C")
-    e2 = PeriodicTable().get_element(e2)
-    assert mmi_finder._is_distort_envelope(e1, e2)
-
-
-def test__get_relevant_elements():
-    e_list = ["C", "H", "N", "O", "P", "S", "Li", "Na"]
-    e_list = [PeriodicTable().get_element(x) for x in e_list]
-    expected = ["C", "O", "S", "Li"]
-    expected = [PeriodicTable().get_element(x) for x in expected]
-    res = mmi_finder._get_relevant_elements(e_list)
+def test__select_two_isotope_elements_dm_1_p0_greater_than_pi():
+    elements = ["C", "H", "N", "O", "P", "S"]
+    expected = ["C"]
+    custom_abundances = dict()
+    dm = 1
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == len(expected)
     assert set(res) == set(expected)
+
+
+def test__select_two_isotope_elements_dm_1_p0_greater_than_pi_custom_abundance():
+    elements = ["C", "H", "N", "O", "P", "S"]
+    expected = ["H"]
+    custom_abundances = {"H": np.array([0.95, 0.05])}
+    dm = 1
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+
+def test__select_two_isotope_elements_dm_1_no_elements():
+    elements = ["O", "P", "S"]
+    custom_abundances = {}
+    dm = 1
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == 0
+
+
+def test__select_two_isotope_elements_dm_1_p0_lower_than_pi():
+    elements = ["B", "Li", "O", "P", "S"]
+    expected = ["B", "Li"]
+    dm = 1
+    custom_abundances = dict()
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+
+def test__select_two_isotope_elements_dm_1_p0_lower_and_higher_than_pi():
+    elements = ["C", "H", "B", "Li", "O", "P", "S"]
+    expected = ["C", "B", "Li"]
+    dm = 1
+    custom_abundances = dict()
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+
+def test__select_two_isotope_elements_dm_2_p0_greater_than_pi():
+    elements = ["Cl", "H", "N", "O", "P", "S"]
+    expected = ["Cl"]
+    custom_abundances = dict()
+    dm = 2
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+
+def test__select_two_isotope_elements_dm_2_p0_greater_than_pi_custom_abundance():
+    elements = ["Cl", "Br", "N", "O", "P", "S"]
+    expected = ["Cl"]
+    # Br abundance adjusted to force the result to be Cl
+    custom_abundances = {"Br": np.array([0.9, 0.1])}
+    dm = 2
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+
+def test__select_two_isotope_elements_dm_2_no_elements():
+    elements = ["O", "P", "S"]
+    custom_abundances = {}
+    dm = 2
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == 0
+
+
+def test__select_two_isotope_elements_dm_2_p0_lower_than_pi():
+    elements = ["In", "H", "O", "P", "S"]
+    expected = ["In"]
+    dm = 2
+    custom_abundances = dict()
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+
+def test__select_two_isotope_elements_dm_2_p0_lower_and_higher_than_pi():
+    elements = ["Cl", "In", "Br", "O", "P", "S"]
+    expected = ["Br", "In"]
+    dm = 2
+    custom_abundances = dict()
+    res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+
+def test__select_multiple_isotope_elements():
+    elements = ["Cl", "H", "N", "O", "P", "S"]
+    expected = ["O", "S"]
+    res = mmi_finder._select_multiple_isotope_elements(elements)
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+
+def test__select_multiple_isotope_elements_no_elements():
+    elements = ["Cl", "H", "N", "P"]
+    expected = []
+    res = mmi_finder._select_multiple_isotope_elements(elements)
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+@pytest.mark.parametrize(
+    "elements,expected",
+    [
+        [
+            ["C", "H", "N", "O", "P", "S"],
+            ["C", "O", "S"]
+        ],
+        [
+            ["C", "H", "N", "O", "P", "S", "Cl", "Li", "Na"],
+            ["C", "O", "S", "Li", "Cl"]
+        ]
+
+     ]
+)
+def test__select_elements(elements, expected):
+    res = mmi_finder._select_elements(elements)
+    res = [x.symbol for x in res]
+    assert len(res) == len(expected)
+    assert set(res) == set(expected)
+
+
+# @pytest.mark.parametrize("e2", ["Na", "P"])
+# def test__is_distort_envelope_e2_monoisotope(e2):
+#     e1 = PeriodicTable().get_element("C")
+#     e2 = PeriodicTable().get_element(e2)
+#     assert not mmi_finder._is_distort_envelope(e1, e2)
+#
+#
+# @pytest.mark.parametrize("e2", ["O", "S"])
+# def test__is_distort_envelope_different_n_isotopes(e2):
+#     e1 = PeriodicTable().get_element("C")
+#     e2 = PeriodicTable().get_element(e2)
+#     assert mmi_finder._is_distort_envelope(e1, e2)
+#
+#
+# @pytest.mark.parametrize("e2", ["Cl", "Br"])
+# def test__is_distort_envelope_different_nominal_mass_increments(e2):
+#     e1 = PeriodicTable().get_element("C")
+#     e2 = PeriodicTable().get_element(e2)
+#     assert mmi_finder._is_distort_envelope(e1, e2)
+#
+#
+# @pytest.mark.parametrize("e2", ["H", "N"])
+# def test__is_distort_envelope_equal_envelopes_e2_dont_distort(e2):
+#     e1 = PeriodicTable().get_element("C")
+#     e2 = PeriodicTable().get_element(e2)
+#     assert not mmi_finder._is_distort_envelope(e1, e2)
+#
+#
+# @pytest.mark.parametrize("e2", ["B", "Li"])
+# def test__is_distort_envelope_equal_envelopes_e2_distort(e2):
+#     e1 = PeriodicTable().get_element("C")
+#     e2 = PeriodicTable().get_element(e2)
+#     assert mmi_finder._is_distort_envelope(e1, e2)
+#
+#
+# def test__get_relevant_elements():
+#     e_list = ["C", "H", "N", "O", "P", "S", "Li", "Na"]
+#     e_list = [PeriodicTable().get_element(x) for x in e_list]
+#     expected = ["C", "O", "S", "Li"]
+#     expected = [PeriodicTable().get_element(x) for x in expected]
+#     res = mmi_finder._get_relevant_elements(e_list)
+#     assert set(res) == set(expected)
 
 
 @pytest.mark.parametrize("max_charge", [1, 2, 3, 4])
@@ -102,7 +235,7 @@ def rules():
     length = 5
     bin_size = 100
     p_tol = 0.05
-    r = mmi_finder._create_rules_dict(bounds, max_mass, length, bin_size, p_tol)
+    r = mmi_finder._create_rules_dict(bounds, max_mass, length, bin_size, p_tol, None)
     return r, max_mass, length, bin_size
 
 
