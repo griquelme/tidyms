@@ -16,12 +16,15 @@ def test_EnvelopeValidator_find_valid_bounds(f_str):
     M, p = f.get_isotopic_envelope(max_length)
     tolerance = 0.005
     validator.generate_envelopes(M, p, tolerance)
+    # results are not strictly equal due to being computed using a subset
+    # of elements in the validator
+    # a tolerance is used to check validity in M and p
+    p_tol = 0.0001
+    M_tol = 0.0000001
     for k in range(M.size):
-        min_mz, max_mz, min_ab, max_ab = validator._find_bounds(k)
-        assert np.all(min_mz < M[k])
-        assert np.all(max_mz > M[k])
-        assert np.all(min_ab < p[k])
-        assert np.all(max_ab > p[k])
+        min_M, max_M, min_p, max_p = validator._find_bounds(k)
+        assert min_M - M_tol < M[k] < max_M + M_tol
+        assert min_p - p_tol < p[k] < max_p + p_tol
 
 
 @pytest.mark.parametrize("f_str", formula_str_list)
