@@ -711,6 +711,7 @@ class Assay:
         n_samples = len(process_samples)
         dc_path = self.manager.assay_path.joinpath(c.DATA_MATRIX_FILENAME)
         if n_samples:
+            annotate_isotopologues = bool(self.manager.params[c.ANNOTATE_ISOTOPOLOGUES])
             sample_metadata = self.manager.get_sample_metadata()
             data_matrix, feature_metadata = build_data_matrix(
                 self.feature_table,
@@ -719,7 +720,8 @@ class Assay:
                 merge_close_features,
                 mz_merge,
                 rt_merge,
-                merge_threshold
+                merge_threshold,
+                annotate_isotopologues
             )
             dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
             dc.save(dc_path)
