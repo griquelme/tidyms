@@ -194,10 +194,11 @@ def _get_n_atoms_envelope_aux(
             end = first_occurrence[k + 1]
             mk = m[start]
             i = mk - m0
-            m_unique[i] = mk
-            pk = np.sum(p[start:end])
-            p_unique[i] = pk
-            M_unique[i] = np.sum(M[start:end] * p[start:end]) / pk
+            if i < max_length:
+                m_unique[i] = mk
+                pk = np.sum(p[start:end])
+                p_unique[i] = pk
+                M_unique[i] = np.sum(M[start:end] * p[start:end]) / pk
     p_unique = p_unique / np.sum(p_unique)
     return M_unique, p_unique
 
