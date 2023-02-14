@@ -14,4 +14,3 @@ seaborn>=0.12
 statsmodels>=0.13
 tqdm>=4.0
 xlrd>=2.0
-networkx>=2.8.7
