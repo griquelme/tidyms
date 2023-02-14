@@ -807,7 +807,7 @@ class BokehPlotMethods:  # pragma: no cover
                    normalization: Optional[str] = None, draw: bool = True,
                    fig_params: Optional[dict] = None,
                    scatter_params: Optional[dict] = None
-                   ) -> bokeh.plotting.Figure:
+                   ) -> bokeh.plotting.figure:
         """
         plots PCA scores
         
@@ -839,7 +839,7 @@ class BokehPlotMethods:  # pragma: no cover
         
         Returns
         -------
-        bokeh.plotting.Figure.
+        bokeh.plotting.figure.
         """
         default_fig_params = {"aspect_ratio": 1}
         if fig_params is None:
@@ -916,7 +916,7 @@ class BokehPlotMethods:  # pragma: no cover
                      normalization: Optional[str] = None, draw: bool = True,
                      fig_params: Optional[dict] = None,
                      scatter_params: Optional[dict] = None
-                     ) -> bokeh.plotting.Figure:
+                     ) -> bokeh.plotting.figure:
         """
         plots PCA loadings.
 
@@ -940,7 +940,7 @@ class BokehPlotMethods:  # pragma: no cover
 
         Returns
         -------
-        bokeh.plotting.Figure.
+        bokeh.plotting.figure.
         """
         default_fig_params = {"aspect_ratio": 1}
         if fig_params is None:
@@ -986,7 +986,7 @@ class BokehPlotMethods:  # pragma: no cover
                 ignore_classes: Optional[List[str]] = None,
                 draw: bool = True,
                 fig_params: Optional[dict] = None,
-                scatter_params: Optional[dict] = None) -> bokeh.plotting.Figure:
+                scatter_params: Optional[dict] = None) -> bokeh.plotting.figure:
         """
         plots a feature intensity as a function of the run order.
 
@@ -1006,7 +1006,7 @@ class BokehPlotMethods:  # pragma: no cover
 
         Returns
         -------
-        bokeh.plotting.Figure
+        bokeh.plotting.figure
         """
 
         default_fig_params = {"aspect_ratio": 1.5}
