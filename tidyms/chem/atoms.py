@@ -206,6 +206,10 @@ class _PeriodicTable:
             element = self._symbol_to_element[element]
         return element
 
+    def __iter__(self):
+        for el in self._symbol_to_element.values():
+            yield el
+
     def get_isotope(self, x: str, copy: bool = False) -> Isotope:
         """
         Returns an isotope object from a string representation.
