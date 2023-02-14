@@ -652,11 +652,9 @@ class DilutionFilter(Processor):
         """
         Constructor of the DilutionFilter.
         """
-        requirements = {"empty": False, "missing": False,
-                        _dilution_qc_type: True}
-        super(DilutionFilter, self).__init__(axis="features", mode="filter",
-                                             verbose=verbose,
-                                             requirements=requirements)
+        requirements = {"empty": False, "missing": False, _dilution_qc_type: True}
+        super(DilutionFilter, self).__init__(
+            axis="features", mode="filter", verbose=verbose, requirements=requirements)
         self.name = "Dilution Filter"
         self.params["min_corr"] = min_corr
         self.params["plim"] = plim
@@ -668,8 +666,8 @@ class DilutionFilter(Processor):
         mode = self.params["mode"]
         min_corr = self.params["min_corr"]
         plim = self.params["plim"]
-        corr = dc.metrics.correlation("dilution", mode=mode,
-                                      classes=dc.mapping[_dilution_qc_type])
+        corr = dc.metrics.correlation(
+            "dilution", mode=mode, classes=dc.mapping[_dilution_qc_type])
         if mode == "ols":
             r2_ind = get_outside_bounds_index(corr.loc["r2", :], min_corr, 1)
             jb_ind = get_outside_bounds_index(corr.loc["JB", :], plim, 1)

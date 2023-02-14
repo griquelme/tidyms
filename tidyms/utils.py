@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from statsmodels.api import OLS, add_constant
 from statsmodels.stats.stattools import jarque_bera, durbin_watson
-from scipy.stats import spearmanr, median_abs_deviation
+from scipy.stats import spearmanr, median_abs_deviation, pearsonr
 import os.path
 from typing import Optional, Union
 import json
@@ -291,7 +291,7 @@ def metadata_correlation(y, x, mode: str = "ols"):
     ----------
     y : array
     x : array
-    mode: {"ols", "spearman"}
+    mode: {"ols", "pearson", "spearman"}
         `ols` computes r squared, Jarque-Bera test p-value and Durwin-Watson
         statistic from the ordinary least squares linear regression. `spearman`
         computes the spearman rank correlation coefficient.
@@ -307,6 +307,8 @@ def metadata_correlation(y, x, mode: str = "ols"):
         jb = jarque_bera(ols.resid)[1]  # Jarque Bera test p-value
         dw = durbin_watson(ols.resid)   # Durwin Watson statistic
         res = {"r2": r2, "DW": dw, "JB": jb}
+    elif mode == "pearson":
+        res = pearsonr(y, x)[0]
     else:
         res = spearmanr(y, x)[0]
     return res
