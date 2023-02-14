@@ -102,12 +102,6 @@ def _build_graph_edges(feature_table: pd.DataFrame) -> List[Tuple[int, int]]:
     return edges
 
 
-def _get_feature_data(feature_table: pd.DataFrame) -> Dict[int, Dict[str, float]]:
-    data = feature_table.groupby(c.LABEL).mean().loc[:, [c.MZ, c.RT]].T.to_dict()
-    data.pop(-1)
-    return data
-
-
 def _build_isotopologue_graph(
     nodes: Dict[int, Dict[str, float]], edges: List[Tuple[int, int]]
 ) -> nx.Graph:
