@@ -242,22 +242,21 @@ class EnvelopeValidator(_EnvelopeGenerator):
             maximum abundance for each peak
 
         """
-        M_tol = self._query.get_mass_tolerance(self.min_M_tol, self.max_M_tol, k)
         if self.results.get_envelope_size():
-
             # abundance bounds
             pk = self.results.get_pk(k)
-            min_p = max(pk.min() - self.p_tol, 0.0)
-            max_p = min(pk.max() + self.p_tol, 1.0)
+            min_p = np.min(pk)
+            max_p = np.max(pk)
 
             # exact mass bounds
             Mk = self.results.get_Mk(k)
-            min_M = Mk.min() - M_tol
-            max_M = Mk.max() + M_tol
+            min_M = np.min(Mk)
+            max_M = np.max(Mk)
 
-            return min_M, max_M, min_p, max_p
+            res = min_M, max_M, min_p, max_p
         else:
-            return None
+            res = None
+        return res
 
     def validate(self, M: np.ndarray, p: np.ndarray) -> int:
         length = 0
@@ -265,20 +264,22 @@ class EnvelopeValidator(_EnvelopeGenerator):
         self.generate_envelopes(M, p, tol)
         while (M.size >= 2) and (length <= 1):
             for k in range(M.size):
-                bounds = self._find_bounds(k)
-                if bounds is None:
-                    break
+                self.filter(self.min_M_tol, self.max_M_tol, self.p_tol, k)
+                # bounds = self._find_bounds(k)
+                # if bounds is None:
+                #     break
+                # else:
+                #     min_Mk, max_Mk, min_pk, max_pk = bounds
+                #     valid = (
+                #         (M[k] >= min_Mk) and (M[k] <= max_Mk) and
+                #         (p[k] >= min_pk) and (p[k] <= max_pk)
+                #     )
+                #     if valid:
+                #         length = k + 1
+                if self.results.get_envelope_size():
+                    length = k + 1
                 else:
-                    min_Mk, max_Mk, min_pk, max_pk = bounds
-                    valid = (
-                        (M[k] >= min_Mk) and (M[k] <= max_Mk) and
-                        (p[k] >= min_pk) and (p[k] <= max_pk)
-                    )
-                    if valid:
-                        length = k + 1
-                        self.filter(self.min_M_tol, self.max_M_tol, self.p_tol, k)
-                    else:
-                        break
+                    break
             if (length <= 1) and (M.size > 2):
                 length = 0
                 M = M[:M.size - 1]
