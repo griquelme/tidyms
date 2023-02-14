@@ -1,2 +1,4 @@
 include README.md
 include LICENSE
+include tidyms/chem/elements.json
+include tidyms/chem/isotopes.json
