@@ -32,12 +32,14 @@ from . import validation
 from . import fileio
 from . import _batch_corrector
 from ._names import *
+from . import _constants as c
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
-from typing import List, Optional, Iterable, Union, BinaryIO, TextIO
+from typing import Dict, List, Optional, Iterable, Union, BinaryIO, TextIO
 import bokeh.plotting
 import pickle
+import json
 from bokeh.palettes import Category10
 from bokeh.models import ColumnDataSource
 from bokeh.transform import factor_cmap
@@ -59,7 +61,7 @@ class DataContainer(object):
     data_matrix : DataFrame.
         feature values for each sample. Data is organized in a "tidy" way:
         each row is an observation, each column is a feature. dtype must
-        be float and all values should be non-negative, but NANs are fine.
+        be a float and all values should be non-negative, but NANs are fine.
     sample_metadata : DataFrame.
         Metadata associated to each sample (eg: sample class). Has the same
         index as the data_matrix. `class` (standing for sample class) is a
@@ -303,8 +305,8 @@ class DataContainer(object):
         if isinstance(test_class, str):
             return test_class in valid_classes
         else:
-            for c in test_class:
-                if not (c in valid_classes):
+            for cl in test_class:
+                if not (cl in valid_classes):
                     return False
             return True
 
@@ -1464,8 +1466,27 @@ class PreprocessMethods:
         else:
             return scaled
 
-    def transform(self, method: str,
-                  inplace: bool = True) -> Optional[pd.DataFrame]:
+    def group_isotopologues(self, remove_non_annotated: bool = True):
+        dm = self.__data.data_matrix
+        fm = self.__data._feature_metadata
+        annotation_report = _create_annotation_report(dm, fm)
+
+        if remove_non_annotated:
+            rm_ft = fm[c.ENVELOPE_INDEX] != 0
+            rm_ft = rm_ft[rm_ft].index
+        else:
+            rm_ft = fm[c.ENVELOPE_INDEX] > 0
+            rm_ft = rm_ft[rm_ft].index
+        self.__data.remove(rm_ft, axis="features")
+
+        annotation_report = pd.Series(annotation_report)
+        cols = [c.ENVELOPE_LABEL, c.ENVELOPE_INDEX, c.CHARGE, "total", "count"]
+        fm.drop(columns=cols, inplace=True)
+        fm["isotopologues"] = annotation_report
+
+    def transform(
+        self, method: str, inplace: bool = True
+    ) -> Optional[pd.DataFrame]:
         """
         Perform element-wise data transformations.
 
@@ -1589,3 +1610,39 @@ def _reverse_mapping(mapping):
             for class_value in v:
                 rev_map[class_value] = k
     return rev_map
+
+
+def _create_annotation_report(
+        data_matrix: pd.DataFrame, feature_metadata: pd.DataFrame
+) -> Dict[str, str]:
+    annotation_report = dict()
+
+    median_abundance = data_matrix.median()
+    score = feature_metadata["count"] / feature_metadata["total"]
+    score[score.isna()] = 1
+
+    for label, gdf in feature_metadata.groupby(c.ENVELOPE_LABEL):
+        if label > -1:
+            gmz = gdf[c.MZ].to_numpy()
+            sorted_index = np.argsort(gmz)
+            features = gdf.index
+            gp = median_abundance[features].to_numpy()
+            main_ft = features[sorted_index[0]]
+            gp /= gp.sum()
+            gp = gp[sorted_index]
+            gmz = gmz[sorted_index]
+            g_score = score[features].to_numpy()
+            g_score = g_score[sorted_index]
+            charge = gdf.at[features[0], c.CHARGE]
+            gmz = list(gmz.round(4))
+            gp = list(gp.round(4))
+            g_score = list(g_score.round(2))
+            d = {
+                c.CHARGE: int(charge),
+                c.MZ: gmz,
+                "abundance": gp,
+                "score": g_score
+            }
+            annotation_report[main_ft] = json.dumps(d)
+    return annotation_report
+

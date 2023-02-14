@@ -7,6 +7,7 @@ feature table.
 import pandas as pd
 from numpy import nan
 from . import _constants as c
+from .votation import vote_annotations
 from typing import Dict, List, Optional, Set, Tuple
 
 
@@ -18,6 +19,7 @@ def build_data_matrix(
     mz_merge: Optional[float],
     rt_merge: Optional[float],
     merge_threshold: Optional[float],
+    annotate_isotopologues: bool
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Creates a data matrix and feature metadata with aggregated descriptors from
@@ -48,6 +50,8 @@ def build_data_matrix(
         number of samples where any of the features was detected. If this
         quotient is lower than the threshold, the pair of features is merged
         into a single one.
+    annotate_isotopologues : bool
+        Include isotopologue annotation in feature metadata.
 
     Returns
     -------
@@ -56,7 +60,7 @@ def build_data_matrix(
 
     """
     # remove noise
-    feature_table = feature_table[feature_table[c.LABEL] > -1]
+    feature_table = feature_table[feature_table[c.LABEL] > -1].copy()
     labels = feature_table[c.LABEL]
     cluster_to_ft = _cluster_to_feature_name(labels)
 
@@ -69,9 +73,16 @@ def build_data_matrix(
 
     if merge_close_features:
         if separation in c.LC_MODES:
-            _lc_merge_close_features(
+            merged_dict = _lc_merge_close_features(
                 data_matrix, feature_metadata, mz_merge, rt_merge, merge_threshold
             )
+        else:
+            raise NotImplementedError
+        _update_feature_table_merged_labels(feature_table, merged_dict)
+
+    if annotate_isotopologues:
+        feature_metadata = _add_annotation_data(feature_table, feature_metadata)
+
     return data_matrix, feature_metadata
 
 
@@ -186,8 +197,8 @@ def _cluster_to_feature_name(labels: pd.Series) -> Dict[int, str]:
     return cluster_to_ft
 
 
-def _feature_name_to_cluster(ft: str) -> int:
-    return int(ft.split("-")[-1])
+# def _feature_name_to_cluster(ft: str) -> int:
+#     return int(ft.split("-")[-1])
 
 
 def _lc_merge_close_features(
@@ -196,7 +207,7 @@ def _lc_merge_close_features(
     mz_merge: float,
     rt_merge: float,
     merge_threshold: float,
-):
+) -> Dict[str, List[str]]:
     rt = feature_metadata[c.RT]
     mz = feature_metadata[c.MZ]
     features = feature_metadata.index
@@ -215,6 +226,7 @@ def _lc_merge_close_features(
                 break
     _add_merged_features_to_feature_metadata(merged_dict, feature_metadata)
     _remove_merged_features(merged_dict, data_matrix, feature_metadata)
+    return merged_dict
 
 
 def _find_merge_candidates(
@@ -306,3 +318,31 @@ def _remove_merged_features(
         rm_features.extend(v)
     data_matrix.drop(columns=rm_features, inplace=True)
     feature_metadata.drop(index=rm_features, inplace=True)
+
+
+def _update_feature_table_merged_labels(
+    feature_table: pd.DataFrame, merged_dict: Dict[str, List[str]]
+):
+    new_labels = dict()
+    for ft, merged in merged_dict.items():
+        v = int(ft.split("-")[-1])
+        for m in merged:
+            k = int(m.split("-")[-1])
+            new_labels[k] = v
+
+    new_labels = {c.LABEL: new_labels}
+    feature_table.replace(new_labels, inplace=True)
+
+
+def _add_annotation_data(
+    feature_table: pd.DataFrame, feature_metadata: pd.DataFrame
+) -> pd.DataFrame:
+    _, annotations = vote_annotations(feature_table)
+    annotation_df = pd.DataFrame(annotations).T.sort_index()
+    n_ft = feature_metadata.shape[0]
+    length = len(str(n_ft))
+    template = "FT-{{:0{}d}}".format(length)
+    annotation_df.index = [template.format(x) for x in annotation_df.index]
+    annotation_df = annotation_df.reindex(feature_metadata.index, fill_value=-1)
+    feature_metadata = pd.concat((feature_metadata, annotation_df), axis=1)
+    return feature_metadata
