@@ -19,7 +19,7 @@ def create_annotator(
     p_tol: float,
     min_similarity: float,
     min_p: float,
-) -> "_IsotopologueEnvelopeAnnotator":
+) -> "_IsotopologueAnnotator":
     """
     Create an annotator object. Auxiliary function to _annotate
 
@@ -48,7 +48,7 @@ def create_annotator(
 
     Returns
     -------
-    annotator: _IsotopologueEnvelopeAnnotator
+    annotator: _IsotopologueAnnotator
 
     """
     # remove elements with only 1 stable isotope
@@ -74,7 +74,7 @@ def create_annotator(
     similarity_checker = _SimilarityChecker(
         min_similarity, _feature_similarity_lc, min_overlap=min_overlap
     )
-    annotator = _IsotopologueEnvelopeAnnotator(
+    annotator = _IsotopologueAnnotator(
         mmi_finder,
         envelope_finder,
         envelope_validator,
@@ -87,7 +87,7 @@ def create_annotator(
 def annotate(
     feature_table: pd.DataFrame,
     roi_list: List[LCRoi],
-    annotator: "_IsotopologueEnvelopeAnnotator",
+    annotator: "_IsotopologueAnnotator",
 ) -> None:
     """
     Annotates isotopologues in a sample.
@@ -108,7 +108,7 @@ def annotate(
     ----------
     feature_table : DataFrame
     roi_list : List[ROI]
-    annotator : _IsotopologueEnvelopeAnnotator
+    annotator : _IsotopologueAnnotator
 
     """
     annotator.load_data(feature_table, roi_list)
@@ -120,7 +120,7 @@ def annotate(
     annotator.clear_data()
 
 
-class _IsotopologueEnvelopeAnnotator:
+class _IsotopologueAnnotator:
     """
     Manages Isotopologue annotation in a sample.
 
@@ -152,7 +152,7 @@ class _IsotopologueEnvelopeAnnotator:
         self._roi_list: Optional[List[LCRoi]] = None
         self._mz_order: Optional[np.ndarray] = None
         self._mz: Optional[np.ndarray] = None
-        self._area: Optional[np.ndarray] = None
+        self._int: Optional[np.ndarray] = None
         self._roi_index: Optional[np.ndarray] = None
         self._ft_index: Optional[np.ndarray] = None
         self._non_annotated: Optional[Set[int]] = None
@@ -171,7 +171,7 @@ class _IsotopologueEnvelopeAnnotator:
         self._roi_list = None
         self._mz = None
         self._mz_order = None
-        self._area = None
+        self._int = None
         self._roi_index = None
         self._ft_index = None
         self._non_annotated = None
@@ -186,17 +186,29 @@ class _IsotopologueEnvelopeAnnotator:
         Load data from a sample.
 
         """
-        mz = feature_table[c.MZ].to_numpy()
-        mz_order = np.argsort(mz)
-        self._mz = mz[mz_order]
+        if feature_table.empty:
+            mz = np.array([])
+            mz_order = mz.copy()
+            intensity = mz.copy()
+            roi_index = mz.copy()
+            ft_index = mz.copy()
+        else:
+            mz = feature_table[c.MZ].to_numpy()
+            mz_order = np.argsort(mz)
+            mz = mz[mz_order]
+            intensity = feature_table[c.HEIGHT].to_numpy()[mz_order]
+            roi_index = feature_table[c.ROI_INDEX].to_numpy()[mz_order]
+            ft_index = feature_table[c.FT_INDEX].to_numpy()[mz_order]
+
+        self._mz = mz
         self._mz_order = mz_order
-        self._area = feature_table[c.HEIGHT].to_numpy()[mz_order]
-        self._roi_index = feature_table[c.ROI_INDEX].to_numpy()[mz_order]
-        self._ft_index = feature_table[c.FT_INDEX].to_numpy()[mz_order]
+        self._int = intensity
+        self._roi_index = roi_index
+        self._ft_index = ft_index
         self._roi_list = roi_list
         self.similarity_checker.load_data(roi_list, self._roi_index, self._ft_index)
         self._non_annotated = set(range(self._mz.size))
-        self._mono_candidates = list(np.argsort(self._area))
+        self._mono_candidates = list(np.argsort(self._int))
         self._envelope_label = -np.ones_like(self._roi_index)
         self._envelope_charge = -np.ones_like(self._roi_index)
         self._envelope_index = -np.ones_like(self._roi_index)
@@ -216,7 +228,7 @@ class _IsotopologueEnvelopeAnnotator:
         return next_mono_index
 
     def _get_mmi_candidates(self, mono_index: int):
-        mmi_candidates = self.mmi_finder.find(self._mz, self._area, mono_index)
+        mmi_candidates = self.mmi_finder.find(self._mz, self._int, mono_index)
 
         # check the similarity between the monoisotopologue and the mmi
         mmi_candidates = self.similarity_checker.filter_mmi_candidates(
