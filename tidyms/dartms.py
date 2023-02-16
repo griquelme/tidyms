@@ -7,6 +7,7 @@
 import tqdm
 import numpy as np
 import pandas as pd
+import natsort
 import tidyms as ms
 import os
 import plotnine as p9
@@ -16,7 +17,8 @@ import math
 import scipy
 import warnings
 import functools
-
+import bs4
+import random
 
 
 
@@ -84,6 +86,7 @@ def get_separate_chronogram_indices(msData, msData_ID, spotsFile, intensityThres
             spots = pd.DataFrame({
                 "msData_ID": [],
                 "spotInd": [],
+                "include": [],
                 "name": [],
                 "group": [],
                 "class": [],
@@ -94,10 +97,11 @@ def get_separate_chronogram_indices(msData, msData_ID, spotsFile, intensityThres
             })
     else:
         raise RuntimeError("Parameter spotsFile must be a str")
-
+        
     spotsCur = spots[spots["msData_ID"] == msData_ID]
     separationInds = []
     if spotsCur.shape[0] == 0:
+        print("      .. no spots defined for file. Spots will be detected automatically, but not used for now. Please modify the spots file '%s' to include or modify them"%(spotsFile))
         ticInts = [sum(msData.get_spectrum(i).spint) for i in range(msData.get_n_spectra())]
         startInd = None
         endInd = None
@@ -110,22 +114,25 @@ def get_separate_chronogram_indices(msData, msData_ID, spotsFile, intensityThres
                 
             else:
                 if startInd is not None:
-                    separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), 0, 0, 0))
+                    ## spots are not automatically added
+                    separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), "unknown", "unknown", 1))
                     startInd = None
                     endInd = None
         
         if startInd is not None:
-            separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), 0, 0, 0))
+            pass
+            ## spots are not automatically added
+            separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), "unknown", "unknown", 1))
         
         for spotInd, spot in enumerate(separationInds):
-            print(spot)
             temp = pd.DataFrame({
                 "msData_ID": [msData_ID],
                 "spotInd": [int(spotInd)],
+                "include": [False],
                 "name": [spot[2]],
-                "group": [0],
-                "class": [0],
-                "batch": [0],
+                "group": [spot[3]],
+                "class": [spot[4]],
+                "batch": [spot[5]],
                 "startRT_seconds": [msData.get_spectrum(spot[0]).time],
                 "endRT_seconds": [msData.get_spectrum(spot[1]).time],
                 "comment": ["spot automatically extracted by get_separate_chronogram_indices(msData, '%s', intensityThreshold = %f, startTime_seconds = %f, endTime_seconds = %f)"%(msData_ID, intensityThreshold, startTime_seconds, endTime_seconds)]
@@ -133,6 +140,7 @@ def get_separate_chronogram_indices(msData, msData_ID, spotsFile, intensityThres
             spotsCur = pd.concat([spotsCur, temp], axis = 0)
         spots = pd.concat([spots, spotsCur], axis = 0, ignore_index = True).reset_index(drop = True)
         spots.to_csv(spotsFile, sep = "\t", index = False)
+        separationInds = []
     
     else:
         for index, row in spotsCur.iterrows():
@@ -159,7 +167,7 @@ def add_chronograms_samples_to_assay(assay, sepInds, msData, filename, fileNameC
     for subseti, _ in enumerate(sepInds):
         subset_name = fileNameChangeFunction("VIRTUAL(%s::%s)"%(os.path.splitext(os.path.basename(filename))[0], sepInds[subseti][2]))
         if verbose: 
-            print("      .. adding subset %4d with name '%35s', width %6.1f sec, RTs %6.1f - %6.1f"%(subseti, subset_name, msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time))
+            print("      .. adding subset %4d with name '%35s' (group '%s', class '%s'), width %6.1f sec, RTs %6.1f - %6.1f"%(subseti, subset_name, sepInds[subseti][3], sepInds[subseti][4], msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time))
         subset = ms.fileio.MSData_Proxy(ms.dartms.subset_MSData_chronogram(msData, sepInds[subseti][0], sepInds[subseti][1]))
         assay.add_virtual_sample(
             MSData_object = subset,
@@ -177,8 +185,11 @@ def add_chronograms_samples_to_assay(assay, sepInds, msData, filename, fileNameC
         )
 
 
-def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument, centroid_profileMode = True, fileNameChangeFunction = None, 
-                                        use_signal_function = None):
+def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument, centroid_profileMode = True, 
+                                        fileNameChangeFunction = None, 
+                                        use_signal_function = None, 
+                                        rewriteRTinFiles = False, rewriteDeleteUnusedScans = True,
+                                        intensity_threshold_spot_extraction = 1E3):
     """
     Generates a new assay from a series of chronograms and a spot_file
 
@@ -201,12 +212,13 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
         n_jobs = 2,
         cache_MSData_objects = True)
     print("   - Created empty assay")
-    
+
+    rtShiftToApply = 0
     for filename in filenames:
         print("   - File '%s'"%(filename), end = "")
 
         msData = None
-        if os.path.exists(filename + ".pickle") and os.path.isfile(filename + ".pickle"):
+        if not rewriteRTinFiles and os.path.exists(filename + ".pickle") and os.path.isfile(filename + ".pickle"):
             print("  // loaded from pickle file")
             with open(filename + ".pickle", "rb") as fin:
                 msData = pickle.load(fin)
@@ -219,7 +231,102 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
                 separation = "None/DART", 
                 data_import_mode = ms._constants.MEMORY,
             )
-        
+
+            if rewriteRTinFiles:
+                lastRT = 0
+                earliestRT = 0
+                for spectrumi, spectrum in msData.get_spectra_iterator():
+                    lastRT = max(lastRT, spectrum.time)
+                    spectrum.time = spectrum.time
+                lastRT = lastRT + 10
+
+                if rewriteDeleteUnusedScans:
+
+                    if os.path.exists(spot_file) and os.path.isfile(spot_file):
+                        spots = pd.read_csv(spot_file, sep = "\t")
+                        lastRT = 0
+                        earliestRT = 1E9
+
+                        for rowi, row in spots.iterrows():
+                            if spots.at[rowi, "msData_ID"] == os.path.basename(filename).replace(".mzML", "") and spots.at[rowi, "include"]:
+                                lastRT = max(lastRT, spots.at[rowi, "endRT_seconds"])
+                                earliestRT = min(earliestRT, spots.at[rowi, "startRT_seconds"])
+
+                        if lastRT > earliestRT:
+                            lastRT += 5
+                            earliestRT = max(0, earliestRT - 5)
+                            print("      .. using only scans from RTs %.1f - %.1f seconds"%(earliestRT, lastRT))
+                        else:
+                            print("      .. no spots to be used in sample, skipping")
+                            continue
+
+                    else:
+                        raise RuntimeError("Can only delete unused scans if the spots file has been created before and manually checked.")
+                
+                rtShiftToApply = rtShiftToApply - earliestRT + 10
+                print("      .. shifting RT by %.1f seconds"%(rtShiftToApply))
+
+                # Reading data from the xml file
+                with open(filename, 'r') as f:
+                    data = f.read()
+
+                bs_data = bs4.BeautifulSoup(data, 'xml')
+
+                ## <cvParam cvRef="MS" accession="MS:1000016" name="scan start time" value="0.033849999309" unitCvRef="UO" unitAccession="UO:0000031" unitName="minute"/>
+                toDel = []
+                tagU = False
+                tagInd = 0
+                for tag in bs_data.find_all("spectrum"):
+                    scanlist = tag.find("scanList")
+                    if scanlist is not None:
+                        scan = scanlist.find("scan")
+                        if scan is not None:
+                            cvParam = scan.find('cvParam', {'accession':'MS:1000016', 'name':'scan start time'}, recursive = True)
+                            if cvParam is not None:
+                                rt = float(cvParam["value"])
+                                if rt < earliestRT/60. or rt > lastRT/60.:
+                                    tagU = False
+                                    toDel.append(tag)
+                                else:
+                                    tagU = True
+                    if tagU:
+                        tag["id"] = tag["id"].replace("scan=%d"%(int(tag["index"])+1), "scan=%d"%(tagInd+1))
+                        tag["index"] = tagInd
+                        tagInd += 1
+                spectrumList = bs_data.find("spectrumList")
+                spectrumList["count"] = tagInd
+                for delTag in toDel:
+                    delTag.extract()
+                for tag in bs_data.find_all('cvParam', {'accession':'MS:1000016', 'name':'scan start time'}):
+                    tag['value'] = float(tag['value']) + rtShiftToApply / 60.
+                
+                with open(filename.replace(".mzML", "_rtShifted.mzML"), "w", newline='\n') as fout: 
+                    fout.write(bs_data.prettify().replace("\r", ""))
+                
+                if os.path.exists(spot_file) and os.path.isfile(spot_file):
+                    spots = pd.read_csv(spot_file, sep = "\t")
+
+                    for rowi, row in spots.iterrows():
+                        if spots.at[rowi, "msData_ID"] == os.path.basename(filename).replace(".mzML", ""):
+                            spots.at[rowi, "msData_ID"] = spots.at[rowi, "msData_ID"] + "_rtShifted"
+                            spots.at[rowi, "startRT_seconds"] = spots.at[rowi, "startRT_seconds"] + rtShiftToApply
+                            spots.at[rowi, "endRT_seconds"] = spots.at[rowi, "endRT_seconds"] + rtShiftToApply
+                            
+                    spots.to_csv(spot_file, sep = "\t", index = False)
+
+                rtShiftToApply += lastRT
+
+                msData = ms.fileio.MSData.create_MSData_instance(
+                    path = filename.replace(".mzML", "_rtShifted.mzML"),
+                    ms_mode = ms_mode,
+                    instrument = instrument,
+                    separation = "None/DART", 
+                    data_import_mode = ms._constants.MEMORY,
+                )
+                
+                with open(filename.replace(".mzML", "_rtShifted.pickle"), "wb") as fout:
+                    pickle.dump(msData, fout)
+
             if centroid_profileMode and ms_mode == "profile":
                 print("      .. centroiding")
                 for k, spectrum in msData.get_spectra_iterator():
@@ -237,8 +344,8 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
                 useInds = use_signal_function(spectrum.mz, spectrum.spint)
                 spectrum.mz = spectrum.mz[useInds]
                 spectrum.spint = spectrum.spint[useInds]
-
-        sepInds = ms.dartms.get_separate_chronogram_indices(msData, os.path.splitext(os.path.basename(filename))[0], spot_file, intensityThreshold = 1E3)
+        
+        sepInds = ms.dartms.get_separate_chronogram_indices(msData, os.path.basename(filename).replace(".mzML", "") + ("" if not rewriteRTinFiles else "_rtShifted"), spot_file, intensityThreshold = intensity_threshold_spot_extraction)
         if len(sepInds) == 0:
             print("      .. no spots to extract")
         else:
@@ -248,9 +355,10 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
 
 
 ## Plot sample TICs
-def plot_sample_TICs(assay):
+def plot_sample_TICs(assay, separate = True, separate_by = "group"):
     temp = {
         "sample": [],
+        "file": [],
         "group": [],
         "time": [],
         "kSpectrum": [],
@@ -261,21 +369,42 @@ def plot_sample_TICs(assay):
         msDataObj = assay.get_ms_data(sample)
         for k, spectrum in msDataObj.get_spectra_iterator():
             temp["sample"].append(sample)
+            temp["file"].append(sample.split("::")[0])
             temp["group"].append(sample_metadata.loc[sample, "group"])
             temp["time"].append(spectrum.time - msDataObj.get_spectrum(0).time)
             temp["kSpectrum"].append(k)
             temp["totalIntensity"].append(np.sum(spectrum.spint))
 
     temp = pd.DataFrame(temp)
-    p = (p9.ggplot(data = temp, mapping = p9.aes(
-            x = "time", y = "totalIntensity", colour = "group", group = "sample"
-        ))
-        + p9.geom_line(alpha = 0.8)
-        + p9.theme_minimal()
-        + p9.theme(legend_position = "bottom")
-        + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
-        + p9.ggtitle("TIC of chronogram samples")
-    )
+    if separate:
+        
+        temp["file"] = pd.Categorical(temp["file"], ordered = True, categories = natsort.natsorted(set(temp["file"])))
+        p = (p9.ggplot(data = temp, mapping = p9.aes(
+                x = "time", y = "totalIntensity", colour = "group", group = "sample"
+            ))
+            + p9.geom_line(alpha = 0.8)
+            + p9.geom_point(data = temp.loc[temp.groupby("sample").time.idxmin()], colour = "black", size = 2)
+            + p9.geom_point(data = temp.loc[temp.groupby("sample").time.idxmax()], colour = "black", size = 2)
+            + p9.facet_wrap(separate_by)
+            + p9.theme_minimal()
+            + p9.theme(legend_position = "bottom")
+            + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
+            + p9.ggtitle("TIC of chronogram samples")
+        )
+    else:
+        temp["sample"] = pd.Categorical(temp["sample"], ordered = True, categories = natsort.natsorted(set(temp["sample"])))
+        p = (p9.ggplot(data = temp, mapping = p9.aes(
+                x = "time", y = "totalIntensity", colour = "group", group = "sample"
+            ))
+            + p9.geom_line(alpha = 0.8)
+            + p9.geom_point(data = temp.loc[temp.groupby("sample").time.idxmin()], colour = "black", size = 2)
+            + p9.geom_point(data = temp.loc[temp.groupby("sample").time.idxmax()], colour = "black", size = 2)
+            + p9.theme_minimal()
+            + p9.theme(legend_position = "bottom")
+            + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
+            + p9.ggtitle("TIC of chronogram samples")
+        )
+
     print(p)
 
 def drop_lower_spectra(assay, drop_rate = None):
@@ -358,6 +487,7 @@ def normalize_to_internal_standard(assay, std, multiplication_factor = 1, plot =
 
     if plot:
         temp = pd.DataFrame(temp)
+        temp["sample"] = pd.Categorical(temp["sample"], ordered = True, categories = natsort.natsorted(set(temp["sample"])))
         p = (p9.ggplot(data = temp, mapping = p9.aes(
                 x = "sample", y = "istdAbundance", group = "group", colour = "group"
             ))
@@ -377,7 +507,7 @@ def normalize_to_internal_standard(assay, std, multiplication_factor = 1, plot =
 
 
 
-def get_MZ_offsets(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_deviation_absolute = 0.1):
+def get_MZ_offsets(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_deviation_absolute = 0.1, selection_criteria = "mostAbundant"):
     """
     Function to calculate the mz offsets of several reference features in the dataset. 
     A signal for a feature on the referenceMZs list is said to be found, if it is within the max_mz_deviation_absolute parameter. The feature with the closest mz difference will be used in cases where several features are present in the search window
@@ -407,22 +537,27 @@ def get_MZ_offsets(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_devi
     
     for sample in assay.manager.get_sample_names():
         msDataObj = assay.get_ms_data(sample)
-        chroms = ms.raw_data_utils.make_chromatograms(msDataObj, referenceMZs, window = max_mz_deviation_absolute)
-        for i, chrom in tqdm.tqdm(enumerate(chroms), total = len(chroms), delay = 5):
-            referenceMZ = referenceMZs[i]
-            for j in range(chrom.time.shape[0]):
-                ind, curMZ, deltaMZ, deltaMZPPM, inte = msDataObj.get_spectrum(j).get_closest_mz(referenceMZ, max_offset_absolute = max_mz_deviation_absolute)
+        for i, referenceMZ in enumerate(referenceMZs):
+            for spectrumi, spectrum in msDataObj.get_spectra_iterator():
+                ind = None
+                if selection_criteria.lower() == "closestmz":
+                    ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_closest_mz(referenceMZ, max_offset_absolute = max_mz_deviation_absolute)
+                elif selection_criteria.lower() == "mostabundant":
+                    ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_most_abundant_signal_in_range(referenceMZ, max_offset_absolute = max_mz_deviation_absolute)
+                else:
+                    raise RuntimeError("Unknown parameter selection_criteria, should be either of['mostAbundant', 'closestMZ']")
+
                 if ind is not None:
                     temp["referenceMZ"].append(referenceMZ)
                     temp["mz"].append(curMZ)
                     temp["mzDeviation"].append(deltaMZ)
                     temp["mzDeviationPPM"].append(deltaMZPPM)
-                    temp["time"].append(chrom.time[j])
+                    temp["time"].append(spectrum.time)
                     temp["intensity"].append(inte)
                     temp["sample"].append(sample)
                     temp["file"].append(sample.split("::")[0])
-                    temp["chromID"].append("%s %.4f"%(sample, referenceMZ))
-
+                    temp["chromID"].append("%s %.4f"%(sample, referenceMZ))                    
+                
     return pd.DataFrame(temp)
 
 def _revMZ(mz, correctby, *args, **kwargs):
@@ -435,7 +570,11 @@ def _revMZ(mz, correctby, *args, **kwargs):
     else:
         raise RuntimeError("Unknown correctby option '%s' specified. Must be either of ['mzDeviationPPM', 'mzDeviation']"%(correctby))
 
-def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_deviation_absolute = 0.1, correctby = "mzDeviationPPM", max_deviationPPM_to_use_for_correction = 80, plot = False, verbose = True):
+def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007276], 
+        max_mz_deviation_absolute = 0.1, correctby = "mzDeviationPPM", 
+        max_deviationPPM_to_use_for_correction = 80, selection_criteria = "mostAbundant",
+        correct_on_level = "file", 
+        plot = False, verbose = True):
     """
     Function to correct systematic shifts of mz values in individual spot samples
     Currently, only a constant MZ offset relative to several reference features can be corrected. The correction is carried out by calculating the median error relative to the reference features' and then apply either the aboslute or ppm devaition to all mz values in the spot sample. 
@@ -451,35 +590,45 @@ def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007
     Returns:
         (pandas.DataFrame, plot): Overview of the correction and plot (if it shall be generated)
     """    
-    temp = get_MZ_offsets(assay, referenceMZs = referenceMZs, max_mz_deviation_absolute = max_mz_deviation_absolute)
-    temp["mode"] = "original MZs"
+    if not correct_on_level.lower() in ["file", "sample"]:
+        raise RuntimeError("Parameter correct_on_level has an unknown value '%s', must be either of ['file', 'sample']"%(correct_on_level))
 
+    temp = get_MZ_offsets(assay, referenceMZs = referenceMZs, max_mz_deviation_absolute = max_mz_deviation_absolute, selection_criteria = selection_criteria)
+    temp["mode"] = "original MZs"
+    
     tempMod = temp.copy()
     tempMod["mode"] = "corrected MZs (by ppm mz deviation)"
     transformFactors = None
     if correctby == "mzDeviationPPM":
-        transformFactors = tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby("sample")["mzDeviationPPM"].median()
-        tempMod["mz"] = tempMod["mz"] * (1 - tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby("sample")["mzDeviationPPM"].transform("median") / 1E6) #* (1. - (temp.groupby("chromID")["mzDeviationPPM"].transform("median")) / 1E6)  ## Error
+        transformFactors = tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby(correct_on_level)["mzDeviationPPM"].median()
+        tempMod["mz"] = tempMod["mz"] * (1 - tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby(correct_on_level)["mzDeviationPPM"].transform("median") / 1E6) #* (1. - (temp.groupby("chromID")["mzDeviationPPM"].transform("median")) / 1E6)  ## Error
     elif correctby == "mzDeviation":
-        transformFactors = tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby("sample")["mzDeviation"].median()
-        tempMod["mz"] = tempMod["mz"] - tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby("sample")["mzDeviation"].transform("median")
+        transformFactors = tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby(correct_on_level)["mzDeviation"].median()
+        tempMod["mz"] = tempMod["mz"] - tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby(correct_on_level)["mzDeviation"].transform("median")
     else:
         raise RuntimeError("Unknown option for correctby parameter. Must be 'mzDeviation' or 'mzDeviationPPM'")
         
     tempMod["mzDeviationPPM"] = (tempMod["mz"] - tempMod["referenceMZ"]) / tempMod["referenceMZ"] * 1E6
     tempMod["mzDeviation"] = (tempMod["mz"] - tempMod["referenceMZ"])
 
+    transformFactors.to_csv("./temp.tsv")
+
     for samplei, sample in enumerate(assay.manager.get_sample_names()):
         msDataObj = assay.get_ms_data(sample)
         if issubclass(type(msDataObj), ms.fileio.MSData_in_memory):
             raise RuntimeError("Function correct_MZ_shift_across_samples only works with objects of class ms.fileio.MSData_in_memory. Please switch data_import_mode to ms._constancts.MEMORY")
 
-        if sample not in transformFactors.index:
+        transformFactor = None
+        if correct_on_level.lower() == "sample" and sample in transformFactors.index:
+            transformFactor = transformFactors.loc[sample]
+        elif correct_on_level.lower() == "file" and sample.split("::")[0] in transformFactors.index:
+            transformFactor = transformFactors.loc[sample.split("::")[0]]
+
+        if transformFactor is None:
             print("Error: sample '%s' could not be corrected as no reference MZs were detected in it"%(sample))
             for k, spectrum in msDataObj.get_spectra_iterator():
                 spectrum.original_mz = spectrum.mz
         else:
-            transformFactor = transformFactors.loc[sample]
 
             for k, spectrum in msDataObj.get_spectra_iterator():
                 spectrum.original_mz = spectrum.mz
@@ -505,13 +654,14 @@ def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007
 
     p = None
     if plot:
+        temp_["file"] = pd.Categorical(temp_["file"], ordered = True, categories = natsort.natsorted(set(temp_["file"])))
         p = (p9.ggplot(data = temp_[(~(temp_["intensity"].isna())) & (np.abs(temp_["mzDeviationPPM"]) <= 100)], mapping = p9.aes(
                 x = "referenceMZ", y = "mzDeviationPPM", group = "chromID", colour = "sample", alpha = "intensity"
             ))
             + p9.geom_hline(yintercept = 0, size = 1, colour = "Black", alpha = 0.25)
             + p9.geom_line()
             + p9.geom_point()
-            + p9.facet_wrap("~file + mode", ncol = 6)
+            + p9.facet_wrap("~ mode + file", ncol = 12)
             + p9.theme_minimal()
             + p9.theme(legend_position = "bottom")
             + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.05, 'left':0.05})
@@ -697,7 +847,7 @@ def describe_MZ_cluster(mz, intensity, clust):
     return mzDesc
     
 
-def collapse_mz_info(mz, intensity, time, cluster, intensity_collapse_method = "sum"):
+def collapse_mz_info(mz, original_mz, intensity, time, cluster, intensity_collapse_method = "sum"):
     clusts, ns = np.unique(cluster, return_counts = True)
     if -1 in clusts:
         clusts = clusts[1:]
@@ -708,7 +858,7 @@ def collapse_mz_info(mz, intensity, time, cluster, intensity_collapse_method = "
 
     usedFeatures = {}
     for i in range(clusts.shape[0]):
-        usedFeatures[i] = np.zeros((ns[i], 3), dtype = np.float32)
+        usedFeatures[i] = np.zeros((ns[i], 4), dtype = np.float32)
 
     for i in range(mz.shape[0]):
         j = cluster[i]
@@ -726,6 +876,7 @@ def collapse_mz_info(mz, intensity, time, cluster, intensity_collapse_method = "
         usedFeatures[j][toPut, 0] = mz[i]
         usedFeatures[j][toPut, 1] = intensity[i]
         usedFeatures[j][toPut, 2] = time[i]
+        usedFeatures[j][toPut, 3] = original_mz[i]
     
     mz_ = mz_ / intensity_
     if intensity_collapse_method == "sum":
@@ -824,6 +975,7 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
             "spectrumInd": [],
             "time": [],
             "mz": [],
+            "original_mz": [],
             "intensity": []
         }
         msDataObj = assay.get_ms_data(sample)
@@ -833,6 +985,7 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
             temp["spectrumInd"].extend((k for i in range(spectrum.mz.shape[0])))
             temp["time"].extend((spectrum.time for i in range(spectrum.mz.shape[0])))
             temp["mz"].append(spectrum.mz)
+            temp["original_mz"].append(spectrum.original_mz)
             temp["intensity"].append(spectrum.spint)
             summary_totalSpectra += 1
         
@@ -840,6 +993,7 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
         temp["spectrumInd"] = np.array(temp["spectrumInd"])
         temp["time"] = np.array(temp["time"])
         temp["mz"] = np.concatenate(temp["mz"], axis = 0)
+        temp["original_mz"] = np.concatenate(temp["original_mz"], axis = 0)
         temp["intensity"] = np.concatenate(temp["intensity"], axis = 0)
         summary_totalSignals = len(temp["mz"])
 
@@ -857,6 +1011,7 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
         temp["spectrumInd"] = temp["spectrumInd"][keep]
         temp["time"] = temp["time"][keep]
         temp["mz"] = temp["mz"][keep]
+        temp["original_mz"] = temp["original_mz"][keep]
         temp["intensity"] = temp["intensity"][keep]
         temp["cluster"] = reindex_cluster(temp["cluster"][keep])
 
@@ -878,6 +1033,7 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
         temp["spectrumInd"] = temp["spectrumInd"][keep]
         temp["time"] = temp["time"][keep]
         temp["mz"] = temp["mz"][keep]
+        temp["original_mz"] = temp["original_mz"][keep]
         temp["intensity"] = temp["intensity"][keep]
         temp["cluster"] = reindex_cluster(temp["cluster"][keep])
 
@@ -903,6 +1059,7 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
                 for j in range(ns.shape[0]):
                     clust = ns[j]
                     mzs = np.copy(temp["mz"][temp["cluster"] == clust])
+                    original_mzs = np.copy(temp["original_mz"][temp["cluster"] == clust])
                     ints = np.copy(temp["intensity"][temp["cluster"] == clust])
                     fout.write('<feature id="%s">\n'%j)
                     fout.write('  <position dim="0">%f</position>\n'%((maxRT + minRT) / 2))
@@ -913,10 +1070,10 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
                     fout.write('  <overallquality>0</overallquality>\n')
                     fout.write('  <charge>1</charge>\n')
                     fout.write('  <convexhull nr="0">\n')
-                    fout.write('    <pt x="%f" y="%f" />\n'%(minRT, np.min(mzs)))
-                    fout.write('    <pt x="%f" y="%f" />\n'%(minRT, np.max(mzs)))
-                    fout.write('    <pt x="%f" y="%f" />\n'%(maxRT, np.max(mzs)))
-                    fout.write('    <pt x="%f" y="%f" />\n'%(maxRT, np.min(mzs)))
+                    fout.write('    <pt x="%f" y="%f" />\n'%(minRT, np.min(original_mzs)))
+                    fout.write('    <pt x="%f" y="%f" />\n'%(minRT, np.max(original_mzs)))
+                    fout.write('    <pt x="%f" y="%f" />\n'%(maxRT, np.max(original_mzs)))
+                    fout.write('    <pt x="%f" y="%f" />\n'%(maxRT, np.min(original_mzs)))
                     fout.write('  </convexhull>\n')
                     fout.write('</feature>\n')
 
@@ -926,7 +1083,7 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
         if verbose:
             print("   .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"%(samplei + 1, len(assay.manager.get_sample_names()), sample, summary_totalSpectra, summary_totalSignals, summary_clusterAfterCrude, summary_clusterAfterFine, summary_clusterAfterQualityFunctions, np.unique(temp["cluster"]).shape[0]))
 
-        mzs, intensities, usedFeatures = ms.dartms.collapse_mz_info(temp["mz"], temp["intensity"], temp["time"], temp["cluster"], intensity_collapse_method = aggregation_function)
+        mzs, intensities, usedFeatures = ms.dartms.collapse_mz_info(temp["mz"], temp["original_mz"], temp["intensity"], temp["time"], temp["cluster"], intensity_collapse_method = aggregation_function)
         
         sampleObjNew = ms.fileio.MSData_in_memory.generate_from_MSData_object(msDataObj)
         startRT = sampleObjNew.get_spectrum(0).time
@@ -962,7 +1119,7 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
 
 
 def write_consensus_spectrum_to_featureML(assay, widthRT = 40):
-    for samplei, sample in tqdm.tqdm(enumerate(assay.manager.get_sample_names()), total = len(assay.manager.get_sample_names())):
+    for samplei, sample in tqdm.tqdm(enumerate(assay.manager.get_sample_names()), total = len(assay.manager.get_sample_names()), desc = "exporting to featureML"):
 
         with open(os.path.join(".", "%s.featureML"%(sample)).replace(":", "_"), "w") as fout:
             msDataObj = assay.get_ms_data(sample)
@@ -1038,7 +1195,7 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
         "cluster": [],
     }
     
-    for samplei, sample in tqdm.tqdm(enumerate(assay.manager.get_sample_names()), total = len(assay.manager.get_sample_names())):
+    for samplei, sample in tqdm.tqdm(enumerate(assay.manager.get_sample_names()), total = len(assay.manager.get_sample_names()), desc = "bracketing: fetching data"):
         msDataObj = assay.get_ms_data(sample)
         for k, spectrum in msDataObj.get_spectra_iterator():
             temp["sample"].extend((sample for i in range(spectrum.mz.shape[0])))
@@ -1085,6 +1242,7 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
     ## Iterative cluster generation with the same algorithm used for calculating the consensus spectra. 
     ## This algorithm is greedy and extends clusters based on their mean mz value and the difference to the next closest feature
     if True:
+        print("   .. clustering with method 2")
         min_difference_ppm = 100
         min_signals_per_cluster = 2
         temp["cluster"] = ms.dartms.crude_cluster_mz_list(sample, temp["mz"], temp["intensity"], min_difference_ppm = min_difference_ppm)
@@ -1155,7 +1313,7 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
 
     temp["cluster"] = reindex_cluster(temp["cluster"])
     clusts = np.unique(temp["cluster"])
-    for clust in tqdm.tqdm(clusts):
+    for clust in tqdm.tqdm(clusts, desc = "bracketing: saving for featureML export"):
         
         assign = [i for i in range(len(temp["cluster"])) if temp["cluster"][i] == clust]
 
@@ -1181,7 +1339,7 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
         for samplei, sample in enumerate(assay.manager.get_sample_names()):
             use = samples == sample
             if np.sum(use) > 0:
-                domzs = np.ndarray.flatten(np.concatenate([np.array(fs[i][:,0]) for i in range(len(fs)) if use[i]]))
+                domzs = np.ndarray.flatten(np.concatenate([np.array(fs[i][:,3]) for i in range(len(fs)) if use[i]]))
                 startRT = startRTs[use][0]
                 endRT = endRTs[use][0]
                 tempClusterInfo["featureMLInfo"][clust]["sampleHulls"][sample] = [(startRT, np.min(domzs)), (startRT, np.max(domzs)), (endRT, np.max(domzs)), (endRT, np.min(domzs))]
@@ -1189,7 +1347,7 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
     if show_diagnostic_plots:
         print("   .. generating diagnostic plot")
         temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
-        for featurei in tqdm.tqdm(range(len(tempClusterInfo["minMZ"]))):
+        for featurei in tqdm.tqdm(range(len(tempClusterInfo["minMZ"])), desc = "bracketing: generating plots"):
             for samplei, sample in enumerate(assay.manager.get_sample_names()):
                 msDataObj = assay.get_ms_data(sample)
                 sample_metadata = assay.manager.get_sample_metadata()
@@ -1199,15 +1357,6 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
                         for i in usei:
                             temp["rt"].append(spectrum.time)
                             temp["mz"].append(spectrum.mz[i])
-                            temp["intensity"].append(spectrum.spint[i])
-                            temp["sample"].append(sample)
-                            temp["file"].append(sample.split("::")[0])
-                            temp["group"].append(sample_metadata.loc[sample, "group"])
-                            temp["type"].append("modified")
-                            temp["feature"].append(featurei)
-
-                            temp["rt"].append(spectrum.time)
-                            temp["mz"].append(spectrum.original_mz[i])
                             temp["intensity"].append(spectrum.spint[i])
                             temp["sample"].append(sample)
                             temp["file"].append(sample.split("::")[0])
@@ -1222,11 +1371,33 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
                                 temp["sample"].append(sample)
                                 temp["file"].append(sample.split("::")[0])
                                 temp["group"].append(sample_metadata.loc[sample, "group"])
-                                temp["type"].append("original")
+                                temp["type"].append("non-consensus")
                                 temp["feature"].append(featurei)
-        temp = pd.DataFrame(temp)
-        
 
+                            for j in range(spectrum.usedFeatures[i].shape[0]):
+                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
+                                temp["mz"].append(spectrum.usedFeatures[i][j, 3])
+                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
+                                temp["sample"].append(sample)
+                                temp["file"].append(sample.split("::")[0])
+                                temp["group"].append(sample_metadata.loc[sample, "group"])
+                                temp["type"].append("raw-onlyFeatures")
+                                temp["feature"].append(featurei)
+            
+                for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
+                    usei = np.where(np.logical_and(spectrum.original_mz >= spectrum.reverseMZ(features[featureInd][0]), spectrum.original_mz <= spectrum.reverseMZ(features[featureInd][2])))[0]
+                    if usei.size > 0:
+                        for i in usei:
+                            temp["rt"].append(spectrum.time)
+                            temp["mz"].append(spectrum.original_mz[i])
+                            temp["intensity"].append(spectrum.spint[i])
+                            temp["sample"].append(sample)
+                            temp["file"].append(sample.split("::")[0])
+                            temp["group"].append(sample_metadata.loc[sample, "group"])
+                            temp["type"].append("raw-allSignals")
+                            temp["feature"].append(featureInd)
+
+        temp = pd.DataFrame(temp)
         dat = pd.concat([
                 temp.groupby(["feature", "type"])["mz"].count(),
                 temp.groupby(["feature", "type"])["mz"].min(),    
@@ -1293,7 +1464,7 @@ def write_brac_results_to_featureML(bracRes, featureMLlocation = "./bracketedRes
         fout.write('    </dataProcessing>\n')
         fout.write('    <featureList count="%d">\n'%(ns))
 
-        for j in tqdm.tqdm(range(ns)):
+        for j in tqdm.tqdm(range(ns), desc = "exporting featureML"):
 
             fout.write('<feature id="%s">\n'%j)
             fout.write('  <position dim="0">%f</position>\n'%((featureMLStartRT + featureMLEndRT) / 2))
@@ -1334,7 +1505,7 @@ def build_data_matrix(assay, bracketing_results, on = "processedData", originalD
     sampleNamesToRowI = dict(((sample, i) for i, sample in enumerate(sampleNames)))
 
     dataMatrix = np.zeros((len(sampleNames), len(bracketing_results)))
-    for samplei, sample in tqdm.tqdm(enumerate(sampleNames), total = len(sampleNames)):
+    for samplei, sample in tqdm.tqdm(enumerate(sampleNames), total = len(sampleNames), desc = "data matrix: gathering data"):
         msDataObj = assay.get_ms_data(sample)
         spectrum = msDataObj.get_spectrum(0)
 
@@ -1348,11 +1519,11 @@ def build_data_matrix(assay, bracketing_results, on = "processedData", originalD
                     dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
 
             elif on == "originalData":
-                _mzmin, _mzmean, _mzmax = spectrum.reverseMZ(mzmin), spectrum.reverseMZ(mzmean), spectrum.reverseMZ(mzmax)
-                _mzmin, _mzmax = _mzmin * (1. - originalData_mz_deviation_multiplier_PPM / 1E6), _mzmax * (1. + originalData_mz_deviation_multiplier_PPM / 1E6)
-
                 s = 0
                 for oSpectrumi, oSpectrum in msDataObj.original_MSData_object.get_spectra_iterator():
+                    _mzmin, _mzmean, _mzmax = oSpectrum.reverseMZ(mzmin), oSpectrum.reverseMZ(mzmean), oSpectrum.reverseMZ(mzmax)
+                    _mzmin, _mzmax = _mzmin * (1. - originalData_mz_deviation_multiplier_PPM / 1E6), _mzmax * (1. + originalData_mz_deviation_multiplier_PPM / 1E6)
+
                     use = np.logical_and(oSpectrum.mz >= _mzmin, oSpectrum.mz <= _mzmax)
                     if np.sum(use) > 0:
                         s += np.sum(oSpectrum.spint[use])
@@ -1457,6 +1628,92 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
     return [k != 0 for k in keeps]
 
 
+
+
+
+
+
+
+
+
+
+
+
+def plot_feature_mz_deviations(assay, features, featureInd, types = None):
+    if types is None:
+        types = ["consensus", "non-consensus", "raw-onlyFeatures", "raw-allSignals"]
+    temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
+
+    for featureInd in [featureInd]:
+        for samplei, sample in enumerate(assay.manager.get_sample_names()):
+            msDataObj = assay.get_ms_data(sample)
+            sample_metadata = assay.manager.get_sample_metadata()
+            for k, spectrum in msDataObj.get_spectra_iterator():
+                usei = np.where(np.logical_and(spectrum.mz >= features[featureInd][0], spectrum.mz <= features[featureInd][2]))[0]
+                if usei.size > 0:
+                    for i in usei:
+                        if "consensus" in types:
+                            temp["rt"].append(spectrum.time)
+                            temp["mz"].append(spectrum.mz[i])
+                            temp["intensity"].append(spectrum.spint[i])
+                            temp["sample"].append(sample)
+                            temp["file"].append(sample.split("::")[0])
+                            temp["group"].append(sample_metadata.loc[sample, "group"])
+                            temp["type"].append("consensus")
+                            temp["feature"].append(featureInd)
+
+                        if "non-consensus" in types:
+                            for j in range(spectrum.usedFeatures[i].shape[0]):
+                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
+                                temp["mz"].append(spectrum.usedFeatures[i][j, 0])
+                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
+                                temp["sample"].append(sample)
+                                temp["file"].append(sample.split("::")[0])
+                                temp["group"].append(sample_metadata.loc[sample, "group"])
+                                temp["type"].append("non-consensus")
+                                temp["feature"].append(featureInd)
+
+                        if "raw-onlyFeatures" in types:
+                            for j in range(spectrum.usedFeatures[i].shape[0]):
+                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
+                                temp["mz"].append(spectrum.usedFeatures[i][j, 3])
+                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
+                                temp["sample"].append(sample)
+                                temp["file"].append(sample.split("::")[0])
+                                temp["group"].append(sample_metadata.loc[sample, "group"])
+                                temp["type"].append("raw-onlyFeatures")
+                                temp["feature"].append(featureInd)
+            
+            if "raw-allSignals" in types:
+                for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
+                    usei = np.where(np.logical_and(spectrum.original_mz >= spectrum.reverseMZ(features[featureInd][0]), spectrum.original_mz <= spectrum.reverseMZ(features[featureInd][2])))[0]
+                    if usei.size > 0:
+                        for i in usei:
+                            temp["rt"].append(spectrum.time)
+                            temp["mz"].append(spectrum.original_mz[i])
+                            temp["intensity"].append(spectrum.spint[i])
+                            temp["sample"].append(sample)
+                            temp["file"].append(sample.split("::")[0])
+                            temp["group"].append(sample_metadata.loc[sample, "group"])
+                            temp["type"].append("raw-allSignals")
+                            temp["feature"].append(featureInd)
+    
+
+    temp = pd.DataFrame(temp)
+    p = (p9.ggplot(data = temp, mapping = p9.aes(x = "rt", y = "mz", colour = "group"))
+        + p9.geom_hline(data = temp.groupby(["type"]).mean("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.5, alpha = 0.5, colour = "slategrey")
+        + p9.geom_hline(data = temp.groupby(["type"]).min("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
+        + p9.geom_hline(data = temp.groupby(["type"]).max("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
+        + p9.geom_point()
+        + p9.facet_wrap("type")
+        + p9.theme_minimal()
+        + p9.ggtitle("Feature %.5f (%.5f - %.5f)\nmz deviation overall: %.1f (ppm, non-consensus) and %.1f (ppm, consensus)"%(features[featureInd][1], features[featureInd][0], features[featureInd][2], 
+            (temp[temp["type"] == "non-consensus"]["mz"].max() - temp[temp["type"] == "non-consensus"]["mz"].min()) / temp[temp["type"] == "non-consensus"]["mz"].mean() * 1E6,
+            (temp[temp["type"] == "consensus"]["mz"].max() - temp[temp["type"] == "consensus"]["mz"].min()) / temp[temp["type"] == "consensus"]["mz"].mean() * 1E6))
+        + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
+        + p9.theme(legend_position = "bottom")
+        )
+    print(p)
 
 
 
@@ -1628,9 +1885,20 @@ def print_results_overview(dat, groups):
 
 
 
-def show_mz_deviation_overview(assay, brackRes):
+def show_mz_deviation_overview(assay, brackRes, show = None, random_fraction = 1):
+    if show is None:
+        show = ["consensus", "non-consensus", "raw"]
+    elif type(show) == str:
+        show = [show]
+    if type(show) == list and not ("consensus" in show or "non-consensus" in show or "raw" in show):
+        raise RuntimeError("Unknown option(s) for show parameter. Must be a list with entries ['consensus', 'non-consensus', 'raw']")
+
     dat = {"avgMZ": [], "stdMZ": [], "avgInt": [], "stdInt": [], "type": [], "feature": [], "calcType": []}
-    for featureInd in tqdm.tqdm(range(len(brackRes))):
+    useFeatures = brackRes
+    if random_fraction < 1:
+        useFeatures = random.sample(useFeatures, int(len(useFeatures) * random_fraction))
+
+    for featureInd in tqdm.tqdm(range(len(useFeatures)), desc = "plot: gathering data"):
         temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
         for samplei, sample in enumerate(assay.manager.get_sample_names()):
             msDataObj = assay.get_ms_data(sample)
@@ -1639,33 +1907,37 @@ def show_mz_deviation_overview(assay, brackRes):
                 usei = np.where(np.logical_and(spectrum.mz >= brackRes[featureInd][0], spectrum.mz <= brackRes[featureInd][2]))[0]
                 if usei.size > 0:
                     for i in usei:
-                        temp["rt"].append(spectrum.time)
-                        temp["mz"].append(spectrum.mz[i])
-                        temp["intensity"].append(spectrum.spint[i])
-                        temp["sample"].append(sample)
-                        temp["file"].append(sample.split("::")[0])
-                        temp["group"].append(sample_metadata.loc[sample, "group"])
-                        temp["type"].append("modified")
-                        temp["feature"].append(featureInd)
-
-                        temp["rt"].append(spectrum.time)
-                        temp["mz"].append(spectrum.original_mz[i])
-                        temp["intensity"].append(spectrum.spint[i])
-                        temp["sample"].append(sample)
-                        temp["file"].append(sample.split("::")[0])
-                        temp["group"].append(sample_metadata.loc[sample, "group"])
-                        temp["type"].append("consensus")
-                        temp["feature"].append(featureInd)
-
-                        for j in range(spectrum.usedFeatures[i].shape[0]):
-                            temp["rt"].append(spectrum.usedFeatures[i][j, 2])
-                            temp["mz"].append(spectrum.usedFeatures[i][j, 0])
-                            temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
+                        if "consensus" in show:
+                            temp["rt"].append(spectrum.time)
+                            temp["mz"].append(spectrum.mz[i])
+                            temp["intensity"].append(spectrum.spint[i])
                             temp["sample"].append(sample)
                             temp["file"].append(sample.split("::")[0])
                             temp["group"].append(sample_metadata.loc[sample, "group"])
-                            temp["type"].append("original")
+                            temp["type"].append("consensus")
                             temp["feature"].append(featureInd)
+
+                        if "non-consensus" in show:
+                            for j in range(spectrum.usedFeatures[i].shape[0]):
+                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
+                                temp["mz"].append(spectrum.usedFeatures[i][j, 0])
+                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
+                                temp["sample"].append(sample)
+                                temp["file"].append(sample.split("::")[0])
+                                temp["group"].append(sample_metadata.loc[sample, "group"])
+                                temp["type"].append("non-consensus")
+                                temp["feature"].append(featureInd)
+
+                        if "raw" in show:
+                            for j in range(spectrum.usedFeatures[i].shape[0]):
+                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
+                                temp["mz"].append(spectrum.usedFeatures[i][j, 3])
+                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
+                                temp["sample"].append(sample)
+                                temp["file"].append(sample.split("::")[0])
+                                temp["group"].append(sample_metadata.loc[sample, "group"])
+                                temp["type"].append("raw")
+                                temp["feature"].append(featureInd)
 
         temp = pd.DataFrame(temp)
         for name, group in temp.groupby(["type", "feature"]):
@@ -1708,68 +1980,6 @@ def show_mz_deviation_overview(assay, brackRes):
         + p9.facet_grid("calcType ~ type")
         + p9.theme_minimal()
         + p9.ggtitle("Overview of mz average and std (weighted) of bracketed features")
-        + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
-        + p9.theme(legend_position = "bottom")
-        )
-    print(p)
-
-def plot_feature_mz_deviations(assay, features, featureInd, types = None):
-    if types is None:
-        types = ["modified", "consensus", "original"]
-    temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
-
-    for featureInd in [featureInd]:
-        for samplei, sample in enumerate(assay.manager.get_sample_names()):
-            msDataObj = assay.get_ms_data(sample)
-            sample_metadata = assay.manager.get_sample_metadata()
-            for k, spectrum in msDataObj.get_spectra_iterator():
-                usei = np.where(np.logical_and(spectrum.mz >= features[featureInd][0], spectrum.mz <= features[featureInd][2]))[0]
-                if usei.size > 0:
-                    for i in usei:
-                        if "modified" in types:
-                            temp["rt"].append(spectrum.time)
-                            temp["mz"].append(spectrum.mz[i])
-                            temp["intensity"].append(spectrum.spint[i])
-                            temp["sample"].append(sample)
-                            temp["file"].append(sample.split("::")[0])
-                            temp["group"].append(sample_metadata.loc[sample, "group"])
-                            temp["type"].append("modified")
-                            temp["feature"].append(featureInd)
-
-                        if "consensus" in types:
-                            temp["rt"].append(spectrum.time)
-                            temp["mz"].append(spectrum.original_mz[i])
-                            temp["intensity"].append(spectrum.spint[i])
-                            temp["sample"].append(sample)
-                            temp["file"].append(sample.split("::")[0])
-                            temp["group"].append(sample_metadata.loc[sample, "group"])
-                            temp["type"].append("consensus")
-                            temp["feature"].append(featureInd)
-
-                        if "original" in types:
-                            for j in range(spectrum.usedFeatures[i].shape[0]):
-                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
-                                temp["mz"].append(spectrum.usedFeatures[i][j, 0])
-                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
-                                temp["sample"].append(sample)
-                                temp["file"].append(sample.split("::")[0])
-                                temp["group"].append(sample_metadata.loc[sample, "group"])
-                                temp["type"].append("original")
-                                temp["feature"].append(featureInd)
-    
-
-    temp = pd.DataFrame(temp)
-
-    p = (p9.ggplot(data = temp, mapping = p9.aes(x = "rt", y = "mz", colour = "group", shape = "file"))
-        + p9.geom_hline(data = temp.groupby(["type", "file"]).mean("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.5, alpha = 0.5, colour = "slategrey")
-        + p9.geom_hline(data = temp.groupby(["type", "file"]).min("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
-        + p9.geom_hline(data = temp.groupby(["type", "file"]).max("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
-        + p9.geom_point()
-        + p9.facet_wrap("file + type")
-        + p9.theme_minimal()
-        + p9.ggtitle("Feature %.5f (%.5f - %.5f)\nmz deviation overall: %.1f (ppm, original) and %.1f (ppm, modified)"%(features[featureInd][1], features[featureInd][0], features[featureInd][2], 
-            (temp[temp["type"] == "original"]["mz"].max() - temp[temp["type"] == "original"]["mz"].min()) / temp[temp["type"] == "original"]["mz"].mean() * 1E6,
-            (temp[temp["type"] == "modified"]["mz"].max() - temp[temp["type"] == "modified"]["mz"].min()) / temp[temp["type"] == "modified"]["mz"].mean() * 1E6))
         + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
         + p9.theme(legend_position = "bottom")
         )

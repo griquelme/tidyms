@@ -141,6 +141,19 @@ class MSSpectrum:
             return ind, self.mz[ind], self.mz[ind] - mz, (self.mz[ind] - mz) / mz * 1E6, self.spint[ind]
         return None, None, None, None, None
 
+    def get_most_abundant_signal_in_range(
+        self, 
+        mz: float = 100.,
+        max_offset_absolute = 0.001
+    ) -> Tuple[int, float, float, float, float]:
+        inds = np.abs(self.mz - mz) <= max_offset_absolute
+        if np.sum(inds) > 0:
+            inds = np.argwhere(inds)[:,0]
+            maxIntInd = np.argmax(self.spint[inds])
+            ind = inds[maxIntInd]
+            return ind, self.mz[ind], self.mz[ind] - mz, (self.mz[ind] - mz) / mz * 1E6, self.spint[ind]
+        return None, None, None, None, None
+
     def plot(
         self,
         fig_params: Optional[dict] = None,

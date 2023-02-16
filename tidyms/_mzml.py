@@ -181,7 +181,11 @@ def get_spectrum(
         n,
         "spectrum"
     )
-    elements = list(fromstring(xml_str))
+    try:
+        elements = list(fromstring(xml_str))
+    except:
+        print("error", xml_str) 
+        raise "laskjf"
     spectrum = dict()
     for el in elements:
         tag = el.tag
@@ -332,7 +336,7 @@ def _read_binary_data_array(element: Element) -> Tuple[np.ndarray, str]:
     for e in element:
         tag = e.tag
         if tag == "binary":
-            data = e.text
+            data = e.text if e.text is None else e.text.strip()
         elif tag == "cvParam":
             accession = e.attrib.get("accession")
             value = e.attrib.get("name")
