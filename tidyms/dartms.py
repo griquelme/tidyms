@@ -1,7 +1,5 @@
 """
-
-  File for many functions concerning the processing of a DART-MS experiment. 
-
+File for many functions concerning the processing of a DART-MS experiment. 
 """
 
 import tqdm
@@ -24,6 +22,27 @@ import random
 
 
 
+def addtoPDDictionary(dict = None, **kwargs):
+    """
+    Generate or extend a dictonary object with list objects that can later be converted to a pandas dataframe.
+    Warning: no sanity checks will be performed
+
+    dict - the dictionary object to extend
+    **kwargs - entries of the dictionary to be used and appended
+    """
+
+    if dict is None:
+        dict = {}
+
+    if "dict" in kwargs:
+        del kwargs["dict"]
+
+    for kwarg in kwargs: 
+        if kwarg not in dict:
+            dict[kwarg] = []
+        dict[kwarg].append(kwargs[kwarg])
+
+    return dict
 
 def weighted_avg_and_std(values, weights):
     """
@@ -84,16 +103,16 @@ def get_separate_chronogram_indices(msData, msData_ID, spotsFile, intensityThres
             spots = pd.read_csv(spotsFile, sep = "\t")
         else:
             spots = pd.DataFrame({
-                "msData_ID": [],
-                "spotInd": [],
-                "include": [],
-                "name": [],
-                "group": [],
-                "class": [],
-                "batch": [],
+                "msData_ID":       [],
+                "spotInd":         [],
+                "include":         [],
+                "name":            [],
+                "group":           [],
+                "class":           [],
+                "batch":           [],
                 "startRT_seconds": [],
-                "endRT_seconds": [],
-                "comment": []
+                "endRT_seconds":   [],
+                "comment":         []
             })
     else:
         raise RuntimeError("Parameter spotsFile must be a str")
@@ -126,16 +145,16 @@ def get_separate_chronogram_indices(msData, msData_ID, spotsFile, intensityThres
         
         for spotInd, spot in enumerate(separationInds):
             temp = pd.DataFrame({
-                "msData_ID": [msData_ID],
-                "spotInd": [int(spotInd)],
-                "include": [False],
-                "name": [spot[2]],
-                "group": [spot[3]],
-                "class": [spot[4]],
-                "batch": [spot[5]],
+                "msData_ID":       [msData_ID],
+                "spotInd":         [int(spotInd)],
+                "include":         [False],
+                "name":            [spot[2]],
+                "group":           [spot[3]],
+                "class":           [spot[4]],
+                "batch":           [spot[5]],
                 "startRT_seconds": [msData.get_spectrum(spot[0]).time],
-                "endRT_seconds": [msData.get_spectrum(spot[1]).time],
-                "comment": ["spot automatically extracted by get_separate_chronogram_indices(msData, '%s', intensityThreshold = %f, startTime_seconds = %f, endTime_seconds = %f)"%(msData_ID, intensityThreshold, startTime_seconds, endTime_seconds)]
+                "endRT_seconds":   [msData.get_spectrum(spot[1]).time],
+                "comment":         ["spot automatically extracted by get_separate_chronogram_indices(msData, '%s', intensityThreshold = %f, startTime_seconds = %f, endTime_seconds = %f)"%(msData_ID, intensityThreshold, startTime_seconds, endTime_seconds)]
             })
             spotsCur = pd.concat([spotsCur, temp], axis = 0)
         spots = pd.concat([spots, spotsCur], axis = 0, ignore_index = True).reset_index(drop = True)
@@ -173,14 +192,14 @@ def add_chronograms_samples_to_assay(assay, sepInds, msData, filename, fileNameC
             MSData_object = subset,
             virtual_name = subset_name,
             sample_metadata = pd.DataFrame({
-                "sample": [subset_name],
-                "group": sepInds[subseti][3],
-                "class": sepInds[subseti][4],
-                "order": [1],
-                "batch": sepInds[subseti][5],
-                "basefile": [os.path.splitext(os.path.basename(filename))[0]],
+                "sample":                    [subset_name],
+                "group":                     sepInds[subseti][3],
+                "class":                     sepInds[subseti][4],
+                "order":                     [1],
+                "batch":                     sepInds[subseti][5],
+                "basefile":                  [os.path.splitext(os.path.basename(filename))[0]],
                 "extracted_spectra_indices": ["%.2f - %.2f seconds"%(msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time)],
-                "spotwidth_seconds": [msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time]
+                "spotwidth_seconds":         [msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time]
             })
         )
 
@@ -356,24 +375,19 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
 
 ## Plot sample TICs
 def plot_sample_TICs(assay, separate = True, separate_by = "group"):
-    temp = {
-        "sample": [],
-        "file": [],
-        "group": [],
-        "time": [],
-        "kSpectrum": [],
-        "totalIntensity": []
-    }
+    temp = None
     sample_metadata = assay.manager.get_sample_metadata()
     for samplei, sample in enumerate(assay.manager.get_sample_names()):
         msDataObj = assay.get_ms_data(sample)
         for k, spectrum in msDataObj.get_spectra_iterator():
-            temp["sample"].append(sample)
-            temp["file"].append(sample.split("::")[0])
-            temp["group"].append(sample_metadata.loc[sample, "group"])
-            temp["time"].append(spectrum.time - msDataObj.get_spectrum(0).time)
-            temp["kSpectrum"].append(k)
-            temp["totalIntensity"].append(np.sum(spectrum.spint))
+            temp = addtoPDDictionary(temp, 
+                sample         = sample,
+                file           = sample.split("::")[0], 
+                group          = sample_metadata.loc[sample, "group"],
+                time           = spectrum.time - msDataObj.get_spectrum(0).time,
+                kSpectrum      = k,
+                totalIntensity = np.sum(spectrum.spint)
+            )
 
     temp = pd.DataFrame(temp)
     if separate:
@@ -465,7 +479,7 @@ def normalize_to_internal_standard(assay, std, multiplication_factor = 1, plot =
     
     sample_metadata = assay.manager.get_sample_metadata()
     
-    temp = {"sample": [], "group": [], "istdAbundance": []}
+    temp = None
     for samplei, sample in enumerate(assay.manager.get_sample_names()):
         sampleType = sample_metadata.loc[sample, "group"]
         totalSTDInt = 0
@@ -479,9 +493,11 @@ def normalize_to_internal_standard(assay, std, multiplication_factor = 1, plot =
             print("   .. sample '%35s' STD intensity (sum) %12.1f * %12.1f"%(sample, totalSTDInt, multiplication_factor))
             for k, spectrum in msDataObj.get_spectra_iterator():
                 spectrum.spint = spectrum.spint / totalSTDInt * multiplication_factor
-            temp["sample"].append(sample)
-            temp["group"].append(sampleType)
-            temp["istdAbundance"].append(totalSTDInt)
+            temp = addtoPDDictionary(temp, 
+                sample        = sample,
+                group         = sampleType,
+                istdAbundance = totalSTDInt
+            )
         else:
             print("   .. Error: cannot normalize sample '%35s' to internal standard as no signals for it have been found"%(sample))
 
@@ -520,17 +536,7 @@ def get_MZ_offsets(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_devi
     Returns:
         _type_: _description_
     """    
-    temp = {
-        "time": [],
-        "intensity": [],
-        "referenceMZ": [],
-        "mz": [],
-        "mzDeviation": [],
-        "mzDeviationPPM": [],
-        "sample": [],
-        "file": [],
-        "chromID": []
-    }
+    temp = None
 
     if type(referenceMZs) is list:
         referenceMZs = np.array(referenceMZs)
@@ -548,15 +554,17 @@ def get_MZ_offsets(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_devi
                     raise RuntimeError("Unknown parameter selection_criteria, should be either of['mostAbundant', 'closestMZ']")
 
                 if ind is not None:
-                    temp["referenceMZ"].append(referenceMZ)
-                    temp["mz"].append(curMZ)
-                    temp["mzDeviation"].append(deltaMZ)
-                    temp["mzDeviationPPM"].append(deltaMZPPM)
-                    temp["time"].append(spectrum.time)
-                    temp["intensity"].append(inte)
-                    temp["sample"].append(sample)
-                    temp["file"].append(sample.split("::")[0])
-                    temp["chromID"].append("%s %.4f"%(sample, referenceMZ))                    
+                    temp = addtoPDDictionary(temp, 
+                        referenceMZ    = referenceMZ,
+                        mz             = curMZ,
+                        mzDeviation    = deltaMZ,
+                        mzDeviationPPM = deltaMZPPM,
+                        time           = spectrum.time,
+                        intensity      = inte,
+                        sample         = sample,
+                        file           = sample.split("::")[0],
+                        chromID        = "%s %.4f"%(sample, referenceMZ)
+                    )                 
                 
     return pd.DataFrame(temp)
 
@@ -610,8 +618,6 @@ def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007
         
     tempMod["mzDeviationPPM"] = (tempMod["mz"] - tempMod["referenceMZ"]) / tempMod["referenceMZ"] * 1E6
     tempMod["mzDeviation"] = (tempMod["mz"] - tempMod["referenceMZ"])
-
-    transformFactors.to_csv("./temp.tsv")
 
     for samplei, sample in enumerate(assay.manager.get_sample_names()):
         msDataObj = assay.get_ms_data(sample)
@@ -1158,18 +1164,16 @@ def write_consensus_spectrum_to_featureML(assay, widthRT = 40):
 
 
 def print_sample_overview(assay):
-    temp = {
-        "sample": [],
-        "spectra": [],
-        "mzs": [],
-    }
+    temp = None
 
     for samplei, sample in enumerate(assay.manager.get_sample_names()):
         msDataObj = assay.get_ms_data(sample)
 
-        temp["sample"].append(sample)
-        temp["spectra"].append(msDataObj.get_n_spectra())
-        temp["mzs"].append(sum((spectrum.mz.shape[0] for k, spectrum in msDataObj.get_spectra_iterator())))
+        temp = addtoPDDictionary(temp, 
+            sample  = sample,
+            spectra = msDataObj.get_n_spectra(), 
+            mzs     = sum((spectrum.mz.shape[0] for k, spectrum in msDataObj.get_spectra_iterator()))
+        )
 
     temp = pd.DataFrame(temp)
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
@@ -1346,7 +1350,7 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
     
     if show_diagnostic_plots:
         print("   .. generating diagnostic plot")
-        temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
+        temp = None
         for featurei in tqdm.tqdm(range(len(tempClusterInfo["minMZ"])), desc = "bracketing: generating plots"):
             for samplei, sample in enumerate(assay.manager.get_sample_names()):
                 msDataObj = assay.get_ms_data(sample)
@@ -1355,47 +1359,55 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
                     usei = np.where(np.logical_and(spectrum.mz >= tempClusterInfo["minMZ"][featurei], spectrum.mz <= tempClusterInfo["maxMZ"][featurei]))[0]
                     if usei.size > 0:
                         for i in usei:
-                            temp["rt"].append(spectrum.time)
-                            temp["mz"].append(spectrum.mz[i])
-                            temp["intensity"].append(spectrum.spint[i])
-                            temp["sample"].append(sample)
-                            temp["file"].append(sample.split("::")[0])
-                            temp["group"].append(sample_metadata.loc[sample, "group"])
-                            temp["type"].append("consensus")
-                            temp["feature"].append(featurei)
+                            temp = addtoPDDictionary(temp, 
+                                rt        = spectrum.time,
+                                mz        = spectrum.mz[i],
+                                intensity = spectrum.spint[i],
+                                sample    = sample,
+                                file      = sample.split("::")[0],
+                                group     = sample_metadata.loc[sample, "group"],
+                                type      = "consensus",
+                                feature   = featurei,
+                            )
 
                             for j in range(spectrum.usedFeatures[i].shape[0]):
-                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
-                                temp["mz"].append(spectrum.usedFeatures[i][j, 0])
-                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
-                                temp["sample"].append(sample)
-                                temp["file"].append(sample.split("::")[0])
-                                temp["group"].append(sample_metadata.loc[sample, "group"])
-                                temp["type"].append("non-consensus")
-                                temp["feature"].append(featurei)
+                                temp = addtoPDDictionary(temp, 
+                                    rt        = spectrum.usedFeatures[i][j, 2],
+                                    mz        = spectrum.usedFeatures[i][j, 0],
+                                    intensity = spectrum.usedFeatures[i][j, 1],
+                                    sample    = sample,
+                                    file      = sample.split("::")[0],
+                                    group     = sample_metadata.loc[sample, "group"],
+                                    type      = "non-consensus",
+                                    feature   = featurei,
+                                )
 
                             for j in range(spectrum.usedFeatures[i].shape[0]):
-                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
-                                temp["mz"].append(spectrum.usedFeatures[i][j, 3])
-                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
-                                temp["sample"].append(sample)
-                                temp["file"].append(sample.split("::")[0])
-                                temp["group"].append(sample_metadata.loc[sample, "group"])
-                                temp["type"].append("raw-onlyFeatures")
-                                temp["feature"].append(featurei)
+                                temp = addtoPDDictionary(temp,
+                                    rt        = spectrum.usedFeatures[i][j, 2],
+                                    mz        = spectrum.usedFeatures[i][j, 3],
+                                    intensity = spectrum.usedFeatures[i][j, 1],
+                                    sample    = sample,
+                                    file      = sample.split("::")[0],
+                                    group     = sample_metadata.loc[sample, "group"],
+                                    type      = "raw-onlyFeatures",
+                                    feature   = featurei,
+                                )
             
                 for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
                     usei = np.where(np.logical_and(spectrum.original_mz >= spectrum.reverseMZ(features[featureInd][0]), spectrum.original_mz <= spectrum.reverseMZ(features[featureInd][2])))[0]
                     if usei.size > 0:
                         for i in usei:
-                            temp["rt"].append(spectrum.time)
-                            temp["mz"].append(spectrum.original_mz[i])
-                            temp["intensity"].append(spectrum.spint[i])
-                            temp["sample"].append(sample)
-                            temp["file"].append(sample.split("::")[0])
-                            temp["group"].append(sample_metadata.loc[sample, "group"])
-                            temp["type"].append("raw-allSignals")
-                            temp["feature"].append(featureInd)
+                            temp = addtoPDDictionary(temp, 
+                                rt        = spectrum.time,
+                                mz        = spectrum.original_mz[i],
+                                intensity = spectrum.spint[i],
+                                sample    = sample,
+                                file      = sample.split("::")[0],
+                                group     = sample_metadata.loc[sample, "group"],
+                                type      = "raw-allSignals",
+                                feature   = featureInd,
+                            )
 
         temp = pd.DataFrame(temp)
         dat = pd.concat([
@@ -1544,6 +1556,7 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
 
     keeps = [0 for i in range(dat.shape[1])]
 
+    temp = None
     folds = []
     pvals = []
     sigInds = []
@@ -1570,13 +1583,12 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
                 pass
 
             elif notInBlanks:
-                pval = -np.inf
-                fold = np.inf
-
-                pvals.append(pval)
-                folds.append(fold)
-                sigInds.append("only in group")
-                comparisons.append("'%s' vs '%s'"%(toTestGroup, blankGroup))
+                temp = addtoPDDictionary(temp,
+                    pvals       = -np.inf,
+                    folds       = np.inf,
+                    sigInds     = "only in group",
+                    comparisons = "'%s' vs '%s'"%(toTestGroup, blankGroup)
+                )
 
                 assert keeps[featurei] <= 0
                 keeps[featurei] -= 1
@@ -1591,15 +1603,14 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
                 if sigInd:
                     keeps[featurei] += 1
 
-                pvals.append(-np.log10(pval))
-                folds.append(np.log2(fold))
-                sigInds.append("group >> blank" if sigInd else "-")
-                comparisons.append("'%s' vs '%s'"%(toTestGroup, blankGroup))
+                temp = addtoPDDictionary(temp, 
+                    pvals       = -np.log10(pval),
+                    folds       = np.log2(fold),
+                    sigInds     = "group >> blank" if sigInd else "-",
+                    comparisons = "'%s' vs '%s'"%(toTestGroup, blankGroup)
+                )
 
     if plot:
-        folds = np.array(folds)
-        pvals = np.array(pvals)
-        temp = {"pvalues": pvals, "folds": folds, "sigIndicators": sigInds, "comparison": comparisons}
         temp = pd.DataFrame(temp)
         p = (p9.ggplot(data = temp, mapping = p9.aes(
                 x = "folds", y = "pvalues", colour = "sigIndicators"
@@ -1642,7 +1653,7 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
 def plot_feature_mz_deviations(assay, features, featureInd, types = None):
     if types is None:
         types = ["consensus", "non-consensus", "raw-onlyFeatures", "raw-allSignals"]
-    temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
+    temp = None
 
     for featureInd in [featureInd]:
         for samplei, sample in enumerate(assay.manager.get_sample_names()):
@@ -1653,51 +1664,58 @@ def plot_feature_mz_deviations(assay, features, featureInd, types = None):
                 if usei.size > 0:
                     for i in usei:
                         if "consensus" in types:
-                            temp["rt"].append(spectrum.time)
-                            temp["mz"].append(spectrum.mz[i])
-                            temp["intensity"].append(spectrum.spint[i])
-                            temp["sample"].append(sample)
-                            temp["file"].append(sample.split("::")[0])
-                            temp["group"].append(sample_metadata.loc[sample, "group"])
-                            temp["type"].append("consensus")
-                            temp["feature"].append(featureInd)
+                            temp = addtoPDDictionary(temp, 
+                                rt        = spectrum.time,
+                                mz        = spectrum.mz[i],
+                                intensity = spectrum.spint[i],
+                                sample    = sample,
+                                file      = sample.split("::")[0],
+                                group     = sample_metadata.loc[sample, "group"],
+                                type      = "consensus",
+                                feature   = featureInd,
+                            )
 
                         if "non-consensus" in types:
                             for j in range(spectrum.usedFeatures[i].shape[0]):
-                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
-                                temp["mz"].append(spectrum.usedFeatures[i][j, 0])
-                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
-                                temp["sample"].append(sample)
-                                temp["file"].append(sample.split("::")[0])
-                                temp["group"].append(sample_metadata.loc[sample, "group"])
-                                temp["type"].append("non-consensus")
-                                temp["feature"].append(featureInd)
+                                temp = addtoPDDictionary(temp, 
+                                    rt        = spectrum.usedFeatures[i][j, 2],
+                                    mz        = spectrum.usedFeatures[i][j, 0],
+                                    intensity = spectrum.usedFeatures[i][j, 1],
+                                    sample    = sample,
+                                    file      = sample.split("::")[0],
+                                    group     = sample_metadata.loc[sample, "group"],
+                                    type      = "non-consensus",
+                                    feature   = featureInd,
+                                )
 
                         if "raw-onlyFeatures" in types:
                             for j in range(spectrum.usedFeatures[i].shape[0]):
-                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
-                                temp["mz"].append(spectrum.usedFeatures[i][j, 3])
-                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
-                                temp["sample"].append(sample)
-                                temp["file"].append(sample.split("::")[0])
-                                temp["group"].append(sample_metadata.loc[sample, "group"])
-                                temp["type"].append("raw-onlyFeatures")
-                                temp["feature"].append(featureInd)
+                                temp = addtoPDDictionary(temp, 
+                                    rt        = spectrum.usedFeatures[i][j, 2], 
+                                    mz        = spectrum.usedFeatures[i][j, 3], 
+                                    intensity = spectrum.usedFeatures[i][j, 1], 
+                                    sample    = sample, 
+                                    file      = sample.split("::")[0], 
+                                    group     = sample_metadata.loc[sample, "group"], 
+                                    type      = "raw-onlyFeatures", 
+                                    feature   = featureInd, 
+                                )
             
             if "raw-allSignals" in types:
                 for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
                     usei = np.where(np.logical_and(spectrum.original_mz >= spectrum.reverseMZ(features[featureInd][0]), spectrum.original_mz <= spectrum.reverseMZ(features[featureInd][2])))[0]
                     if usei.size > 0:
                         for i in usei:
-                            temp["rt"].append(spectrum.time)
-                            temp["mz"].append(spectrum.original_mz[i])
-                            temp["intensity"].append(spectrum.spint[i])
-                            temp["sample"].append(sample)
-                            temp["file"].append(sample.split("::")[0])
-                            temp["group"].append(sample_metadata.loc[sample, "group"])
-                            temp["type"].append("raw-allSignals")
-                            temp["feature"].append(featureInd)
-    
+                            temp = addtoPDDictionary(temp, 
+                                rt        = spectrum.time, 
+                                mz        = spectrum.original_mz[i], 
+                                intensity = spectrum.spint[i], 
+                                sample    = sample, 
+                                file      = sample.split("::")[0], 
+                                group     = sample_metadata.loc[sample, "group"], 
+                                type      = "raw-allSignals", 
+                                feature   = featureInd, 
+                            )
 
     temp = pd.DataFrame(temp)
     p = (p9.ggplot(data = temp, mapping = p9.aes(x = "rt", y = "mz", colour = "group"))
@@ -1740,27 +1758,24 @@ def find_feature(features, mz, max_deviation_ppm = 20):
 def calculate_mz_deviationPPM(a, b):
     return (a - b) / b * 1E6
 
-def annotate_features(dat, features, samples, plot = False):
+def annotate_features(dat, features, samples, groups, useGroups = None, plot = False):
+
+    if useGroups is None:
+        useGroups = list(set(groups))
+
     features_ = np.array(features)
     order = np.argsort(features_[:,1])
     features_ = features_[order,:]
     dat_ = dat[:, order]
 
-    annotations = ["" for i in range(features_.shape[0])]
-
-    cns = []
-    deviations = []
-    mzs = []
-    intensitiesMean = []
-    ratiosMean = []
-    ratiosSTD = []
-    ratiosCount = []
+    annotations = [[] for i in range(features_.shape[0])]
+    temp = None
 
     searchIons = {"+Na": 22.989218 - 1.007276, "+NH4": 18.033823 - 1.007276, "+CH3OH+H": 33.033489 - 1.007276}#, "arbi1": 0.5, "arbi2": 0.75, "arbi3": 0.9, "arbi4": 1.04, "arbi5": 1.1}
     for cn in range(1, 5):
         searchIons["[13C%d]"%cn] = 1.00335484 * cn
 
-    for featurei in range(features_.shape[0]):
+    for featurei in tqdm.tqdm(range(features_.shape[0])):
         mz = features_[featurei, 1]
 
         intensities = []
@@ -1774,35 +1789,45 @@ def annotate_features(dat, features, samples, plot = False):
             searchMZ = mz + searchIons[searchIon]
             inds = find_feature(features_, searchMZ, max_deviation_ppm = 100)
             if inds is not None:
-                if intensities.shape[0] > 0:
-                    intensitiesMean.append(np.mean(intensities))
-                else:
-                    intensitiesMean.append(0)
                 
-                deviationPPM = calculate_mz_deviationPPM(features_[inds,1], searchMZ)
-                mzs.append(mz)
-                cns.append("%s (%.4f)"%(searchIon, searchIons[searchIon]))
-                deviations.append(deviationPPM)
                 ratios = []
                 for samplei, sample in enumerate(samples):
-                    ratio = dat_[samplei, inds] / dat_[samplei, featurei] * 100.
-                    if not np.isnan(ratio):
-                        ratios.append(ratio)
+                    if useGroups is None or groups[samplei] in useGroups:
+                        ratio = dat_[samplei, inds] / dat_[samplei, featurei]
+                        if not np.isnan(ratio) and ratio > 0:
+                            ratios.append(ratio)
                 ratios = np.array(ratios)
-                if ratios.shape[0] > 0:
-                    ratiosMean.append(np.mean(ratios))
-                    ratiosSTD.append(np.std(ratios))
-                    ratiosCount.append(ratios.shape[0])
-                else:
-                    ratiosMean.append(0)
-                    ratiosSTD.append(0)
-                    ratiosCount.append(ratios.shape[0])
 
                 if ratios.shape[0] > 10 and np.mean(ratios) > 2. and np.mean(ratios) < 200. and np.std(ratios) < 50.:
-                    annotations[inds] = searchIon if annotations[inds] == "" else annotations[inds] + ";" + searchIon
+                    for ind in [inds]:
+                        annotations[featurei].append({
+                            "otherType": searchIon, 
+                            "otherRatios": ratios, 
+                            "otherMZs": searchMZ
+                        })
+
+                temp = addtoPDDictionary(temp,
+                                         searchIon      = "%s (%.4f)"%(searchIon, searchIons[searchIon]),
+                                         cns            = "%s (%.4f)"%(searchIon, searchIons[searchIon]),
+                                         MZs            = mz,
+                                         intensityMeans = np.mean(intensities) if intensities.shape[0] > 0 else 0,
+                                         deviations     = calculate_mz_deviationPPM(features_[inds,1], searchMZ),
+                                         ratiosMean     = np.mean(ratios) if ratios.shape[0] > 0 else 0,
+                                         ratiosSTD      = np.std(ratios) if ratios.shape[0] > 1 else 0,
+                                         ratiosRSTD     = np.std(ratios) / np.mean(ratios) * 100. if ratios.shape[0] > 1 else 0,
+                                         ratiosCount    = ratios.shape[0]
+                )
+    if False:
+        temp = {"mz": [], "type": [], "meanRatio": [], "sdRatio": []}
+        for featurei in range(features.shape[0]):
+            for annoi in annotations[featurei]:
+                temp["mz"].append(features_[featurei, 1])
+                temp["type"].append(annotations[featurei][annoi]["otherType"])
+                temp["meanRatio"].append(np.mean(annotations[featurei][annoi]["otherRatios"]))
+                temp["sdRatio"].append(np.std(annotations[featurei][annoi]["otherRatios"]))
 
     if plot: 
-        temp = {"MZs": mzs, "searchIon": cns, "deviations": deviations, "ratiosMean": np.log10(np.array(ratiosMean)), "ratiosSTD": np.log10(np.array(ratiosSTD)), "ratiosCount": ratiosCount, "intensityMeans": np.log10(np.array(intensitiesMean))}
+        
         temp = pd.DataFrame(temp)
         temp['searchIon'] = temp['searchIon'].astype(object)
         p = (p9.ggplot(data = temp, mapping = p9.aes(
@@ -1816,20 +1841,38 @@ def annotate_features(dat, features, samples, plot = False):
             + p9.ggtitle("Distribution of mz deviation of sister ions")
         )
         print(p)
-        p = (p9.ggplot(data = temp, mapping = p9.aes(
-                x = "ratiosMean", y = "ratiosSTD", colour = "ratiosCount"
+        p = (p9.ggplot(data = temp[temp["ratiosCount"] >= 150], mapping = p9.aes(
+                x = "ratiosRSTD", fill = "searchIon"
             ))
-            + p9.geom_point(alpha = 0.05)
-            + p9.facet_wrap("~ratiosCount")
+            + p9.geom_histogram()
+            + p9.facet_wrap("searchIon")
+            + p9.geom_vline(xintercept = 50, colour = "firebrick")
             + p9.theme_minimal()
             + p9.theme(legend_position = "bottom")
             + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
-            + p9.ggtitle("Distribution of mz deviation of sister ions")
+            + p9.xlim(0, 300)
+            + p9.xlab("RSTD (%)")
+            + p9.ggtitle("Distribution of rstd ratios of sister ions")
         )
         print(p)
+        p = (p9.ggplot(data = temp, mapping = p9.aes(
+                x = "np.log10(intensityMeans)", y = "ratiosRSTD", colour = "ratiosCount"
+            ))
+            + p9.geom_point(alpha = 0.1)
+            + p9.geom_hline(yintercept = 50, colour = "firebrick")
+            #+ p9.facet_wrap("~ratiosCount")
+            + p9.theme_minimal()
+            + p9.ylim(0, 300)
+            + p9.theme(legend_position = "bottom")
+            + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
+            + p9.ggtitle("Distribution of ratio deviation of sister ions")
+        )
+        print(p)
+        
+        temp["intensityMeansCUT"] = pd.cut(np.log10(temp["intensityMeans"]), 10)
+        print(temp[temp["searchIon"] == "[13C1] (1.0034)"].groupby(["intensityMeansCUT"])[["ratiosRSTD"]].describe().to_markdown())
 
-    return ["; ".join(sorted(set(annotations[i].split(";")))) for i in np.argsort(order)]
-
+    return [annotations[i] for i in np.argsort(order)]
 
 
 
@@ -1893,13 +1936,13 @@ def show_mz_deviation_overview(assay, brackRes, show = None, random_fraction = 1
     if type(show) == list and not ("consensus" in show or "non-consensus" in show or "raw" in show):
         raise RuntimeError("Unknown option(s) for show parameter. Must be a list with entries ['consensus', 'non-consensus', 'raw']")
 
-    dat = {"avgMZ": [], "stdMZ": [], "avgInt": [], "stdInt": [], "type": [], "feature": [], "calcType": []}
+    dat = None
     useFeatures = brackRes
     if random_fraction < 1:
         useFeatures = random.sample(useFeatures, int(len(useFeatures) * random_fraction))
 
     for featureInd in tqdm.tqdm(range(len(useFeatures)), desc = "plot: gathering data"):
-        temp = {"rt": [], "mz": [], "intensity": [], "sample": [], "file": [], "group": [], "type": [], "feature": []}
+        temp = None
         for samplei, sample in enumerate(assay.manager.get_sample_names()):
             msDataObj = assay.get_ms_data(sample)
             sample_metadata = assay.manager.get_sample_metadata()
@@ -1908,59 +1951,69 @@ def show_mz_deviation_overview(assay, brackRes, show = None, random_fraction = 1
                 if usei.size > 0:
                     for i in usei:
                         if "consensus" in show:
-                            temp["rt"].append(spectrum.time)
-                            temp["mz"].append(spectrum.mz[i])
-                            temp["intensity"].append(spectrum.spint[i])
-                            temp["sample"].append(sample)
-                            temp["file"].append(sample.split("::")[0])
-                            temp["group"].append(sample_metadata.loc[sample, "group"])
-                            temp["type"].append("consensus")
-                            temp["feature"].append(featureInd)
+                            temp = addtoPDDictionary(temp, 
+                                rt        = spectrum.time, 
+                                mz        = spectrum.mz[i], 
+                                intensity = spectrum.spint[i], 
+                                sample    = sample, 
+                                file      = sample.split("::")[0], 
+                                group     = sample_metadata.loc[sample, "group"], 
+                                type      = "consensus", 
+                                feature   = featureInd
+                            )
 
                         if "non-consensus" in show:
                             for j in range(spectrum.usedFeatures[i].shape[0]):
-                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
-                                temp["mz"].append(spectrum.usedFeatures[i][j, 0])
-                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
-                                temp["sample"].append(sample)
-                                temp["file"].append(sample.split("::")[0])
-                                temp["group"].append(sample_metadata.loc[sample, "group"])
-                                temp["type"].append("non-consensus")
-                                temp["feature"].append(featureInd)
+                                temp = addtoPDDictionary(temp, 
+                                    rt        = spectrum.usedFeatures[i][j, 2], 
+                                    mz        = spectrum.usedFeatures[i][j, 0], 
+                                    intensity = spectrum.usedFeatures[i][j, 1], 
+                                    sample    = sample, 
+                                    file      = sample.split("::")[0], 
+                                    group     = sample_metadata.loc[sample, "group"], 
+                                    type      = "non-consensus", 
+                                    feature   = featureInd, 
+                                )
 
                         if "raw" in show:
                             for j in range(spectrum.usedFeatures[i].shape[0]):
-                                temp["rt"].append(spectrum.usedFeatures[i][j, 2])
-                                temp["mz"].append(spectrum.usedFeatures[i][j, 3])
-                                temp["intensity"].append(spectrum.usedFeatures[i][j, 1])
-                                temp["sample"].append(sample)
-                                temp["file"].append(sample.split("::")[0])
-                                temp["group"].append(sample_metadata.loc[sample, "group"])
-                                temp["type"].append("raw")
-                                temp["feature"].append(featureInd)
+                                temp = addtoPDDictionary(temp, 
+                                    rt        = spectrum.usedFeatures[i][j, 2], 
+                                    mz        = spectrum.usedFeatures[i][j, 3], 
+                                    intensity = spectrum.usedFeatures[i][j, 1], 
+                                    sample    = sample, 
+                                    file      = sample.split("::")[0], 
+                                    group     = sample_metadata.loc[sample, "group"], 
+                                    type      = "raw", 
+                                    feature   = featureInd, 
+                                )
 
         temp = pd.DataFrame(temp)
         for name, group in temp.groupby(["type", "feature"]):
             avgMZW, stdMZW = ms.dartms.weighted_avg_and_std(group["mz"], group["intensity"])
             avgInt, stdInt = np.mean(group["intensity"]), np.std(group["intensity"])
-            dat["avgMZ"].append(avgMZW)
-            dat["stdMZ"].append(stdMZW)
-            dat["avgInt"].append(avgInt)
-            dat["stdInt"].append(stdInt)
-            dat["type"].append(name[0])
-            dat["feature"].append(name[1])
-            dat["calcType"].append("weighted")
+
+            dat = addtoPDDictionary(dat, 
+                avgMZ    = avgMZW, 
+                stdMZ    = stdMZW, 
+                avgInt   = avgInt, 
+                stdInt   = stdInt, 
+                type     = name[0], 
+                feature  = name[1], 
+                calcType = "weighted", 
+            )
             
-            dat["avgMZ"].append(np.mean(group["mz"]))
-            dat["stdMZ"].append(np.std(group["mz"]))
-            dat["avgInt"].append(avgInt)
-            dat["stdInt"].append(stdInt)
-            dat["type"].append(name[0])
-            dat["feature"].append(name[1])
-            dat["calcType"].append("unweighted")
+            dat = addtoPDDictionary(dat, 
+                avgMZ    = np.mean(group["mz"]), 
+                stdMZ    = np.std(group["mz"]), 
+                avgInt   = avgInt, 
+                stdInt   = stdInt, 
+                type     = name[0], 
+                feature  = name[1], 
+                calcType = "unweighted", 
+            )
 
     dat = pd.DataFrame(dat)
-
 
     dat["stdMZPPM"] = dat["stdMZ"] / dat["avgMZ"] * 1E6
     dat = dat[dat["stdMZPPM"] > 1]
@@ -2003,7 +2056,7 @@ def rsd(vals):
     return np.std(vals) / np.mean(vals) * 100
 
 def plot_RSDs_per_group(dat, groups, type = "points"):
-    temp ={"rsd": [], "mean": [], "sd": [], "featurei": [], "group": [], "type": []}
+    temp = None
 
     for grp in sorted(list(set(groups))):
         groupInd = [i for i, group in enumerate(groups) if group == grp]
@@ -2016,22 +2069,26 @@ def plot_RSDs_per_group(dat, groups, type = "points"):
             vals_ = np.copy(vals)
             vals_ = vals_[~np.isnan(vals_)]
             if vals_.shape[0] > 1:
-                temp["rsd"].append(rsd(vals_))
-                temp["mean"].append(np.log2(np.mean(vals_)))
-                temp["sd"].append(np.log2(np.std(vals_)))
-                temp["featurei"].append(featurei)
-                temp["group"].append(grp)
-                temp["type"].append("without np.nan")
+                temp = addtoPDDictionary(temp, 
+                    rsd      = rsd(vals_), 
+                    mean     = np.log2(np.mean(vals_)), 
+                    sd       = np.log2(np.std(vals_)), 
+                    featurei = featurei, 
+                    group    = grp, 
+                    type     = "without np.nan", 
+                )
     
             vals_ = np.copy(vals)
             vals_[np.isnan(vals_)] = 0
             if np.sum(vals_ > 0) > 1:
-                temp["rsd"].append(rsd(vals_))
-                temp["mean"].append(np.log2(np.mean(vals_)))
-                temp["sd"].append(np.log2(np.std(vals_)))
-                temp["featurei"].append(featurei)
-                temp["group"].append(grp)
-                temp["type"].append("np.nan replaced with 0")
+                temp = addtoPDDictionary(temp, 
+                    rsd      = rsd(vals_), 
+                    mean     = np.log2(np.mean(vals_)), 
+                    sd       = np.log2(np.std(vals_)), 
+                    featurei = featurei, 
+                    group    = grp, 
+                    type     = "np.nan replaced with 0", 
+                )
             
     temp = pd.DataFrame(temp)
     if type == "histogram": 
@@ -2085,7 +2142,8 @@ def remove_blank_groups(samples, groups, batches, dat, blankGroups):
             print("   .. removed group %s"%(bGrp))
         else:
             warnings.warn("Blank group '%s' is not present (%s)"%(bGrp, str(sorted(list(set(groups))))))
-    return samples,groups,batches,dat
+
+    return samples, groups, batches, dat
 
 
 
