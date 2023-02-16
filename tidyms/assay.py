@@ -122,8 +122,12 @@ class Assay:
         separation: str = "uplc",
         data_import_mode: str = None,
 
+<<<<<<< HEAD
         n_jobs: int = 1,
         cache_MSData_objects: bool = False
+=======
+        n_jobs: int = 1
+>>>>>>> adapted_master
     ):
         if data_import_mode is None:
             data_import_mode = c.DEFAULT_DATA_LOAD_MODE
@@ -154,6 +158,7 @@ class Assay:
         self.feature_metrics = dict()
 
         self.n_jobs = n_jobs
+<<<<<<< HEAD
         self._cache_MSData_objects = cache_MSData_objects
         self._MSData_objects_cache = {}
         self._virtual_samples = set()
@@ -165,6 +170,8 @@ class Assay:
     @manager.setter
     def manager(self, value: None):
         raise RuntimeError("Setting the manager is not allowed")
+=======
+>>>>>>> adapted_master
 
     @property
     def ms_mode(self) -> str:
@@ -214,6 +221,7 @@ class Assay:
             msg = "n_jobs must be set to a positive, non-zero integer value to use a specific number of parallel workers. -1 indicates all processors. Provided value is {}."
             raise ValueError(msg.format(value))
 
+<<<<<<< HEAD
     def add_samples(
         self,
         data_path: Optional[Union[str, List[str], Path]],
@@ -238,6 +246,8 @@ class Assay:
         self._MSData_objects_cache[virtual_name] = MSData_object
         self._virtual_samples.add(virtual_name)
 
+=======
+>>>>>>> adapted_master
 
 
     @staticmethod
