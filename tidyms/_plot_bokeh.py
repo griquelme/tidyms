@@ -75,7 +75,7 @@ def add_line(
 
     Parameters
     ----------
-    figure : bokeh.plotting.Figure
+    figure : bokeh.plotting.figure
         key-value parameters to pass into bokeh figure function.
     x : array
     y : array

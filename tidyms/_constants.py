@@ -41,6 +41,11 @@ ROI_INDEX: Final[str] = "roi_index"
 FT_INDEX: Final[str] = "ft_index"
 MERGED: Final[str] = "merged"
 
+# isotopologue envelope annotation
+ENVELOPE_LABEL: Final[str] = "envelope_label"
+ENVELOPE_INDEX: Final[str] = "envelope_index"
+CHARGE: Final[str] = "charge"
+
 # sample metadata
 SAMPLE: Final[str] = "sample_"
 CLASS: Final[str] = "class_"

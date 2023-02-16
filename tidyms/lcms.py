@@ -168,13 +168,13 @@ class MSSpectrum:
         fig_params : dict or None, default=None
             key-value parameters to pass to ``bokeh.plotting.figure``.
         line_params : dict, or None, default=None
-            key-value parameters to pass to ``bokeh.plotting.Figure.line``.
+            key-value parameters to pass to ``bokeh.plotting.figure.line``.
         show : bool, default=True
             If True calls ``bokeh.plotting.show`` on the Figure.
 
         Returns
         -------
-        bokeh.plotting.Figure
+        bokeh.plotting.figure
 
         """
         default_fig_params = _plot_bokeh.get_spectrum_figure_params()
@@ -447,14 +447,14 @@ class LCRoi(Roi):
 
         Parameters
         ----------
-        figure : bokeh.plotting.Figure or None, default=None
+        figure : bokeh.plotting.figure or None, default=None
             Figure to add the plot. If None, a new figure is created.
         show : bool, default=True
             If True calls ``bokeh.plotting.show`` on the Figure.
 
         Returns
         -------
-        bokeh.plotting.Figure
+        bokeh.plotting.figure
 
         """
         if figure is None:

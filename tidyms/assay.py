@@ -20,8 +20,13 @@ from ._plot_bokeh import _LCAssayPlotter
 from .fill_missing import fill_missing_lc
 from ._build_data_matrix import build_data_matrix
 import json
+<<<<<<< HEAD
 import copy
 import tempfile
+=======
+from .annotation import create_annotator, annotate
+import copy
+>>>>>>> master
 
 # TODO: add id_ column to sample metadata
 # TODO: add make_roi params to each column in sample metadata for cases where
@@ -836,6 +841,7 @@ class Assay:
         n_samples = len(process_samples)
         dc_path = self.manager.assay_path.joinpath(c.DATA_MATRIX_FILENAME)
         if n_samples:
+            annotate_isotopologues = bool(self.manager.params[c.ANNOTATE_ISOTOPOLOGUES])
             sample_metadata = self.manager.get_sample_metadata()
             data_matrix, feature_metadata = build_data_matrix(
                 self.feature_table,
@@ -844,7 +850,8 @@ class Assay:
                 merge_close_features,
                 mz_merge,
                 rt_merge,
-                merge_threshold
+                merge_threshold,
+                annotate_isotopologues
             )
             dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
             dc.save(dc_path)
@@ -853,8 +860,77 @@ class Assay:
             self.data_matrix = read_pickle(dc_path)
         return self.data_matrix
 
-    def annotate_isotopologues(self, **kwargs):
-        raise NotImplementedError
+    @_manage_preprocessing_step
+    def annotate_isotopologues(
+        self, n_jobs: Optional[int] = 1, verbose: bool = True, **kwargs
+    ):
+        """
+        Labels isotopic envelopes in each sample.
+
+        Labels are stored in the `isotopologue_label` column of the feature
+        table. Each envelope share the same label. Features labelled
+        with ``-1`` do not belong to any group. The `isotopologue_index` column
+        indexes the nominal mass of the isotopologue, relative to the minimum
+        mass isotopologue. The `charge` column contains the charge of the
+        isotopic envelope
+
+        Features descriptors from each sample are organized in a Pandas
+        DataFrame and stored to disk and can be recovered using
+        ``self.load_features``. Besides the descriptors, these DataFrames
+        contain two additional columns: `roi_index` and `ft_index`. `roi_index`
+        is used to indentify the ROI where the feature was detected, and
+        recovered using the ``load_roi`` method. The `ft_index` value is used
+        to identify the feature in the `feature` attribute of the ROI.
+
+        Parameters
+        ----------
+        n_jobs: int or None, default=None
+            Number of jobs to run in parallel. ``None`` means 1 unless in a
+            :obj:`joblib.parallel_backend` context. ``-1`` means using all
+            processors.
+        verbose : bool, default=True
+            If ``True``, displays a progress bar.
+        **kwargs : dict
+            Parameters to pass to :py:meth:`tidyms.lcms.Roi.describe_features`.
+
+        """
+        process_samples = self.manager.sample_queue
+        n_samples = len(process_samples)
+        if n_samples:
+            # annotator = create_annotator(**kwargs)
+            # for sample in self.manager.get_sample_names():
+            #         ft_path = self.manager.get_feature_path(sample)
+            #         roi_list = self.load_roi_list(sample)
+            #         ft_table = self.load_features(sample)
+            #         annotate(ft_table, roi_list, annotator)
+            #         ft_table.to_pickle(ft_path)
+            #         print(sample)
+            def iterator():
+                for sample in self.manager.get_sample_names():
+                    ft_path = self.manager.get_feature_path(sample)
+                    roi_list = self.load_roi_list(sample)
+                    ft_table = self.load_features(sample)
+                    yield ft_table, ft_path, roi_list
+
+            def worker(args):
+                ft_table, ft_path, roi_list = args
+                ann = create_annotator(**kwargs)
+                annotate(ft_table, roi_list, ann)
+                ft_table.to_pickle(ft_path)
+
+            worker = delayed(worker)
+            if verbose:
+                msg = "Annotating Isotopologues in {} samples."
+                print(msg.format(n_samples))
+                bar = get_progress_bar()
+                iterator = bar(iterator(), total=n_samples)
+            else:
+                iterator = iterator()
+            Parallel(n_jobs=n_jobs)(worker(x) for x in iterator)
+        else:
+            if verbose:
+                print("All samples are processed already.")
+            return self
 
     def annotate_adducts(self, **kwargs):
         raise NotImplementedError

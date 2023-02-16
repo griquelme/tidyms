@@ -14,6 +14,7 @@ Provides
 
 __version__ = "0.5.1"
 
+from . import chem
 from . import fileio
 from . import container
 from . import utils
@@ -26,12 +27,17 @@ from . import _mzml
 from . import _build_data_matrix
 from . import correspondence
 from . import fill_missing
+from . import consensus_annotation
 from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum
 from .assay import Assay
 from .raw_data_utils import *
+<<<<<<< HEAD
 from . import dartms
+=======
+from . import annotation
+>>>>>>> master
 
 utils.create_tidyms_dir()
 SETTINGS = utils.get_settings()
