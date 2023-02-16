@@ -68,11 +68,5 @@ if __name__ == "__main__":
           python_requires=PYTHON_REQUIRES,
           install_requires=INSTALL_REQUIRES,
           include_package_data=True,
-<<<<<<< HEAD
-          
-          setup_requires=["pytest-runner"],
-          tests_require=["pytest"],)
-=======
           # ext_modules=ext_modules
     )
->>>>>>> master

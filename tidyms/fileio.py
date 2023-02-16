@@ -310,10 +310,7 @@ class MSData:
         self.ms_mode = ms_mode
         self.instrument = instrument
         self.separation = separation
-<<<<<<< HEAD
         self._is_virtual_sample = is_virtual_sample
-=======
->>>>>>> adapted_master
 
     @property
     def ms_mode(self) -> str:

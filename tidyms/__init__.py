@@ -33,11 +33,8 @@ from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum
 from .assay import Assay
 from .raw_data_utils import *
-<<<<<<< HEAD
 from . import dartms
-=======
 from . import annotation
->>>>>>> master
 
 utils.create_tidyms_dir()
 SETTINGS = utils.get_settings()
