@@ -1,18 +1,40 @@
-"""
-File for many functions concerning the processing of a DART-MS experiment. 
-"""
+#####################################################################################################
+####################################################################################################
+##
+## File for many functions concerning the processing of a DART-MS experiment. 
+##
+#
 
-import tqdm
-import numpy as np
-import pandas as pd
-import natsort
+
+
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Imports
+##
+#
+
 import tidyms as ms
-import os
+
+import numpy as np
+import numba
+import pandas as pd
 import plotnine as p9
-import pickle
-import datetime
 import math
 import scipy
+
+import tqdm
+import natsort
+import os
+import pickle
+import datetime
 import warnings
 import functools
 import bs4
@@ -21,6 +43,18 @@ import random
 
 
 
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Convenience functions
+##
+#
 
 def addtoPDDictionary(dict = None, **kwargs):
     """
@@ -44,6 +78,7 @@ def addtoPDDictionary(dict = None, **kwargs):
 
     return dict
 
+
 def weighted_avg_and_std(values, weights):
     """
     Return the weighted average and standard deviation.
@@ -56,9 +91,93 @@ def weighted_avg_and_std(values, weights):
     return (average, math.sqrt(variance))
 
 
+def rsd(vals, weights = None):
+    if weights == None:
+        weights = np.ones((vals.shape[0]))
+    avg, std = weighted_avg_and_std(vals, weights)
+    return std / avg
+
+
+def calculate_mz_deviationPPM(a, b):
+    return (a - b) / b * 1E6
+
+
+def find_feature(features, mz, max_deviation_ppm = 20):
+    mzmax = mz * (1. + max_deviation_ppm / 1E6)
+    mzmin = mz * (1. - max_deviation_ppm / 1E6)
+    ind = np.argmin(np.abs(features[:,1] - mz))
+
+    if features[ind,1] >= mzmin and features[ind,1] <= mzmax:
+        return ind
+    else:
+        return None 
 
 
 
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## General functions
+##
+#
+
+def print_sample_overview(assay):
+    temp = None
+
+    for samplei, sample in enumerate(assay.manager.get_sample_names()):
+        msDataObj = assay.get_ms_data(sample)
+
+        temp = addtoPDDictionary(temp, 
+            sample  = sample,
+            spectra = msDataObj.get_n_spectra(), 
+            mzs     = sum((spectrum.mz.shape[0] for k, spectrum in msDataObj.get_spectra_iterator()))
+        )
+
+    temp = pd.DataFrame(temp)
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+        print(temp.to_markdown())
+
+
+def remove_blank_groups(samples, groups, batches, dat, blankGroups):
+    for bGrp in blankGroups:
+        if bGrp in groups:
+        ## find all samples not associated with the blank group
+            inds = [i for i, group in enumerate(groups) if group != bGrp]
+        
+        ## keep all these samples thereby removing the samples of the particular blank group
+            dat = dat[inds, :]
+            samples = [samples[i] for i in inds]
+            groups = [groups[i] for i in inds]
+            batches = [batches[i] for i in inds]
+
+            print("   .. removed group %s"%(bGrp))
+        else:
+            warnings.warn("Blank group '%s' is not present (%s)"%(bGrp, str(sorted(list(set(groups))))))
+
+    return samples, groups, batches, dat
+
+
+
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Chronogram import and separation functions
+##
+#
 
 def subset_MSData_chronogram(msData, startInd, endInd):
     """
@@ -73,6 +192,7 @@ def subset_MSData_chronogram(msData, startInd, endInd):
         MSData: The new MSData subset object
     """    
     return ms.fileio.MSData_subset_spectra(start_ind = startInd, end_ind = endInd, from_MSData_object = msData)
+
 
 def get_separate_chronogram_indices(msData, msData_ID, spotsFile, intensityThreshold = 0.00001, startTime_seconds = 0, endTime_seconds = 1E6):
     """
@@ -169,6 +289,7 @@ def get_separate_chronogram_indices(msData, msData_ID, spotsFile, intensityThres
                 separationInds.append((startInd, endInd, row["name"], row["group"], row["class"], row["batch"]))
 
     return separationInds
+
 
 def add_chronograms_samples_to_assay(assay, sepInds, msData, filename, fileNameChangeFunction = None, verbose = True):
     """
@@ -372,8 +493,6 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
     return assay
 
 
-
-## Plot sample TICs
 def plot_sample_TICs(assay, separate = True, separate_by = "group"):
     temp = None
     sample_metadata = assay.manager.get_sample_metadata()
@@ -421,6 +540,22 @@ def plot_sample_TICs(assay, separate = True, separate_by = "group"):
 
     print(p)
 
+
+
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Spectra selection in separated samples
+## 
+#
+
 def drop_lower_spectra(assay, drop_rate = None):
     for samplei, sample in enumerate(assay.manager.get_sample_names()):
         totalInt = []
@@ -438,6 +573,7 @@ def drop_lower_spectra(assay, drop_rate = None):
                 sampleObjNew.delete_spectrum(ordInte[c])
                 c = c + 1
             msDataObj.to_MSData_object = sampleObjNew
+
 
 def select_top_n_spectra(assay, n = None):
     for samplei, sample in enumerate(assay.manager.get_sample_names()):
@@ -457,6 +593,22 @@ def select_top_n_spectra(assay, n = None):
                 c = c + 1
             msDataObj.to_MSData_object = sampleObjNew
 
+
+
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Sample normalization
+##
+#
+
 def normalize_samples_by_TICs(assay, multiplication_factor = 1):
     for samplei, sample in enumerate(assay.manager.get_sample_names()):
         totalInt = []
@@ -473,6 +625,7 @@ def normalize_samples_by_TICs(assay, multiplication_factor = 1):
                 spectrum.spint = spectrum.spint / totalInt * multiplication_factor
         else:
             print("   .. Error: cannot normalize sample '%35s' to TIC as it is zero"%(sample))
+
 
 def normalize_to_internal_standard(assay, std, multiplication_factor = 1, plot = False):
     stdMZmin, stdMZmax = std
@@ -515,13 +668,21 @@ def normalize_to_internal_standard(assay, std, multiplication_factor = 1, plot =
             + p9.ggtitle("Abundance of internal standard (mz %.5f - %.5f)"%(std[0], std[1]))
         )
         
-    
 
 
 
 
 
 
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## MZ correction 
+##
+#
 
 def get_MZ_offsets(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_deviation_absolute = 0.1, selection_criteria = "mostAbundant"):
     """
@@ -568,6 +729,7 @@ def get_MZ_offsets(assay, referenceMZs = [165.078978594 + 1.007276], max_mz_devi
                 
     return pd.DataFrame(temp)
 
+
 def _revMZ(mz, correctby, *args, **kwargs):
     if correctby == "mzDeviationPPM":
         transformFactor = kwargs["transformFactor"]
@@ -577,6 +739,7 @@ def _revMZ(mz, correctby, *args, **kwargs):
         return mz + transformFactor
     else:
         raise RuntimeError("Unknown correctby option '%s' specified. Must be either of ['mzDeviationPPM', 'mzDeviation']"%(correctby))
+
 
 def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007276], 
         max_mz_deviation_absolute = 0.1, correctby = "mzDeviationPPM", 
@@ -684,6 +847,15 @@ def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007
 
 
 
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Clustering of mz values functionality 
+## used for consensus calculations and bracketing
+##
+#
     
 def crude_cluster_mz_list(sample, mz, intensity, min_difference_ppm):
     """
@@ -707,7 +879,7 @@ def crude_cluster_mz_list(sample, mz, intensity, min_difference_ppm):
 
     return clust[np.argsort(mzOrd)]
 
-import numba
+
 global refine_clustering
 @numba.jit(nopython=True)
 def refine_clustering(sample, mzs, intensities, spectrumID, clusts, expected_mz_deviation_ppm = 15, closest_signal_max_deviation_ppm = 20, max_mz_deviation_ppm = None):
@@ -785,10 +957,6 @@ def refine_clustering(sample, mzs, intensities, spectrumID, clusts, expected_mz_
     return newClusts
 
 
-
-
-
-
 def reindex_cluster(cluster):
     """
     Function to reindex a cluster if certain cluster IDs have been deleted previously. 
@@ -820,7 +988,21 @@ def reindex_cluster(cluster):
 
     return newClust
 
-## TODO implement fine clustering after crude one
+
+
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Consensus spectra calculation
+##
+#
 
 def describe_MZ_cluster(mz, intensity, clust):
     """
@@ -851,7 +1033,7 @@ def describe_MZ_cluster(mz, intensity, clust):
     mzDesc[:,3] = mzDesc[:,3] / mzDesc[:,1]
     mzDesc[:,5] = (mzDesc[:,4] - mzDesc[:,2]) / mzDesc[:,3] * 1E6
     return mzDesc
-    
+
 
 def collapse_mz_info(mz, original_mz, intensity, time, cluster, intensity_collapse_method = "sum"):
     clusts, ns = np.unique(cluster, return_counts = True)
@@ -961,6 +1143,7 @@ def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectru
     #print("'%s' ppmDeviationCheck filter filter, removed %d features"%(sample, removed))
 
     return cluster
+
 
 def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_signals_per_cluster = 10, minimum_intensity_for_signals = 0, cluster_quality_check_functions = None, aggregation_function = "sum", exportAsFeatureML = True, featureMLlocation = ".", verbose = True):
     """
@@ -1106,24 +1289,6 @@ def calculate_consensus_spectra_per_sample(assay, min_difference_ppm = 30, min_s
         msDataObj.to_MSData_object = sampleObjNew
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def write_consensus_spectrum_to_featureML(assay, widthRT = 40):
     for samplei, sample in tqdm.tqdm(enumerate(assay.manager.get_sample_names()), total = len(assay.manager.get_sample_names()), desc = "exporting to featureML"):
 
@@ -1163,21 +1328,6 @@ def write_consensus_spectrum_to_featureML(assay, widthRT = 40):
 
 
 
-def print_sample_overview(assay):
-    temp = None
-
-    for samplei, sample in enumerate(assay.manager.get_sample_names()):
-        msDataObj = assay.get_ms_data(sample)
-
-        temp = addtoPDDictionary(temp, 
-            sample  = sample,
-            spectra = msDataObj.get_n_spectra(), 
-            mzs     = sum((spectrum.mz.shape[0] for k, spectrum in msDataObj.get_spectra_iterator()))
-        )
-
-    temp = pd.DataFrame(temp)
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
-        print(temp)
 
 
 
@@ -1185,6 +1335,12 @@ def print_sample_overview(assay):
 
 
 
+#####################################################################################################
+####################################################################################################
+##
+## Bracketing of several samples
+##
+#
 
 def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False):
     temp = {
@@ -1222,7 +1378,6 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
     temp["endRT"] = np.array(temp["endRT"])
     temp["cluster"] = np.array(temp["cluster"])
 
-
     if False:  ## used for development purposes TODO remove all code in this if
         print("Restricting", end = "")
         keep = np.abs(temp["mz"] - 358.3079) < 0.06
@@ -1238,9 +1393,6 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
         temp["endRT"] = temp["endRT"][useInds]
         temp["cluster"] = temp["cluster"][useInds]
         print("... done")
-
-
-
 
     ## clusering v2
     ## Iterative cluster generation with the same algorithm used for calculating the consensus spectra. 
@@ -1283,10 +1435,6 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
         temp["endRT"] = temp["endRT"][keep]
         temp["cluster"] = reindex_cluster(temp["cluster"][keep])
         
-
-
-
-
     ## Clustering version 1
     ## This algorithm starts with the highest abundant features and adds all other features to that particular cluster.
     ## It has the drawback that certain overlapping mz values can be predatory. 
@@ -1300,10 +1448,6 @@ def bracket_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False
             temp["cluster"][assign] = cclust
 
             cclust = cclust + 1
-            
-
-
-
 
     tempClusterInfo = {
         "cluster": [],
@@ -1507,11 +1651,22 @@ def write_brac_results_to_featureML(bracRes, featureMLlocation = "./bracketedRes
         fout.write('  </featureMap>\n')
 
 
-    
 
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
 ## Generate data matrix from bracketing information
 ## This step also automatically re-integrates the results
-## TODO implement code to use the original spectra for the integration
+##
+#
+
 def build_data_matrix(assay, bracketing_results, on = "processedData", originalData_mz_deviation_multiplier_PPM = 0):
     sampleNames = assay.manager.get_sample_names()
     sampleNamesToRowI = dict(((sample, i) for i, sample in enumerate(sampleNames)))
@@ -1552,15 +1707,25 @@ def build_data_matrix(assay, bracketing_results, on = "processedData", originalD
 
 
 
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Blank subtraction
+##
+#
+
 def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutoff = 2, pvalueCutoff = 0.05, minDetected = 2, plot = False, verbose = True):
 
     keeps = [0 for i in range(dat.shape[1])]
 
     temp = None
-    folds = []
-    pvals = []
-    sigInds = []
-    comparisons = []
 
     for featurei in range(dat.shape[1]):
         blankInds = [i for i, group in enumerate(groups) if group == blankGroup]
@@ -1647,116 +1812,12 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
 
 
 
-
-
-
-def plot_feature_mz_deviations(assay, features, featureInd, types = None):
-    if types is None:
-        types = ["consensus", "non-consensus", "raw-onlyFeatures", "raw-allSignals"]
-    temp = None
-
-    for featureInd in [featureInd]:
-        for samplei, sample in enumerate(assay.manager.get_sample_names()):
-            msDataObj = assay.get_ms_data(sample)
-            sample_metadata = assay.manager.get_sample_metadata()
-            for k, spectrum in msDataObj.get_spectra_iterator():
-                usei = np.where(np.logical_and(spectrum.mz >= features[featureInd][0], spectrum.mz <= features[featureInd][2]))[0]
-                if usei.size > 0:
-                    for i in usei:
-                        if "consensus" in types:
-                            temp = addtoPDDictionary(temp, 
-                                rt        = spectrum.time,
-                                mz        = spectrum.mz[i],
-                                intensity = spectrum.spint[i],
-                                sample    = sample,
-                                file      = sample.split("::")[0],
-                                group     = sample_metadata.loc[sample, "group"],
-                                type      = "consensus",
-                                feature   = featureInd,
-                            )
-
-                        if "non-consensus" in types:
-                            for j in range(spectrum.usedFeatures[i].shape[0]):
-                                temp = addtoPDDictionary(temp, 
-                                    rt        = spectrum.usedFeatures[i][j, 2],
-                                    mz        = spectrum.usedFeatures[i][j, 0],
-                                    intensity = spectrum.usedFeatures[i][j, 1],
-                                    sample    = sample,
-                                    file      = sample.split("::")[0],
-                                    group     = sample_metadata.loc[sample, "group"],
-                                    type      = "non-consensus",
-                                    feature   = featureInd,
-                                )
-
-                        if "raw-onlyFeatures" in types:
-                            for j in range(spectrum.usedFeatures[i].shape[0]):
-                                temp = addtoPDDictionary(temp, 
-                                    rt        = spectrum.usedFeatures[i][j, 2], 
-                                    mz        = spectrum.usedFeatures[i][j, 3], 
-                                    intensity = spectrum.usedFeatures[i][j, 1], 
-                                    sample    = sample, 
-                                    file      = sample.split("::")[0], 
-                                    group     = sample_metadata.loc[sample, "group"], 
-                                    type      = "raw-onlyFeatures", 
-                                    feature   = featureInd, 
-                                )
-            
-            if "raw-allSignals" in types:
-                for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
-                    usei = np.where(np.logical_and(spectrum.original_mz >= spectrum.reverseMZ(features[featureInd][0]), spectrum.original_mz <= spectrum.reverseMZ(features[featureInd][2])))[0]
-                    if usei.size > 0:
-                        for i in usei:
-                            temp = addtoPDDictionary(temp, 
-                                rt        = spectrum.time, 
-                                mz        = spectrum.original_mz[i], 
-                                intensity = spectrum.spint[i], 
-                                sample    = sample, 
-                                file      = sample.split("::")[0], 
-                                group     = sample_metadata.loc[sample, "group"], 
-                                type      = "raw-allSignals", 
-                                feature   = featureInd, 
-                            )
-
-    temp = pd.DataFrame(temp)
-    p = (p9.ggplot(data = temp, mapping = p9.aes(x = "rt", y = "mz", colour = "group"))
-        + p9.geom_hline(data = temp.groupby(["type"]).mean("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.5, alpha = 0.5, colour = "slategrey")
-        + p9.geom_hline(data = temp.groupby(["type"]).min("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
-        + p9.geom_hline(data = temp.groupby(["type"]).max("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
-        + p9.geom_point()
-        + p9.facet_wrap("type")
-        + p9.theme_minimal()
-        + p9.ggtitle("Feature %.5f (%.5f - %.5f)\nmz deviation overall: %.1f (ppm, non-consensus) and %.1f (ppm, consensus)"%(features[featureInd][1], features[featureInd][0], features[featureInd][2], 
-            (temp[temp["type"] == "non-consensus"]["mz"].max() - temp[temp["type"] == "non-consensus"]["mz"].min()) / temp[temp["type"] == "non-consensus"]["mz"].mean() * 1E6,
-            (temp[temp["type"] == "consensus"]["mz"].max() - temp[temp["type"] == "consensus"]["mz"].min()) / temp[temp["type"] == "consensus"]["mz"].mean() * 1E6))
-        + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
-        + p9.theme(legend_position = "bottom")
-        )
-    print(p)
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-def find_feature(features, mz, max_deviation_ppm = 20):
-    mzmax = mz * (1. + max_deviation_ppm / 1E6)
-    mzmin = mz * (1. - max_deviation_ppm / 1E6)
-    ind = np.argmin(np.abs(features[:,1] - mz))
-    if features[ind,1] >= mzmin and features[ind,1] <= mzmax:
-        return ind
-    else:
-        return None 
-
-def calculate_mz_deviationPPM(a, b):
-    return (a - b) / b * 1E6
+#####################################################################################################
+####################################################################################################
+##
+## Feature annotaiton
+##
+#
 
 def annotate_features(dat, features, samples, groups, useGroups = None, plot = False):
 
@@ -1883,11 +1944,12 @@ def annotate_features(dat, features, samples, groups, useGroups = None, plot = F
 
 
 
-
-
-
-
-
+#####################################################################################################
+####################################################################################################
+##
+## Summary 
+##
+#
 
 def print_results_overview(dat, groups):
     print("There are %d features (columns) and %d samples (rows) in the dataset"%(dat.shape[1], dat.shape[0]))
@@ -1922,10 +1984,6 @@ def print_results_overview(dat, groups):
     for group in sorted(list(set(groups))):
         print("%%%ds  "%(maxGroupLabelSize)%(a[group]["total"] if a[group]["total"] > 0 else ""), end = "")
     print("")
-
-
-
-
 
 
 def show_mz_deviation_overview(assay, brackRes, show = None, random_fraction = 1):
@@ -2039,6 +2097,88 @@ def show_mz_deviation_overview(assay, brackRes, show = None, random_fraction = 1
     print(p)
 
 
+def plot_feature_mz_deviations(assay, features, featureInd, types = None):
+    if types is None:
+        types = ["consensus", "non-consensus", "raw-onlyFeatures", "raw-allSignals"]
+    temp = None
+
+    for featureInd in [featureInd]:
+        for samplei, sample in enumerate(assay.manager.get_sample_names()):
+            msDataObj = assay.get_ms_data(sample)
+            sample_metadata = assay.manager.get_sample_metadata()
+            for k, spectrum in msDataObj.get_spectra_iterator():
+                usei = np.where(np.logical_and(spectrum.mz >= features[featureInd][0], spectrum.mz <= features[featureInd][2]))[0]
+                if usei.size > 0:
+                    for i in usei:
+                        if "consensus" in types:
+                            temp = addtoPDDictionary(temp, 
+                                rt        = spectrum.time,
+                                mz        = spectrum.mz[i],
+                                intensity = spectrum.spint[i],
+                                sample    = sample,
+                                file      = sample.split("::")[0],
+                                group     = sample_metadata.loc[sample, "group"],
+                                type      = "consensus",
+                                feature   = featureInd,
+                            )
+
+                        if "non-consensus" in types:
+                            for j in range(spectrum.usedFeatures[i].shape[0]):
+                                temp = addtoPDDictionary(temp, 
+                                    rt        = spectrum.usedFeatures[i][j, 2],
+                                    mz        = spectrum.usedFeatures[i][j, 0],
+                                    intensity = spectrum.usedFeatures[i][j, 1],
+                                    sample    = sample,
+                                    file      = sample.split("::")[0],
+                                    group     = sample_metadata.loc[sample, "group"],
+                                    type      = "non-consensus",
+                                    feature   = featureInd,
+                                )
+
+                        if "raw-onlyFeatures" in types:
+                            for j in range(spectrum.usedFeatures[i].shape[0]):
+                                temp = addtoPDDictionary(temp, 
+                                    rt        = spectrum.usedFeatures[i][j, 2], 
+                                    mz        = spectrum.usedFeatures[i][j, 3], 
+                                    intensity = spectrum.usedFeatures[i][j, 1], 
+                                    sample    = sample, 
+                                    file      = sample.split("::")[0], 
+                                    group     = sample_metadata.loc[sample, "group"], 
+                                    type      = "raw-onlyFeatures", 
+                                    feature   = featureInd, 
+                                )
+            
+            if "raw-allSignals" in types:
+                for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
+                    usei = np.where(np.logical_and(spectrum.original_mz >= spectrum.reverseMZ(features[featureInd][0]), spectrum.original_mz <= spectrum.reverseMZ(features[featureInd][2])))[0]
+                    if usei.size > 0:
+                        for i in usei:
+                            temp = addtoPDDictionary(temp, 
+                                rt        = spectrum.time, 
+                                mz        = spectrum.original_mz[i], 
+                                intensity = spectrum.spint[i], 
+                                sample    = sample, 
+                                file      = sample.split("::")[0], 
+                                group     = sample_metadata.loc[sample, "group"], 
+                                type      = "raw-allSignals", 
+                                feature   = featureInd, 
+                            )
+
+    temp = pd.DataFrame(temp)
+    p = (p9.ggplot(data = temp, mapping = p9.aes(x = "rt", y = "mz", colour = "group"))
+        + p9.geom_hline(data = temp.groupby(["type"]).mean("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.5, alpha = 0.5, colour = "slategrey")
+        + p9.geom_hline(data = temp.groupby(["type"]).min("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
+        + p9.geom_hline(data = temp.groupby(["type"]).max("mz").reset_index(), mapping = p9.aes(yintercept = "mz"), size = 1.25, alpha = 0.5, colour = "lightgrey")
+        + p9.geom_point()
+        + p9.facet_wrap("type")
+        + p9.theme_minimal()
+        + p9.ggtitle("Feature %.5f (%.5f - %.5f)\nmz deviation overall: %.1f (ppm, non-consensus) and %.1f (ppm, consensus)"%(features[featureInd][1], features[featureInd][0], features[featureInd][2], 
+            (temp[temp["type"] == "non-consensus"]["mz"].max() - temp[temp["type"] == "non-consensus"]["mz"].min()) / temp[temp["type"] == "non-consensus"]["mz"].mean() * 1E6,
+            (temp[temp["type"] == "consensus"]["mz"].max() - temp[temp["type"] == "consensus"]["mz"].min()) / temp[temp["type"] == "consensus"]["mz"].mean() * 1E6))
+        + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
+        + p9.theme(legend_position = "bottom")
+        )
+    print(p)
 
 
 
@@ -2049,11 +2189,12 @@ def show_mz_deviation_overview(assay, brackRes, show = None, random_fraction = 1
 
 
 
-
-
-
-def rsd(vals):
-    return np.std(vals) / np.mean(vals) * 100
+#####################################################################################################
+####################################################################################################
+##
+## RSD overview
+##
+#
 
 def plot_RSDs_per_group(dat, groups, type = "points"):
     temp = None
@@ -2105,7 +2246,7 @@ def plot_RSDs_per_group(dat, groups, type = "points"):
 
     elif type == "points":
         p = (p9.ggplot(data = temp, mapping = p9.aes(
-                x = "mean", y = "rsd", colour = "group"
+                x = "mean", y = "rsd * 100", colour = "group"
             ))
             + p9.geom_point(alpha = 0.3)
             #+ p9.geom_abline(slope = 0.15, intercept = 0, colour = "slategrey")
@@ -2122,30 +2263,3 @@ def plot_RSDs_per_group(dat, groups, type = "points"):
         raise RuntimeError("Unknown plot type. Must be 'histogram' or 'points'")
     
     return p
-
-
-
-
-
-def remove_blank_groups(samples, groups, batches, dat, blankGroups):
-    for bGrp in blankGroups:
-        if bGrp in groups:
-        ## find all samples not associated with the blank group
-            inds = [i for i, group in enumerate(groups) if group != bGrp]
-        
-        ## keep all these samples thereby removing the samples of the particular blank group
-            dat = dat[inds, :]
-            samples = [samples[i] for i in inds]
-            groups = [groups[i] for i in inds]
-            batches = [batches[i] for i in inds]
-
-            print("   .. removed group %s"%(bGrp))
-        else:
-            warnings.warn("Blank group '%s' is not present (%s)"%(bGrp, str(sorted(list(set(groups))))))
-
-    return samples, groups, batches, dat
-
-
-
-
-
