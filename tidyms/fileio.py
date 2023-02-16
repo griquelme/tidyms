@@ -287,7 +287,14 @@ class MSData:
             del kwargs["data_import_mode"]
         
         if data_import_mode.lower() == c.SIMULATED:
-            return MSData_simulated()
+                
+            mz_values = kwargs["mz_values"]; del kwargs["mz_values"]
+            rt_values = kwargs["rt_values"]; del kwargs["rt_values"]
+            mz_params = kwargs["mz_params"]; del kwargs["mz_params"]
+            rt_params = kwargs["rt_params"]; del kwargs["rt_params"]
+            return MSData_simulated(mz_values, rt_values, 
+                                    mz_params, rt_params,
+                                    **kwargs)
         if data_import_mode.lower() == c.INFILE and "path" in kwargs:
             path = Path(kwargs["path"])
             suffix = path.suffix

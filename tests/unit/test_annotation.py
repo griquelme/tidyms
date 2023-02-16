@@ -5,7 +5,7 @@ import pytest
 from tidyms import annotation
 from tidyms.raw_data_utils import make_roi
 from tidyms import _constants as c
-from tidyms.fileio import SimulatedMSData
+from tidyms.fileio import MSData
 from tidyms.lcms import Peak, LCRoi
 from tidyms.chem import get_chnops_bounds, Formula
 from math import isclose
@@ -195,7 +195,12 @@ def simulated_data(compound_data):
         mz_params.append(cmz)
     mz_params = np.vstack(mz_params)
     rt_params = np.vstack(rt_params)
-    ms_data = SimulatedMSData(mz_grid, rt_grid, mz_params, rt_params, noise=0.025)
+    ms_data = MSData.create_MSData_instance(mz_values = mz_grid, 
+                                            rt_values = rt_grid, 
+                                            mz_params = mz_params, 
+                                            rt_params = rt_params, 
+                                            data_import_mode = "simulated",                                             
+                                            noise=0.025)
 
     roi_list = make_roi(ms_data, tolerance=0.01)
     ft_list = list()
