@@ -12,8 +12,6 @@ Provides
 
 """
 
-__version__ = "0.5.1"
-
 from . import chem
 from . import fileio
 from . import container
