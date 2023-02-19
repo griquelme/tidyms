@@ -1,5 +1,6 @@
 from tidyms import assay
 from tidyms.lcms import LCRoi, Peak
+from tidyms import _constants as c
 import pytest
 from pathlib import Path
 import os
@@ -27,11 +28,7 @@ def create_sample_names(n: int, start: int = 1):
 
 
 def create_assay_dir(
-    path,
-    n,
-    start=1,
-    data_dir_name: str = "data-dir",
-    assay_dir_name: str = "assay-dir"
+    path, n, start=1, data_dir_name: str = "data-dir", assay_dir_name: str = "assay-dir"
 ):
     tmpdir = Path(str(path))
     assay_path = tmpdir.joinpath(assay_dir_name)
@@ -43,23 +40,22 @@ def create_assay_dir(
     return assay_path, data_path
 
 
-def create_dummy_assay_manager(
-        assay_path, data_path, metadata) -> assay._AssayManager:
+def create_dummy_assay_manager(assay_path, data_path, metadata) -> assay._AssayManager:
     return assay._AssayManager(
         assay_path=assay_path,
         data_path=data_path,
         sample_metadata=metadata,
-        ms_mode="centroid",
-        instrument="qtof",
-        separation="uplc"
+        ms_mode=c.CENTROID,
+        instrument=c.QTOF,
+        separation=c.UPLC,
     )
 
 
 def create_dummy_data_frame(n: int, classes: list, start: int = 1):
     sample_names = create_sample_names(n, start=start)
     sample_names = [x.split(".")[0] for x in sample_names]
-    df = pd.DataFrame(data=sample_names, columns=["sample"])
-    df["class"] = np.random.choice(classes, n)
+    df = pd.DataFrame(data=sample_names, columns=[c.SAMPLE])
+    df[c.CLASS] = np.random.choice(classes, n)
     return df
 
 
@@ -70,6 +66,7 @@ def test_assay_metadata_creation(tmpdir):
 
 
 # get_path_list
+
 
 def test_get_path_list_single_file_str(tmpdir):
     file_path = str(tmpdir) + os.path.sep + "sample.mzML"
@@ -164,7 +161,7 @@ def test_assay_manager_invalid_sample_metadata_extra_samples(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, n)
     sample_metadata = create_dummy_data_frame(n, classes)
     sample_metadata2 = sample_metadata.copy()
-    sample_metadata2["sample"] = sample_metadata2["sample"] + "asdf"
+    sample_metadata2[c.SAMPLE] = sample_metadata2[c.SAMPLE] + "asdf"
     sample_metadata = pd.concat([sample_metadata, sample_metadata2])
     sample_metadata = sample_metadata.reset_index()
     with pytest.raises(ValueError):
@@ -176,7 +173,7 @@ def test_assay_manager_sample_metadata_without_sample_column(tmpdir):
     classes = ["a", "b", "c"]
     assay_path, data_path = create_assay_dir(tmpdir, n)
     sample_metadata = create_dummy_data_frame(n, classes)
-    sample_metadata = sample_metadata.drop(columns=["sample"])
+    sample_metadata = sample_metadata.drop(columns=[c.SAMPLE])
     with pytest.raises(ValueError):
         create_dummy_assay_manager(assay_path, data_path, sample_metadata)
 
@@ -186,10 +183,9 @@ def test_assay_manager_sample_metadata_without_class_column(tmpdir):
     classes = ["a", "b", "c"]
     assay_path, data_path = create_assay_dir(tmpdir, n)
     sample_metadata = create_dummy_data_frame(n, classes)
-    sample_metadata = sample_metadata.drop(columns=["class"])
-    metadata = create_dummy_assay_manager(
-        assay_path, data_path, sample_metadata)
-    assert (metadata.sample_metadata.class_ == 0).all()
+    sample_metadata = sample_metadata.drop(columns=[c.CLASS])
+    metadata = create_dummy_assay_manager(assay_path, data_path, sample_metadata)
+    assert (metadata.sample_metadata[c.CLASS] == 0).all()
 
 
 def test_assay_manager_sample_metadata_without_order_column(tmpdir):
@@ -197,10 +193,9 @@ def test_assay_manager_sample_metadata_without_order_column(tmpdir):
     classes = ["a", "b", "c"]
     assay_path, data_path = create_assay_dir(tmpdir, n)
     sample_metadata = create_dummy_data_frame(n, classes)
-    sample_metadata = sample_metadata.drop(columns=["class"])
-    metadata = create_dummy_assay_manager(
-        assay_path, data_path, sample_metadata)
-    assert (metadata.sample_metadata.order_ == np.arange(n) + 1).all()
+    sample_metadata = sample_metadata.drop(columns=[c.CLASS])
+    metadata = create_dummy_assay_manager(assay_path, data_path, sample_metadata)
+    assert (metadata.sample_metadata[c.ORDER] == np.arange(n) + 1).all()
 
 
 def test_assay_manager_sample_metadata_with_order_column(tmpdir):
@@ -208,7 +203,7 @@ def test_assay_manager_sample_metadata_with_order_column(tmpdir):
     classes = ["a", "b", "c"]
     assay_path, data_path = create_assay_dir(tmpdir, n)
     sample_metadata = create_dummy_data_frame(n, classes)
-    sample_metadata["order"] = np.arange(n) + 1
+    sample_metadata[c.ORDER] = np.arange(n) + 1
     create_dummy_assay_manager(assay_path, data_path, sample_metadata)
     assert True
 
@@ -218,8 +213,8 @@ def test_assay_manager_sample_metadata_invalid_order_type(tmpdir):
     classes = ["a", "b", "c"]
     assay_path, data_path = create_assay_dir(tmpdir, n)
     sample_metadata = create_dummy_data_frame(n, classes)
-    sample_metadata["order"] = np.arange(n) + 1
-    sample_metadata["order"] = sample_metadata["order"].astype(str)
+    sample_metadata[c.ORDER] = np.arange(n) + 1
+    sample_metadata[c.ORDER] = sample_metadata[c.ORDER].astype(str)
     with pytest.raises(TypeError):
         create_dummy_assay_manager(assay_path, data_path, sample_metadata)
 
@@ -229,8 +224,8 @@ def test_assay_manager_sample_metadata_invalid_order_non_pos_values(tmpdir):
     classes = ["a", "b", "c"]
     assay_path, data_path = create_assay_dir(tmpdir, n)
     sample_metadata = create_dummy_data_frame(n, classes)
-    sample_metadata["order"] = np.arange(n) + 1
-    sample_metadata.at[2, "order"] = -1
+    sample_metadata[c.ORDER] = np.arange(n) + 1
+    sample_metadata.at[2, c.ORDER] = -1
     with pytest.raises(ValueError):
         create_dummy_assay_manager(assay_path, data_path, sample_metadata)
 
@@ -240,8 +235,8 @@ def test_assay_manager_sample_metadata_invalid_order_repeated_values(tmpdir):
     classes = ["a", "b", "c"]
     assay_path, data_path = create_assay_dir(tmpdir, n)
     sample_metadata = create_dummy_data_frame(n, classes)
-    sample_metadata["order"] = np.arange(n) + 1
-    sample_metadata.at[2, "order"] = 1
+    sample_metadata[c.ORDER] = np.arange(n) + 1
+    sample_metadata.at[2, c.ORDER] = 1
     with pytest.raises(ValueError):
         create_dummy_assay_manager(assay_path, data_path, sample_metadata)
 
@@ -253,7 +248,7 @@ def test_assay_manager_sample_metadata_with_batch_column(tmpdir):
     sample_metadata = create_dummy_data_frame(n, classes)
     n1 = n // 2
     n2 = n - n1
-    sample_metadata["batch"] = [1] * n1 + [2] * n2
+    sample_metadata[c.BATCH] = [1] * n1 + [2] * n2
     create_dummy_assay_manager(assay_path, data_path, sample_metadata)
     assert True
 
@@ -265,8 +260,8 @@ def test_assay_manager_sample_metadata_invalid_batch_type(tmpdir):
     sample_metadata = create_dummy_data_frame(n, classes)
     n1 = n // 2
     n2 = n - n1
-    sample_metadata["batch"] = [0] * n1 + [2] * n2
-    sample_metadata["batch"] = sample_metadata["batch"].astype(str)
+    sample_metadata[c.BATCH] = [0] * n1 + [2] * n2
+    sample_metadata[c.BATCH] = sample_metadata[c.BATCH].astype(str)
     with pytest.raises(TypeError):
         create_dummy_assay_manager(assay_path, data_path, sample_metadata)
 
@@ -278,7 +273,7 @@ def test_assay_manager_sample_metadata_invalid_batch_values(tmpdir):
     sample_metadata = create_dummy_data_frame(n, classes)
     n1 = n // 2
     n2 = n - n1
-    sample_metadata["batch"] = [0] * n1 + [2] * n2
+    sample_metadata[c.BATCH] = [0] * n1 + [2] * n2
     with pytest.raises(ValueError):
         create_dummy_assay_manager(assay_path, data_path, sample_metadata)
 
@@ -288,8 +283,7 @@ def test_assay_manager_create_assay_dir(tmpdir):
     classes = ["a", "b", "c"]
     assay_path, data_path = create_assay_dir(tmpdir, n)
     sample_metadata = create_dummy_data_frame(n, classes)
-    metadata = create_dummy_assay_manager(
-        assay_path, data_path, sample_metadata)
+    metadata = create_dummy_assay_manager(assay_path, data_path, sample_metadata)
     metadata.create_assay_dir()
 
     # check dir
@@ -302,7 +296,7 @@ def test_assay_manager_create_assay_dir(tmpdir):
 def test_assay_manager_check_previous_step_first_step(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     metadata = create_dummy_assay_manager(assay_path, data_path, None)
-    step = "detect_features"
+    step = c.DETECT_FEATURES
     metadata.check_step(step)
     assert True
 
@@ -310,9 +304,9 @@ def test_assay_manager_check_previous_step_first_step(tmpdir):
 def test_assay_manager_check_previous_middle_step(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     metadata = create_dummy_assay_manager(assay_path, data_path, None)
-    previous = "detect_features"
+    previous = c.DETECT_FEATURES
     metadata.flag_completed(previous)
-    step = "extract_features"
+    step = c.EXTRACT_FEATURES
     metadata.check_step(step)
     assert True
 
@@ -320,7 +314,7 @@ def test_assay_manager_check_previous_middle_step(tmpdir):
 def test_assay_manager_check_invalid_order(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     metadata = create_dummy_assay_manager(assay_path, data_path, None)
-    step = "extract_features"
+    step = c.EXTRACT_FEATURES
     with pytest.raises(assay.PreprocessingOrderError):
         metadata.check_step(step)
 
@@ -371,7 +365,8 @@ def test_assay_manager_add_samples(tmpdir):
     metadata = create_dummy_assay_manager(assay_path, data_path, None)
     metadata.create_assay_dir()
     _, new_data_path = create_assay_dir(
-        tmpdir, n2, start=n1 + 1, data_dir_name="new-data-path")
+        tmpdir, n2, start=n1 + 1, data_dir_name="new-data-path"
+    )
     metadata.add_samples(new_data_path, None)
 
     assert metadata.sample_metadata.shape[0] == n1 + n2
@@ -385,6 +380,7 @@ def test_assay_manager_add_samples(tmpdir):
 # Test AssayTemplate
 
 # create a subclass with dummy methods
+
 
 class DummyAssay(assay.Assay):
 
@@ -573,7 +569,7 @@ def test_assay_load_features(tmpdir):
     test_assay = DummyAssay(assay_path, data_path)
     test_assay.detect_features(strategy=detect_features_dummy)
     test_assay.extract_features(strategy=extract_features_dummy)
-    filters = {"width": (0, None), "snr": (0, None)}
+    filters = {c.WIDTH: (0, None), c.SNR: (0, None)}
     test_assay.describe_features(filters=filters)
     sample_list = test_assay.manager.get_sample_names()
     for sample in sample_list:
@@ -593,7 +589,7 @@ def test_assay_build_feature_table(tmpdir):
     test_assay = DummyAssay(assay_path, data_path)
     test_assay.detect_features(strategy=detect_features_dummy)
     test_assay.extract_features(strategy=extract_features_dummy)
-    filters = {"width": (0, None), "snr": (0, None)}
+    filters = {c.WIDTH: (0, None), c.SNR: (0, None)}
     test_assay.describe_features(filters=filters)
     test_assay.build_feature_table()
     n_features = DummyAssay.n_ft * DummyAssay.n_roi * n_samples
