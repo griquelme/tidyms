@@ -1,6 +1,6 @@
 from typing import Final, List
 
-# TODO: merge with _names.py
+
 # separation modes
 HPLC: Final[str] = "hplc"
 UPLC: Final[str] = "uplc"
