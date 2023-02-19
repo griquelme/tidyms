@@ -32,7 +32,6 @@ import pandas as pd
 from pathlib import Path
 from typing import BinaryIO, Generator, List, Optional, TextIO, Tuple, Union
 from .container import DataContainer
-from ._names import *
 from . import _constants as c
 from . import lcms
 from . import validation as v
@@ -89,9 +88,8 @@ def read_progenesis(path: Union[str, TextIO]):
     norm_index = df_header.columns.get_loc("Normalised abundance") - 1
     raw_index = df_header.columns.get_loc("Raw abundance") - 1
     ft_def = df.iloc[:, 0:norm_index].copy()
-    data = df.iloc[:, raw_index:(2 * raw_index - norm_index)].T
-    sample_info = \
-        df_header.iloc[:, (raw_index + 1):(2 * raw_index - norm_index + 1)].T
+    data = df.iloc[:, raw_index : (2 * raw_index - norm_index)].T
+    sample_info = df_header.iloc[:, (raw_index + 1) : (2 * raw_index - norm_index + 1)].T
 
     # rename data matrix
     data.index.rename("sample", inplace=True)
@@ -100,14 +98,11 @@ def read_progenesis(path: Union[str, TextIO]):
 
     # rename sample info
     sample_info.index = data.index
-    sample_info.rename({sample_info.columns[0]: _sample_class},
-                       axis="columns", inplace=True)
+    sample_info.rename({sample_info.columns[0]: c.CLASS}, axis="columns", inplace=True)
 
     # rename features def
     ft_def.index.rename("feature", inplace=True)
-    ft_def.rename({"m/z": "mz", "Retention time (min)": "rt"},
-                  axis="columns",
-                  inplace=True)
+    ft_def.rename({"m/z": "mz", "Retention time (min)": "rt"}, axis="columns", inplace=True)
     ft_def = ft_def.astype({"rt": float, "mz": float})
     ft_def["rt"] = ft_def["rt"] * 60
     v.validate_data_container(data, ft_def, sample_info)
@@ -115,8 +110,9 @@ def read_progenesis(path: Union[str, TextIO]):
     return dc
 
 
-def read_mzmine(data: Union[str, TextIO],
-                sample_metadata: Union[str, TextIO]) -> DataContainer:
+def read_mzmine(
+    data: Union[str, TextIO], sample_metadata: Union[str, TextIO]
+) -> DataContainer:
     """
     read a MZMine2 csv file into a DataContainer.
 
@@ -169,9 +165,13 @@ def read_mzmine(data: Union[str, TextIO],
     return dc
 
 
-def read_xcms(data_matrix: str, feature_metadata: str,
-              sample_metadata: str, class_column: str = "class",
-              sep: str = "\t"):
+def read_xcms(
+    data_matrix: str,
+    feature_metadata: str,
+    sample_metadata: str,
+    class_column: str = "class",
+    sep: str = "\t",
+):
     r"""
     Reads tabular data generated with xcms.
 
@@ -221,10 +221,11 @@ def read_xcms(data_matrix: str, feature_metadata: str,
     return dc
 
 
-def read_data_matrix(path: Union[str, TextIO, BinaryIO],
-                     data_matrix_format: str,
-                     sample_metadata: Optional[str] = None
-                     ) -> DataContainer:
+def read_data_matrix(
+    path: Union[str, TextIO, BinaryIO],
+    data_matrix_format: str,
+    sample_metadata: Optional[str] = None,
+) -> DataContainer:
     """
     Read different Data Matrix formats into a DataContainer.
 
@@ -281,14 +282,14 @@ class MSData:
         path: Union[str, Path],
         ms_mode: str = "centroid",
         instrument: str = "qtof",
-        separation: str = "uplc"
+        separation: str = "uplc",
     ):
         path = Path(path)
         suffix = path.suffix
         if suffix == ".mzML":
             self._reader = MZMLReader(path)
         elif suffix == "":
-            # used to intantiate SimulatedMSData
+            # used to instantiate SimulatedMSData
             self._reader = None
         else:
             msg = "{} is not a valid format for MS data".format(suffix)
@@ -374,7 +375,8 @@ class MSData:
         chrom_data = self._reader.get_chromatogram(n)
         name = chrom_data["name"]
         chromatogram = lcms.Chromatogram(
-            chrom_data["time"], chrom_data["spint"], mode=self.separation)
+            chrom_data["time"], chrom_data["spint"], mode=self.separation
+        )
         return name, chromatogram
 
     def get_spectrum(self, n: int) -> lcms.MSSpectrum:
@@ -396,12 +398,12 @@ class MSData:
         return lcms.MSSpectrum(**sp_data)
 
     def get_spectra_iterator(
-            self,
-            ms_level: int = 1,
-            start: int = 0,
-            end: Optional[int] = None,
-            start_time: float = 0.0,
-            end_time: Optional[float] = None
+        self,
+        ms_level: int = 1,
+        start: int = 0,
+        end: Optional[int] = None,
+        start_time: float = 0.0,
+        end_time: Optional[float] = None,
     ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
         """
         Yields the spectra in the file.
@@ -435,8 +437,9 @@ class MSData:
         for k in range(start, end):
             sp = self.get_spectrum(k)
             is_valid_level = ms_level == sp.ms_level
-            is_valid_time = ((start_time <= sp.time) and
-                             ((end_time is None) or (end_time > sp.time)))
+            is_valid_time = (start_time <= sp.time) and (
+                (end_time is None) or (end_time > sp.time)
+            )
             if is_valid_level and is_valid_time:
                 yield k, sp
 
@@ -446,6 +449,7 @@ class SimulatedMSData(MSData):  # pragma: no cover
     Emulates a MSData using simulated data. Used for tests.
 
     """
+
     def __init__(
         self,
         mz_values: np.ndarray,
@@ -456,7 +460,7 @@ class SimulatedMSData(MSData):  # pragma: no cover
         noise: Optional[float] = None,
         ms_mode: str = "centroid",
         separation: str = "uplc",
-        instrument: str = "qtof"
+        instrument: str = "qtof",
     ):
         """
         Constructor function
@@ -488,20 +492,10 @@ class SimulatedMSData(MSData):  # pragma: no cover
         """
         # MSData params
         super(SimulatedMSData, self).__init__(
-            "",
-            ms_mode=ms_mode,
-            instrument=instrument,
-            separation=separation
+            "", ms_mode=ms_mode, instrument=instrument, separation=separation
         )
         self._reader = _SimulatedReader(
-            mz_values,
-            rt_values,
-            mz_params,
-            rt_params,
-            ms_mode,
-            instrument,
-            ft_noise,
-            noise
+            mz_values, rt_values, mz_params, rt_params, ms_mode, instrument, ft_noise, noise
         )
 
 
@@ -510,6 +504,7 @@ class _SimulatedReader:
     Reader object for simulated data
 
     """
+
     def __init__(
         self,
         mz_values: np.ndarray,
@@ -519,7 +514,7 @@ class _SimulatedReader:
         ms_mode: str,
         instrument: str,
         ft_noise: Optional[np.ndarray] = None,
-        noise: Optional[float] = None
+        noise: Optional[float] = None,
     ):
         # simulation params
         self.ms_mode = ms_mode
@@ -577,7 +572,7 @@ class _SimulatedReader:
             "time": rt,
             "ms_level": 1,
             "instrument": self.instrument,
-            "is_centroid": (self.ms_mode == "centroid")
+            "is_centroid": (self.ms_mode == "centroid"),
         }
         return sp
 
@@ -611,11 +606,7 @@ def _check_dataset_name(name: str):
         raise ValueError(msg)
 
 
-def download_tidyms_data(
-    name: str,
-    files: List[str],
-    download_dir: Optional[str] = None
-):
+def download_tidyms_data(name: str, files: List[str], download_dir: Optional[str] = None):
     """
     Download a list of files from the data repository
 
@@ -644,7 +635,7 @@ def download_tidyms_data(
 
     See Also
     --------
-    dowload_dataset
+    download_dataset
     load_dataset
 
     """
@@ -659,8 +650,8 @@ def download_tidyms_data(
     url = "https://raw.githubusercontent.com/griquelme/tidyms-data/master/"
     dataset_url = url + "/" + name
 
-    WINDOWS_LINE_ENDING = b'\r\n'
-    UNIX_LINE_ENDING = b'\n'
+    WINDOWS_LINE_ENDING = b"\r\n"
+    UNIX_LINE_ENDING = b"\n"
 
     for f in files:
         file_path = download_dir.joinpath(f)
@@ -692,26 +683,41 @@ def _get_dataset_files(name: str):
             "centroid-data-indexed-uncompressed.mzML",
             "centroid-data-zlib-indexed-compressed.mzML",
             "centroid-data-zlib-no-index-compressed.mzML",
-            "profile-data-zlib-indexed-compressed.mzML"
+            "profile-data-zlib-indexed-compressed.mzML",
         ],
         "test-nist-raw-data": [
-            'NZ_20200226_005.mzML', 'NZ_20200226_007.mzML',
-            'NZ_20200226_009.mzML', 'NZ_20200226_011.mzML',
-            'NZ_20200226_013.mzML', 'NZ_20200226_015.mzML',
-            'NZ_20200226_017.mzML', 'NZ_20200226_019.mzML',
-            'NZ_20200226_021.mzML', 'NZ_20200226_023.mzML',
-            'NZ_20200227_009.mzML', 'NZ_20200227_011.mzML',
-            'NZ_20200227_013.mzML', 'NZ_20200227_015.mzML',
-            'NZ_20200227_017.mzML', 'NZ_20200227_019.mzML',
-            'NZ_20200227_021.mzML', 'NZ_20200227_023.mzML',
-            'NZ_20200227_025.mzML', 'NZ_20200227_027.mzML',
-            'NZ_20200227_029.mzML', 'NZ_20200227_039.mzML',
-            'NZ_20200227_049.mzML', 'NZ_20200227_059.mzML',
-            'NZ_20200227_069.mzML', 'NZ_20200227_079.mzML',
-            'NZ_20200227_089.mzML', 'NZ_20200227_091.mzML',
-            'NZ_20200227_093.mzML', 'NZ_20200227_097.mzML',
-            'sample_list.csv'
-        ]
+            "NZ_20200226_005.mzML",
+            "NZ_20200226_007.mzML",
+            "NZ_20200226_009.mzML",
+            "NZ_20200226_011.mzML",
+            "NZ_20200226_013.mzML",
+            "NZ_20200226_015.mzML",
+            "NZ_20200226_017.mzML",
+            "NZ_20200226_019.mzML",
+            "NZ_20200226_021.mzML",
+            "NZ_20200226_023.mzML",
+            "NZ_20200227_009.mzML",
+            "NZ_20200227_011.mzML",
+            "NZ_20200227_013.mzML",
+            "NZ_20200227_015.mzML",
+            "NZ_20200227_017.mzML",
+            "NZ_20200227_019.mzML",
+            "NZ_20200227_021.mzML",
+            "NZ_20200227_023.mzML",
+            "NZ_20200227_025.mzML",
+            "NZ_20200227_027.mzML",
+            "NZ_20200227_029.mzML",
+            "NZ_20200227_039.mzML",
+            "NZ_20200227_049.mzML",
+            "NZ_20200227_059.mzML",
+            "NZ_20200227_069.mzML",
+            "NZ_20200227_079.mzML",
+            "NZ_20200227_089.mzML",
+            "NZ_20200227_091.mzML",
+            "NZ_20200227_093.mzML",
+            "NZ_20200227_097.mzML",
+            "sample_list.csv",
+        ],
     }
     return files_dict[name]
 
@@ -742,7 +748,7 @@ def download_dataset(name: str, download_dir: Optional[str] = None):
 
     See Also
     --------
-    dowload_dataset
+    download_dataset
     load_dataset
 
     """
@@ -781,9 +787,11 @@ def load_dataset(name: str, cache: bool = True, **kwargs) -> DataContainer:
     feature_path = os.path.join(dataset_path, "feature.csv")
     data_matrix_path = os.path.join(dataset_path, "data.csv")
 
-    is_data_found = (os.path.exists(sample_path) and
-                     os.path.exists(feature_path) and
-                     os.path.exists(data_matrix_path))
+    is_data_found = (
+        os.path.exists(sample_path)
+        and os.path.exists(feature_path)
+        and os.path.exists(data_matrix_path)
+    )
 
     if not (cache and is_data_found):
         download_dataset(name)

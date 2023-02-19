@@ -1,17 +1,25 @@
 import numpy as np
 import pandas as pd
-from typing import List, Optional
+from . import _constants as c
+from typing import Optional
 from .container import DataContainer
 
 
-def simulate_dataset(population: dict, mean_dict: dict, cov_dict: dict,
-                     feature_mz: np.ndarray, feature_rt: np.ndarray,
-                     blank_contribution: Optional[np.ndarray] = None,
-                     noise_dict: Optional[dict] = None,
-                     qc_template: bool = True, qc_bracket_size: int = 5,
-                     triple_qc: bool = True, prepend_blank: int = 0,
-                     append_blank: int = 0, batch_size: int = 25
-                     ) -> DataContainer:
+def simulate_dataset(
+    population: dict,
+    mean_dict: dict,
+    cov_dict: dict,
+    feature_mz: np.ndarray,
+    feature_rt: np.ndarray,
+    blank_contribution: Optional[np.ndarray] = None,
+    noise_dict: Optional[dict] = None,
+    qc_template: bool = True,
+    qc_bracket_size: int = 5,
+    triple_qc: bool = True,
+    prepend_blank: int = 0,
+    append_blank: int = 0,
+    batch_size: int = 25,
+) -> DataContainer:
     """
     Creates DataContainer with simulated data
 
@@ -58,10 +66,16 @@ def simulate_dataset(population: dict, mean_dict: dict, cov_dict: dict,
 
     """
 
-    sm = _make_sample_list(population, qc_template, qc_bracket_size,
-                           triple_qc, prepend_blank, append_blank, batch_size)
-    dm = _make_data_matrix(population, sm, mean_dict, cov_dict,
-                           blank_contribution, noise_dict)
+    sm = _make_sample_list(
+        population,
+        qc_template,
+        qc_bracket_size,
+        triple_qc,
+        prepend_blank,
+        append_blank,
+        batch_size,
+    )
+    dm = _make_data_matrix(population, sm, mean_dict, cov_dict, blank_contribution, noise_dict)
     fm = np.vstack((feature_mz, feature_rt)).T
     fm = pd.DataFrame(data=fm, columns=["mz", "rt"], index=dm.columns)
     mapping = {"sample": list(population)}
@@ -72,12 +86,17 @@ def simulate_dataset(population: dict, mean_dict: dict, cov_dict: dict,
     return DataContainer(dm, fm, sm, mapping)
 
 
-def _make_sample_list(population: dict, qc_template: bool = True,
-                      qc_bracket_size: int = 5, triple_qc: bool = True,
-                      prepend_blank: int = 0, append_blank: int = 0,
-                      batch_size: int = 25):
+def _make_sample_list(
+    population: dict,
+    qc_template: bool = True,
+    qc_bracket_size: int = 5,
+    triple_qc: bool = True,
+    prepend_blank: int = 0,
+    append_blank: int = 0,
+    batch_size: int = 25,
+):
     """
-    creates a simulated sample list for an untargeted metabolomic assay.
+    creates a simulated sample list for an untargeted metabolomics assay.
 
     Parameters
     ----------
@@ -118,25 +137,30 @@ def _make_sample_list(population: dict, qc_template: bool = True,
         qc_bracket_size = n_study_samples + 1
 
     # randomize classes and make QC brackets
-    classes = _make_sample_classes(population, batch_size,
-                                   qc_bracket_size, prepend_blank, append_blank)
+    classes = _make_sample_classes(
+        population, batch_size, qc_bracket_size, prepend_blank, append_blank
+    )
     n_prepend = len(prepend_blank)
     n_append = len(append_blank)
-    batch_number = _make_batch_number(batch_size, n_study_samples, n_prepend,
-                                      n_append, qc_bracket_size)
+    batch_number = _make_batch_number(
+        batch_size, n_study_samples, n_prepend, n_append, qc_bracket_size
+    )
     order = list(range(1, len(batch_number) + 1))
     sample_name = _make_sample_name(len(batch_number))
-    sample_list = {"id": sample_name, "class": classes, "order": order,
-                   "batch": batch_number}
+    sample_list = {c.ID: sample_name, c.CLASS: classes, c.ORDER: order, c.BATCH: batch_number}
     sample_list = pd.DataFrame(data=sample_list, index=sample_name)
-    sample_list.index.name = "samples"
+    sample_list.index.name = c.SAMPLE
     return sample_list
 
 
-def _make_data_matrix(population: dict, sample_list: pd.DataFrame,
-                      mean_dict: dict, cov_dict: dict,
-                      blank_contribution: Optional[np.ndarray] = None,
-                      noise_dict: Optional[dict] = None):
+def _make_data_matrix(
+    population: dict,
+    sample_list: pd.DataFrame,
+    mean_dict: dict,
+    cov_dict: dict,
+    blank_contribution: Optional[np.ndarray] = None,
+    noise_dict: Optional[dict] = None,
+):
     """
     Creates a simulated data matrix
 
@@ -175,26 +199,22 @@ def _make_data_matrix(population: dict, sample_list: pd.DataFrame,
     if (sample_list["class"] == "blank").any():
         if blank_contribution is None:
             blank_contribution = np.zeros_like(mean)
-        data_mats["blank"] = \
-            _generate_blank_data(sample_list, blank_contribution)
+        data_mats["blank"] = _generate_blank_data(sample_list, blank_contribution)
 
     if (sample_list["class"] == "QC").any():
-        data_mats["QC"] = _generate_qc_data(population, sample_list,
-                                            mean_dict)
+        data_mats["QC"] = _generate_qc_data(population, sample_list, mean_dict)
 
     if noise_dict is not None:
-        for c, x in data_mats.items():
-            data_mats[c] = _add_noise(x, noise_dict[c])
+        for cl, x in data_mats.items():
+            data_mats[cl] = _add_noise(x, noise_dict[cl])
 
     data = _concat_data(data_mats, sample_list)
     ft_names = _generate_feature_names(data.shape[1])
-    data_matrix = pd.DataFrame(data=data, index=sample_list.index,
-                               columns=ft_names)
+    data_matrix = pd.DataFrame(data=data, index=sample_list.index, columns=ft_names)
     return data_matrix
 
 
-def _make_sample_classes(sample_distribution, batch_size, qc_bracket_size,
-                         prepend, append):
+def _make_sample_classes(sample_distribution, batch_size, qc_bracket_size, prepend, append):
     n_study_samples = sum(sample_distribution.values())
     # randomize classes and make QC brackets
     classes = list()
@@ -209,17 +229,14 @@ def _make_sample_classes(sample_distribution, batch_size, qc_bracket_size,
     end = min(batch_size, n_study_samples)
     for k_batches in range(n_batches):
         res += prepend
-        res += _make_batch_sample_block(classes,
-                                        permutation_index[start:end],
-                                        qc_bracket_size)
+        res += _make_batch_sample_block(classes, permutation_index[start:end], qc_bracket_size)
         res += append
         start = end
         end = min(start + batch_size, n_study_samples)
     return res
 
 
-def _make_batch_number(batch_size, n_study_samples, n_prepend, n_append,
-                       qc_bracket_size):
+def _make_batch_number(batch_size, n_study_samples, n_prepend, n_append, qc_bracket_size):
     n_batch, n_study_samples_last_batch = divmod(n_study_samples, batch_size)
     # adds an extra batch for the last batch
     n_batch += int(n_study_samples_last_batch > 0)
@@ -230,10 +247,10 @@ def _make_batch_number(batch_size, n_study_samples, n_prepend, n_append,
         batch_number.extend([k_batch] * n_samples_per_batch)
     if n_study_samples_last_batch:
 
-        n_qc_last_batch = _n_qc_per_batch(n_study_samples_last_batch,
-                                          qc_bracket_size)
-        n_samples_last_batch = (n_study_samples_last_batch + n_prepend +
-                                n_append + n_qc_last_batch)
+        n_qc_last_batch = _n_qc_per_batch(n_study_samples_last_batch, qc_bracket_size)
+        n_samples_last_batch = (
+            n_study_samples_last_batch + n_prepend + n_append + n_qc_last_batch
+        )
         batch_number.extend([n_batch] * n_samples_last_batch)
     return batch_number
 
@@ -245,8 +262,7 @@ def _make_sample_name(n_samples: int):
     return sample_name
 
 
-def generate_correlated_data(n_obs: int, mean: np.array,
-                             cov: np.array) -> np.array:
+def generate_correlated_data(n_obs: int, mean: np.array, cov: np.array) -> np.array:
     """
     Generates a data matrix with normal correlated columns
 
@@ -293,7 +309,7 @@ def _generate_blank_data(sample_list, blank_contribution):
 def _generate_qc_data(sample_population, sample_list, mean_dict):
     n_qc = (sample_list["class"] == "QC").sum()
     n_samples = sum(sample_population.values())
-    mean = sum([n * mean_dict[c] for c, n in sample_population.items()])
+    mean = sum([n * mean_dict[cl] for cl, n in sample_population.items()])
     mean = np.array(mean) / n_samples
     qc_data = np.tile(mean, [n_qc, 1])
     return qc_data
@@ -318,8 +334,7 @@ def _generate_random_covariance_matrix(n: int) -> np.array:
     return x
 
 
-def _make_batch_sample_block(classes, batch_perm_index,
-                             qc_bracket_size):
+def _make_batch_sample_block(classes, batch_perm_index, qc_bracket_size):
     classes_rand = list()
     for k, ind in enumerate(batch_perm_index):
 

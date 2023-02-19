@@ -8,41 +8,12 @@ from scipy.interpolate import CubicSpline, interp1d
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from typing import List, Callable, Union, Optional
 from .utils import mad
-from ._names import *
+from . import _constants as c
 
 
-# def input_na(df: pd.DataFrame, classes: pd.Series, mode: str) -> pd.DataFrame:
-#     """
-#     Fill missing values.
-#
-#     Parameters
-#     ----------
-#     df : pd.DataFrame
-#     classes: ps.Series
-#     mode : {'zero', 'mean', 'min'}
-#
-#     Returns
-#     -------
-#     filled : pd.DataFrame
-#     """
-#     if mode == "zero":
-#         return df.fillna(0)
-#     elif mode == "mean":
-#         return (df.groupby(classes)
-#                 .apply(lambda x: x.fillna(x.mean()))
-#                 .droplevel(0))
-#     elif mode == "min":
-#         return (df.groupby(classes)
-#                 .apply(lambda x: x.fillna(x.min()))
-#                 .droplevel(0))
-#     else:
-#         msg = "mode should be `zero`, `mean` or `min`"
-#         raise ValueError(msg)
-
-
-def average_replicates(data: pd.DataFrame, sample_id: pd.Series,
-                       classes: pd.Series,
-                       process_classes: List[str]) -> pd.DataFrame:
+def average_replicates(
+    data: pd.DataFrame, sample_id: pd.Series, classes: pd.Series, process_classes: List[str]
+) -> pd.DataFrame:
     """
     Group samples by id and computes the average.
 
@@ -62,18 +33,22 @@ def average_replicates(data: pd.DataFrame, sample_id: pd.Series,
     mapper = pd.Series(data=mapper.index, index=mapper.values)
     included_data = data.loc[include_samples, :]
     excluded_data = data.loc[exclude_samples, :]
-    averaged_data = (included_data.groupby(sample_id[include_samples])
-                     .mean())
+    averaged_data = included_data.groupby(sample_id[include_samples]).mean()
     averaged_data.index = averaged_data.index.map(mapper)
     result = pd.concat((averaged_data, excluded_data)).sort_index()
     return result
 
 
-def correct_blanks(df: pd.DataFrame, classes: pd.Series,
-                   corrector_classes: List[str], process_classes: List[str],
-                   factor: float = 1.0, robust: bool = True,
-                   mode: Union[str, Callable] = "mean",
-                   process_blanks: bool = False) -> pd.DataFrame:
+def correct_blanks(
+    df: pd.DataFrame,
+    classes: pd.Series,
+    corrector_classes: List[str],
+    process_classes: List[str],
+    factor: float = 1.0,
+    robust: bool = True,
+    mode: Union[str, Callable] = "mean",
+    process_blanks: bool = False,
+) -> pd.DataFrame:
     """
     Correct samples using blanks.
 
@@ -106,10 +81,12 @@ def correct_blanks(df: pd.DataFrame, classes: pd.Series,
         mean_func = lambda x: x.mean()
         std_func = lambda x: x.std()
 
-    corrector = {"max": lambda x: x.max(),
-                 "mean": lambda x: mean_func(x),
-                 "lod": lambda x: mean_func(x) + 3 * std_func(x),
-                 "loq": lambda x: mean_func(x) + 10 * std_func(x)}
+    corrector = {
+        "max": lambda x: x.max(),
+        "mean": lambda x: mean_func(x),
+        "lod": lambda x: mean_func(x) + 3 * std_func(x),
+        "loq": lambda x: mean_func(x) + 10 * std_func(x),
+    }
     if hasattr(mode, "__call__"):
         corrector = mode
     else:
@@ -128,8 +105,9 @@ def correct_blanks(df: pd.DataFrame, classes: pd.Series,
     return df
 
 
-def _loocv_loess(x: pd.Series, y: pd.Series, interpolator: Callable,
-                 frac: Optional[float] = None) -> tuple:
+def _loocv_loess(
+    x: pd.Series, y: pd.Series, interpolator: Callable, frac: Optional[float] = None
+) -> tuple:
     """
     Helper function for batch_correction. Computes loess correction with LOOCV.
 
@@ -151,7 +129,7 @@ def _loocv_loess(x: pd.Series, y: pd.Series, interpolator: Callable,
         # valid frac values, from 4/N to 1/N, where N is the number of corrector
         # samples.
         frac_list = [k / x.size for k in range(4, x.size + 1)]
-        rms = np.inf    # initial value for root mean square error
+        rms = np.inf  # initial value for root mean square error
         best_frac = 1
         for frac in frac_list:
             curr_rms = 0
@@ -168,12 +146,16 @@ def _loocv_loess(x: pd.Series, y: pd.Series, interpolator: Callable,
     return lowess(y, x, return_sorted=False, frac=frac)
 
 
-def _generate_batches(df: pd.DataFrame, run_order: pd.Series, batch: pd.Series,
-                      classes: pd.Series, corrector_classes: List[str],
-                      process_classes: List[str]):
-    batch_order = (pd.concat((batch, run_order), axis=1)
-                   .sort_values([_sample_batch, _sample_order]))
-    grouped = batch_order.groupby(_sample_batch)
+def _generate_batches(
+    df: pd.DataFrame,
+    run_order: pd.Series,
+    batch: pd.Series,
+    classes: pd.Series,
+    corrector_classes: List[str],
+    process_classes: List[str],
+):
+    batch_order = pd.concat((batch, run_order), axis=1).sort_values([c.BATCH, c.ORDER])
+    grouped = batch_order.groupby(c.BATCH)
     for n_batch, group in grouped:
         df_batch = df.loc[group.index, :]
         classes_batch = classes[group.index]
@@ -181,15 +163,15 @@ def _generate_batches(df: pd.DataFrame, run_order: pd.Series, batch: pd.Series,
         corrector_df = df_batch.loc[classes_batch.isin(corrector_classes), :]
         process_order = run_order[process_df.index]
         corrector_order = run_order[corrector_df.index]
-        batch_order = (run_order[corrector_df.index.union(process_df.index)]
-                       .sort_values())
+        batch_order = run_order[corrector_df.index.union(process_df.index)].sort_values()
         corrector_df = corrector_df.set_index(corrector_order).sort_index()
         process_df = process_df.set_index(process_order).sort_index()
         yield corrector_df, process_df, batch_order
 
 
-def get_outside_bounds_index(data: Union[pd.Series, pd.DataFrame], lb: float,
-                             ub: float) -> pd.Index:
+def get_outside_bounds_index(
+    data: Union[pd.Series, pd.DataFrame], lb: float, ub: float
+) -> pd.Index:
     """
     return index of columns with values outside bounds.
     Parameters
@@ -203,7 +185,7 @@ def get_outside_bounds_index(data: Union[pd.Series, pd.DataFrame], lb: float,
     -------
 
     """
-    result = ((data < lb) | (data > ub))
+    result = (data < lb) | (data > ub)
     if isinstance(data, pd.DataFrame):
         result = result.all()
     if result.empty:
@@ -212,8 +194,9 @@ def get_outside_bounds_index(data: Union[pd.Series, pd.DataFrame], lb: float,
         return result[result].index
 
 
-def batch_ext(order: pd.Series, batch: pd.Series, classes: pd.Series,
-              class_list: List[str], ext: str) -> pd.Series:
+def batch_ext(
+    order: pd.Series, batch: pd.Series, classes: pd.Series, class_list: List[str], ext: str
+) -> pd.Series:
     """
     get minimum/maximum order of samples of classes in class_list. Auxiliary
     function to be used with BatchChecker / FeatureCheckerBatchCorrection
@@ -237,22 +220,27 @@ def batch_ext(order: pd.Series, batch: pd.Series, classes: pd.Series,
     func = {"min": lambda x: x.min(), "max": lambda x: x.max()}
     func = func[ext]
 
-    ext_order = (order
-                 .groupby([classes, batch])
-                 .apply(func)
-                 .reset_index()
-                 .groupby(classes.name)
-                 .filter(lambda x: x.name in class_list)
-                 .groupby(batch.name)
-                 .apply(func)[order.name])
+    ext_order = (
+        order.groupby([classes, batch])
+        .apply(func)
+        .reset_index()
+        .groupby(classes.name)
+        .filter(lambda x: x.name in class_list)
+        .groupby(batch.name)
+        .apply(func)[order.name]
+    )
     return ext_order
 
 
-def check_qc_prevalence(data_matrix: pd.DataFrame,
-                        batch: pd.Series, classes: pd.Series,
-                        qc_classes: List[str], sample_classes: List[str],
-                        threshold: float = 0,
-                        min_qc_dr: float = 0.9) -> pd.Index:
+def check_qc_prevalence(
+    data_matrix: pd.DataFrame,
+    batch: pd.Series,
+    classes: pd.Series,
+    qc_classes: List[str],
+    sample_classes: List[str],
+    threshold: float = 0,
+    min_qc_dr: float = 0.9,
+) -> pd.Index:
     """
     Remove features with low detection rate in the QC samples. Also check that
     each feature is detected in the first and last block (this step is necessary
@@ -276,12 +264,13 @@ def check_qc_prevalence(data_matrix: pd.DataFrame,
     """
     invalid_features = pd.Index([])
     for batch_number, batch_class in classes.groupby(batch):
-        block_type, block_number = \
-            make_sample_blocks(batch_class, qc_classes, sample_classes)
+        block_type, block_number = make_sample_blocks(batch_class, qc_classes, sample_classes)
         qc_blocks = block_number[block_type == 0]
-        block_prevalence = (data_matrix.loc[qc_blocks.index]
-                            .groupby(qc_blocks)
-                            .apply(lambda x: (x > threshold).any()))
+        block_prevalence = (
+            data_matrix.loc[qc_blocks.index]
+            .groupby(qc_blocks)
+            .apply(lambda x: (x > threshold).any())
+        )
 
         # check start block
         start_block_mask = block_prevalence.loc[qc_blocks.iloc[0]]
@@ -303,10 +292,16 @@ def check_qc_prevalence(data_matrix: pd.DataFrame,
     return invalid_features
 
 
-def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
-                 sample_index: pd.Index, frac: float, interpolator: Callable,
-                 n_qc: Optional[int] = None, method: str = "multiplicative"
-                 ) -> pd.Series:
+def loess_interp(
+    ft_data: pd.Series,
+    order: pd.Series,
+    qc_index: pd.Index,
+    sample_index: pd.Index,
+    frac: float,
+    interpolator: Callable,
+    n_qc: Optional[int] = None,
+    method: str = "multiplicative",
+) -> pd.Series:
     """
     Applies LOESS-correction interpolation on a feature. Auxiliary function of
     batch_corrector_func
@@ -337,8 +332,7 @@ def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
     if np.isclose(qc_median, 0.0):
         qc_median = ft_data[qc_index[:n_qc]].mean()
 
-    qc_loess = _loocv_loess(order[qc_index], ft_data[qc_index], interpolator,
-                            frac=frac)
+    qc_loess = _loocv_loess(order[qc_index], ft_data[qc_index], interpolator, frac=frac)
     interp = interpolator(order[qc_index], qc_loess)
 
     if method == "additive":
@@ -361,12 +355,17 @@ def loess_interp(ft_data: pd.Series, order: pd.Series, qc_index: pd.Index,
     return ft_data
 
 
-def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
-                         classes: pd.Series, frac: float,
-                         interpolator: Callable, qc_classes: List[str],
-                         sample_classes: List[str],
-                         n_qc: Optional[int] = None,
-                         method: str = "multiplicative") -> pd.DataFrame:
+def batch_corrector_func(
+    df_batch: pd.DataFrame,
+    order: pd.Series,
+    classes: pd.Series,
+    frac: float,
+    interpolator: Callable,
+    qc_classes: List[str],
+    sample_classes: List[str],
+    n_qc: Optional[int] = None,
+    method: str = "multiplicative",
+) -> pd.DataFrame:
     """
     Applies LOESS correction - interpolation on a single batch. Auxiliary
     function of interbatch_correction.
@@ -393,23 +392,28 @@ def batch_corrector_func(df_batch: pd.DataFrame, order: pd.Series,
     qc_index = qc_index[qc_index].index
     sample_index = classes.isin(sample_classes)
     sample_index = sample_index[sample_index].index
-    df_batch.loc[sample_index, :] = \
-        (df_batch.apply(loess_interp,
-                        args=(order, qc_index, sample_index, frac,
-                              interpolator),
-                        n_qc=n_qc, method=method))
+    df_batch.loc[sample_index, :] = df_batch.apply(
+        loess_interp,
+        args=(order, qc_index, sample_index, frac, interpolator),
+        n_qc=n_qc,
+        method=method,
+    )
     return df_batch
 
 
-def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
-                          classes: pd.Series, corrector_classes: List[str],
-                          process_classes: List[str],
-                          frac: Optional[float] = None,
-                          interpolator: Optional[str] = "splines",
-                          n_qc: Optional[int] = None,
-                          process_qc: bool = True,
-                          method: str = "multiplicative"
-                          ) -> pd.DataFrame:
+def interbatch_correction(
+    df: pd.DataFrame,
+    order: pd.Series,
+    batch: pd.Series,
+    classes: pd.Series,
+    corrector_classes: List[str],
+    process_classes: List[str],
+    frac: Optional[float] = None,
+    interpolator: Optional[str] = "splines",
+    n_qc: Optional[int] = None,
+    process_qc: bool = True,
+    method: str = "multiplicative",
+) -> pd.DataFrame:
     r"""
     Correct instrument response drift using LOESS regression [1, 2]
     and center each batch to a common mean.
@@ -455,7 +459,7 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     to mass spectrometry", Nature Protocols volume 6, pages 1060–1083 (2011).
     .. [2] D Broadhurst *et al*, "Guidelines and considerations for the use of
     system suitability and quality control samples in mass spectrometry assays
-    applied in untargeted clinical metabolomic studies.", Metabolomics,
+    applied in untargeted clinical metabolomics studies.", Metabolomics,
     2018;14(6):72. doi: 10.1007/s11306-018-1367-3
 
     Notes
@@ -484,19 +488,24 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
         process_classes = list(set(process_classes))
 
     def corrector_helper(df_group):
-        return batch_corrector_func(df_group, order[df_group.index],
-                                    classes[df_group.index], frac,
-                                    interp_func, corrector_classes,
-                                    process_classes, n_qc=n_qc,
-                                    method=method)
+        return batch_corrector_func(
+            df_group,
+            order[df_group.index],
+            classes[df_group.index],
+            frac,
+            interp_func,
+            corrector_classes,
+            process_classes,
+            n_qc=n_qc,
+            method=method,
+        )
 
     # intra batch correction
     corrected = df.groupby(batch).apply(corrector_helper)
 
     # inter batch mean alignment
     def batch_mean_func(df_group):
-        batch_mean = (df_group[classes[df_group.index].isin(corrector_classes)]
-                      .mean())
+        batch_mean = df_group[classes[df_group.index].isin(corrector_classes)].mean()
         is_process_sample = classes[df_group.index].isin(process_classes)
         if method == "additive":
             df_group[is_process_sample] -= batch_mean
@@ -518,8 +527,9 @@ def interbatch_correction(df: pd.DataFrame, order: pd.Series, batch: pd.Series,
     return corrected
 
 
-def make_sample_blocks(classes: pd.Series, corrector_classes: List[str],
-                       process_classes: List[str]):
+def make_sample_blocks(
+    classes: pd.Series, corrector_classes: List[str], process_classes: List[str]
+):
     """
     groups samples into blocks of consecutive samples of the same type
     aux function in BatchCorrector pipeline.
@@ -531,13 +541,13 @@ def make_sample_blocks(classes: pd.Series, corrector_classes: List[str],
     Each block is assigned an unique number.
     """
     class_to_block_type = dict()
-    for c in classes.unique():
-        if c in corrector_classes:
-            class_to_block_type[c] = 0
-        elif c in process_classes:
-            class_to_block_type[c] = 1
+    for cl in classes.unique():
+        if cl in corrector_classes:
+            class_to_block_type[cl] = 0
+        elif cl in process_classes:
+            class_to_block_type[cl] = 1
         else:
-            class_to_block_type[c] = 2
+            class_to_block_type[cl] = 2
     block_type = classes.map(class_to_block_type)
     block_number = (block_type.diff().fillna(0) != 0).cumsum()
     return block_type, block_number
