@@ -187,7 +187,7 @@ def correct_batches(
     # intra-batch correction
     corrector_func = partial(_correct_intra_batch, first_n=first_n, frac=frac)
     func = delayed(corrector_func)
-    data: list[Tuple] = Parallel(n_jobs=n_jobs)(func(x) for x in iterator)
+    data = Parallel(n_jobs=n_jobs)(func(x) for x in iterator)
     data_corrected = _rebuild_data_matrix(data_matrix.shape, data)
     data_corrected = pd.DataFrame(
         data=data_corrected, index=data_matrix.index, columns=data_matrix.columns
@@ -403,7 +403,7 @@ def _inter_batch_correction(
         res = data_matrix
     else:
         factor = _get_inter_batch_correction_factor(qc_dm, qc_batch)
-        res = data_matrix.groupby(batch).apply(lambda x: x * factor[x.name])
+        res = data_matrix.groupby(batch, group_keys=False).apply(lambda x: x * factor[x.name])
     return res
 
 
