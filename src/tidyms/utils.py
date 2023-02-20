@@ -21,8 +21,7 @@ data_type = Union[pd.DataFrame, pd.Series]
 reduced_type = Union[pd.Series, float]
 
 
-def gauss(x: np.ndarray, mu: float, sigma: float,
-          amp: float):
+def gauss(x: np.ndarray, mu: float, sigma: float, amp: float):
     """
     gaussian curve.
 
@@ -38,12 +37,11 @@ def gauss(x: np.ndarray, mu: float, sigma: float,
     gaussian : np.array
 
     """
-    gaussian = amp * np.power(np.e, - 0.5 * ((x - mu) / sigma) ** 2)
+    gaussian = amp * np.power(np.e, -0.5 * ((x - mu) / sigma) ** 2)
     return gaussian
 
 
-def gaussian_mixture(x: np.ndarray, params: np.ndarray
-                     ) -> np.ndarray:
+def gaussian_mixture(x: np.ndarray, params: np.ndarray) -> np.ndarray:
     """
     Mixture of gaussian curves.
 
@@ -66,8 +64,7 @@ def gaussian_mixture(x: np.ndarray, params: np.ndarray
     return mixture
 
 
-def normalize(df: pd.DataFrame, method: str,
-              feature: Optional[str] = None) -> pd.DataFrame:
+def normalize(df: pd.DataFrame, method: str, feature: Optional[str] = None) -> pd.DataFrame:
     """
     Normalize samples using different methods.
 
@@ -186,7 +183,7 @@ def sample_to_path(samples, path):
             d[name] = full_path[k]
     return d
 
-    
+
 def cv(df: data_type, fill_value: Optional[float] = None) -> reduced_type:
     """
     Computes the Coefficient of variation for each column.
@@ -199,8 +196,7 @@ def cv(df: data_type, fill_value: Optional[float] = None) -> reduced_type:
     return res
 
 
-def robust_cv(df: data_type, fill_value: Optional[float] = None
-              ) -> reduced_type:
+def robust_cv(df: data_type, fill_value: Optional[float] = None) -> reduced_type:
     """
     Estimation of the coefficient of variation using the MAD and median.
     Assumes a normal distribution.
@@ -230,8 +226,12 @@ def mad(df: data_type) -> reduced_type:
     return res
 
 
-def sd_ratio(df1: pd.DataFrame, df2: pd.DataFrame, robust: bool = False,
-             fill_value: Optional[float] = None) -> pd.Series:
+def sd_ratio(
+    df1: pd.DataFrame,
+    df2: pd.DataFrame,
+    robust: bool = False,
+    fill_value: Optional[float] = None,
+) -> pd.Series:
     """
     Computes the ratio between the standard deviation of the columns of
     DataFrame1 and DataFrame2.
@@ -305,7 +305,7 @@ def metadata_correlation(y, x, mode: str = "ols"):
         ols = OLS(y, add_constant(x)).fit()
         r2 = ols.rsquared
         jb = jarque_bera(ols.resid)[1]  # Jarque Bera test p-value
-        dw = durbin_watson(ols.resid)   # Durwin Watson statistic
+        dw = durbin_watson(ols.resid)  # Durwin Watson statistic
         res = {"r2": r2, "DW": dw, "JB": jb}
     elif mode == "pearson":
         res = pearsonr(y, x)[0]
@@ -326,10 +326,7 @@ def _fill_na(s: reduced_type, fill_value: Optional[float]):
     return res
 
 
-def _find_closest_sorted(
-        x: np.ndarray,
-        xq: Union[np.ndarray, float, int]
-) -> np.ndarray:
+def _find_closest_sorted(x: np.ndarray, xq: Union[np.ndarray, float, int]) -> np.ndarray:
     """
     Find the index in x closest to each xq element. Assumes that x is sorted.
 
@@ -379,8 +376,9 @@ def _find_closest_sorted(
         return ind
 
 
-def find_closest(x: np.ndarray, xq: Union[np.ndarray, float, int],
-                 is_sorted: bool = True) -> np.ndarray:
+def find_closest(
+    x: np.ndarray, xq: Union[np.ndarray, float, int], is_sorted: bool = True
+) -> np.ndarray:
     """
     Search the closest value between two arrays.
 
@@ -477,7 +475,7 @@ def default_settings():
                 },
                 "yaxis": {
                     "axis_label": "Intensity [au]",
-                }
+                },
             },
             "spectrum": {
                 "figure": {
@@ -488,8 +486,8 @@ def default_settings():
                 },
                 "yaxis": {
                     "axis_label": "intensity [au]",
-                }
-            }
+                },
+            },
         }
     }
     return settings
@@ -531,14 +529,14 @@ def is_notebook() -> bool:
     """
     try:
         shell = get_ipython().__class__.__name__
-        if shell == 'ZMQInteractiveShell':
-            return True   # Jupyter notebook or qtconsole
-        elif shell == 'TerminalInteractiveShell':
+        if shell == "ZMQInteractiveShell":
+            return True  # Jupyter notebook or qtconsole
+        elif shell == "TerminalInteractiveShell":
             return False  # Terminal running IPython
         else:
             return False  # Other type (?)
     except NameError:
-        return False      # Probably standard Python interpreter
+        return False  # Probably standard Python interpreter
 
 
 def get_progress_bar():
@@ -582,5 +580,5 @@ def str_to_array1d(s: str):
     """
     sep_index = s.index(",")
     dtype = s[:sep_index]
-    data = base64.b64decode(bytes(s[sep_index + 1:], "utf8"))
+    data = base64.b64decode(bytes(s[sep_index + 1 :], "utf8"))
     return np.frombuffer(data, dtype=dtype).copy()
