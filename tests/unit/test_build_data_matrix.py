@@ -34,7 +34,7 @@ def create_dummy_feature_table(n_ft, n_samples):
         return df
 
     feature_table[c.SAMPLE] = np.random.choice(samples, replace=True, size=n_rows)
-    feature_table = feature_table.groupby(c.SAMPLE).apply(assign_cluster)
+    feature_table = feature_table.groupby(c.SAMPLE, group_keys=False).apply(assign_cluster)
     feature_table = feature_table[feature_table[c.LABEL] > -1]
 
     return feature_table
