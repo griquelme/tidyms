@@ -880,7 +880,7 @@ def _crude_clustering_for_mz_list(sample, mz, intensity, min_difference_ppm):
     return clust[np.argsort(mzOrd)]
 
 
-global refine_clustering
+global refine_clustering_for_mz_list
 @numba.jit(nopython=True)
 def refine_clustering_for_mz_list(sample, mzs, intensities, spectrumID, clusts, expected_mz_deviation_ppm = 15, closest_signal_max_deviation_ppm = 20, max_mz_deviation_ppm = None):
     clustInds = np.unique(clusts)
@@ -1691,7 +1691,7 @@ def build_data_matrix(assay, bracketing_results, on = "processedData", originalD
                     _mzmin, _mzmean, _mzmax = oSpectrum.reverseMZ(mzmin), oSpectrum.reverseMZ(mzmean), oSpectrum.reverseMZ(mzmax)
                     _mzmin, _mzmax = _mzmin * (1. - originalData_mz_deviation_multiplier_PPM / 1E6), _mzmax * (1. + originalData_mz_deviation_multiplier_PPM / 1E6)
 
-                    use = np.logical_and(oSpectrum.mz >= _mzmin, oSpectrum.mz <= _mzmax)
+                    use = np.logical_and(oSpectrum.original_mz >= _mzmin, oSpectrum.original_mz <= _mzmax)
                     if np.sum(use) > 0:
                         s += np.sum(oSpectrum.spint[use])
 
@@ -2219,7 +2219,7 @@ def plot_RSDs_per_group(dat, uGroups, groups, batches, include = None, plotType 
                             vals_ = np.copy(vals)
                             vals_ = vals_[~np.isnan(vals_)]
                             if vals_.shape[0] > 1:
-                                temp["rsd"].append(rsd(vals_))
+                                temp["rsd"].append(_relative_standard_deviation(vals_))
                                 temp["mean"].append(np.log2(np.mean(vals_)))
                                 temp["sd"].append(np.log2(np.std(vals_)))
                                 temp["featurei"].append(featurei)
@@ -2230,7 +2230,7 @@ def plot_RSDs_per_group(dat, uGroups, groups, batches, include = None, plotType 
                             vals_ = np.copy(vals)
                             vals_[np.isnan(vals_)] = 0
                             if np.sum(vals_ > 0) > 1:
-                                temp["rsd"].append(rsd(vals_))
+                                temp["rsd"].append(_relative_standard_deviation(vals_))
                                 temp["mean"].append(np.log2(np.mean(vals_)))
                                 temp["sd"].append(np.log2(np.std(vals_)))
                                 temp["featurei"].append(featurei)
@@ -2252,7 +2252,7 @@ def plot_RSDs_per_group(dat, uGroups, groups, batches, include = None, plotType 
                     vals_ = np.copy(vals)
                     vals_ = vals_[~np.isnan(vals_)]
                     if vals_.shape[0] > 1:
-                        temp["rsd"].append(rsd(vals_))
+                        temp["rsd"].append(_relative_standard_deviation(vals_))
                         temp["mean"].append(np.log2(np.mean(vals_)))
                         temp["sd"].append(np.log2(np.std(vals_)))
                         temp["featurei"].append(featurei)
@@ -2263,7 +2263,7 @@ def plot_RSDs_per_group(dat, uGroups, groups, batches, include = None, plotType 
                     vals_ = np.copy(vals)
                     vals_[np.isnan(vals_)] = 0
                     if np.sum(vals_ > 0) > 1:
-                        temp["rsd"].append(rsd(vals_))
+                        temp["rsd"].append(_relative_standard_deviation(vals_))
                         temp["mean"].append(np.log2(np.mean(vals_)))
                         temp["sd"].append(np.log2(np.std(vals_)))
                         temp["featurei"].append(featurei)
