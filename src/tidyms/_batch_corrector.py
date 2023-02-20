@@ -5,18 +5,17 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 from sklearn.model_selection import LeaveOneOut, ShuffleSplit, GridSearchCV
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_X_y
+from sklearn.exceptions import NotFittedError
 from joblib import Parallel, delayed
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 from tqdm.notebook import tqdm
 from functools import partial
 
-MIN_LOESS_SIZE = 4      # the minimum number of points necessary to use LOESS
+MIN_LOESS_SIZE = 4  # the minimum number of points necessary to use LOESS
 
 
 def find_invalid_samples(
-    sample_metadata: pd.DataFrame,
-    sample_class: List[str],
-    qc_class: List[str]
+    sample_metadata: pd.DataFrame, sample_class: list[str], qc_class: list[str]
 ) -> pd.Index:
     """
     Finds samples that cannot be corrected using LOESS batch correction.
@@ -25,9 +24,9 @@ def find_invalid_samples(
     ----------
     sample_metadata : DataFrame
         sample metadata from a DataContainer
-    sample_class : List[str]
+    sample_class : list[str]
         Classes where the correction is going to be applied.
-    qc_class : List[str]
+    qc_class : list[str]
         Classes used to estimate the correction factor.
 
     Returns
@@ -37,18 +36,16 @@ def find_invalid_samples(
     """
     invalid_samples = pd.Index([])
     for name, gdf in sample_metadata.groupby("batch"):
+        gdf: pd.DataFrame
         qc_mask = gdf["class"].isin(qc_class)
         sample_mask = gdf["class"].isin(sample_class)
         qc_order = gdf.loc[qc_mask, "order"]
-        sample_order = gdf.loc[sample_mask, "order"]    # type: pd.Series
+        sample_order = gdf.loc[sample_mask, "order"]  # type: pd.Series
         min_qc_order = qc_order.min()
         max_qc_order = qc_order.max()
         n_qc = qc_order.size
         if n_qc >= MIN_LOESS_SIZE:
-            mask = (
-                    (sample_order < min_qc_order) |
-                    (sample_order > max_qc_order)
-            )
+            mask = (sample_order < min_qc_order) | (sample_order > max_qc_order)
             rm_index = mask[mask].index
         else:
             rm_index = gdf.index
@@ -59,10 +56,10 @@ def find_invalid_samples(
 def find_invalid_features(
     data_matrix: pd.DataFrame,
     sample_metadata: pd.DataFrame,
-    sample_class: List[str],
-    qc_class: List[str],
+    sample_class: list[str],
+    qc_class: list[str],
     threshold: float,
-    min_detection_rate: float
+    min_detection_rate: float,
 ) -> pd.Index:
     """
     Remove features detected in a low number of QC samples.
@@ -73,9 +70,9 @@ def find_invalid_features(
         data matrix from a DataContainer
     sample_metadata : DataFrame
         sample metadata from a DataContainer
-    sample_class : List[str]
+    sample_class : list[str]
         Classes where the correction is going to be applied.
-    qc_class : List[str]
+    qc_class : list[str]
         Classes used to estimate the correction factor.
     threshold : positive number
         Minimum value to consider a feature detected.
@@ -91,7 +88,7 @@ def find_invalid_features(
     for name, gdf in sample_metadata.groupby("batch"):
         qc_mask = gdf["class"].isin(qc_class)
         sample_mask = gdf["class"].isin(sample_class)
-        qc_order = gdf.loc[qc_mask, "order"]    # type: pd.Series
+        qc_order = gdf.loc[qc_mask, "order"]  # type: pd.Series
         sample_order = gdf.loc[sample_mask, "order"]
         min_sample_order = sample_order.min()
         max_sample_order = sample_order.max()
@@ -103,8 +100,7 @@ def find_invalid_features(
         first_block_n = (first_block_n > threshold).sum()
 
         # middle block: qc sample measured between study samples
-        middle_block_samples = ((qc_order > min_sample_order) |
-                                (qc_order < max_sample_order))
+        middle_block_samples = (qc_order > min_sample_order) | (qc_order < max_sample_order)
         middle_block_samples = middle_block_samples[middle_block_samples].index
         middle_block_n = data_matrix.loc[middle_block_samples, :]
         middle_block_n = (middle_block_n > threshold).sum()
@@ -117,13 +113,11 @@ def find_invalid_features(
 
         total = first_block_n + middle_block_n + last_block_n
         valid_blocks = (
-            (first_block_n > 0) &
-            (middle_block_n > 0) &
-            (last_block_n > 0)
-        )    # type: pd.Series
-        valid_n = (total >= MIN_LOESS_SIZE)
+            (first_block_n > 0) & (middle_block_n > 0) & (last_block_n > 0)
+        )  # type: pd.Series
+        valid_n = total >= MIN_LOESS_SIZE
         n_rows = qc_order.size
-        valid_dr = (total / n_rows) >= min_detection_rate   # type: pd.Series
+        valid_dr = (total / n_rows) >= min_detection_rate  # type: pd.Series
         invalid_mask = ~(valid_n & valid_blocks & valid_dr)
         rm_features = invalid_mask[invalid_mask].index
         invalid_features = invalid_features.union(rm_features)
@@ -133,13 +127,13 @@ def find_invalid_features(
 def correct_batches(
     data_matrix: pd.DataFrame,
     sample_metadata: pd.DataFrame,
-    sample_class: List[str],
-    qc_class: List[str],
+    sample_class: list[str],
+    qc_class: list[str],
     threshold: float = 0.0,
     frac: Optional[float] = None,
     first_n: Optional[int] = None,
     n_jobs: Optional[int] = None,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """
     Inter-batch correction using LOESS smoothing.
@@ -150,9 +144,9 @@ def correct_batches(
         data matrix from a DataContainer
     sample_metadata : DataFrame
         sample metadata from a DataContainer
-    sample_class : List[str]
+    sample_class : list[str]
         Classes where the correction is going to be applied.
-    qc_class : List[str]
+    qc_class : list[str]
         Classes used to estimate the correction factor.
     threshold : positive number
         Minimum value to consider a feature detected. Features in QC samples
@@ -180,11 +174,7 @@ def correct_batches(
     # data matrix is split into columns, and each column is split according to
     # the number of batches.
     iterator = _split_data_matrix(
-        data_matrix,
-        sample_metadata,
-        sample_class,
-        qc_class,
-        threshold
+        data_matrix, sample_metadata, sample_class, qc_class, threshold
     )
 
     if verbose:
@@ -197,17 +187,13 @@ def correct_batches(
     # intra-batch correction
     corrector_func = partial(_correct_intra_batch, first_n=first_n, frac=frac)
     func = delayed(corrector_func)
-    data = Parallel(n_jobs=n_jobs)(func(x) for x in iterator)
+    data: list[Tuple] = Parallel(n_jobs=n_jobs)(func(x) for x in iterator)
     data_corrected = _rebuild_data_matrix(data_matrix.shape, data)
     data_corrected = pd.DataFrame(
-        data=data_corrected,
-        index=data_matrix.index,
-        columns=data_matrix.columns
+        data=data_corrected, index=data_matrix.index, columns=data_matrix.columns
     )
     # inter-batch correction
-    data_corrected = _inter_batch_correction(
-        data_corrected, sample_metadata, qc_class
-    )
+    data_corrected = _inter_batch_correction(data_corrected, sample_metadata, qc_class)
 
     return data_corrected
 
@@ -222,6 +208,7 @@ class _LoessCorrector(BaseEstimator, RegressorMixin):
         Fraction of samples used for local regressions
 
     """
+
     def __init__(self, frac: float = 0.66):
         """
         Constructor function.
@@ -237,26 +224,25 @@ class _LoessCorrector(BaseEstimator, RegressorMixin):
         X, y = check_X_y(X, y)
         # Store the classes seen during fit
         x = X.flatten()
-        y_fit = lowess(
-            y, x, frac=self.frac, is_sorted=True, return_sorted=False
-        )
+        y_fit = lowess(y, x, frac=self.frac, is_sorted=True, return_sorted=False)
         fill = (y[0], y[-1])
-        self.interpolator_ = interp1d(
-            x, y_fit, fill_value=fill, bounds_error=False)
+        self.interpolator_ = interp1d(x, y_fit, fill_value=fill, bounds_error=False)
         return self
 
     def predict(self, X):
+        if self.interpolator_ is None:
+            raise NotFittedError
         xf = X.flatten()
         x_interp = self.interpolator_(xf)
         return x_interp
 
 
 def _split_data_matrix(
-        data_matrix: pd.DataFrame,
-        sample_metadata: pd.DataFrame,
-        sample_class: List[str],
-        qc_class: List[str],
-        threshold: float
+    data_matrix: pd.DataFrame,
+    sample_metadata: pd.DataFrame,
+    sample_class: list[str],
+    qc_class: list[str],
+    threshold: float,
 ):
     """
     Yields chunks of the data matrix and the order array associated with the
@@ -266,9 +252,9 @@ def _split_data_matrix(
     ----------
     data_matrix : DataFrame
     sample_metadata : DataFrame
-    sample_class : List[str]
+    sample_class : list[str]
         classes where the correction will be applied
-    qc_class : List[str]
+    qc_class : list[str]
         classes used to create the correction
     threshold : positive number
         Minimum value to consider a feature detected.
@@ -309,9 +295,7 @@ def _split_data_matrix(
 
 
 def _correct_intra_batch(
-        args: Tuple,
-        frac: Optional[float] = None,
-        first_n: Optional[int] = None
+    args: Tuple, frac: Optional[float] = None, first_n: Optional[int] = None
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """
     Apply LOESS correction on features in a batch. Aux function to
@@ -362,7 +346,7 @@ def _correct_intra_batch(
     # compute corrected values
     x_qc = corrector.predict(x_predict)
     factor = np.zeros_like(x_qc)
-    # correct nans in zero values and negative values generated during LOESS
+    # correct nan in zero values and negative values generated during LOESS
     is_positive = x_qc > 0
     factor = np.divide(x_mean, x_qc, out=factor, where=is_positive)
     corrected = y_predict * factor
@@ -372,7 +356,7 @@ def _correct_intra_batch(
     return x, index, column
 
 
-def _rebuild_data_matrix(shape, data: List[Tuple]) -> np.ndarray:
+def _rebuild_data_matrix(shape, data: list[Tuple]) -> np.ndarray:
     """
     Rebuilds the data matrix from the processed output. Aux function to\
     correct_batches.
@@ -395,9 +379,7 @@ def _rebuild_data_matrix(shape, data: List[Tuple]) -> np.ndarray:
 
 
 def _inter_batch_correction(
-        data_matrix: pd.DataFrame,
-        sample_metadata: pd.DataFrame,
-        qc_class: List[str]
+    data_matrix: pd.DataFrame, sample_metadata: pd.DataFrame, qc_class: list[str]
 ) -> pd.DataFrame:
     """
     corrects the mean in each batch to a common mean. Aux function to
@@ -426,8 +408,7 @@ def _inter_batch_correction(
 
 
 def _get_inter_batch_correction_factor(
-        data_matrix: pd.DataFrame,
-        batch: pd.Series
+    data_matrix: pd.DataFrame, batch: pd.Series
 ) -> pd.DataFrame:
     """
     Estimates a correction factor for inter-batch correction. Aux function to
@@ -473,8 +454,7 @@ def _get_param_grid_loess_corrector(train_index: np.ndarray) -> dict:
     return grid_params
 
 
-def _get_tqdm_total(
-        data_matrix: pd.DataFrame, sample_metadata: pd.DataFrame) -> int:
+def _get_tqdm_total(data_matrix: pd.DataFrame, sample_metadata: pd.DataFrame) -> int:
     """
     Computes the number of items to compute a percentage in the progress bar.
 
