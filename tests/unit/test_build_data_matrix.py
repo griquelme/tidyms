@@ -8,11 +8,7 @@ import pytest
 def create_dummy_sample_metadata(n_samples):
     samples = ["Sample{}".format(x + 1) for x in range(n_samples)]
     # dummy sample metadata, we only care about the index
-    return pd.DataFrame(
-        data=1,
-        index=samples,
-        columns=["class", "id"]
-    )
+    return pd.DataFrame(data=1, index=samples, columns=["class", "id"])
 
 
 def create_dummy_feature_table(n_ft, n_samples):
@@ -29,7 +25,7 @@ def create_dummy_feature_table(n_ft, n_samples):
         clusters = np.arange(n_ft)
         if size > n_ft:
             # excess values are set to -1
-            label = - np.ones(size, dtype=int)
+            label = -np.ones(size, dtype=int)
             label[:n_ft] = np.random.choice(clusters, replace=False, size=n_ft)
 
         else:
@@ -37,8 +33,7 @@ def create_dummy_feature_table(n_ft, n_samples):
         df[c.LABEL] = label
         return df
 
-    feature_table[c.SAMPLE] = np.random.choice(
-        samples, replace=True, size=n_rows)
+    feature_table[c.SAMPLE] = np.random.choice(samples, replace=True, size=n_rows)
     feature_table = feature_table.groupby(c.SAMPLE).apply(assign_cluster)
     feature_table = feature_table[feature_table[c.LABEL] > -1]
 
@@ -72,7 +67,8 @@ def test__build_data_matrix():
     labels = feature_table[c.LABEL]
     cluster_to_ft = _build_data_matrix._cluster_to_feature_name(labels)
     data_matrix = _build_data_matrix._build_data_matrix(
-        feature_table, sample_metadata, cluster_to_ft)
+        feature_table, sample_metadata, cluster_to_ft
+    )
     assert data_matrix.index.name == c.SAMPLE
     assert data_matrix.columns.name == c.FEATURE
     assert data_matrix.shape == (n_samples, n_ft)
@@ -87,7 +83,8 @@ def test__build_data_matrix_all_features_missing_in_a_sample():
     labels = feature_table[c.LABEL]
     cluster_to_ft = _build_data_matrix._cluster_to_feature_name(labels)
     data_matrix = _build_data_matrix._build_data_matrix(
-        feature_table, sample_metadata, cluster_to_ft)
+        feature_table, sample_metadata, cluster_to_ft
+    )
     assert data_matrix.index.name == c.SAMPLE
     assert data_matrix.columns.name == c.FEATURE
     assert data_matrix.shape == (n_samples + 1, n_ft)
@@ -102,14 +99,12 @@ def test__merge_features_not_merge():
     feature_names = ["FT1", "FT2", "FT3", "FT4"]
     feature_set = set(feature_names)
     merged_dict = dict()
-    data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=feature_names
-    )
+    data_matrix = pd.DataFrame(data=np.ones((n_samples, n_ft)), columns=feature_names)
     ft1 = feature_names[1]
     ft2 = feature_names[2]
     results = _build_data_matrix._merge_features(
-        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold)
+        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold
+    )
     assert results is None
 
 
@@ -121,10 +116,7 @@ def test__merge_features_merge_main_ft1():
     feature_names = ["FT1", "FT2", "FT3", "FT4"]
     feature_set = set(feature_names)
     merged_dict = dict()
-    data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=feature_names
-    )
+    data_matrix = pd.DataFrame(data=np.ones((n_samples, n_ft)), columns=feature_names)
     ft1 = feature_names[1]
     ft2 = feature_names[2]
 
@@ -133,7 +125,8 @@ def test__merge_features_merge_main_ft1():
     data_matrix.loc[nan_index, ft2] = np.nan
 
     merged_ft = _build_data_matrix._merge_features(
-        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold)
+        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold
+    )
     assert merged_ft == ft2
     assert ft1 in merged_dict
     assert ft2 not in feature_set
@@ -148,10 +141,7 @@ def test__merge_features_merge_main_ft1_ft1_in_merged_dict():
     n_samples = 20
     feature_names = ["FT1", "FT2", "FT3", "FT4"]
     feature_set = set(feature_names)
-    data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=feature_names
-    )
+    data_matrix = pd.DataFrame(data=np.ones((n_samples, n_ft)), columns=feature_names)
     ft1 = feature_names[1]
     ft2 = feature_names[2]
     merged_dict = {ft1: ["FT5"]}
@@ -161,7 +151,8 @@ def test__merge_features_merge_main_ft1_ft1_in_merged_dict():
     data_matrix.loc[nan_index, ft2] = np.nan
 
     merged_ft = _build_data_matrix._merge_features(
-        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold)
+        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold
+    )
     assert merged_ft == ft2
     assert ft1 in merged_dict
     assert merged_dict[ft1] == ["FT5", ft2]
@@ -177,10 +168,7 @@ def test__merge_features_merge_main_ft1_ft2_in_merged_dict():
     n_samples = 20
     feature_names = ["FT1", "FT2", "FT3", "FT4"]
     feature_set = set(feature_names)
-    data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=feature_names
-    )
+    data_matrix = pd.DataFrame(data=np.ones((n_samples, n_ft)), columns=feature_names)
     ft1 = feature_names[1]
     ft2 = feature_names[2]
     merged_dict = {ft2: ["FT5"]}
@@ -190,7 +178,8 @@ def test__merge_features_merge_main_ft1_ft2_in_merged_dict():
     data_matrix.loc[nan_index, ft2] = np.nan
 
     merged_ft = _build_data_matrix._merge_features(
-        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold)
+        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold
+    )
     assert merged_ft == ft2
     assert ft1 in merged_dict
     assert set(merged_dict[ft1]) == {"FT5", ft2}
@@ -207,10 +196,7 @@ def test__merge_features_merge_main_ft2():
     feature_names = ["FT1", "FT2", "FT3", "FT4"]
     feature_set = set(feature_names)
     merged_dict = dict()
-    data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=feature_names
-    )
+    data_matrix = pd.DataFrame(data=np.ones((n_samples, n_ft)), columns=feature_names)
     ft1 = feature_names[1]
     ft2 = feature_names[2]
 
@@ -219,7 +205,8 @@ def test__merge_features_merge_main_ft2():
     data_matrix.loc[nan_index, ft1] = np.nan
 
     merged_ft = _build_data_matrix._merge_features(
-        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold)
+        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold
+    )
     assert ft1 not in merged_dict
     assert merged_ft == ft1
     assert ft1 in merged_dict[ft2]
@@ -235,10 +222,7 @@ def test__merge_features_merge_main_ft2_ft1_in_merged_dict():
     n_samples = 20
     feature_names = ["FT1", "FT2", "FT3", "FT4"]
     feature_set = set(feature_names)
-    data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=feature_names
-    )
+    data_matrix = pd.DataFrame(data=np.ones((n_samples, n_ft)), columns=feature_names)
     ft1 = feature_names[1]
     ft2 = feature_names[2]
     merged_dict = {ft1: ["FT5"]}
@@ -248,7 +232,8 @@ def test__merge_features_merge_main_ft2_ft1_in_merged_dict():
     data_matrix.loc[nan_index, ft1] = np.nan
 
     merged_ft = _build_data_matrix._merge_features(
-        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold)
+        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold
+    )
     assert ft1 not in merged_dict
     assert merged_ft == ft1
     assert {"FT5", ft1} == set(merged_dict[ft2])
@@ -264,10 +249,7 @@ def test__merge_features_merge_main_ft2_ft2_in_merged_dict():
     n_samples = 20
     feature_names = ["FT1", "FT2", "FT3", "FT4"]
     feature_set = set(feature_names)
-    data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=feature_names
-    )
+    data_matrix = pd.DataFrame(data=np.ones((n_samples, n_ft)), columns=feature_names)
     ft1 = feature_names[1]
     ft2 = feature_names[2]
     merged_dict = {ft2: ["FT5"]}
@@ -277,7 +259,8 @@ def test__merge_features_merge_main_ft2_ft2_in_merged_dict():
     data_matrix.loc[nan_index, ft1] = np.nan
 
     merged_ft = _build_data_matrix._merge_features(
-        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold)
+        data_matrix, merged_dict, feature_set, ft1, ft2, merge_threshold
+    )
     assert ft1 not in merged_dict
     assert merged_ft == ft1
     assert {"FT5", ft1} == set(merged_dict[ft2])
@@ -364,15 +347,11 @@ def test__lc_merge_close_features_none_close():
     ft_names = ["FT-{}".format(x) for x in range(n_ft)]
     samples = ["sample{}".format(x) for x in range(n_samples)]
     data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=ft_names,
-        index=samples
+        data=np.ones((n_samples, n_ft)), columns=ft_names, index=samples
     )
     ft_descriptors = [c.MZ, c.RT]
     feature_metadata = pd.DataFrame(
-        data=[[1, 1], [2, 2], [3, 3], [4, 4]],
-        columns=ft_descriptors,
-        index=ft_names
+        data=[[1, 1], [2, 2], [3, 3], [4, 4]], columns=ft_descriptors, index=ft_names
     )
 
     mz_merge = 0.01
@@ -382,11 +361,7 @@ def test__lc_merge_close_features_none_close():
     expected_data_matrix = data_matrix.copy()
     expected_feature_metadata = feature_metadata.copy()
     _build_data_matrix._lc_merge_close_features(
-        data_matrix,
-        feature_metadata,
-        mz_merge,
-        rt_merge,
-        merge_threshold
+        data_matrix, feature_metadata, mz_merge, rt_merge, merge_threshold
     )
     assert expected_data_matrix.equals(data_matrix)
     merged = feature_metadata.pop(c.MERGED)
@@ -400,15 +375,11 @@ def test__lc_merge_close_features_all_features_above_merge_threshold():
     ft_names = ["FT-{}".format(x) for x in range(n_ft)]
     samples = ["sample{}".format(x) for x in range(n_samples)]
     data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=ft_names,
-        index=samples
+        data=np.ones((n_samples, n_ft)), columns=ft_names, index=samples
     )
     ft_descriptors = [c.MZ, c.RT]
     feature_metadata = pd.DataFrame(
-        data=[[1, 1], [1.005, 1.005], [3, 3], [4, 4]],
-        columns=ft_descriptors,
-        index=ft_names
+        data=[[1, 1], [1.005, 1.005], [3, 3], [4, 4]], columns=ft_descriptors, index=ft_names
     )
 
     mz_merge = 0.01
@@ -418,11 +389,7 @@ def test__lc_merge_close_features_all_features_above_merge_threshold():
     expected_data_matrix = data_matrix.copy()
     expected_feature_metadata = feature_metadata.copy()
     _build_data_matrix._lc_merge_close_features(
-        data_matrix,
-        feature_metadata,
-        mz_merge,
-        rt_merge,
-        merge_threshold
+        data_matrix, feature_metadata, mz_merge, rt_merge, merge_threshold
     )
     assert expected_data_matrix.equals(data_matrix)
     merged = feature_metadata.pop(c.MERGED)
@@ -436,15 +403,11 @@ def test__lc_merge_close_features_merge_one_feature():
     ft_names = ["FT-{}".format(x) for x in range(n_ft)]
     samples = ["sample{}".format(x) for x in range(n_samples)]
     data_matrix = pd.DataFrame(
-        data=np.ones((n_samples, n_ft)),
-        columns=ft_names,
-        index=samples
+        data=np.ones((n_samples, n_ft)), columns=ft_names, index=samples
     )
     ft_descriptors = [c.MZ, c.RT]
     feature_metadata = pd.DataFrame(
-        data=[[1, 1], [1.005, 1.005], [3, 3], [4, 4]],
-        columns=ft_descriptors,
-        index=ft_names
+        data=[[1, 1], [1.005, 1.005], [3, 3], [4, 4]], columns=ft_descriptors, index=ft_names
     )
 
     # set values in FT2 to nan
@@ -457,20 +420,15 @@ def test__lc_merge_close_features_merge_one_feature():
     merge_threshold = 1.0
 
     expected_data_matrix = data_matrix.copy()
-    expected_data_matrix[main_ft] = (
-        expected_data_matrix[main_ft] +
-        expected_data_matrix[merge_ft].fillna(0)
-    )
+    expected_data_matrix[main_ft] = expected_data_matrix[main_ft] + expected_data_matrix[
+        merge_ft
+    ].fillna(0)
     expected_data_matrix.drop(columns=[merge_ft], inplace=True)
     expected_feature_metadata = feature_metadata.copy()
     expected_feature_metadata.drop(index=[merge_ft], inplace=True)
 
     _build_data_matrix._lc_merge_close_features(
-        data_matrix,
-        feature_metadata,
-        mz_merge,
-        rt_merge,
-        merge_threshold
+        data_matrix, feature_metadata, mz_merge, rt_merge, merge_threshold
     )
     assert expected_data_matrix.equals(data_matrix)
     merged = feature_metadata.pop(c.MERGED)
