@@ -40,6 +40,93 @@ import warnings
 import functools
 import bs4
 import random
+import dill
+
+
+
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Data handling assay
+##
+#
+
+class DartMSAssay:
+    def __init__(self, name = "Generic"):
+        self.name = name
+        
+        self.assay = None
+        self.dat = None
+        self.features = None
+        self.featureAnnotations = None
+        self.samples = None
+        self.groups = None
+        self.batches = None
+
+        self.processingHistory = []
+
+    def set_data_matrix(self, dat, features, featureAnnotations, samples, groups, batches):
+        self.dat = dat
+        self.features = features
+        self.featureAnnotations = featureAnnotations
+        self.samples = samples
+        self.groups = groups
+        self.batches = batches
+
+    def get_data_matrix_and_meta(self):
+        if self.dat is None:
+            raise RuntimeError("Data matrix not set/generated")
+
+        return self.dat, self.features, self.samples, self.groups, self.batches
+
+    def add_processing_step(self, step_identifier_text, log_text, processing_data = None):
+        self.processingHistory.append({"step_identifier": step_identifier_text, 
+                                       "log_text": log_text,
+                                       "processing_data": processing_data})
+
+    def save_self_to_dill_file(self, dill_file):
+        with open(dill_file, "wb") as fout:
+            dill.dump(
+                {
+                    "name": self.name,
+                    "assay": self.assay,
+                    "dat": self.dat,
+                    "features": self.features,
+                    "featureAnnotations": self.featureAnnotations, 
+                    "samples": self.samples, 
+                    "groups": self.groups,
+                    "batches": self.batches,
+
+                    "processingHistory": self.processingHistory
+                }, fout
+            )
+
+    @staticmethod
+    def read_from_dill_file(dill_file):
+        with open(dill_file, "rb") as fin:
+            di = dill.load(fin)
+
+            dartMSAssay = DartMSAssay(di["name"])
+
+            dartMSAssay.assay = di["assay"]
+            dartMSAssay.dat = di["dat"]
+            dartMSAssay.features = di["features"]
+            ## TODO  dartMSAssay.featureAnnotations = di["featureAnnotations"]
+            dartMSAssay.samples = di["samples"]
+            dartMSAssay.groups = di["groups"]
+            dartMSAssay.batches = di["batches"]
+            
+            dartMSAssay.processingHistory = di["processingHistory"]
+
+            return dartMSAssay
+
 
 
 
@@ -164,6 +251,51 @@ def remove_blank_groups(samples, groups, batches, dat, blankGroups):
 
     return samples, groups, batches, dat
 
+
+
+
+
+
+
+
+
+
+#####################################################################################################
+####################################################################################################
+##
+## Data import filters
+##
+#
+
+def import_filter_mz_range(msData, min_mz, max_mz):
+    for spectrumi, spectrum in msData.get_spectra_iterator():
+        use = np.logical_and(spectrum.mz >= min_mz, spectrum.mz <= max_mz)
+
+        spectrum.mz = spectrum.mz[use]
+        spectrum.spint = spectrum.spint[use]
+
+    return msData
+
+def import_filter_artifact_removal(msData, artifacts):
+    for spectrumi, spectrum in msData.get_spectra_iterator():
+        use = spectrum.mz >= 0
+
+        for artifact in artifacts:
+            use = np.logical_and(use, np.logical_and(spectrum.mz >= artifact[0], spectrum.mz <= artifact[1]))
+
+        spectrum.mz = spectrum.mz[use]
+        spectrum.spint = spectrum.spint[use]
+    
+    return msData
+
+def import_filter_remove_signals_below_intensity(msData, minimum_signal_intensity):
+    for spectrumi, spectrum in msData.get_spectra_iterator():
+        use = spectrum.spint >= minimum_signal_intensity
+
+        spectrum.mz = spectrum.mz[use]
+        spectrum.spint = spectrum.spint[use]
+    
+    return msData
 
 
 
@@ -326,11 +458,11 @@ def _add_chronograms_samples_to_assay(assay, sepInds, msData, filename, fileName
         )
 
 
-def plot_sample_TICs(assay, separate = True, separate_by = "group"):
+def plot_sample_TICs(dartMSAssay, separate = True, separate_by = "group"):
     temp = None
-    sample_metadata = assay.manager.get_sample_metadata()
-    for samplei, sample in enumerate(assay.manager.get_sample_names()):
-        msDataObj = assay.get_ms_data(sample)
+    sample_metadata = dartMSAssay.assay.manager.get_sample_metadata()
+    for samplei, sample in enumerate(dartMSAssay.assay.manager.get_sample_names()):
+        msDataObj = dartMSAssay.assay.get_ms_data(sample)
         for k, spectrum in msDataObj.get_spectra_iterator():
             temp = _add_row_to_pandas_creation_dictionary(temp, 
                 sample         = sample,
@@ -374,11 +506,13 @@ def plot_sample_TICs(assay, separate = True, separate_by = "group"):
     print(p)
 
 
-def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument, centroid_profileMode = True, 
-                                        fileNameChangeFunction = None, 
-                                        use_signal_function = None, 
-                                        rewriteRTinFiles = False, rewriteDeleteUnusedScans = True,
-                                        intensity_threshold_spot_extraction = 1E3):
+def create_assay_from_chronogramFiles(assay_name, 
+                                      filenames, spot_file, ms_mode, instrument, centroid_profileMode = True, 
+                                      fileNameChangeFunction = None, 
+                                      use_signal_function = None, 
+                                      rewriteRTinFiles = False, rewriteDeleteUnusedScans = True,
+                                      intensity_threshold_spot_extraction = 1E3,
+                                      import_filters = None):
     """
     Generates a new assay from a series of chronograms and a spot_file
 
@@ -390,6 +524,9 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
     Returns:
         Assay: The new generated assay object with the either automatically or user-guided spots from the spot_file
     """    
+
+    if import_filters is None:
+        import_filters = []
 
     assay = Assay.Assay(
         data_path = None,
@@ -420,6 +557,9 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
                 separation = "None/DART", 
                 data_import_mode = _constants.MEMORY,
             )
+
+            for importFilter in import_filters:
+                msData = importFilter(msData = msData)
 
             if rewriteRTinFiles:
                 lastRT = 0
@@ -539,7 +679,10 @@ def create_assay_from_chronogramFiles(filenames, spot_file, ms_mode, instrument,
             print("      .. no spots to extract")
         else:
             _add_chronograms_samples_to_assay(assay, sepInds, msData, filename, fileNameChangeFunction = fileNameChangeFunction)
-    return assay
+    
+    dartMSAssay = DartMSAssay(assay_name)
+    dartMSAssay.assay = assay
+    return dartMSAssay
 
 
 
@@ -628,16 +771,16 @@ def normalize_samples_by_TIC(assay, multiplication_factor = 1):
             print("   .. Error: cannot normalize sample '%35s' to TIC as it is zero"%(sample))
 
 
-def normalize_to_internal_standard(assay, std, multiplication_factor = 1, plot = False):
+def normalize_to_internal_standard(dartMSAssay, std, multiplication_factor = 1, plot = False):
     stdMZmin, stdMZmax = std
     
-    sample_metadata = assay.manager.get_sample_metadata()
+    sample_metadata = dartMSAssay.assay.manager.get_sample_metadata()
     
     temp = None
-    for samplei, sample in enumerate(assay.manager.get_sample_names()):
+    for samplei, sample in enumerate(dartMSAssay.assay.manager.get_sample_names()):
         sampleType = sample_metadata.loc[sample, "group"]
         totalSTDInt = 0
-        msDataObj = assay.get_ms_data(sample)
+        msDataObj = dartMSAssay.assay.get_ms_data(sample)
         for k, spectrum in msDataObj.get_spectra_iterator():
             use = np.logical_and(spectrum.mz >= stdMZmin, spectrum.mz <= stdMZmax)
             if np.sum(use) > 0:
@@ -668,6 +811,71 @@ def normalize_to_internal_standard(assay, std, multiplication_factor = 1, plot =
             + p9.guides(alpha = False, colour = False)
             + p9.ggtitle("Abundance of internal standard (mz %.5f - %.5f)"%(std[0], std[1]))
         )
+
+## Batch correction
+def batch_correction(dartMSAssay, by_group, plot = True):
+    datCorr = np.copy(dartMSAssay.dat)
+
+    correctedFeatures = 0
+    correctedBatches = 0
+
+    batchCorrectionValues = {"batch": [], "featurei": [], "correctionValue": [], "meanValue": []}
+
+    qcInds = [i for i in range(len(dartMSAssay.groups)) if dartMSAssay.groups[i] == by_group]
+    for featurei in range(datCorr.shape[1]):
+        vals = datCorr[qcInds, featurei]
+        if np.any(np.logical_not(np.isnan(vals))):
+            qcMean = np.mean(vals[~np.isnan(vals)])
+            
+            if not np.isnan(qcMean) and qcMean > 0:
+                correctedFeatures += 1
+
+                for batch in set(dartMSAssay.batches):
+                    batchInds = [i for i in range(len(dartMSAssay.batches)) if dartMSAssay.batches[i] == batch]
+                    cInds = list(set(batchInds).intersection(set(qcInds)))
+
+                    vals = datCorr[cInds, featurei]
+                    if np.any(np.logical_not(np.isnan(vals))):
+                        qcCurMean = np.mean(vals[~np.isnan(vals)])
+
+                        if not np.isnan(qcCurMean) and qcCurMean > 0:
+                            batchCorrectionValues["batch"].append(batch)
+                            batchCorrectionValues["featurei"].append(featurei)
+                            batchCorrectionValues["correctionValue"].append(qcMean / qcCurMean)
+                            batchCorrectionValues["meanValue"].append(qcCurMean)
+                            correctedBatches += 1
+    
+    batchCorrectionValues = pd.DataFrame(batchCorrectionValues)
+    batchCorrectionValuesGrouped = batchCorrectionValues.groupby(["batch"]).aggregate("median").reset_index()
+
+    if plot:
+        p = (p9.ggplot(data = batchCorrectionValues, mapping = p9.aes(
+                x = "batch", y = "np.log2(correctionValue)", group = "featurei"
+            ))
+            + p9.geom_jitter(width = 0.4, height = 0, alpha = 0.15, colour = "slategrey")
+            + p9.geom_point(data = batchCorrectionValuesGrouped, colour = "Firebrick", size = 3)
+            + p9.theme_minimal()
+            + p9.theme(legend_position = "bottom")
+            + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
+            + p9.ylim(-2, 2)
+            + p9.ggtitle("Before batch correction. Note: some large differences have been clipped in this illustration")
+            
+        )
+        print(p)
+
+    for batch in set(dartMSAssay.batches):
+        if batch in list(batchCorrectionValuesGrouped["batch"]):
+            corrVal = batchCorrectionValuesGrouped["correctionValue"][batchCorrectionValuesGrouped["batch"] == batch].iloc[0]
+            batchInds = [i for i in range(len(dartMSAssay.batches)) if dartMSAssay.batches[i] == batch]
+            
+            for featurei in range(datCorr.shape[1]):
+                datCorr[batchInds, featurei] = datCorr[batchInds, featurei] * corrVal                    
+
+    print("Batch effect correction carried out. %d / %d features were eligible for correction and %d / %d batches have been corrected. "%(correctedFeatures, dartMSAssay.dat.shape[1], correctedBatches, dartMSAssay.dat.shape[1] * len(set(dartMSAssay.batches))))
+    print("Batch correction values are")
+    print(batchCorrectionValuesGrouped)
+
+    dartMSAssay.dat = datCorr
         
 
 
@@ -742,7 +950,7 @@ def _reverse_applied_mz_offset(mz, correctby, *args, **kwargs):
         raise RuntimeError("Unknown correctby option '%s' specified. Must be either of ['mzDeviationPPM', 'mzDeviation']"%(correctby))
 
 
-def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007276], 
+def correct_MZ_shift_across_samples(dartMSAssay, referenceMZs = [165.078978594 + 1.007276], 
         max_mz_deviation_absolute = 0.1, correctby = "mzDeviationPPM", 
         max_deviationPPM_to_use_for_correction = 80, selection_criteria = "mostAbundant",
         correct_on_level = "file", 
@@ -765,7 +973,7 @@ def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007
     if not correct_on_level.lower() in ["file", "sample"]:
         raise RuntimeError("Parameter correct_on_level has an unknown value '%s', must be either of ['file', 'sample']"%(correct_on_level))
 
-    temp = _calculate_mz_offsets(assay, referenceMZs = referenceMZs, max_mz_deviation_absolute = max_mz_deviation_absolute, selection_criteria = selection_criteria)
+    temp = _calculate_mz_offsets(dartMSAssay.assay, referenceMZs = referenceMZs, max_mz_deviation_absolute = max_mz_deviation_absolute, selection_criteria = selection_criteria)
     temp["mode"] = "original MZs"
     
     tempMod = temp.copy()
@@ -783,8 +991,8 @@ def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007
     tempMod["mzDeviationPPM"] = (tempMod["mz"] - tempMod["referenceMZ"]) / tempMod["referenceMZ"] * 1E6
     tempMod["mzDeviation"] = (tempMod["mz"] - tempMod["referenceMZ"])
 
-    for samplei, sample in enumerate(assay.manager.get_sample_names()):
-        msDataObj = assay.get_ms_data(sample)
+    for samplei, sample in enumerate(dartMSAssay.assay.manager.get_sample_names()):
+        msDataObj = dartMSAssay.assay.get_ms_data(sample)
         if issubclass(type(msDataObj), fileio.MSData_in_memory):
             raise RuntimeError("Function correct_MZ_shift_across_samples only works with objects of class fileio.MSData_in_memory. Please switch data_import_mode to _constancts.MEMORY")
 
@@ -817,7 +1025,7 @@ def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007
                     raise RuntimeError("Unknown mz correction method provided. Must be one of ['mzDeviationPPM', 'mzDeviation']")
 
             if verbose:
-                print("    .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"%(samplei+1, len(assay.manager.get_sample_names()), sample, transformFactor, correctby))
+                print("    .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"%(samplei+1, len(dartMSAssay.assay.manager.get_sample_names()), sample, transformFactor, correctby))
 
     tempMod["mode"] = "corrected MZs (by %s)"%(correctby)
     temp_ = pd.concat([temp, tempMod], axis = 0, ignore_index = True).reset_index(drop = False)
@@ -838,8 +1046,7 @@ def correct_MZ_shift_across_samples(assay, referenceMZs = [165.078978594 + 1.007
             + p9.guides(alpha = False, colour = False)
             + p9.ggtitle("MZ deviation before and after correction for each sample/chronogram file")
         )
-
-    return tempMod, p
+        print(p)
 
 
 
@@ -1146,12 +1353,12 @@ def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectru
     return cluster
 
 
-def calculate_consensus_spectra_for_samples(assay, min_difference_ppm = 30, min_signals_per_cluster = 10, minimum_intensity_for_signals = 0, cluster_quality_check_functions = None, aggregation_function = "sum", exportAsFeatureML = True, featureMLlocation = ".", verbose = True):
+def calculate_consensus_spectra_for_samples(dartMSAssay, min_difference_ppm = 30, min_signals_per_cluster = 10, minimum_intensity_for_signals = 0, cluster_quality_check_functions = None, aggregation_function = "sum", exportAsFeatureML = True, featureMLlocation = ".", verbose = True):
     """
     Function to collapse several spectra into a single consensus spectrum per spot
 
     Args:
-        assay (Assay): The assay of the experiment
+        dartMSAssay (DartMSAssay): The DartMSAssay of the experiment
         min_difference_ppm (float, optional): Minimum difference in PPM required to separate into different clusters. Defaults to 30.
         min_signals_per_cluster (int, optional): Minimum number of signals for a certain MZ cluster for it to be used in the collapsed spectrum. Defaults to 10.
     """    
@@ -1159,7 +1366,7 @@ def calculate_consensus_spectra_for_samples(assay, min_difference_ppm = 30, min_
     if cluster_quality_check_functions is None:
         cluster_quality_check_functions = []
 
-    for samplei, sample in enumerate(assay.manager.get_sample_names()):
+    for samplei, sample in enumerate(dartMSAssay.assay.manager.get_sample_names()):
         temp = {
             "sample": [],
             "spectrumInd": [],
@@ -1168,7 +1375,7 @@ def calculate_consensus_spectra_for_samples(assay, min_difference_ppm = 30, min_
             "original_mz": [],
             "intensity": []
         }
-        msDataObj = assay.get_ms_data(sample)
+        msDataObj = dartMSAssay.assay.get_ms_data(sample)
         summary_totalSpectra = 0
         for k, spectrum in msDataObj.get_spectra_iterator():
             temp["sample"].extend((sample for i in range(spectrum.mz.shape[0])))
@@ -1271,7 +1478,7 @@ def calculate_consensus_spectra_for_samples(assay, min_difference_ppm = 30, min_
                 fout.write('  </featureMap>\n')
 
         if verbose:
-            print("   .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"%(samplei + 1, len(assay.manager.get_sample_names()), sample, summary_totalSpectra, summary_totalSignals, summary_clusterAfterCrude, summary_clusterAfterFine, summary_clusterAfterQualityFunctions, np.unique(temp["cluster"]).shape[0]))
+            print("   .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"%(samplei + 1, len(dartMSAssay.assay.manager.get_sample_names()), sample, summary_totalSpectra, summary_totalSignals, summary_clusterAfterCrude, summary_clusterAfterFine, summary_clusterAfterQualityFunctions, np.unique(temp["cluster"]).shape[0]))
 
         mzs, intensities, usedFeatures = _collapse_mz_cluster(temp["mz"], temp["original_mz"], temp["intensity"], temp["time"], temp["cluster"], intensity_collapse_method = aggregation_function)
         
@@ -1343,7 +1550,7 @@ def write_consensus_spectrum_to_featureML_file_per_sample(assay, widthRT = 40):
 ##
 #
 
-def bracket_consensus_spectrum_samples(assay, max_ppm_deviation = 25, show_diagnostic_plots = False):
+def bracket_consensus_spectrum_samples(dartMSAssay, max_ppm_deviation = 25, show_diagnostic_plots = False):
     temp = {
         "sample": [],
         "spectrumInd": [], 
@@ -1356,8 +1563,8 @@ def bracket_consensus_spectrum_samples(assay, max_ppm_deviation = 25, show_diagn
         "cluster": [],
     }
     
-    for samplei, sample in tqdm.tqdm(enumerate(assay.manager.get_sample_names()), total = len(assay.manager.get_sample_names()), desc = "bracketing: fetching data"):
-        msDataObj = assay.get_ms_data(sample)
+    for samplei, sample in tqdm.tqdm(enumerate(dartMSAssay.assay.manager.get_sample_names()), total = len(dartMSAssay.assay.manager.get_sample_names()), desc = "bracketing: fetching data"):
+        msDataObj = dartMSAssay.assay.get_ms_data(sample)
         for k, spectrum in msDataObj.get_spectra_iterator():
             temp["sample"].extend((sample for i in range(spectrum.mz.shape[0])))
             temp["spectrumInd"].extend((k for i in range(spectrum.mz.shape[0])))
@@ -1485,7 +1692,7 @@ def bracket_consensus_spectrum_samples(assay, max_ppm_deviation = 25, show_diagn
         samples  = temp["sample" ][temp["cluster"] == clust]
 
         tempClusterInfo["featureMLInfo"][clust]["sampleHulls"] = {}
-        for samplei, sample in enumerate(assay.manager.get_sample_names()):
+        for samplei, sample in enumerate(dartMSAssay.assay.manager.get_sample_names()):
             use = samples == sample
             if np.sum(use) > 0:
                 domzs = np.ndarray.flatten(np.concatenate([np.array(fs[i][:,3]) for i in range(len(fs)) if use[i]]))
@@ -1497,9 +1704,9 @@ def bracket_consensus_spectrum_samples(assay, max_ppm_deviation = 25, show_diagn
         print("   .. generating diagnostic plot")
         temp = None
         for featurei in tqdm.tqdm(range(len(tempClusterInfo["minMZ"])), desc = "bracketing: generating plots"):
-            for samplei, sample in enumerate(assay.manager.get_sample_names()):
-                msDataObj = assay.get_ms_data(sample)
-                sample_metadata = assay.manager.get_sample_metadata()
+            for samplei, sample in enumerate(dartMSAssay.assay.manager.get_sample_names()):
+                msDataObj = dartMSAssay.assay.get_ms_data(sample)
+                sample_metadata = dartMSAssay.assay.manager.get_sample_metadata()
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     usei = np.where(np.logical_and(spectrum.mz >= tempClusterInfo["minMZ"][featurei], spectrum.mz <= tempClusterInfo["maxMZ"][featurei]))[0]
                     if usei.size > 0:
@@ -1605,13 +1812,13 @@ def bracket_consensus_spectrum_samples(assay, max_ppm_deviation = 25, show_diagn
         #print(p)
 
 
-    return [e for e in zip(tempClusterInfo["minMZ"], tempClusterInfo["meanMZ"], tempClusterInfo["maxMZ"], tempClusterInfo["featureMLInfo"])]
+    dartMSAssay.features = [e for e in zip(tempClusterInfo["minMZ"], tempClusterInfo["meanMZ"], tempClusterInfo["maxMZ"], tempClusterInfo["featureMLInfo"])]
 
 
-def write_bracketing_results_to_featureML(bracRes, featureMLlocation = "./bracketedResults.featureML", featureMLStartRT = 0, featureMLEndRT = 1400):
+def write_bracketing_results_to_featureML(dartMSAssay, featureMLlocation = "./bracketedResults.featureML", featureMLStartRT = 0, featureMLEndRT = 1400):
     with open(featureMLlocation, "w") as fout:
         
-        bracRes = [b[3] for b in bracRes]
+        bracRes = [b[3] for b in dartMSAssay.features]
         ns = len(bracRes)
         fout.write('<?xml version="1.0" encoding="ISO-8859-1"?>\n')
         fout.write('  <featureMap version="1.4" id="fm_16311276685788915066" xsi:noNamespaceSchemaLocation="http://open-ms.sourceforge.net/schemas/FeatureXML_1_4.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n')
@@ -1668,16 +1875,16 @@ def write_bracketing_results_to_featureML(bracRes, featureMLlocation = "./bracke
 ##
 #
 
-def build_data_matrix(assay, bracketing_results, on = "processedData", originalData_mz_deviation_multiplier_PPM = 0):
-    sampleNames = assay.manager.get_sample_names()
+def build_data_matrix(dartMSAssay, on = "processedData", originalData_mz_deviation_multiplier_PPM = 0):
+    sampleNames = dartMSAssay.assay.manager.get_sample_names()
     sampleNamesToRowI = dict(((sample, i) for i, sample in enumerate(sampleNames)))
 
-    dataMatrix = np.zeros((len(sampleNames), len(bracketing_results)))
+    dataMatrix = np.zeros((len(sampleNames), len(dartMSAssay.features)))
     for samplei, sample in tqdm.tqdm(enumerate(sampleNames), total = len(sampleNames), desc = "data matrix: gathering data"):
-        msDataObj = assay.get_ms_data(sample)
+        msDataObj = dartMSAssay.assay.get_ms_data(sample)
         spectrum = msDataObj.get_spectrum(0)
 
-        for braci, (mzmin, mzmean, mzmax, _) in enumerate(bracketing_results):
+        for braci, (mzmin, mzmean, mzmax, _) in enumerate(dartMSAssay.features):
             if on == "processedData":
                 use = np.logical_and(spectrum.mz >= mzmin, spectrum.mz <= mzmax)
                 if np.sum(use) > 0:
@@ -1704,7 +1911,11 @@ def build_data_matrix(assay, bracketing_results, on = "processedData", originalD
             else:
                 raise RuntimeError("Unknown option for parameter on. Must be either of ['processedData', 'originalData']")
     
-    return sampleNames, bracketing_results, dataMatrix
+    sample_metadata = dartMSAssay.assay.get_sample_metadata()
+    dartMSAssay.samples = sampleNames
+    dartMSAssay.groups = [sample_metadata.loc[sample, "group"] for sample in dartMSAssay.samples]
+    dartMSAssay.batches = [sample_metadata.loc[sample, "batch"] for sample in dartMSAssay.samples]
+    dartMSAssay.dat = dataMatrix
 
 
 
@@ -1722,18 +1933,18 @@ def build_data_matrix(assay, bracketing_results, on = "processedData", originalD
 ##
 #
 
-def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutoff = 2, pvalueCutoff = 0.05, minDetected = 2, plot = False, verbose = True):
+def blank_subtraction(dartMSAssay, blankGroup, toTestGroups, foldCutoff = 2, pvalueCutoff = 0.05, minDetected = 2, plot = False, verbose = True):
 
-    keeps = [0 for i in range(dat.shape[1])]
+    keeps = [0 for i in range(dartMSAssay.dat.shape[1])]
 
     temp = None
 
-    for featurei in range(dat.shape[1]):
-        blankInds = [i for i, group in enumerate(groups) if group == blankGroup]
-        valsBlanks = dat[blankInds, featurei]
+    for featurei in range(dartMSAssay.dat.shape[1]):
+        blankInds = [i for i, group in enumerate(dartMSAssay.groups) if group == blankGroup]
+        valsBlanks = dartMSAssay.dat[blankInds, featurei]
         notInBlanks = False
 
-        if np.sum(~np.isnan(dat[:,featurei])) < minDetected:
+        if np.sum(~np.isnan(dartMSAssay.dat[:,featurei])) < minDetected:
             continue
 
         if np.all(np.isnan(valsBlanks)):
@@ -1742,8 +1953,8 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
         valsBlanks = valsBlanks[~np.isnan(valsBlanks)]
 
         for toTestGroup in toTestGroups:
-            toTestInds = [i for i, group in enumerate(groups) if group == toTestGroup]
-            valsGroup = dat[toTestInds, featurei]
+            toTestInds = [i for i, group in enumerate(dartMSAssay.groups) if group == toTestGroup]
+            valsGroup = dartMSAssay.dat[toTestInds, featurei]
 
             if np.sum(~np.isnan(valsGroup)) < minDetected:
                 pass
@@ -1802,7 +2013,10 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
                 print("   .. %d features found in %d of the blank comparisons with higher abundances in the samples and in at least %d samples. These features will be used"%(sum([k == i for k in keeps]), i, minDetected))
         print("Significance criteria are pval <= pvalueCutoff (%.3f) and fold >= foldCutoff (%.1f) and detected in at least %d samples of a non-Blank group"%(pvalueCutoff, foldCutoff, minDetected))
     
-    return [k != 0 for k in keeps]
+    keeps = [i for i in range(len(keeps)) if keeps[i]]
+    dartMSAssay.dat = dartMSAssay.dat[:, keeps]
+    dartMSAssay.features = [dartMSAssay.features[i] for i in keeps]
+    dartMSAssay.featureAnnotations = [dartMSAssay.featureAnnotations[i] for i in keeps]
 
 
 
@@ -1820,15 +2034,15 @@ def blank_subtraction(dat, features, groups, blankGroup, toTestGroups, foldCutof
 ##
 #
 
-def annotate_features(dat, features, samples, groups, useGroups = None, plot = False):
+def annotate_features(dartMSAssay, useGroups = None, plot = False):
 
     if useGroups is None:
-        useGroups = list(set(groups))
+        useGroups = list(set(dartMSAssay.groups))
 
-    features_ = np.array(features)
+    features_ = np.array(dartMSAssay.features)
     order = np.argsort(features_[:,1])
     features_ = features_[order,:]
-    dat_ = dat[:, order]
+    dat_ = dartMSAssay.dat[:, order]
 
     annotations = [[] for i in range(features_.shape[0])]
     temp = None
@@ -1841,7 +2055,7 @@ def annotate_features(dat, features, samples, groups, useGroups = None, plot = F
         mz = features_[featurei, 1]
 
         intensities = []
-        for samplei, sample in enumerate(samples):
+        for samplei, sample in enumerate(dartMSAssay.samples):
             if not np.isnan(dat_[samplei, featurei]):
                 intensities.append(dat_[samplei, featurei]) 
         intensities = np.array(intensities)
@@ -1853,8 +2067,8 @@ def annotate_features(dat, features, samples, groups, useGroups = None, plot = F
             if inds is not None:
                 
                 ratios = []
-                for samplei, sample in enumerate(samples):
-                    if useGroups is None or groups[samplei] in useGroups:
+                for samplei, sample in enumerate(dartMSAssay.samples):
+                    if useGroups is None or dartMSAssay.groups[samplei] in useGroups:
                         ratio = dat_[samplei, inds] / dat_[samplei, featurei]
                         if not np.isnan(ratio) and ratio > 0:
                             ratios.append(ratio)
@@ -1879,15 +2093,6 @@ def annotate_features(dat, features, samples, groups, useGroups = None, plot = F
                                          ratiosRSTD     = np.std(ratios) / np.mean(ratios) * 100. if ratios.shape[0] > 1 else 0,
                                          ratiosCount    = ratios.shape[0]
                 )
-    if False:
-        temp = {"mz": [], "type": [], "meanRatio": [], "sdRatio": []}
-        for featurei in range(features.shape[0]):
-            for annoi in annotations[featurei]:
-                temp["mz"].append(features_[featurei, 1])
-                temp["type"].append(annotations[featurei][annoi]["otherType"])
-                temp["meanRatio"].append(np.mean(annotations[featurei][annoi]["otherRatios"]))
-                temp["sdRatio"].append(np.std(annotations[featurei][annoi]["otherRatios"]))
-
     if plot: 
         
         temp = pd.DataFrame(temp)
@@ -1920,7 +2125,7 @@ def annotate_features(dat, features, samples, groups, useGroups = None, plot = F
         temp["intensityMeansCUT"] = pd.cut(np.log10(temp["intensityMeans"]), 10)
         print(temp[temp["searchIon"] == "[13C1] (1.0034)"].groupby(["intensityMeansCUT"])[["ratiosRSTD"]].describe().to_markdown())
 
-    return [annotations[i] for i in np.argsort(order)]
+    dartMSAssay.featureAnnotations = [annotations[i] for i in np.argsort(order)]
 
 
 
@@ -1938,19 +2143,19 @@ def annotate_features(dat, features, samples, groups, useGroups = None, plot = F
 ##
 #
 
-def print_results_overview(dat, groups):
-    print("There are %d features (columns) and %d samples (rows) in the dataset"%(dat.shape[1], dat.shape[0]))
-    print("   .. %d (%.1f%%) features have at least one missing value (np.nan)"%(np.sum(np.isnan(dat).any(axis = 0)), np.sum(np.isnan(dat).any(axis = 0)) / dat.shape[1] * 100))
+def print_results_overview(dartMSAssay):
+    print("There are %d features (columns) and %d samples (rows) in the dataset"%(dartMSAssay.dat.shape[1], dartMSAssay.dat.shape[0]))
+    print("   .. %d (%.1f%%) features have at least one missing value (np.nan)"%(np.sum(np.isnan(dartMSAssay.dat).any(axis = 0)), np.sum(np.isnan(dartMSAssay.dat).any(axis = 0)) / dartMSAssay.dat.shape[1] * 100))
 
-    maxGroupSize = max((sum((grp == group for grp in groups)) for group in set(groups))) 
-    maxGroupLabelSize = max((len(group) for group in groups))  
+    maxGroupSize = max((sum((grp == group for grp in dartMSAssay.groups)) for group in set(dartMSAssay.groups))) 
+    maxGroupLabelSize = max((len(group) for group in dartMSAssay.groups))  
     a = {}
-    for grp in set(groups):
-        groupInd = [i for i, group in enumerate(groups) if group == grp]
+    for grp in set(dartMSAssay.groups):
+        groupInd = [i for i, group in enumerate(dartMSAssay.groups) if group == grp]
         a[grp] = dict([(i, 0) for i in range(maxGroupSize + 1)])
         total = 0
-        for featurei in range(dat.shape[1]):
-            vals = dat[groupInd, featurei]
+        for featurei in range(dartMSAssay.dat.shape[1]):
+            vals = dartMSAssay.dat[groupInd, featurei]
             f = np.sum(~np.isnan(vals))
             a[grp][f] += 1
             if f > 0:
@@ -1958,17 +2163,17 @@ def print_results_overview(dat, groups):
         a[grp]["total"] = total
 
     print("Detected   ", end = "")
-    for group in sorted(list(set(groups))):
+    for group in sorted(list(set(dartMSAssay.groups))):
         print("%%%ds  "%(maxGroupLabelSize)%(group), end = "")
     print("")
 
     for det in range(0, maxGroupSize + 1):
         print("%%%dd   "%(maxGroupLabelSize)%(det), end = "")
-        for group in sorted(list(set(groups))):
+        for group in sorted(list(set(dartMSAssay.groups))):
             print("%%%ds  "%(maxGroupLabelSize)%(a[group][det] if a[group][det] > 0 else ""), end = "")
         print("")
     print("%%%ds   "%(maxGroupLabelSize)%("total"), end = "")
-    for group in sorted(list(set(groups))):
+    for group in sorted(list(set(dartMSAssay.groups))):
         print("%%%ds  "%(maxGroupLabelSize)%(a[group]["total"] if a[group]["total"] > 0 else ""), end = "")
     print("")
 
@@ -2084,17 +2289,17 @@ def plot_mz_deviation_overview(assay, brackRes, show = None, random_fraction = 1
     print(p)
 
 
-def plot_feature_mz_deviations(assay, features, featureInd, types = None):
+def plot_feature_mz_deviations(dartMSAssay, featureInd, types = None):
     if types is None:
         types = ["consensus", "non-consensus", "raw-onlyFeatures", "raw-allSignals"]
     temp = None
 
     for featureInd in [featureInd]:
-        for samplei, sample in enumerate(assay.manager.get_sample_names()):
-            msDataObj = assay.get_ms_data(sample)
-            sample_metadata = assay.manager.get_sample_metadata()
+        for samplei, sample in enumerate(dartMSAssay.assay.manager.get_sample_names()):
+            msDataObj = dartMSAssay.assay.get_ms_data(sample)
+            sample_metadata = dartMSAssay.assay.manager.get_sample_metadata()
             for k, spectrum in msDataObj.get_spectra_iterator():
-                usei = np.where(np.logical_and(spectrum.mz >= features[featureInd][0], spectrum.mz <= features[featureInd][2]))[0]
+                usei = np.where(np.logical_and(spectrum.mz >= dartMSAssay.features[featureInd][0], spectrum.mz <= dartMSAssay.features[featureInd][2]))[0]
                 if usei.size > 0:
                     for i in usei:
                         if "consensus" in types:
@@ -2137,7 +2342,7 @@ def plot_feature_mz_deviations(assay, features, featureInd, types = None):
             
             if "raw-allSignals" in types:
                 for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
-                    usei = np.where(np.logical_and(spectrum.original_mz >= spectrum.reverseMZ(features[featureInd][0]), spectrum.original_mz <= spectrum.reverseMZ(features[featureInd][2])))[0]
+                    usei = np.where(np.logical_and(spectrum.original_mz >= spectrum.reverseMZ(dartMSAssay.features[featureInd][0]), spectrum.original_mz <= spectrum.reverseMZ(dartMSAssay.features[featureInd][2])))[0]
                     if usei.size > 0:
                         for i in usei:
                             temp = _add_row_to_pandas_creation_dictionary(temp, 
@@ -2159,7 +2364,7 @@ def plot_feature_mz_deviations(assay, features, featureInd, types = None):
         + p9.geom_point()
         + p9.facet_wrap("type")
         + p9.theme_minimal()
-        + p9.ggtitle("Feature %.5f (%.5f - %.5f)\nmz deviation overall: %.1f (ppm, non-consensus) and %.1f (ppm, consensus)"%(features[featureInd][1], features[featureInd][0], features[featureInd][2], 
+        + p9.ggtitle("Feature %.5f (%.5f - %.5f)\nmz deviation overall: %.1f (ppm, non-consensus) and %.1f (ppm, consensus)"%(dartMSAssay.features[featureInd][1], dartMSAssay.features[featureInd][0], dartMSAssay.features[featureInd][2], 
             (temp[temp["type"] == "non-consensus"]["mz"].max() - temp[temp["type"] == "non-consensus"]["mz"].min()) / temp[temp["type"] == "non-consensus"]["mz"].mean() * 1E6,
             (temp[temp["type"] == "consensus"]["mz"].max() - temp[temp["type"] == "consensus"]["mz"].min()) / temp[temp["type"] == "consensus"]["mz"].mean() * 1E6))
         + p9.theme(axis_text_x = p9.element_text(angle = 45, hjust = 1))
@@ -2183,7 +2388,10 @@ def plot_feature_mz_deviations(assay, features, featureInd, types = None):
 ##
 #
 
-def plot_RSDs_per_group(dat, uGroups, groups, batches, include = None, plotType = "points", scales = "free_y"):
+def plot_RSDs_per_group(dartMSAssay, uGroups = None, include = None, plotType = "points", scales = "free_y"):
+
+    if uGroups is None:
+        uGroups = set(dartMSAssay.groups)
 
     if include is None:
         include = ["wo.nan", "nan=0"]
@@ -2192,12 +2400,12 @@ def plot_RSDs_per_group(dat, uGroups, groups, batches, include = None, plotType 
     for grp in uGroups:
 
         if type(grp) == list and len(grp) == 2 and type(grp[0]) == str and type(grp[1]) == str and grp[1] == "Batch":
-            for batch in list(set(batches)):
-                groupInd = list(set([i for i, group in enumerate(groups) if group == grp[0]]).intersection(set([i for i, b in enumerate(batches) if b == batch])))
+            for batch in list(set(dartMSAssay.batches)):
+                groupInd = list(set([i for i, group in enumerate(dartMSAssay.groups) if group == grp[0]]).intersection(set([i for i, b in enumerate(dartMSAssay.batches) if b == batch])))
                 
                 if len(groupInd) > 0:
-                    for featurei in range(dat.shape[1]):
-                        vals = dat[groupInd, featurei]
+                    for featurei in range(dartMSAssay.dat.shape[1]):
+                        vals = dartMSAssay.dat[groupInd, featurei]
 
                         if np.all(np.isnan(vals)):
                             next
@@ -2227,10 +2435,10 @@ def plot_RSDs_per_group(dat, uGroups, groups, batches, include = None, plotType 
             grp = grp[0]
         
         if type(grp) == str:
-            groupInd = [i for i, group in enumerate(groups) if group == grp]
+            groupInd = [i for i, group in enumerate(dartMSAssay.groups) if group == grp]
             
-            for featurei in range(dat.shape[1]):
-                vals = dat[groupInd, featurei]
+            for featurei in range(dartMSAssay.dat.shape[1]):
+                vals = dartMSAssay.dat[groupInd, featurei]
 
                 if np.all(np.isnan(vals)):
                     next
@@ -2269,6 +2477,7 @@ def plot_RSDs_per_group(dat, uGroups, groups, batches, include = None, plotType 
             #+ p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
             + p9.ggtitle("RSD plots")
         )
+        print(p)
 
     elif plotType == "points":
         p = (p9.ggplot(data = temp, mapping = p9.aes(
@@ -2284,8 +2493,9 @@ def plot_RSDs_per_group(dat, uGroups, groups, batches, include = None, plotType 
             #+ p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
             + p9.ggtitle("RSD plots")
         )
+        print(p)
     
     else:
         raise RuntimeError("Unknown plot type. Must be 'histogram' or 'points'")
     
-    return p, temp
+    print(temp.groupby(["group", "type"])["rsd"].describe().to_markdown())
