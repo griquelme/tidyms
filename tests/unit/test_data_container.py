@@ -1,5 +1,6 @@
 from tidyms import container
-from tidyms._names import *
+from tidyms.container import DataContainer
+from tidyms import _constants as c
 import numpy as np
 import pandas as pd
 import pytest
@@ -15,7 +16,7 @@ def test_class_getter(data_container_with_order):
 def test_class_setter(data_container_with_order):
     data = data_container_with_order
     class_series = pd.Series(data=data.classes, index=data.classes.index)
-    #set classes to an arbitrary value
+    # set classes to an arbitrary value
     data.classes = 4
     data.classes = class_series
     assert data.classes.equals(class_series)
@@ -33,11 +34,11 @@ def test_batch_getter_no_batch_information(data_container_without_order):
         data.batch
 
 
-def test_batch_setter(data_container_with_order):
+def test_batch_setter(data_container_with_order: DataContainer):
     data = data_container_with_order
     b = np.arange(data.data_matrix.shape[0])
     batch_series = pd.Series(data=b, index=data.batch.index)
-    data.batch = b
+    data.batch = batch_series
     assert data.batch.equals(batch_series)
 
 
@@ -57,9 +58,7 @@ def test_order_setter(data_container_with_order):
     data = data_container_with_order
     # new order value
     order_series = pd.Series(
-        data=data.order + 1,
-        index=data.order.index,
-        dtype=data.order.dtype
+        data=data.order + 1, index=data.order.index, dtype=data.order.dtype
     )
     data.order = order_series
     assert (data.order == order_series).all()
@@ -67,7 +66,7 @@ def test_order_setter(data_container_with_order):
 
 def test_id_getter(data_container_with_order):
     data = data_container_with_order
-    assert  np.equal(data.data_matrix.index.values, data.id.values).all()
+    assert np.equal(data.data_matrix.index.values, data.id.values).all()
 
 
 def test_is_valid_class_name_with_valid_names(data_container_with_order):
@@ -88,27 +87,31 @@ def test_is_valid_class_name_several_invalid_names(data_container_with_order):
 
 def test_mapping_setter(data_container_with_order):
     data = data_container_with_order
-    mapping = {"sample": ["healthy", "disease"],
-               "blank": ["blank"]}
-    expected_mapping = {"sample": ["healthy", "disease"],
-                        "blank": ["blank"], "qc": None, "zero": None,
-                        "suitability": None, "dqc": None}
+    mapping = {c.STUDY_TYPE: ["healthy", "disease"], c.BLANK_TYPE: ["blank"]}
+    expected_mapping = {
+        c.STUDY_TYPE: ["healthy", "disease"],
+        c.BLANK_TYPE: ["blank"],
+        c.QC_TYPE: None,
+        c.DQC_TYPE: None,
+    }
     data.mapping = mapping
     assert data.mapping == expected_mapping
 
 
 def test_mapping_setter_bad_sample_type(data_container_with_order):
     data = data_container_with_order
-    mapping = {"sample": ["healthy", "disease"],
-               "blank": ["SV"], "bad_sample_type": ["healthy"]}
+    mapping = {
+        "sample": ["healthy", "disease"],
+        "blank": ["SV"],
+        "bad_sample_type": ["healthy"],
+    }
     with pytest.raises(ValueError):
         data.mapping = mapping
 
 
 def test_mapping_setter_bad_sample_class(data_container_with_order):
     data = data_container_with_order
-    mapping = {"sample": ["healthy", "disease"],
-               "blank": ["SV", "bad_sample_class"]}
+    mapping = {"sample": ["healthy", "disease"], "blank": ["SV", "bad_sample_class"]}
     with pytest.raises(ValueError):
         data.mapping = mapping
 
@@ -147,7 +150,7 @@ def test_remove_correct_features(data_container_with_order):
     rm_features = data.data_matrix.columns[[1, 2]]
     data.remove(rm_features, "features")
     assert data.data_matrix.columns.equals(features.difference(rm_features))
-    
+
 
 def test_equal_feature_index(data_container_with_order):
     data = data_container_with_order
@@ -200,8 +203,8 @@ def test_diagnose_empty(data_container_with_order):
 
 def test_diagnose_missing(data_container_with_order):
     data = data_container_with_order
-    assert  not data.diagnose()["missing"]
-    # set one column to nans
+    assert not data.diagnose()["missing"]
+    # set one column to nan
     data._data_matrix[data.data_matrix.columns[0]] = np.nan
     assert data.diagnose()["missing"]
     # reset data values
@@ -210,26 +213,26 @@ def test_diagnose_missing(data_container_with_order):
 
 def test_diagnose_qc(data_container_with_order):
     data = data_container_with_order
-    assert data.diagnose()[_qc_sample_type]
+    assert data.diagnose()[c.QC_TYPE]
     # remove mapping info
     data.mapping = None
-    assert not data.diagnose()[_qc_sample_type]
+    assert not data.diagnose()[c.QC_TYPE]
 
 
 def test_diagnose_blank(data_container_with_order):
     data = data_container_with_order
-    assert data.diagnose()[_blank_sample_type]
+    assert data.diagnose()[c.BLANK_TYPE]
     # remove mapping info
     data.mapping = None
-    assert  not data.diagnose()[_blank_sample_type]
+    assert not data.diagnose()[c.BLANK_TYPE]
 
 
 def test_diagnose_sample(data_container_with_order):
     data = data_container_with_order
-    assert data.diagnose()[_study_sample_type]
+    assert data.diagnose()[c.STUDY_TYPE]
     # remove mapping info
     data.mapping = None
-    assert not data.diagnose()[_study_sample_type]
+    assert not data.diagnose()[c.STUDY_TYPE]
 
 
 def test_diagnose_run_order(data_container_with_order):
@@ -275,16 +278,16 @@ def test_reset(data_container_with_order):
     assert data.sample_metadata.equals(original_sm)
 
 
-def test_select_featurest(data_container_with_order):
+def test_select_features(data_container_with_order):
     data = data_container_with_order
     # manually selected features
     mz_tol = 0.1
     mz_mask = np.abs(data.feature_metadata["mz"] - 200) < mz_tol
     rt_tol = 2
-    rt_mask = np.abs(data.feature_metadata["rt"] - 200)  < rt_tol
+    rt_mask = np.abs(data.feature_metadata["rt"] - 200) < rt_tol
     ft_mask = mz_mask & rt_mask
     ft_name = ft_mask[ft_mask].index
-    assert data.select_features(200, 200, 0.1 ,2).equals(ft_name)
+    assert data.select_features(200, 200, 0.1, 2).equals(ft_name)
 
 
 def test_set_default_order(data_container_without_order):
@@ -344,8 +347,7 @@ def test_set_plot_mode(data_container_with_order):
 
 def test_add_run_order_from_csv(tmpdir, data_container_without_order):
     data = data_container_without_order
-    order_data = pd.DataFrame(data=np.arange(data.data_matrix.shape[0]),
-                              columns=["order"])
+    order_data = pd.DataFrame(data=np.arange(data.data_matrix.shape[0]), columns=["order"])
     order_data["sample"] = data.data_matrix.index
     order_data["batch"] = 1
     save_path = os.path.join(tmpdir, "order.csv")
@@ -355,6 +357,7 @@ def test_add_run_order_from_csv(tmpdir, data_container_without_order):
 
 
 # test metrics
+
 
 def test_metrics_cv_no_groupby(data_container_with_order):
     data = data_container_with_order
@@ -438,8 +441,7 @@ def test_metrics_detection_rate_group_multiple(data_container_with_order):
 
 def test_metrics_pca(data_container_with_order):
     data = data_container_with_order
-    scores, loadings, pc_variance, total_variance = \
-        data.metrics.pca(n_components=None)
+    scores, loadings, pc_variance, total_variance = data.metrics.pca(n_components=None)
     # shape check for scores and loadings
     assert scores.shape[0] == data.data_matrix.shape[0]
     assert loadings.shape[0] == data.data_matrix.shape[1]
@@ -450,8 +452,7 @@ def test_metrics_pca(data_container_with_order):
 def test_metrics_pca_n_components(data_container_with_order):
     n_comp = 3
     data = data_container_with_order
-    scores, loadings, pc_variance, total_variance = \
-        data.metrics.pca(n_components=n_comp)
+    scores, loadings, pc_variance, total_variance = data.metrics.pca(n_components=n_comp)
     # shape check for scores and loadings
     assert scores.shape[1] == n_comp
     assert scores.shape[0] == data.data_matrix.shape[0]
@@ -461,8 +462,9 @@ def test_metrics_pca_n_components(data_container_with_order):
 def test_metrics_pca_normalization(data_container_with_order):
     n_comp = 2
     data = data_container_with_order
-    scores, loadings, pc_variance, total_variance = \
-        data.metrics.pca(n_components=n_comp, normalization="sum")
+    scores, loadings, pc_variance, total_variance = data.metrics.pca(
+        n_components=n_comp, normalization="sum"
+    )
     # shape check for scores and loadings
     assert scores.shape[1] == n_comp
     assert scores.shape[0] == data.data_matrix.shape[0]
@@ -472,8 +474,9 @@ def test_metrics_pca_normalization(data_container_with_order):
 def test_metrics_pca_scaling(data_container_with_order):
     n_comp = 2
     data = data_container_with_order
-    scores, loadings, pc_variance, total_variance = \
-        data.metrics.pca(n_components=n_comp, scaling="autoscaling")
+    scores, loadings, pc_variance, total_variance = data.metrics.pca(
+        n_components=n_comp, scaling="autoscaling"
+    )
     # shape check for scores and loadings
     assert scores.shape[1] == n_comp
     assert scores.shape[0] == data.data_matrix.shape[0]
@@ -483,11 +486,13 @@ def test_metrics_pca_scaling(data_container_with_order):
 def test_metrics_pca_ignore_classes(data_container_with_order):
     n_comp = 2
     data = data_container_with_order
-    scores, loadings, pc_variance, total_variance = \
-        data.metrics.pca(n_components=n_comp, ignore_classes=["blank"])
+    scores, loadings, pc_variance, total_variance = data.metrics.pca(
+        n_components=n_comp, ignore_classes=["blank"]
+    )
     # shape check for scores and loadings
     assert scores.shape[1] == n_comp
     assert loadings.shape[0] == data.data_matrix.shape[1]
+
 
 def test_metrics_correlation_spearman(data_container_with_order):
     data = data_container_with_order
@@ -503,8 +508,7 @@ def test_metrics_correlation_ols(data_container_with_order):
 
 def test_metrics_correlation_class(data_container_with_order):
     data = data_container_with_order
-    r = data.metrics.correlation("order", mode="ols",
-                                 classes=["healthy", "disease"])
+    r = data.metrics.correlation("order", mode="ols", classes=["healthy", "disease"])
     assert r.shape[1] == data.data_matrix.shape[1]
 
 

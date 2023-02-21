@@ -31,7 +31,6 @@ from . import utils
 from . import validation
 from . import fileio
 from . import _batch_corrector
-from ._names import *
 from . import _constants as c
 import numpy as np
 import pandas as pd
@@ -77,7 +76,7 @@ class DataContainer(object):
     mapping : dictionary of sample types to a list of sample classes.
         Maps sample types to sample classes. valid samples types are `qc`,
         `blank`, `sample` or `suitability`. values are list of sample classes.
-        Mapping is used by Processor objects to define a default behaviour. For
+        Mapping is used by Processor objects to define a default behavior. For
         example, when using a BlankCorrector, the blank contribution to each
         feature is estimated using the sample classes that are values of the
         `blank` sample type.
@@ -142,32 +141,26 @@ class DataContainer(object):
             The package used to generate plots with the plot methods
 
         """
-        validation.validate_data_container(
-            data_matrix, feature_metadata, sample_metadata
-        )
+        validation.validate_data_container(data_matrix, feature_metadata, sample_metadata)
 
         # sort columns and indices of each DataFrame
         data_matrix = data_matrix.sort_index()
         data_matrix = data_matrix.reindex(sorted(data_matrix.columns), axis=1)
         sample_metadata = sample_metadata.sort_index()
-        sample_metadata = sample_metadata.reindex(
-            sorted(sample_metadata.columns), axis=1
-        )
+        sample_metadata = sample_metadata.reindex(sorted(sample_metadata.columns), axis=1)
         feature_metadata = feature_metadata.sort_index()
-        feature_metadata = feature_metadata.reindex(
-            sorted(feature_metadata.columns), axis=1
-        )
+        feature_metadata = feature_metadata.reindex(sorted(feature_metadata.columns), axis=1)
 
         # check and convert order and batch information
         try:
-            order = sample_metadata.pop(_sample_order)
+            order = sample_metadata.pop(c.ORDER)
             try:
-                batch = sample_metadata.pop(_sample_batch)
+                batch = sample_metadata.pop(c.BATCH)
             except KeyError:
                 batch = pd.Series(data=np.ones_like(order.values), index=order.index)
             order = _convert_to_interbatch_order(order, batch)
-            sample_metadata[_sample_order] = order
-            sample_metadata[_sample_batch] = batch
+            sample_metadata[c.ORDER] = order
+            sample_metadata[c.BATCH] = batch
         except KeyError:
             pass
 
@@ -231,33 +224,33 @@ class DataContainer(object):
     @property
     def id(self) -> pd.Series:
         """pd.Series[str] : name id of each sample."""
-        return self._sample_metadata.loc[self._sample_mask, _sample_id]
+        return self._sample_metadata.loc[self._sample_mask, c.ID]
 
     @id.setter
     def id(self, value: pd.Series):
-        self._sample_metadata.loc[self._sample_mask, _sample_id] = value
+        self._sample_metadata.loc[self._sample_mask, c.ID] = value
 
     @property
     def classes(self) -> pd.Series:
         """pd.Series[str] : class of each sample."""
-        return self._sample_metadata.loc[self._sample_mask, _sample_class]
+        return self._sample_metadata.loc[self._sample_mask, c.CLASS]
 
     @classes.setter
     def classes(self, value: pd.Series):
-        self._sample_metadata.loc[self._sample_mask, _sample_class] = value
+        self._sample_metadata.loc[self._sample_mask, c.CLASS] = value
 
     @property
     def batch(self) -> pd.Series:
         """pd.Series[int]. Analytical batch number"""
         try:
-            return self._sample_metadata.loc[self._sample_mask, _sample_batch]
+            return self._sample_metadata.loc[self._sample_mask, c.BATCH]
         except KeyError:
             raise BatchInformationError("No batch information available.")
 
     @batch.setter
     def batch(self, value: pd.Series):
 
-        self._sample_metadata.loc[self._sample_mask, _sample_batch] = value.astype(int)
+        self._sample_metadata.loc[self._sample_mask, c.BATCH] = value.astype(int)
 
     @property
     def order(self) -> pd.Series:
@@ -266,16 +259,14 @@ class DataContainer(object):
         an unique integer for each sample.
         """
         try:
-            return self._sample_metadata.loc[self._sample_mask, _sample_order]
+            return self._sample_metadata.loc[self._sample_mask, c.ORDER]
         except KeyError:
             raise RunOrderError("No run order information available")
 
     @order.setter
     def order(self, value: pd.Series):
         if utils.is_unique(value):
-            self._sample_metadata.loc[self._sample_mask, _sample_order] = value.astype(
-                int
-            )
+            self._sample_metadata.loc[self._sample_mask, c.ORDER] = value.astype(int)
         else:
             msg = "order values must be unique"
             raise ValueError(msg)
@@ -283,14 +274,14 @@ class DataContainer(object):
     @property
     def dilution(self) -> pd.Series:
         try:
-            return self._sample_metadata.loc[self._sample_mask, _sample_dilution]
+            return self._sample_metadata.loc[self._sample_mask, c.DILUTION]
         except KeyError:
             msg = "No dilution information available."
             raise DilutionInformationError(msg)
 
     @dilution.setter
     def dilution(self, value):
-        self._sample_metadata.loc[self._sample_mask, _sample_dilution] = value
+        self._sample_metadata.loc[self._sample_mask, c.DILUTION] = value
 
     def is_valid_class_name(self, test_class: Union[str, List[str]]) -> bool:
         """
@@ -374,19 +365,19 @@ class DataContainer(object):
         diagnostic = dict()
         diagnostic["empty"] = self.data_matrix.empty
         diagnostic["missing"] = self.data_matrix.isna().any().any()
-        diagnostic[_qc_sample_type] = bool(self.mapping[_qc_sample_type])
-        diagnostic[_blank_sample_type] = bool(self.mapping[_blank_sample_type])
-        diagnostic[_study_sample_type] = bool(self.mapping[_study_sample_type])
-        diagnostic[_dilution_qc_type] = bool(self.mapping[_dilution_qc_type])
+        diagnostic[c.QC_TYPE] = bool(self.mapping[c.QC_TYPE])
+        diagnostic[c.BLANK_TYPE] = bool(self.mapping[c.BLANK_TYPE])
+        diagnostic[c.STUDY_TYPE] = bool(self.mapping[c.STUDY_TYPE])
+        diagnostic[c.DQC_TYPE] = bool(self.mapping[c.DQC_TYPE])
         try:
-            diagnostic[_sample_order] = self.order.any()
+            diagnostic[c.ORDER] = self.order.any()
         except RunOrderError:
-            diagnostic[_sample_order] = False
+            diagnostic[c.ORDER] = False
 
         try:
-            diagnostic[_sample_batch] = self.batch.any()
+            diagnostic[c.BATCH] = self.batch.any()
         except BatchInformationError:
-            diagnostic[_sample_batch] = False
+            diagnostic[c.BATCH] = False
         return diagnostic
 
     def reset(self, reset_mapping: bool = True):
@@ -525,8 +516,8 @@ class DataContainer(object):
 
         """
         df = pd.read_csv(path, index_col="sample")
-        order = df[_sample_order].astype(int)
-        batch = df[_sample_batch].astype(int)
+        order = df[c.ORDER].astype(int)
+        batch = df[c.BATCH].astype(int)
 
         if interbatch_order:
             order = _convert_to_interbatch_order(order, batch)
@@ -634,9 +625,7 @@ class MetricMethods:
                 by = self.__data.sample_metadata[groupby]
             else:
                 by = [self.__data.sample_metadata[x] for x in groupby]
-            result = self.__data.data_matrix.groupby(by).apply(
-                cv_func, fill_value=fill_value
-            )
+            result = self.__data.data_matrix.groupby(by).apply(cv_func, fill_value=fill_value)
         else:
             result = cv_func(self.__data.data_matrix, fill_value=fill_value)
         return result
@@ -661,15 +650,15 @@ class MetricMethods:
             D-Ratio for each feature
 
         """
-        if self.__data.mapping[_study_sample_type] is None:
+        if self.__data.mapping[c.STUDY_TYPE] is None:
             msg = "Study sample classes not specified in the sample mapping"
             raise ValueError(msg)
-        sample_classes = self.__data.mapping[_study_sample_type]
+        sample_classes = self.__data.mapping[c.STUDY_TYPE]
 
-        if self.__data.mapping[_qc_sample_type] is None:
+        if self.__data.mapping[c.QC_TYPE] is None:
             msg = "QC class not specified in the sample mapping"
             raise ValueError(msg)
-        qc_classes = self.__data.mapping[_qc_sample_type]
+        qc_classes = self.__data.mapping[c.QC_TYPE]
 
         is_sample_class = self.__data.classes.isin(sample_classes)
         is_qc_class = self.__data.classes.isin(qc_classes)
@@ -679,9 +668,7 @@ class MetricMethods:
         dratio = utils.sd_ratio(qc_data, sample_data, robust=robust, fill_value=np.inf)
         return dratio
 
-    def detection_rate(
-        self, groupby: Union[str, List[str], None] = "class", threshold=0
-    ):
+    def detection_rate(self, groupby: Union[str, List[str], None] = "class", threshold=0):
         """
         Computes the fraction of samples where a feature was detected.
 
@@ -704,9 +691,7 @@ class MetricMethods:
                 utils.detection_rate, threshold=threshold
             )
         else:
-            result = self.__data.data_matrix.apply(
-                utils.detection_rate, threshold=threshold
-            )
+            result = self.__data.data_matrix.apply(utils.detection_rate, threshold=threshold)
         return result
 
     def pca(
@@ -767,9 +752,7 @@ class MetricMethods:
         total_variance = data.var().sum()
         return scores, loadings, variance, total_variance
 
-    def correlation(
-        self, field: str, mode: str = "ols", classes: Optional[List[str]] = None
-    ):
+    def correlation(self, field: str, mode: str = "ols", classes: Optional[List[str]] = None):
         """
         Correlates features with sample metadata properties.
 
@@ -825,7 +808,7 @@ class BokehPlotMethods:  # pragma: no cover
         self,
         x_pc: int = 1,
         y_pc: int = 2,
-        hue: str = _sample_class,
+        hue: str = c.CLASS,
         ignore_classes: Optional[List[str]] = None,
         show_order: bool = False,
         scaling: Optional[str] = None,
@@ -882,10 +865,10 @@ class BokehPlotMethods:  # pragma: no cover
             scatter_params = default_scatter_params
 
         tooltips = [
-            (_sample_class, "@{}".format(_sample_class)),
-            (_sample_order, "@{}".format(_sample_order)),
-            (_sample_batch, "@{}".format(_sample_batch)),
-            (_sample_id, "@{}".format(_sample_id)),
+            (c.CLASS, "@{}".format(c.CLASS)),
+            (c.ORDER, "@{}".format(c.ORDER)),
+            (c.BATCH, "@{}".format(c.BATCH)),
+            (c.ID, "@{}".format(c.ID)),
         ]
         fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
 
@@ -900,12 +883,12 @@ class BokehPlotMethods:  # pragma: no cover
         )
         score = score.join(self._data_container.sample_metadata)
 
-        if hue == _sample_type:
+        if hue == c.TYPE:
             rev_map = _reverse_mapping(self._data_container.mapping)
-            score[_sample_type] = score[_sample_class].apply(lambda x: rev_map.get(x))
-            score = score[~pd.isna(score[_sample_type])]
-        elif hue == _sample_batch:
-            score[_sample_batch] = score[_sample_batch].astype(str)
+            score[c.TYPE] = score[c.CLASS].apply(lambda x: rev_map.get(x))
+            score = score[~pd.isna(score[c.TYPE])]
+        elif hue == c.BATCH:
+            score[c.BATCH] = score[c.BATCH].astype(str)
 
         # setup the colors
         unique_values = score[hue].unique().astype(str)
@@ -938,7 +921,7 @@ class BokehPlotMethods:  # pragma: no cover
             labels = LabelSet(
                 x=x_name,
                 y=y_name,
-                text=_sample_order,
+                text=c.ORDER,
                 level="glyph",
                 x_offset=3,
                 y_offset=3,
@@ -1033,7 +1016,7 @@ class BokehPlotMethods:  # pragma: no cover
     def feature(
         self,
         ft: str,
-        hue: str = _sample_class,
+        hue: str = c.CLASS,
         ignore_classes: Optional[List[str]] = None,
         draw: bool = True,
         fig_params: Optional[dict] = None,
@@ -1078,15 +1061,15 @@ class BokehPlotMethods:  # pragma: no cover
             self._data_container.data_matrix[ft]
         )
 
-        ignore_samples = source[_sample_class].isin(ignore_classes)
+        ignore_samples = source[c.CLASS].isin(ignore_classes)
         source = source[~ignore_samples]
 
-        if hue == _sample_type:
+        if hue == c.TYPE:
             rev_map = _reverse_mapping(self._data_container.mapping)
-            source[_sample_type] = source[_sample_class].apply(lambda x: rev_map.get(x))
-            source = source[~source[_sample_type].isna()]
-        elif hue == _sample_batch:
-            source[_sample_batch] = source[_sample_batch].astype(str)
+            source[c.TYPE] = source[c.CLASS].apply(lambda x: rev_map.get(x))
+            source = source[~source[c.TYPE].isna()]
+        elif hue == c.BATCH:
+            source[c.BATCH] = source[c.BATCH].astype(str)
 
         # setup the colors
         unique_values = source[hue].unique().astype(str)
@@ -1097,16 +1080,16 @@ class BokehPlotMethods:  # pragma: no cover
         source = ColumnDataSource(source)
 
         tooltips = [
-            (_sample_class, "@{}".format(_sample_class)),
-            (_sample_order, "@{}".format(_sample_order)),
-            (_sample_batch, "@{}".format(_sample_batch)),
-            (_sample_id, "@{}".format(_sample_id)),
+            (c.CLASS, "@{}".format(c.CLASS)),
+            (c.ORDER, "@{}".format(c.ORDER)),
+            (c.BATCH, "@{}".format(c.BATCH)),
+            (c.ID, "@{}".format(c.ID)),
         ]
         fig = bokeh.plotting.figure(tooltips=tooltips, **fig_params)
         cmap_factor = factor_cmap(hue, palette, unique_values)
         fig.scatter(
             source=source,
-            x=_sample_order,
+            x=c.ORDER,
             y=ft,
             color=cmap_factor,
             legend_group=hue,
@@ -1137,7 +1120,7 @@ class SeabornPlotMethods(object):  # pragma: no cover
         self,
         x_pc: int = 1,
         y_pc: int = 2,
-        hue: str = _sample_class,
+        hue: str = c.CLASS,
         ignore_classes: Optional[List[str]] = None,
         show_order: bool = False,
         scaling: Optional[str] = None,
@@ -1192,14 +1175,14 @@ class SeabornPlotMethods(object):  # pragma: no cover
         else:
             relplot_params.update(tmp_params)
 
-        if hue == _sample_type:
+        if hue == c.TYPE:
             rev_map = _reverse_mapping(self.data.mapping)
-            score[_sample_type] = score[_sample_class].apply(lambda s: rev_map.get(s))
-            score = score[~pd.isna(score[_sample_type])]
-        elif hue == _sample_batch:
-            score[_sample_batch] = score[_sample_batch].astype(str)
-        elif hue == _sample_class:
-            score[_sample_class] = self.data.classes
+            score[c.TYPE] = score[c.CLASS].apply(lambda s: rev_map.get(s))
+            score = score[~pd.isna(score[c.TYPE])]
+        elif hue == c.BATCH:
+            score[c.BATCH] = score[c.BATCH].astype(str)
+        elif hue == c.CLASS:
+            score[c.CLASS] = self.data.classes
 
         g = sns.relplot(data=score, **relplot_params)
 
@@ -1282,12 +1265,12 @@ class SeabornPlotMethods(object):  # pragma: no cover
     def feature(
         self,
         ft: str,
-        hue: str = _sample_class,
+        hue: str = c.CLASS,
         ignore_classes: Optional[List[str]] = None,
         relplot_params: Optional[dict] = None,
     ):
 
-        tmp_params = {"x": _sample_order, "y": ft, "hue": hue, "kind": "scatter"}
+        tmp_params = {"x": c.ORDER, "y": ft, "hue": hue, "kind": "scatter"}
         if relplot_params is None:
             relplot_params = tmp_params
         else:
@@ -1297,17 +1280,17 @@ class SeabornPlotMethods(object):  # pragma: no cover
             ignore_classes = list()
 
         df = self.data.sample_metadata.join(self.data.data_matrix[ft])
-        ignore_samples = df[_sample_class].isin(ignore_classes)
+        ignore_samples = df[c.CLASS].isin(ignore_classes)
         df = df[~ignore_samples]
 
-        if hue == _sample_type:
+        if hue == c.TYPE:
             rev_map = _reverse_mapping(self.data.mapping)
-            df[_sample_type] = df[_sample_class].apply(lambda x: rev_map.get(x))
-            df = df[~df[_sample_type].isna()]
-        elif hue == _sample_batch:
-            df[_sample_batch] = df[_sample_batch].astype(str)
-        elif hue == _sample_class:
-            df[_sample_class] = df[_sample_class].astype(str)
+            df[c.TYPE] = df[c.CLASS].apply(lambda x: rev_map.get(x))
+            df = df[~df[c.TYPE].isna()]
+        elif hue == c.BATCH:
+            df[c.BATCH] = df[c.BATCH].astype(str)
+        elif hue == c.CLASS:
+            df[c.CLASS] = df[c.CLASS].astype(str)
 
         g = sns.relplot(data=df, **relplot_params)
         return g
@@ -1423,33 +1406,33 @@ class PreprocessMethods:
         """
         mapping = self.__data.mapping
 
-        if mapping[_qc_sample_type] is None:
+        if mapping[c.QC_TYPE] is None:
             msg = "QC samples not defined in sample mapping"
             raise ValueError(msg)
 
-        if mapping[_study_sample_type] is None:
+        if mapping[c.STUDY_TYPE] is None:
             msg = "Study samples not defined in sample mapping"
             raise ValueError(msg)
 
         sample_metadata = self.__data.sample_metadata
 
-        if _sample_order not in sample_metadata:
+        if c.ORDER not in sample_metadata:
             msg = "Run order information not available"
             raise RunOrderError(msg)
 
-        if _sample_batch not in sample_metadata:
+        if c.BATCH not in sample_metadata:
             msg = "Batch information not available"
             raise BatchInformationError(msg)
 
-        sample_class = mapping[_study_sample_type]
-        qc_class = mapping[_qc_sample_type]
+        sample_class = mapping[c.STUDY_TYPE]
+        qc_class = mapping[c.QC_TYPE]
 
         rm_samples = _batch_corrector.find_invalid_samples(
             sample_metadata, sample_class, qc_class
         )
         self.__data.remove(rm_samples, "samples")
 
-        # TODO: this should be removed after fixing the Datacontainer
+        # TODO: this should be removed after fixing the DataContainer
         #   00implementation
         sample_metadata = self.__data.sample_metadata
         data_matrix = self.__data.data_matrix
@@ -1615,13 +1598,13 @@ class DilutionInformationError(Exception):
 
 def _validate_mapping(mapping, valid_samples):
     for sample_type, classes in mapping.items():
-        if sample_type not in SAMPLE_TYPES:
+        if sample_type not in c.SAMPLE_TYPES:
             msg = "{} is not a valid sample type".format(sample_type)
             raise ValueError(msg)
         else:
-            for c in classes:
-                if c not in valid_samples:
-                    msg = "{} is not a valid sample class".format(c)
+            for cl in classes:
+                if cl not in valid_samples:
+                    msg = "{} is not a valid sample class".format(cl)
                     raise ValueError(msg)
 
 
@@ -1666,7 +1649,7 @@ def _convert_to_interbatch_order(order: pd.Series, batch: pd.Series) -> pd.Serie
 
 
 def _make_empty_mapping():
-    empty_mapping = {x: None for x in SAMPLE_TYPES}
+    empty_mapping = {x: None for x in c.SAMPLE_TYPES}
     return empty_mapping
 
 
@@ -1680,7 +1663,7 @@ def _reverse_mapping(mapping):
 
 
 def _create_annotation_report(
-        data_matrix: pd.DataFrame, feature_metadata: pd.DataFrame
+    data_matrix: pd.DataFrame, feature_metadata: pd.DataFrame
 ) -> Dict[str, str]:
     annotation_report = dict()
 
@@ -1704,12 +1687,6 @@ def _create_annotation_report(
             gmz = list(gmz.round(4))
             gp = list(gp.round(4))
             g_score = list(g_score.round(2))
-            d = {
-                c.CHARGE: int(charge),
-                c.MZ: gmz,
-                "abundance": gp,
-                "score": g_score
-            }
+            d = {c.CHARGE: int(charge), c.MZ: gmz, "abundance": gp, "score": g_score}
             annotation_report[main_ft] = json.dumps(d)
     return annotation_report
-

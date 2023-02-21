@@ -1,6 +1,6 @@
 from typing import Final, List
 
-# TODO: merge with _names.py
+
 # separation modes
 HPLC: Final[str] = "hplc"
 UPLC: Final[str] = "uplc"
@@ -47,11 +47,22 @@ ENVELOPE_INDEX: Final[str] = "envelope_index"
 CHARGE: Final[str] = "charge"
 
 # sample metadata
-SAMPLE: Final[str] = "sample_"
-CLASS: Final[str] = "class_"
-ORDER: Final[str] = "order_"
-BATCH: Final[str] = "batch_"
-LABEL: Final[str] = "cluster_"
+SAMPLE: Final[str] = "sample"
+CLASS: Final[str] = "class"
+ORDER: Final[str] = "order"
+BATCH: Final[str] = "batch"
+LABEL: Final[str] = "cluster"
+ID: Final[str] = "id"
+DILUTION: Final[str] = "dilution"
+TYPE: Final[str] = "type"
+
+# sample types
+QC_TYPE: Final[str] = "qc"
+DQC_TYPE: Final[str] = "dqc"
+STUDY_TYPE: Final[str] = "sample"
+BLANK_TYPE: Final[str] = "blank"
+SAMPLE_TYPES: Final[list[str]] = [QC_TYPE, STUDY_TYPE, BLANK_TYPE, DQC_TYPE]
+
 
 # assay file and dir names
 ROI_DIR: Final[str] = "roi"
@@ -80,5 +91,5 @@ PREPROCESSING_STEPS: Final[List[str]] = [
     BUILD_FEATURE_TABLE,
     MATCH_FEATURES,
     MAKE_DATA_MATRIX,
-    FILL_MISSING
+    FILL_MISSING,
 ]
