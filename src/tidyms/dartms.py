@@ -844,7 +844,7 @@ class DartMSAssay:
         spotsCur = spots[spots["msData_ID"] == msData_ID]
         separationInds = []
         if spotsCur.shape[0] == 0:
-            logging.info("      .. no spots defined for file. Spots will be detected automatically, but not used for now. Please modify the spots file '%s' to include or modify them"%(spotsFile))
+            logging.info("       .. no spots defined for file. Spots will be detected automatically, but not used for now. Please modify the spots file '%s' to include or modify them"%(spotsFile))
             ticInts = [sum(msData.get_spectrum(i).spint) for i in range(msData.get_n_spectra())]
             startInd = None
             endInd = None
@@ -910,7 +910,7 @@ class DartMSAssay:
         for subseti, _ in enumerate(sepInds):
             subset_name = fileNameChangeFunction("VIRTUAL(%s::%s)"%(os.path.splitext(os.path.basename(filename))[0], sepInds[subseti][2]))
             if verbose: 
-                logging.info("      .. adding subset %4d with name '%35s' (group '%s', class '%s'), width %6.1f sec, RTs %6.1f - %6.1f"%(subseti, subset_name, sepInds[subseti][3], sepInds[subseti][4], msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time))
+                logging.info("       .. adding subset %4d with name '%35s' (group '%s', class '%s'), width %6.1f sec, RTs %6.1f - %6.1f"%(subseti, subset_name, sepInds[subseti][3], sepInds[subseti][4], msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time))
             subset = fileio.MSData_Proxy(self._subset_MSData_chronogram(msData, sepInds[subseti][0], sepInds[subseti][1]))
             self.assay.add_virtual_sample(
                 MSData_object = subset,
@@ -961,7 +961,7 @@ class DartMSAssay:
             cache_MSData_objects = True)
         dartMSAssay = DartMSAssay(assay_name)
         dartMSAssay.assay = assay
-        logging.info("Creating empty assay")
+        logging.info(" Creating empty assay")
         dartMSAssay.add_data_processing_step("Created empty DartMSAssay", "created empty DartMSAssay with create_assay_from_chronogramFiles", {
             "filenames": filenames, "spot_file": spot_file, "ms_mode": ms_mode, "instrument": instrument, "centroid_profileMode": centroid_profileMode, 
             "fileNameChangeFunction": fileNameChangeFunction, 
@@ -973,11 +973,11 @@ class DartMSAssay:
 
         rtShiftToApply = 0
         for filename in filenames:
-            logging.info("   .. processing input file '%s'"%(filename))
+            logging.info("    .. processing input file '%s'"%(filename))
 
             msData = None
             if not rewriteRTinFiles and os.path.exists(filename + ".pickle") and os.path.isfile(filename + ".pickle"):
-                logging.info("     // loaded from pickle file")
+                logging.info("      // loaded from pickle file")
                 with open(filename + ".pickle", "rb") as fin:
                     msData = pickle.load(fin)
             else:
@@ -1015,16 +1015,16 @@ class DartMSAssay:
                             if lastRT > earliestRT:
                                 lastRT += 5
                                 earliestRT = max(0, earliestRT - 5)
-                                logging.info("      .. using only scans from RTs %.1f - %.1f seconds"%(earliestRT, lastRT))
+                                logging.info("       .. using only scans from RTs %.1f - %.1f seconds"%(earliestRT, lastRT))
                             else:
-                                logging.info("      .. no spots to be used in sample, skipping")
+                                logging.info("       .. no spots to be used in sample, skipping")
                                 continue
 
                         else:
                             raise RuntimeError("Can only delete unused scans if the spots file has been created before and manually checked.")
                     
                     rtShiftToApply = rtShiftToApply - earliestRT + 10
-                    logging.info("      .. shifting RT by %.1f seconds"%(rtShiftToApply))
+                    logging.info("       .. shifting RT by %.1f seconds"%(rtShiftToApply))
 
                     # Reading data from the xml file
                     with open(filename, 'r') as f:
@@ -1088,7 +1088,7 @@ class DartMSAssay:
                         pickle.dump(msData, fout)
 
                 if centroid_profileMode and ms_mode == "profile":
-                    logging.info("      .. centroiding")
+                    logging.info("       .. centroiding")
                     for k, spectrum in msData.get_spectra_iterator():
                         mzs, intensities = spectrum.find_centroids()
 
@@ -1107,7 +1107,7 @@ class DartMSAssay:
             
             sepInds = dartMSAssay._get_separate_chronogram_indices(msData, os.path.basename(filename).replace(".mzML", "") + ("" if not rewriteRTinFiles else "_rtShifted"), spot_file, intensityThreshold = intensity_threshold_spot_extraction)
             if len(sepInds) == 0:
-                logging.warning("      .. no spots to extract")
+                logging.warning("       .. no spots to extract")
             else:
                 dartMSAssay._add_chronograms_samples_to_assay(sepInds, msData, filename, fileNameChangeFunction = fileNameChangeFunction)
         
@@ -1194,7 +1194,7 @@ class DartMSAssay:
                     totalSTDInt = totalSTDInt + np.sum(spectrum.spint[use])
             
             if totalSTDInt > 0:
-                logging.info("   .. sample '%35s' STD intensity (sum) %12.1f * %12.1f"%(sample, totalSTDInt, multiplication_factor))
+                logging.info("    .. sample '%35s' STD intensity (sum) %12.1f * %12.1f"%(sample, totalSTDInt, multiplication_factor))
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     spectrum.spint = spectrum.spint / totalSTDInt * multiplication_factor
                 temp = _add_row_to_pandas_creation_dictionary(temp, 
@@ -1278,8 +1278,8 @@ class DartMSAssay:
                 for featurei in range(datCorr.shape[1]):
                     datCorr[batchInds, featurei] = datCorr[batchInds, featurei] * corrVal                    
 
-        logging.info("Batch effect correction carried out. %d / %d features were eligible for correction and %d / %d batches have been corrected. "%(correctedFeatures, self.dat.shape[1], correctedBatches, self.dat.shape[1] * len(set(self.batches))))
-        logging.info("Batch correction values are")
+        logging.info(" Batch effect correction carried out. %d / %d features were eligible for correction and %d / %d batches have been corrected. "%(correctedFeatures, self.dat.shape[1], correctedBatches, self.dat.shape[1] * len(set(self.batches))))
+        logging.info(" Batch correction values are")
         logging.info(batchCorrectionValuesGrouped.to_markdown())
 
         self.dat = datCorr
@@ -1426,7 +1426,7 @@ class DartMSAssay:
                         raise RuntimeError("Unknown mz correction method provided. Must be one of ['mzDeviationPPM', 'mzDeviation']")
 
                 if verbose:
-                    logging.info("    .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"%(samplei+1, len(self.assay.manager.get_sample_names()), sample, transformFactor, correctby))
+                    logging.info("     .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"%(samplei+1, len(self.assay.manager.get_sample_names()), sample, transformFactor, correctby))
 
         tempMod["mode"] = "corrected MZs (by %s)"%(correctby)
         temp_ = pd.concat([temp, tempMod], axis = 0, ignore_index = True).reset_index(drop = False)
@@ -1715,7 +1715,7 @@ class DartMSAssay:
                     fout.write('  </featureMap>\n')
 
             if verbose:
-                logging.info("   .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"%(samplei + 1, len(self.assay.manager.get_sample_names()), sample, summary_totalSpectra, summary_totalSignals, summary_clusterAfterCrude, summary_clusterAfterFine, summary_clusterAfterQualityFunctions, np.unique(temp["cluster"]).shape[0]))
+                logging.info("    .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"%(samplei + 1, len(self.assay.manager.get_sample_names()), sample, summary_totalSpectra, summary_totalSignals, summary_clusterAfterCrude, summary_clusterAfterFine, summary_clusterAfterQualityFunctions, np.unique(temp["cluster"]).shape[0]))
 
             mzs, intensities, usedFeatures = self._collapse_mz_cluster(temp["mz"], temp["original_mz"], temp["intensity"], temp["time"], temp["cluster"], intensity_collapse_method = aggregation_function)
             
@@ -1796,7 +1796,7 @@ class DartMSAssay:
         ## Iterative cluster generation with the same algorithm used for calculating the consensus spectra. 
         ## This algorithm is greedy and extends clusters based on their mean mz value and the difference to the next closest feature
         if True:
-            logging.info("   .. clustering with method 2")
+            logging.info("    .. clustering with method 2")
             min_difference_ppm = 100
             min_signals_per_cluster = 2
             temp["cluster"] = self._crude_clustering_for_mz_list(sample, temp["mz"], temp["intensity"], min_difference_ppm = min_difference_ppm)
@@ -2132,15 +2132,18 @@ class DartMSAssay:
         if verbose:
             for i in sorted(list(set(keeps))):
                 if i < 0: 
-                    logging.info("   .. %d features not found in any of the blank samples, but at least in %d samples of %d groups and thus these features will be used"%(sum([k == i for k in keeps]), minDetected, -i))
+                    logging.info("    .. %d features not found in any of the blank samples, but at least in %d samples of %d groups and thus these features will be used"%(sum([k == i for k in keeps]), minDetected, -i))
                 elif i == 0:
-                    logging.info("   .. %d features found in None of the blank comparisons with higher abundances in the samples. These features will be removed"%(sum([k == i for k in keeps])))
+                    logging.info("    .. %d features found in None of the blank comparisons with higher abundances in the samples. These features will be removed"%(sum([k == i for k in keeps])))
                 else:
-                    logging.info("   .. %d features found in %d of the blank comparisons with higher abundances in the samples and in at least %d samples. These features will be used"%(sum([k == i for k in keeps]), i, minDetected))
-            logging.info("Significance criteria are pval <= pvalueCutoff (%.3f) and fold >= foldCutoff (%.1f) and detected in at least %d samples of a non-Blank group"%(pvalueCutoff, foldCutoff, minDetected))
+                    logging.info("    .. %d features found in %d of the blank comparisons with higher abundances in the samples and in at least %d samples. These features will be used"%(sum([k == i for k in keeps]), i, minDetected))
+            logging.info(" Significance criteria are pval <= pvalueCutoff (%.3f) and fold >= foldCutoff (%.1f) and detected in at least %d samples of a non-Blank group"%(pvalueCutoff, foldCutoff, minDetected))
         
         keeps = [i for i in range(len(keeps)) if keeps[i]]
         self.subset_features(keeps)
+
+        if verbose:
+            logging.info("    .. %d features remain in the dataset"%(self.dat.shape[1]))
 
 
     #####################################################################################################
@@ -2246,7 +2249,7 @@ class DartMSAssay:
     #
     def restrict_to_high_quality_features__most_n_abundant(self, n_features):
         self.add_data_processing_step("restricting to n most abundant features", "restricting to most abundant features", {"n_features": n_features})
-        logging.info("Restricting data matrix to a %d of the most abundant features"%(n_features))
+        logging.info(" Restricting data matrix to a %d of the most abundant features"%(n_features))
 
         abundances = [-1 for i in range(self.dat.shape[1])]
         for featurei in range(self.dat.shape[1]):
@@ -2260,11 +2263,11 @@ class DartMSAssay:
         keeps = np.argsort(abundances)[::-1][0:n_features]
 
         self.subset_features(keep_features_with_indices = keeps)
-        logging.info("   .. using %d features"%(self.dat.shape[1]))
+        logging.info("    .. using %d features"%(self.dat.shape[1]))
 
     def restrict_to_high_quality_features__found_in_replicates(self, test_groups, minimum_ratio_found, found_in_type = "anyGroup"):
         self.add_data_processing_step("restricting to found in replicates features", "restricting to found in replicates features", {"test_groups": test_groups, "minimum_ratio_found": minimum_ratio_found, "found_in_type": found_in_type})
-        logging.info("Using only features that are present in more than %.1f%% replicates of %s to test"%(minimum_ratio_found * 100, "all groups" if found_in_type.lower() == "allGroups".lower() else "any group"))
+        logging.info(" Using only features that are present in more than %.1f%% replicates of %s to test"%(minimum_ratio_found * 100, "all groups" if found_in_type.lower() == "allGroups".lower() else "any group"))
 
         foundIn = [0 for i in range(self.dat.shape[1])]
         for featurei in range(self.dat.shape[1]):
@@ -2282,11 +2285,11 @@ class DartMSAssay:
         keeps = np.where(np.array(foundIn) > 0)[0]
 
         self.subset_features(keep_features_with_indices = keeps)
-        logging.info("   .. using %d features"%(self.dat.shape[1]))
+        logging.info("    .. using %d features"%(self.dat.shape[1]))
 
     def restrict_to_high_quality_features__minimum_intensity_filter(self, test_groups, minimum_intensity):
         self.add_data_processing_step("restricting to minimum intensity filter", "restricting to minimum intensity filter", {"test_groups": test_groups, "minimum_intensity": minimum_intensity})
-        logging.info("Using only features that have a minimum intensity of %.1f in at least one test-group"%(minimum_intensity))
+        logging.info(" Using only features that have a minimum intensity of %.1f in at least one test-group"%(minimum_intensity))
 
         use = [False for i in range(self.dat.shape[1])]
         for featurei in range(self.dat.shape[1]):
@@ -2301,7 +2304,7 @@ class DartMSAssay:
         keeps = np.where(np.array(use))[0] 
 
         self.subset_features(keep_features_with_indices = keeps)
-        logging.info("   .. using %d features"%(self.dat.shape[1]))
+        logging.info("    .. using %d features"%(self.dat.shape[1]))
 
 
 
