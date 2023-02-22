@@ -858,6 +858,7 @@ class DartMSAssay:
                 else:
                     if startInd is not None:
                         ## spots are not automatically added
+                        logging.info("       .. found new automatically detected spot from %.2f to %.2f seconds"%(msData.get_spectrum(startInd).time, msData.get_spectrum(endInd).time))
                         separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), "unknown", "unknown", 1))
                         startInd = None
                         endInd = None
@@ -865,6 +866,7 @@ class DartMSAssay:
             if startInd is not None:
                 pass
                 ## spots are not automatically added
+                logging.info("       .. found new automatically detected spot from %.2f to %.2f seconds"%(msData.get_spectrum(startInd).time, msData.get_spectrum(endInd).time))
                 separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), "unknown", "unknown", 1))
             
             for spotInd, spot in enumerate(separationInds):
@@ -882,6 +884,7 @@ class DartMSAssay:
                 })
                 spotsCur = pd.concat([spotsCur, temp], axis = 0)
             spots = pd.concat([spots, spotsCur], axis = 0, ignore_index = True).reset_index(drop = True)
+            spots["include"] = spots["include"].astype('bool')
             spots.to_csv(spotsFile, sep = "\t", index = False)
             separationInds = []
         
@@ -975,129 +978,117 @@ class DartMSAssay:
         for filename in filenames:
             logging.info("    .. processing input file '%s'"%(filename))
 
-            msData = None
-            if not rewriteRTinFiles and os.path.exists(filename + ".pickle") and os.path.isfile(filename + ".pickle"):
-                logging.info("      // loaded from pickle file")
-                with open(filename + ".pickle", "rb") as fin:
-                    msData = pickle.load(fin)
-            else:
+            msData = fileio.MSData.create_MSData_instance(
+                path = filename,
+                ms_mode = ms_mode,
+                instrument = instrument,
+                separation = "None/DART", 
+                data_import_mode = _constants.MEMORY,
+            )
+
+            for importFilter in import_filters:
+                msData = importFilter(msData = msData)
+
+            if rewriteRTinFiles:
+                lastRT = 0
+                earliestRT = 0
+                for spectrumi, spectrum in msData.get_spectra_iterator():
+                    lastRT = max(lastRT, spectrum.time)
+                    spectrum.time = spectrum.time
+                lastRT = lastRT + 10
+
+                if rewriteDeleteUnusedScans:
+
+                    if os.path.exists(spot_file) and os.path.isfile(spot_file):
+                        spots = pd.read_csv(spot_file, sep = "\t")
+                        lastRT = 0
+                        earliestRT = 1E9
+
+                        for rowi, row in spots.iterrows():
+                            if spots.at[rowi, "msData_ID"] == os.path.basename(filename).replace(".mzML", "") and spots.at[rowi, "include"]:
+                                lastRT = max(lastRT, spots.at[rowi, "endRT_seconds"])
+                                earliestRT = min(earliestRT, spots.at[rowi, "startRT_seconds"])
+
+                        if lastRT > earliestRT:
+                            lastRT += 5
+                            earliestRT = max(0, earliestRT - 5)
+                            logging.info("       .. using only scans from RTs %.1f - %.1f seconds"%(earliestRT, lastRT))
+                        else:
+                            logging.info("       .. no spots to be used in sample, skipping")
+                            continue
+
+                    else:
+                        raise RuntimeError("Can only delete unused scans if the spots file has been created before and manually checked.")
+                
+                rtShiftToApply = rtShiftToApply - earliestRT + 10
+                logging.info("       .. shifting RT by %.1f seconds"%(rtShiftToApply))
+
+                # Reading data from the xml file
+                with open(filename, 'r') as f:
+                    data = f.read()
+
+                bs_data = bs4.BeautifulSoup(data, 'xml')
+
+                ## <cvParam cvRef="MS" accession="MS:1000016" name="scan start time" value="0.033849999309" unitCvRef="UO" unitAccession="UO:0000031" unitName="minute"/>
+                toDel = []
+                tagU = False
+                tagInd = 0
+                for tag in bs_data.find_all("spectrum"):
+                    scanlist = tag.find("scanList")
+                    if scanlist is not None:
+                        scan = scanlist.find("scan")
+                        if scan is not None:
+                            cvParam = scan.find('cvParam', {'accession':'MS:1000016', 'name':'scan start time'}, recursive = True)
+                            if cvParam is not None:
+                                rt = float(cvParam["value"])
+                                if rt < earliestRT/60. or rt > lastRT/60.:
+                                    tagU = False
+                                    toDel.append(tag)
+                                else:
+                                    tagU = True
+                    if tagU:
+                        tag["id"] = tag["id"].replace("scan=%d"%(int(tag["index"])+1), "scan=%d"%(tagInd+1))
+                        tag["index"] = tagInd
+                        tagInd += 1
+                spectrumList = bs_data.find("spectrumList")
+                spectrumList["count"] = tagInd
+                for delTag in toDel:
+                    delTag.extract()
+                for tag in bs_data.find_all('cvParam', {'accession':'MS:1000016', 'name':'scan start time'}):
+                    tag['value'] = float(tag['value']) + rtShiftToApply / 60.
+                
+                with open(filename.replace(".mzML", "_rtShifted.mzML"), "w", newline='\n') as fout: 
+                    fout.write(bs_data.prettify().replace("\r", ""))
+                
+                if os.path.exists(spot_file) and os.path.isfile(spot_file):
+                    spots = pd.read_csv(spot_file, sep = "\t")
+
+                    for rowi, row in spots.iterrows():
+                        if spots.at[rowi, "msData_ID"] == os.path.basename(filename).replace(".mzML", ""):
+                            spots.at[rowi, "msData_ID"] = spots.at[rowi, "msData_ID"] + "_rtShifted"
+                            spots.at[rowi, "startRT_seconds"] = spots.at[rowi, "startRT_seconds"] + rtShiftToApply
+                            spots.at[rowi, "endRT_seconds"] = spots.at[rowi, "endRT_seconds"] + rtShiftToApply
+                            
+                    spots.to_csv(spot_file, sep = "\t", index = False)
+
+                rtShiftToApply += lastRT
+
                 msData = fileio.MSData.create_MSData_instance(
-                    path = filename,
+                    path = filename.replace(".mzML", "_rtShifted.mzML"),
                     ms_mode = ms_mode,
                     instrument = instrument,
                     separation = "None/DART", 
                     data_import_mode = _constants.MEMORY,
                 )
 
-                for importFilter in import_filters:
-                    msData = importFilter(msData = msData)
+            if centroid_profileMode and ms_mode == "profile":
+                logging.info("       .. centroiding")
+                for k, spectrum in msData.get_spectra_iterator():
+                    mzs, intensities = spectrum.find_centroids()
 
-                if rewriteRTinFiles:
-                    lastRT = 0
-                    earliestRT = 0
-                    for spectrumi, spectrum in msData.get_spectra_iterator():
-                        lastRT = max(lastRT, spectrum.time)
-                        spectrum.time = spectrum.time
-                    lastRT = lastRT + 10
-
-                    if rewriteDeleteUnusedScans:
-
-                        if os.path.exists(spot_file) and os.path.isfile(spot_file):
-                            spots = pd.read_csv(spot_file, sep = "\t")
-                            lastRT = 0
-                            earliestRT = 1E9
-
-                            for rowi, row in spots.iterrows():
-                                if spots.at[rowi, "msData_ID"] == os.path.basename(filename).replace(".mzML", "") and spots.at[rowi, "include"]:
-                                    lastRT = max(lastRT, spots.at[rowi, "endRT_seconds"])
-                                    earliestRT = min(earliestRT, spots.at[rowi, "startRT_seconds"])
-
-                            if lastRT > earliestRT:
-                                lastRT += 5
-                                earliestRT = max(0, earliestRT - 5)
-                                logging.info("       .. using only scans from RTs %.1f - %.1f seconds"%(earliestRT, lastRT))
-                            else:
-                                logging.info("       .. no spots to be used in sample, skipping")
-                                continue
-
-                        else:
-                            raise RuntimeError("Can only delete unused scans if the spots file has been created before and manually checked.")
-                    
-                    rtShiftToApply = rtShiftToApply - earliestRT + 10
-                    logging.info("       .. shifting RT by %.1f seconds"%(rtShiftToApply))
-
-                    # Reading data from the xml file
-                    with open(filename, 'r') as f:
-                        data = f.read()
-
-                    bs_data = bs4.BeautifulSoup(data, 'xml')
-
-                    ## <cvParam cvRef="MS" accession="MS:1000016" name="scan start time" value="0.033849999309" unitCvRef="UO" unitAccession="UO:0000031" unitName="minute"/>
-                    toDel = []
-                    tagU = False
-                    tagInd = 0
-                    for tag in bs_data.find_all("spectrum"):
-                        scanlist = tag.find("scanList")
-                        if scanlist is not None:
-                            scan = scanlist.find("scan")
-                            if scan is not None:
-                                cvParam = scan.find('cvParam', {'accession':'MS:1000016', 'name':'scan start time'}, recursive = True)
-                                if cvParam is not None:
-                                    rt = float(cvParam["value"])
-                                    if rt < earliestRT/60. or rt > lastRT/60.:
-                                        tagU = False
-                                        toDel.append(tag)
-                                    else:
-                                        tagU = True
-                        if tagU:
-                            tag["id"] = tag["id"].replace("scan=%d"%(int(tag["index"])+1), "scan=%d"%(tagInd+1))
-                            tag["index"] = tagInd
-                            tagInd += 1
-                    spectrumList = bs_data.find("spectrumList")
-                    spectrumList["count"] = tagInd
-                    for delTag in toDel:
-                        delTag.extract()
-                    for tag in bs_data.find_all('cvParam', {'accession':'MS:1000016', 'name':'scan start time'}):
-                        tag['value'] = float(tag['value']) + rtShiftToApply / 60.
-                    
-                    with open(filename.replace(".mzML", "_rtShifted.mzML"), "w", newline='\n') as fout: 
-                        fout.write(bs_data.prettify().replace("\r", ""))
-                    
-                    if os.path.exists(spot_file) and os.path.isfile(spot_file):
-                        spots = pd.read_csv(spot_file, sep = "\t")
-
-                        for rowi, row in spots.iterrows():
-                            if spots.at[rowi, "msData_ID"] == os.path.basename(filename).replace(".mzML", ""):
-                                spots.at[rowi, "msData_ID"] = spots.at[rowi, "msData_ID"] + "_rtShifted"
-                                spots.at[rowi, "startRT_seconds"] = spots.at[rowi, "startRT_seconds"] + rtShiftToApply
-                                spots.at[rowi, "endRT_seconds"] = spots.at[rowi, "endRT_seconds"] + rtShiftToApply
-                                
-                        spots.to_csv(spot_file, sep = "\t", index = False)
-
-                    rtShiftToApply += lastRT
-
-                    msData = fileio.MSData.create_MSData_instance(
-                        path = filename.replace(".mzML", "_rtShifted.mzML"),
-                        ms_mode = ms_mode,
-                        instrument = instrument,
-                        separation = "None/DART", 
-                        data_import_mode = _constants.MEMORY,
-                    )
-                    
-                    with open(filename.replace(".mzML", "_rtShifted.pickle"), "wb") as fout:
-                        pickle.dump(msData, fout)
-
-                if centroid_profileMode and ms_mode == "profile":
-                    logging.info("       .. centroiding")
-                    for k, spectrum in msData.get_spectra_iterator():
-                        mzs, intensities = spectrum.find_centroids()
-
-                        spectrum.mz = mzs
-                        spectrum.spint = intensities
-                        spectrum.centroid = True
-
-                with open(filename + ".pickle", "wb") as fout:
-                    pickle.dump(msData, fout)
+                    spectrum.mz = mzs
+                    spectrum.spint = intensities
+                    spectrum.centroid = True
 
             if use_signal_function is not None:
                 for spectrumi, spectrum in msData.get_spectra_iterator():
@@ -1218,6 +1209,7 @@ class DartMSAssay:
                 + p9.guides(alpha = False, colour = False)
                 + p9.ggtitle("Abundance of internal standard (mz %.5f - %.5f)"%(std[0], std[1]))
             )
+            print(p)
 
     def batch_correction(self, by_group, plot = True):
         self.add_data_processing_step("batch correction", "batch correction", {"by_group": by_group})
@@ -2019,7 +2011,7 @@ class DartMSAssay:
             spectrum = msDataObj.get_spectrum(0)
 
             for braci, (mzmin, mzmean, mzmax, _) in enumerate(self.features):
-                if on == "processedData":
+                if on.lower() == "processedData".lower():
                     use = np.logical_and(spectrum.mz >= mzmin, spectrum.mz <= mzmax)
                     if np.sum(use) > 0:
                         s = np.sum(spectrum.spint[use])
@@ -2027,7 +2019,7 @@ class DartMSAssay:
                     else:
                         dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
 
-                elif on == "originalData":
+                elif on.lower() == "originalData".lower():
                     s = 0
                     for oSpectrumi, oSpectrum in msDataObj.original_MSData_object.get_spectra_iterator():
                         _mzmin, _mzmean, _mzmax = oSpectrum.reverseMZ(mzmin), oSpectrum.reverseMZ(mzmean), oSpectrum.reverseMZ(mzmax)
@@ -2167,7 +2159,7 @@ class DartMSAssay:
         for cn in range(1, 5):
             searchIons["[13C%d]"%cn] = 1.00335484 * cn
 
-        for featurei in tqdm.tqdm(range(features_.shape[0])):
+        for featurei in tqdm.tqdm(range(features_.shape[0]), desc = "annotating features"):
             mz = features_[featurei, 1]
 
             intensities = []
