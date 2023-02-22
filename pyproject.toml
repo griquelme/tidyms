@@ -28,7 +28,7 @@ dependencies = [
     "networkx>=3.0",
     "numpy>=1.22",
     "openpyxl>=3.0",
-    "pandas>=1.4.1",
+    "pandas>=1.5.3",
     "requests",
     "scikit-learn>=1.0.2",
     "scipy>=1.8",
