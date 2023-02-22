@@ -363,6 +363,8 @@ class DartMSAssay:
 
         self.processingHistory = []
 
+    def clodeDartMSAssay(self):
+        return deepcopy(self)
 
     #####################################################################################################
     ## Data handling
