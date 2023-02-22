@@ -2298,6 +2298,26 @@ class DartMSAssay:
         self.subset_features(keep_features_with_indices = keeps)
         logging.info("    .. using %d features"%(self.dat.shape[1]))
 
+    def restrict_to_high_quality_features__low_RSD_in_groups(self, test_groups, maximum_RSD):
+        self.add_data_processing_step("restricting to maximum rsd ", "restricting to maximum rsd", {"test_groups": test_groups, "maximum_RSD": maximum_RSD})
+        logging.info(" Using only features that have a maximum RSD of %.1f in all test-group"%(maximum_RSD))
+
+        use = [True for i in range(self.dat.shape[1])]
+        for featurei in range(self.dat.shape[1]):
+            for grp in test_groups:
+                groupInd = [i for i, group in enumerate(self.groups) if group == grp]
+
+                vals = self.dat[groupInd, featurei]
+                vals[np.isnan(vals)] = 0
+
+                if _relative_standard_deviation(vals) > maximum_RSD:
+                    use[featurei] = False
+
+        keeps = np.where(np.array(use))[0] 
+
+        self.subset_features(keep_features_with_indices = keeps)
+        logging.info("    .. using %d features"%(self.dat.shape[1]))
+
 
 
     #####################################################################################################
