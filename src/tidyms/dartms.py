@@ -40,6 +40,8 @@ import functools
 import bs4
 import random
 import dill
+from copy import deepcopy
+import logging
 
 
 
@@ -77,7 +79,6 @@ def _add_row_to_pandas_creation_dictionary(dict = None, **kwargs):
 
     return dict
 
-
 def _average_and_std_weighted(values, weights):
     """
     Return the weighted average and standard deviation.
@@ -89,17 +90,14 @@ def _average_and_std_weighted(values, weights):
     variance = np.average((values-average)**2, weights=weights)
     return (average, math.sqrt(variance))
 
-
 def _relative_standard_deviation(vals, weights = None):
     if weights == None:
         weights = np.ones((vals.shape[0]))
     avg, std = _average_and_std_weighted(vals, weights)
     return std / avg
 
-
 def _mz_deviationPPM_between(a, b):
     return (a - b) / b * 1E6
-
 
 def _find_feature_by_mz(features, mz, max_deviation_ppm = 20):
     mzmax = mz * (1. + max_deviation_ppm / 1E6)
@@ -111,7 +109,18 @@ def _find_feature_by_mz(features, mz, max_deviation_ppm = 20):
     else:
         return None 
 
-
+def cohend(d1, d2):
+    ## copied from https://machinelearningmastery.com/effect-size-measures-in-python/ and modified
+    # calculate the size of samples
+    n1, n2 = d1.shape[0], d2.shape[0]
+    # calculate the variance of the samples
+    s1, s2 = np.var(d1, ddof=1), np.var(d2, ddof=1)
+    # calculate the pooled standard deviation
+    s = np.sqrt(((n1 - 1) * s1 + (n2 - 1) * s2) / (n1 + n2 - 2))
+    # calculate the means of the samples
+    u1, u2 = np.mean(d1), np.mean(d2)
+    # calculate the effect size
+    return (u1 - u2) / s
 
 
 
@@ -211,7 +220,6 @@ def cluster_quality_check_function__peak_form(sample, msDataObj, spectrumIDs, ti
         print(p)
     
     return cluster
-
 
 def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectrumIDs, time, mz, intensity, cluster, max_weighted_ppm_deviation = 15):
     removed = 0
@@ -338,6 +346,10 @@ def _refine_clustering_for_mz_list(sample, mzs, intensities, spectrumID, clusts,
 #
 
 class DartMSAssay:
+
+    #####################################################################################################
+    ## Init
+    #
     def __init__(self, name = "Generic"):
         self.name = name
         
@@ -351,6 +363,10 @@ class DartMSAssay:
 
         self.processingHistory = []
 
+
+    #####################################################################################################
+    ## Data handling
+    #
     def set_data_matrix(self, dat, features, featureAnnotations, samples, groups, batches):
         self.dat = dat
         self.features = features
@@ -359,17 +375,97 @@ class DartMSAssay:
         self.groups = groups
         self.batches = batches
 
-    def get_data_matrix_and_meta(self):
+    def get_data_matrix_and_meta(self, keep_features = None, remove_features = None, keep_samples = None, remove_samples = None, keep_groups = None, remove_groups = None, keep_batches = None, remove_batches = None, copy = False):
         if self.dat is None:
             raise RuntimeError("Data matrix not set/generated")
 
-        return self.dat, self.features, self.samples, self.groups, self.batches
+        if copy or keep_features is not None or remove_features is not None or keep_samples is not None or remove_samples is not None or keep_groups is not None or remove_groups is not None or keep_batches is not None or remove_batches is not None:
+            _dat = np.copy(self.dat)
+            _features = deepcopy(self.features)
+            _featureAnnotations = deepcopy(self.featureAnnotations)
+            _samples = deepcopy(self.samples)
+            _groups = deepcopy(self.groups)
+            _batches = deepcopy(self.batches)
 
+            if keep_features is not None:
+                keeps = [i for i in range(_dat.shape[1]) if i in keep_features]
+                
+                _dat = _dat[:, keeps]
+                _features = [_features[i] for i in keeps]
+                _featureAnnotations = [_featureAnnotations[i] for i in keeps]
+
+            if remove_features is not None:
+                keeps = [i for i in range(_dat.shape[1]) if i not in remove_features]
+                
+                _dat = _dat[:, keeps]
+                _features = [_features[i] for i in keeps]
+                _featureAnnotations = [_featureAnnotations[i] for i in keeps]
+
+            if keep_samples is not None:
+                keeps = [i for i in range(len(_samples)) if _samples[i] in keep_samples]
+
+                _dat = _dat[keeps, :]
+                _samples = [_samples[i] for i in keeps]
+                _groups = [_groups[i] for i in keeps]
+                _batches = [_batches[i] for i in keeps]
+
+            if remove_samples is not None:
+                keeps = [i for i in range(len(_samples)) if _samples[i] not in remove_samples]
+
+                _dat = _dat[keeps, :]
+                _samples = [_samples[i] for i in keeps]
+                _groups = [_groups[i] for i in keeps]
+                _batches = [_batches[i] for i in keeps]
+
+            if keep_groups is not None:
+                keeps = [i for i in range(len(_groups)) if _groups[i] in keep_groups]
+
+                _dat = _dat[keeps, :]
+                _samples = [_samples[i] for i in keeps]
+                _groups = [_groups[i] for i in keeps]
+                _batches = [_batches[i] for i in keeps]
+
+            if remove_groups is not None:
+                keeps = [i for i in range(len(_groups)) if _groups[i] not in remove_groups]
+
+                _dat = _dat[keeps, :]
+                _samples = [_samples[i] for i in keeps]
+                _groups = [_groups[i] for i in keeps]
+                _batches = [_batches[i] for i in keeps]
+
+            if keep_batches is not None:
+                keeps = [i for i in range(len(_batches)) if _batches[i] in keep_batches]
+
+                _dat = _dat[keeps, :]
+                _samples = [_samples[i] for i in keeps]
+                _groups = [_groups[i] for i in keeps]
+                _batches = [_batches[i] for i in keeps]
+
+            if remove_batches is not None:
+                keeps = [i for i in range(len(_batches)) if _batches[i] not in remove_batches]
+
+                _dat = _dat[keeps, :]
+                _samples = [_samples[i] for i in keeps]
+                _groups = [_groups[i] for i in keeps]
+                _batches = [_batches[i] for i in keeps]
+
+            return _dat, _features, _featureAnnotations, _samples, _groups, _batches
+
+        return self.dat, self.features, self.featureAnnotations, self.samples, self.groups, self.batches
+
+
+    #####################################################################################################
+    ## Processing history
+    #
     def add_processing_step(self, step_identifier_text, log_text, processing_data = None):
         self.processingHistory.append({"step_identifier": step_identifier_text, 
                                        "log_text": log_text,
                                        "processing_data": processing_data})
 
+
+    #####################################################################################################
+    ## IO
+    #
     def save_self_to_dill_file(self, dill_file):
         with open(dill_file, "wb") as fout:
             dill.dump(
@@ -406,6 +502,10 @@ class DartMSAssay:
 
             return dartMSAssay
 
+
+    #####################################################################################################
+    ## Subset results
+    #
     def subset_features(self, keep_features_with_indices = None, remove_features_with_indices = None):
         if self.dat is None:
             raise RuntimeError("Cannot subset DartMSAssay until a data matrix has been generated")
@@ -479,6 +579,9 @@ class DartMSAssay:
             self.batches = [self.batches[i] for i in keeps]
 
 
+    #####################################################################################################
+    ## FeatureML functions
+    #
     def write_bracketing_results_to_featureML(self, featureMLlocation = "./results.featureML", featureMLStartRT = 0, featureMLEndRT = 1400):
         with open(featureMLlocation, "w") as fout:
             
@@ -522,7 +625,6 @@ class DartMSAssay:
             fout.write('    </featureList>\n')
             fout.write('  </featureMap>\n')
 
-
     def write_consensus_spectrum_to_featureML_file_per_sample(self, widthRT = 40):
         for samplei, sample in tqdm.tqdm(enumerate(self.assay.manager.get_sample_names()), total = len(self.assay.manager.get_sample_names()), desc = "exporting to featureML"):
 
@@ -561,14 +663,9 @@ class DartMSAssay:
                 fout.write('  </featureMap>\n')
 
 
-
     #####################################################################################################
-    ####################################################################################################
-    ##
     ## General functions
-    ##
     #
-
     def print_sample_overview(self):
         temp = None
 
@@ -584,15 +681,6 @@ class DartMSAssay:
         temp = pd.DataFrame(temp)
         with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
             print(temp.to_markdown())
-
-
-
-    #####################################################################################################
-    ####################################################################################################
-    ##
-    ## Chronogram import and separation functions
-    ##
-    #
 
     def plot_sample_TICs(self, separate = True, separate_by = "group"):
         temp = None
@@ -642,6 +730,153 @@ class DartMSAssay:
         print(p)
 
 
+    #####################################################################################################
+    ## Chronogram import and separation
+    #
+
+    def _subset_MSData_chronogram(self, msData, startInd, endInd):
+        """
+        Function subsets a MSData object by chronogram time into a new MSData_subset_spectra object via an internal reference
+
+        Args:
+            msData (MSData): The MSData object to subset
+            startInd (int): Index of first spectrum (included)
+            endInd (int): Index of last spectrum (included)
+
+        Returns:
+            MSData: The new MSData subset object
+        """    
+        return fileio.MSData_subset_spectra(start_ind = startInd, end_ind = endInd, from_MSData_object = msData)
+
+    def _get_separate_chronogram_indices(self, msData, msData_ID, spotsFile, intensityThreshold = 0.00001, startTime_seconds = 0, endTime_seconds = 1E6):
+        """
+        Function separats a chronogram MSData object into spots that are defined as being continuously above the set threshold. 
+        Spots are either automatically detected (when the sportsFile is not available) or user-guided (when the spotsFile exists)
+        There is deliberately no option to superseed the automated extraction of the spots to not remove an existing spotsFile by accident. If the user wishes to automatically find the spots, the spotsFile file should be deleted by them    
+
+        Args:
+            msData (MSData): The chronogram MSData object to separate into spots
+            msData_ID (string): The name of the chronogram object
+            spotsFile (string): The file to which the spots information will be written to. Furthermore, if the file already exists, information provided there will superseed the automated detection of the spots. 
+            intensityThreshold (float, optional): _description_. Defaults to 0.00001.
+            startTime_seconds (int, optional): _description_. Defaults to 0.
+            endTime_seconds (_type_, optional): _description_. Defaults to 1E6.
+
+        Raises:
+            RuntimeError: 
+
+        Returns:
+            list of (startInd, endInd, spotName, group, class, batch): Detected of user-guided spots.
+        """    
+        if spotsFile is None:
+            raise RuntimeError("Parameter spotsFile must be specified either to save extracted spots to or to read from there. ")
+        
+        spots = None
+        if type(spotsFile) is str:
+            if os.path.exists(spotsFile) and os.path.isfile(spotsFile):
+                spots = pd.read_csv(spotsFile, sep = "\t")
+            else:
+                spots = pd.DataFrame({
+                    "msData_ID":       [],
+                    "spotInd":         [],
+                    "include":         [],
+                    "name":            [],
+                    "group":           [],
+                    "class":           [],
+                    "batch":           [],
+                    "startRT_seconds": [],
+                    "endRT_seconds":   [],
+                    "comment":         []
+                })
+        else:
+            raise RuntimeError("Parameter spotsFile must be a str")
+            
+        spotsCur = spots[spots["msData_ID"] == msData_ID]
+        separationInds = []
+        if spotsCur.shape[0] == 0:
+            logging.info("      .. no spots defined for file. Spots will be detected automatically, but not used for now. Please modify the spots file '%s' to include or modify them"%(spotsFile))
+            ticInts = [sum(msData.get_spectrum(i).spint) for i in range(msData.get_n_spectra())]
+            startInd = None
+            endInd = None
+            for i, inte in enumerate(ticInts):
+                time = msData.get_spectrum(i).time
+                if inte >= intensityThreshold and time >= startTime_seconds and time <= endTime_seconds:
+                    if startInd is None:
+                        startInd = i
+                    endInd = i
+                    
+                else:
+                    if startInd is not None:
+                        ## spots are not automatically added
+                        separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), "unknown", "unknown", 1))
+                        startInd = None
+                        endInd = None
+            
+            if startInd is not None:
+                pass
+                ## spots are not automatically added
+                separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), "unknown", "unknown", 1))
+            
+            for spotInd, spot in enumerate(separationInds):
+                temp = pd.DataFrame({
+                    "msData_ID":       [msData_ID],
+                    "spotInd":         [int(spotInd)],
+                    "include":         [False],
+                    "name":            [spot[2]],
+                    "group":           [spot[3]],
+                    "class":           [spot[4]],
+                    "batch":           [spot[5]],
+                    "startRT_seconds": [msData.get_spectrum(spot[0]).time],
+                    "endRT_seconds":   [msData.get_spectrum(spot[1]).time],
+                    "comment":         ["spot automatically extracted by _get_separate_chronogram_indices(msData, '%s', intensityThreshold = %f, startTime_seconds = %f, endTime_seconds = %f)"%(msData_ID, intensityThreshold, startTime_seconds, endTime_seconds)]
+                })
+                spotsCur = pd.concat([spotsCur, temp], axis = 0)
+            spots = pd.concat([spots, spotsCur], axis = 0, ignore_index = True).reset_index(drop = True)
+            spots.to_csv(spotsFile, sep = "\t", index = False)
+            separationInds = []
+        
+        else:
+            for index, row in spotsCur.iterrows():
+                if row["include"]:
+                    startInd, timeDiff_start = msData.get_closest_spectrum_to_RT(row["startRT_seconds"])
+                    endInd, timeDiff_end = msData.get_closest_spectrum_to_RT(row["endRT_seconds"])
+                    separationInds.append((startInd, endInd, row["name"], row["group"], row["class"], row["batch"]))
+
+        return separationInds
+
+    def _add_chronograms_samples_to_assay(self, sepInds, msData, filename, fileNameChangeFunction = None, verbose = True):
+        """
+        Function adds spots from a chronogram file to an existing assay
+
+        Args:
+            assay (Assay): Assay object to add the spots to
+            sepInds (list of (startInd, endInd, spotName, group, class, batch)): Information of spots
+            msData (MSData): Chronogram from which the spots are generated
+            filename (str): Name of the chronogram sample
+            verbose (bool, optional): Print additional debugging information. Defaults to True.
+        """    
+        if fileNameChangeFunction is None:
+            fileNameChangeFunction = lambda x: x
+        for subseti, _ in enumerate(sepInds):
+            subset_name = fileNameChangeFunction("VIRTUAL(%s::%s)"%(os.path.splitext(os.path.basename(filename))[0], sepInds[subseti][2]))
+            if verbose: 
+                logging.info("      .. adding subset %4d with name '%35s' (group '%s', class '%s'), width %6.1f sec, RTs %6.1f - %6.1f"%(subseti, subset_name, sepInds[subseti][3], sepInds[subseti][4], msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time))
+            subset = fileio.MSData_Proxy(self._subset_MSData_chronogram(msData, sepInds[subseti][0], sepInds[subseti][1]))
+            self.assay.add_virtual_sample(
+                MSData_object = subset,
+                virtual_name = subset_name,
+                sample_metadata = pd.DataFrame({
+                    "sample":                    [subset_name],
+                    "group":                     sepInds[subseti][3],
+                    "class":                     sepInds[subseti][4],
+                    "order":                     [1],
+                    "batch":                     sepInds[subseti][5],
+                    "basefile":                  [os.path.splitext(os.path.basename(filename))[0]],
+                    "extracted_spectra_indices": ["%.2f - %.2f seconds"%(msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time)],
+                    "spotwidth_seconds":         [msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time]
+                })
+            )
+
     @staticmethod
     def create_assay_from_chronogramFiles(assay_name, 
                                         filenames, spot_file, ms_mode, instrument, centroid_profileMode = True, 
@@ -676,19 +911,18 @@ class DartMSAssay:
             cache_MSData_objects = True)
         dartMSAssay = DartMSAssay(assay_name)
         dartMSAssay.assay = assay
-        print("   - Created empty assay")
+        logging.info("Creating empty assay")
 
         rtShiftToApply = 0
         for filename in filenames:
-            print("   - File '%s'"%(filename), end = "")
+            logging.info("   .. processing input file '%s'"%(filename))
 
             msData = None
             if not rewriteRTinFiles and os.path.exists(filename + ".pickle") and os.path.isfile(filename + ".pickle"):
-                print("  // loaded from pickle file")
+                logging.info("     // loaded from pickle file")
                 with open(filename + ".pickle", "rb") as fin:
                     msData = pickle.load(fin)
             else:
-                print("")
                 msData = fileio.MSData.create_MSData_instance(
                     path = filename,
                     ms_mode = ms_mode,
@@ -723,16 +957,16 @@ class DartMSAssay:
                             if lastRT > earliestRT:
                                 lastRT += 5
                                 earliestRT = max(0, earliestRT - 5)
-                                print("      .. using only scans from RTs %.1f - %.1f seconds"%(earliestRT, lastRT))
+                                logging.info("      .. using only scans from RTs %.1f - %.1f seconds"%(earliestRT, lastRT))
                             else:
-                                print("      .. no spots to be used in sample, skipping")
+                                logging.info("      .. no spots to be used in sample, skipping")
                                 continue
 
                         else:
                             raise RuntimeError("Can only delete unused scans if the spots file has been created before and manually checked.")
                     
                     rtShiftToApply = rtShiftToApply - earliestRT + 10
-                    print("      .. shifting RT by %.1f seconds"%(rtShiftToApply))
+                    logging.info("      .. shifting RT by %.1f seconds"%(rtShiftToApply))
 
                     # Reading data from the xml file
                     with open(filename, 'r') as f:
@@ -796,7 +1030,7 @@ class DartMSAssay:
                         pickle.dump(msData, fout)
 
                 if centroid_profileMode and ms_mode == "profile":
-                    print("      .. centroiding")
+                    logging.info("      .. centroiding")
                     for k, spectrum in msData.get_spectra_iterator():
                         mzs, intensities = spectrum.find_centroids()
 
@@ -815,21 +1049,16 @@ class DartMSAssay:
             
             sepInds = dartMSAssay._get_separate_chronogram_indices(msData, os.path.basename(filename).replace(".mzML", "") + ("" if not rewriteRTinFiles else "_rtShifted"), spot_file, intensityThreshold = intensity_threshold_spot_extraction)
             if len(sepInds) == 0:
-                print("      .. no spots to extract")
+                logging.warning("      .. no spots to extract")
             else:
                 dartMSAssay._add_chronograms_samples_to_assay(sepInds, msData, filename, fileNameChangeFunction = fileNameChangeFunction)
         
         return dartMSAssay
 
 
-
     #####################################################################################################
-    ####################################################################################################
-    ##
-    ## Spectra selection in separated samples
-    ## 
+    ## Spectra selection
     #
-
     def drop_lower_spectra(self, drop_rate = None):
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
             totalInt = []
@@ -847,7 +1076,6 @@ class DartMSAssay:
                     sampleObjNew.delete_spectrum(ordInte[c])
                     c = c + 1
                 msDataObj.to_MSData_object = sampleObjNew
-
 
     def select_top_n_spectra(self, n = None):
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
@@ -868,14 +1096,9 @@ class DartMSAssay:
                 msDataObj.to_MSData_object = sampleObjNew
 
 
-
     #####################################################################################################
-    ####################################################################################################
-    ##
     ## Sample normalization
-    ##
     #
-
     def normalize_samples_by_TIC(self, multiplication_factor = 1):
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
             totalInt = []
@@ -891,8 +1114,7 @@ class DartMSAssay:
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     spectrum.spint = spectrum.spint / totalInt * multiplication_factor
             else:
-                print("   .. Error: cannot normalize sample '%35s' to TIC as it is zero"%(sample))
-
+                logging.error("   .. Error: cannot normalize sample '%35s' to TIC as it is zero"%(sample))
 
     def normalize_to_internal_standard(self, std, multiplication_factor = 1, plot = False):
         stdMZmin, stdMZmax = std
@@ -910,7 +1132,7 @@ class DartMSAssay:
                     totalSTDInt = totalSTDInt + np.sum(spectrum.spint[use])
             
             if totalSTDInt > 0:
-                print("   .. sample '%35s' STD intensity (sum) %12.1f * %12.1f"%(sample, totalSTDInt, multiplication_factor))
+                logging.info("   .. sample '%35s' STD intensity (sum) %12.1f * %12.1f"%(sample, totalSTDInt, multiplication_factor))
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     spectrum.spint = spectrum.spint / totalSTDInt * multiplication_factor
                 temp = _add_row_to_pandas_creation_dictionary(temp, 
@@ -919,7 +1141,7 @@ class DartMSAssay:
                     istdAbundance = totalSTDInt
                 )
             else:
-                print("   .. Error: cannot normalize sample '%35s' to internal standard as no signals for it have been found"%(sample))
+                logging.error("   .. Error: cannot normalize sample '%35s' to internal standard as no signals for it have been found"%(sample))
 
         if plot:
             temp = pd.DataFrame(temp)
@@ -934,7 +1156,6 @@ class DartMSAssay:
                 + p9.guides(alpha = False, colour = False)
                 + p9.ggtitle("Abundance of internal standard (mz %.5f - %.5f)"%(std[0], std[1]))
             )
-
 
     def batch_correction(self, by_group, plot = True):
         datCorr = np.copy(self.dat)
@@ -994,238 +1215,16 @@ class DartMSAssay:
                 for featurei in range(datCorr.shape[1]):
                     datCorr[batchInds, featurei] = datCorr[batchInds, featurei] * corrVal                    
 
-        print("Batch effect correction carried out. %d / %d features were eligible for correction and %d / %d batches have been corrected. "%(correctedFeatures, self.dat.shape[1], correctedBatches, self.dat.shape[1] * len(set(self.batches))))
-        print("Batch correction values are")
-        print(batchCorrectionValuesGrouped)
+        logging.info("Batch effect correction carried out. %d / %d features were eligible for correction and %d / %d batches have been corrected. "%(correctedFeatures, self.dat.shape[1], correctedBatches, self.dat.shape[1] * len(set(self.batches))))
+        logging.info("Batch correction values are")
+        logging.info(batchCorrectionValuesGrouped.to_markdown())
 
         self.dat = datCorr
-            
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     #####################################################################################################
-    ####################################################################################################
-    ##
-    ## Chronogram import and separation functions
-    ##
+    ## MZ shift correction
     #
-
-    def _subset_MSData_chronogram(self, msData, startInd, endInd):
-        """
-        Function subsets a MSData object by chronogram time into a new MSData_subset_spectra object via an internal reference
-
-        Args:
-            msData (MSData): The MSData object to subset
-            startInd (int): Index of first spectrum (included)
-            endInd (int): Index of last spectrum (included)
-
-        Returns:
-            MSData: The new MSData subset object
-        """    
-        return fileio.MSData_subset_spectra(start_ind = startInd, end_ind = endInd, from_MSData_object = msData)
-
-
-    def _get_separate_chronogram_indices(self, msData, msData_ID, spotsFile, intensityThreshold = 0.00001, startTime_seconds = 0, endTime_seconds = 1E6):
-        """
-        Function separats a chronogram MSData object into spots that are defined as being continuously above the set threshold. 
-        Spots are either automatically detected (when the sportsFile is not available) or user-guided (when the spotsFile exists)
-        There is deliberately no option to superseed the automated extraction of the spots to not remove an existing spotsFile by accident. If the user wishes to automatically find the spots, the spotsFile file should be deleted by them    
-
-        Args:
-            msData (MSData): The chronogram MSData object to separate into spots
-            msData_ID (string): The name of the chronogram object
-            spotsFile (string): The file to which the spots information will be written to. Furthermore, if the file already exists, information provided there will superseed the automated detection of the spots. 
-            intensityThreshold (float, optional): _description_. Defaults to 0.00001.
-            startTime_seconds (int, optional): _description_. Defaults to 0.
-            endTime_seconds (_type_, optional): _description_. Defaults to 1E6.
-
-        Raises:
-            RuntimeError: 
-
-        Returns:
-            list of (startInd, endInd, spotName, group, class, batch): Detected of user-guided spots.
-        """    
-        if spotsFile is None:
-            raise RuntimeError("Parameter spotsFile must be specified either to save extracted spots to or to read from there. ")
-        
-        spots = None
-        if type(spotsFile) is str:
-            if os.path.exists(spotsFile) and os.path.isfile(spotsFile):
-                spots = pd.read_csv(spotsFile, sep = "\t")
-            else:
-                spots = pd.DataFrame({
-                    "msData_ID":       [],
-                    "spotInd":         [],
-                    "include":         [],
-                    "name":            [],
-                    "group":           [],
-                    "class":           [],
-                    "batch":           [],
-                    "startRT_seconds": [],
-                    "endRT_seconds":   [],
-                    "comment":         []
-                })
-        else:
-            raise RuntimeError("Parameter spotsFile must be a str")
-            
-        spotsCur = spots[spots["msData_ID"] == msData_ID]
-        separationInds = []
-        if spotsCur.shape[0] == 0:
-            print("      .. no spots defined for file. Spots will be detected automatically, but not used for now. Please modify the spots file '%s' to include or modify them"%(spotsFile))
-            ticInts = [sum(msData.get_spectrum(i).spint) for i in range(msData.get_n_spectra())]
-            startInd = None
-            endInd = None
-            for i, inte in enumerate(ticInts):
-                time = msData.get_spectrum(i).time
-                if inte >= intensityThreshold and time >= startTime_seconds and time <= endTime_seconds:
-                    if startInd is None:
-                        startInd = i
-                    endInd = i
-                    
-                else:
-                    if startInd is not None:
-                        ## spots are not automatically added
-                        separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), "unknown", "unknown", 1))
-                        startInd = None
-                        endInd = None
-            
-            if startInd is not None:
-                pass
-                ## spots are not automatically added
-                separationInds.append((startInd, endInd, "Spot_%d"%len(separationInds), "unknown", "unknown", 1))
-            
-            for spotInd, spot in enumerate(separationInds):
-                temp = pd.DataFrame({
-                    "msData_ID":       [msData_ID],
-                    "spotInd":         [int(spotInd)],
-                    "include":         [False],
-                    "name":            [spot[2]],
-                    "group":           [spot[3]],
-                    "class":           [spot[4]],
-                    "batch":           [spot[5]],
-                    "startRT_seconds": [msData.get_spectrum(spot[0]).time],
-                    "endRT_seconds":   [msData.get_spectrum(spot[1]).time],
-                    "comment":         ["spot automatically extracted by _get_separate_chronogram_indices(msData, '%s', intensityThreshold = %f, startTime_seconds = %f, endTime_seconds = %f)"%(msData_ID, intensityThreshold, startTime_seconds, endTime_seconds)]
-                })
-                spotsCur = pd.concat([spotsCur, temp], axis = 0)
-            spots = pd.concat([spots, spotsCur], axis = 0, ignore_index = True).reset_index(drop = True)
-            spots.to_csv(spotsFile, sep = "\t", index = False)
-            separationInds = []
-        
-        else:
-            for index, row in spotsCur.iterrows():
-                if row["include"]:
-                    startInd, timeDiff_start = msData.get_closest_spectrum_to_RT(row["startRT_seconds"])
-                    endInd, timeDiff_end = msData.get_closest_spectrum_to_RT(row["endRT_seconds"])
-                    separationInds.append((startInd, endInd, row["name"], row["group"], row["class"], row["batch"]))
-
-        return separationInds
-
-
-    def _add_chronograms_samples_to_assay(self, sepInds, msData, filename, fileNameChangeFunction = None, verbose = True):
-        """
-        Function adds spots from a chronogram file to an existing assay
-
-        Args:
-            assay (Assay): Assay object to add the spots to
-            sepInds (list of (startInd, endInd, spotName, group, class, batch)): Information of spots
-            msData (MSData): Chronogram from which the spots are generated
-            filename (str): Name of the chronogram sample
-            verbose (bool, optional): Print additional debugging information. Defaults to True.
-        """    
-        if fileNameChangeFunction is None:
-            fileNameChangeFunction = lambda x: x
-        for subseti, _ in enumerate(sepInds):
-            subset_name = fileNameChangeFunction("VIRTUAL(%s::%s)"%(os.path.splitext(os.path.basename(filename))[0], sepInds[subseti][2]))
-            if verbose: 
-                print("      .. adding subset %4d with name '%35s' (group '%s', class '%s'), width %6.1f sec, RTs %6.1f - %6.1f"%(subseti, subset_name, sepInds[subseti][3], sepInds[subseti][4], msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time))
-            subset = fileio.MSData_Proxy(self._subset_MSData_chronogram(msData, sepInds[subseti][0], sepInds[subseti][1]))
-            self.assay.add_virtual_sample(
-                MSData_object = subset,
-                virtual_name = subset_name,
-                sample_metadata = pd.DataFrame({
-                    "sample":                    [subset_name],
-                    "group":                     sepInds[subseti][3],
-                    "class":                     sepInds[subseti][4],
-                    "order":                     [1],
-                    "batch":                     sepInds[subseti][5],
-                    "basefile":                  [os.path.splitext(os.path.basename(filename))[0]],
-                    "extracted_spectra_indices": ["%.2f - %.2f seconds"%(msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time)],
-                    "spotwidth_seconds":         [msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time]
-                })
-            )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    #####################################################################################################
-    ####################################################################################################
-    ##
-    ## MZ correction 
-    ##
-    #
-
     def _calculate_mz_offsets(self, referenceMZs = [165.078978594 + 1.007276], max_mz_deviation_absolute = 0.1, selection_criteria = "mostAbundant"):
         """
         Function to calculate the mz offsets of several reference features in the dataset. 
@@ -1271,7 +1270,6 @@ class DartMSAssay:
                     
         return pd.DataFrame(temp)
 
-
     def _reverse_applied_mz_offset(self, mz, correctby, *args, **kwargs):
         if correctby == "mzDeviationPPM":
             transformFactor = kwargs["transformFactor"]
@@ -1281,7 +1279,6 @@ class DartMSAssay:
             return mz + transformFactor
         else:
             raise RuntimeError("Unknown correctby option '%s' specified. Must be either of ['mzDeviationPPM', 'mzDeviation']"%(correctby))
-
 
     def correct_MZ_shift_across_samples(self, referenceMZs = [165.078978594 + 1.007276], 
             max_mz_deviation_absolute = 0.1, correctby = "mzDeviationPPM", 
@@ -1336,7 +1333,7 @@ class DartMSAssay:
                 transformFactor = transformFactors.loc[sample.split("::")[0]]
 
             if transformFactor is None:
-                print("Error: sample '%s' could not be corrected as no reference MZs were detected in it"%(sample))
+                logging.error("Error: sample '%s' could not be corrected as no reference MZs were detected in it"%(sample))
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     spectrum.original_mz = spectrum.mz
             else:
@@ -1358,7 +1355,7 @@ class DartMSAssay:
                         raise RuntimeError("Unknown mz correction method provided. Must be one of ['mzDeviationPPM', 'mzDeviation']")
 
                 if verbose:
-                    print("    .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"%(samplei+1, len(self.assay.manager.get_sample_names()), sample, transformFactor, correctby))
+                    logging.info("    .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"%(samplei+1, len(self.assay.manager.get_sample_names()), sample, transformFactor, correctby))
 
         tempMod["mode"] = "corrected MZs (by %s)"%(correctby)
         temp_ = pd.concat([temp, tempMod], axis = 0, ignore_index = True).reset_index(drop = False)
@@ -1382,22 +1379,10 @@ class DartMSAssay:
             print(p)
 
 
-
-
-
-
-
-
-
-
     #####################################################################################################
-    ####################################################################################################
-    ##
-    ## Clustering of mz values functionality 
+    ## Clustering of mz values functionality
     ## used for consensus calculations and bracketing
-    ##
     #
-        
     def _crude_clustering_for_mz_list(self, sample, mz, intensity, min_difference_ppm):
         """
         Function for a crude clustering of similar mz values in a spot sample
@@ -1419,8 +1404,6 @@ class DartMSAssay:
         clust = np.concatenate([[0], np.cumsum(diffsPPM > min_difference_ppm)], axis = 0)
 
         return clust[np.argsort(mzOrd)]
-
-
 
     def _reindex_cluster(self, cluster):
         """
@@ -1446,29 +1429,16 @@ class DartMSAssay:
         clustInds, ns = np.unique(cluster, return_counts = True)
 
         use = 0
-        for i, clustInd in enumerate(clustInds):
-            #print(clustInd, ns[i], np.sum(cluster == clustInd), "--->", use) 
+        for i, clustInd in enumerate(clustInds): 
             newClust[cluster == clustInd] = use
             use += 1
 
         return newClust
 
 
-
-
-
-
-
-
-
-
     #####################################################################################################
-    ####################################################################################################
-    ##
     ## Consensus spectra calculation
-    ##
     #
-
     def _describe_mz_cluster(self, mz, intensity, clust):
         """
         Function to calculate summary information about each mz cluster
@@ -1498,7 +1468,6 @@ class DartMSAssay:
         mzDesc[:,3] = mzDesc[:,3] / mzDesc[:,1]
         mzDesc[:,5] = (mzDesc[:,4] - mzDesc[:,2]) / mzDesc[:,3] * 1E6
         return mzDesc
-
 
     def _collapse_mz_cluster(self, mz, original_mz, intensity, time, cluster, intensity_collapse_method = "sum"):
         clusts, ns = np.unique(cluster, return_counts = True)
@@ -1543,7 +1512,6 @@ class DartMSAssay:
 
         ord = np.argsort(mz_)
         return mz_[ord], intensity_[ord], [usedFeatures[i] for i in ord]
-
 
     def calculate_consensus_spectra_for_samples(self, min_difference_ppm = 30, min_signals_per_cluster = 10, minimum_intensity_for_signals = 0, cluster_quality_check_functions = None, aggregation_function = "sum", exportAsFeatureML = True, featureMLlocation = ".", verbose = True):
         """
@@ -1627,7 +1595,7 @@ class DartMSAssay:
             temp["cluster"] = self._reindex_cluster(temp["cluster"][keep])
 
             if len(temp["cluster"]) == 0:
-                print("   .. Error: no signals to be used for sample '%35s'"%(sample))
+                logging.error("   .. Error: no signals to be used for sample '%35s'"%(sample))
                 next
 
             if exportAsFeatureML:
@@ -1670,7 +1638,7 @@ class DartMSAssay:
                     fout.write('  </featureMap>\n')
 
             if verbose:
-                print("   .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"%(samplei + 1, len(self.assay.manager.get_sample_names()), sample, summary_totalSpectra, summary_totalSignals, summary_clusterAfterCrude, summary_clusterAfterFine, summary_clusterAfterQualityFunctions, np.unique(temp["cluster"]).shape[0]))
+                logging.info("   .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"%(samplei + 1, len(self.assay.manager.get_sample_names()), sample, summary_totalSpectra, summary_totalSignals, summary_clusterAfterCrude, summary_clusterAfterFine, summary_clusterAfterQualityFunctions, np.unique(temp["cluster"]).shape[0]))
 
             mzs, intensities, usedFeatures = self._collapse_mz_cluster(temp["mz"], temp["original_mz"], temp["intensity"], temp["time"], temp["cluster"], intensity_collapse_method = aggregation_function)
             
@@ -1689,21 +1657,9 @@ class DartMSAssay:
             msDataObj.to_MSData_object = sampleObjNew
 
 
-
-
-
-
-
-
-
-
     #####################################################################################################
-    ####################################################################################################
-    ##
     ## Bracketing of several samples
-    ##
     #
-
     def bracket_consensus_spectrum_samples(self, max_ppm_deviation = 25, show_diagnostic_plots = False):
         temp = {
             "sample": [],
@@ -1760,7 +1716,7 @@ class DartMSAssay:
         ## Iterative cluster generation with the same algorithm used for calculating the consensus spectra. 
         ## This algorithm is greedy and extends clusters based on their mean mz value and the difference to the next closest feature
         if True:
-            print("   .. clustering with method 2")
+            logging.info("   .. clustering with method 2")
             min_difference_ppm = 100
             min_signals_per_cluster = 2
             temp["cluster"] = self._crude_clustering_for_mz_list(sample, temp["mz"], temp["intensity"], min_difference_ppm = min_difference_ppm)
@@ -1855,7 +1811,6 @@ class DartMSAssay:
                     tempClusterInfo["featureMLInfo"][clust]["sampleHulls"][sample] = [(startRT, np.min(domzs)), (startRT, np.max(domzs)), (endRT, np.max(domzs)), (endRT, np.min(domzs))]
         
         if show_diagnostic_plots:
-            print("   .. generating diagnostic plot")
             temp = None
             for featurei in tqdm.tqdm(range(len(tempClusterInfo["minMZ"])), desc = "bracketing: generating plots"):
                 for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
@@ -1969,24 +1924,10 @@ class DartMSAssay:
         self.features = [e for e in zip(tempClusterInfo["minMZ"], tempClusterInfo["meanMZ"], tempClusterInfo["maxMZ"], tempClusterInfo["featureMLInfo"])]
 
 
-
-
-
-
-
-
-
-
-
-
     #####################################################################################################
-    ####################################################################################################
-    ##
     ## Generate data matrix from bracketing information
-    ## This step also automatically re-integrates the results
-    ##
+    ## This setp also automatically re-integrates the results
     #
-
     def build_data_matrix(self, on = "processedData", originalData_mz_deviation_multiplier_PPM = 0):
         sampleNames = self.assay.manager.get_sample_names()
         sampleNamesToRowI = dict(((sample, i) for i, sample in enumerate(sampleNames)))
@@ -2030,19 +1971,8 @@ class DartMSAssay:
         self.dat = dataMatrix
 
 
-
-
-
-
-
-
-
-
     #####################################################################################################
-    ####################################################################################################
-    ##
     ## Blank subtraction
-    ##
     #
 
     def blank_subtraction(self, blankGroup, toTestGroups, foldCutoff = 2, pvalueCutoff = 0.05, minDetected = 2, plot = False, verbose = True):
@@ -2118,32 +2048,20 @@ class DartMSAssay:
         if verbose:
             for i in sorted(list(set(keeps))):
                 if i < 0: 
-                    print("   .. %d features not found in any of the blank samples, but at least in %d samples of %d groups and thus these features will be used"%(sum([k == i for k in keeps]), minDetected, -i))
+                    logging.info("   .. %d features not found in any of the blank samples, but at least in %d samples of %d groups and thus these features will be used"%(sum([k == i for k in keeps]), minDetected, -i))
                 elif i == 0:
-                    print("   .. %d features found in None of the blank comparisons with higher abundances in the samples. These features will be removed"%(sum([k == i for k in keeps])))
+                    logging.info("   .. %d features found in None of the blank comparisons with higher abundances in the samples. These features will be removed"%(sum([k == i for k in keeps])))
                 else:
-                    print("   .. %d features found in %d of the blank comparisons with higher abundances in the samples and in at least %d samples. These features will be used"%(sum([k == i for k in keeps]), i, minDetected))
-            print("Significance criteria are pval <= pvalueCutoff (%.3f) and fold >= foldCutoff (%.1f) and detected in at least %d samples of a non-Blank group"%(pvalueCutoff, foldCutoff, minDetected))
+                    logging.info("   .. %d features found in %d of the blank comparisons with higher abundances in the samples and in at least %d samples. These features will be used"%(sum([k == i for k in keeps]), i, minDetected))
+            logging.info("Significance criteria are pval <= pvalueCutoff (%.3f) and fold >= foldCutoff (%.1f) and detected in at least %d samples of a non-Blank group"%(pvalueCutoff, foldCutoff, minDetected))
         
         keeps = [i for i in range(len(keeps)) if keeps[i]]
         self.subset_features(keeps)
 
 
-
-
-
-
-
-
-
-
     #####################################################################################################
-    ####################################################################################################
-    ##
-    ## Feature annotaiton
-    ##
+    ## Feature annotation
     #
-
     def annotate_features(self, useGroups = None, plot = False):
 
         if useGroups is None:
@@ -2233,29 +2151,78 @@ class DartMSAssay:
             print(p)
             
             temp["intensityMeansCUT"] = pd.cut(np.log10(temp["intensityMeans"]), 10)
-            print(temp[temp["searchIon"] == "[13C1] (1.0034)"].groupby(["intensityMeansCUT"])[["ratiosRSTD"]].describe().to_markdown())
+            logging.info(temp[temp["searchIon"] == "[13C1] (1.0034)"].groupby(["intensityMeansCUT"])[["ratiosRSTD"]].describe().to_markdown())
 
         self.featureAnnotations = [annotations[i] for i in np.argsort(order)]
 
 
+    #####################################################################################################
+    ## Feature annotation
+    #
+    def restrict_to_high_quality_features__most_n_abundant(self, n_features):
+        logging.info("Restricting data matrix to a %d of the most abundant features"%(n_features))
 
+        abundances = [-1 for i in range(self.dat.shape[1])]
+        for featurei in range(self.dat.shape[1]):
+            vals = self.dat[:, featurei]
+            vals = vals[~np.isnan(vals)]
+            if vals.shape[0] > 0:
+                inte = np.mean(vals)
+                abundances[featurei] = inte / self.dat.shape[0]
 
+        abundances = np.array(abundances)
+        keeps = np.argsort(abundances)[::-1][0:n_features]
 
+        self.subset_features(keep_features_with_indices = keeps)
+        logging.info("   .. using %d features"%(self.dat.shape[1]))
 
+    def restrict_to_high_quality_features__found_in_replicates(self, test_groups, minimum_ratio_found, found_in_type = "anyGroup"):
+        logging.info("Using only features that are present in more than %.1f%% replicates of %s to test"%(minimum_ratio_found * 100, "all groups" if found_in_type.lower() == "allGroups".lower() else "any group"))
 
+        foundIn = [0 for i in range(self.dat.shape[1])]
+        for featurei in range(self.dat.shape[1]):
+            for grp in test_groups:
+                groupInd = [i for i, group in enumerate(self.groups) if group == grp]
+
+                vals = self.dat[groupInd, featurei]
+
+                if np.sum(~np.isnan(vals)) / vals.shape[0] >= minimum_ratio_found:
+                    foundIn[featurei] += 1
+            
+            if found_in_type.lower() == "allGroups".lower() and foundIn[featurei] < len(test_groups):
+                foundIn[featurei] = 0
+        
+        keeps = np.where(np.array(foundIn) > 0)[0]
+
+        self.subset_features(keep_features_with_indices = keeps)
+        logging.info("   .. using %d features"%(self.dat.shape[1]))
+
+    def restrict_to_high_quality_features__minimum_intensity_filter(self, test_groups, minimum_intensity):
+        logging.info("Using only features that have a minimum intensity of %.1f in at least one test-group"%(minimum_intensity))
+
+        use = [False for i in range(self.dat.shape[1])]
+        for featurei in range(self.dat.shape[1]):
+            for grp in test_groups:
+                groupInd = [i for i, group in enumerate(self.groups) if group == grp]
+
+                vals = self.dat[groupInd, featurei]
+
+                if np.sum(~np.isnan(vals)) > 0 and np.mean(vals[~np.isnan(vals)]) > minimum_intensity:
+                    use[featurei] = True
+
+        keeps = np.where(np.array(use))[0] 
+
+        self.subset_features(keep_features_with_indices = keeps)
+        logging.info("   .. using %d features"%(self.dat.shape[1]))
 
 
 
     #####################################################################################################
-    ####################################################################################################
-    ##
-    ## Summary 
-    ##
+    ## Summary
     #
-
     def print_results_overview(self):
-        print("There are %d features (columns) and %d samples (rows) in the dataset"%(self.dat.shape[1], self.dat.shape[0]))
-        print("   .. %d (%.1f%%) features have at least one missing value (np.nan)"%(np.sum(np.isnan(self.dat).any(axis = 0)), np.sum(np.isnan(self.dat).any(axis = 0)) / self.dat.shape[1] * 100))
+        logging.info("There are %d features (columns) and %d samples (rows) in the dataset"%(self.dat.shape[1], self.dat.shape[0]))
+        logging.info("   .. %d (%.1f%%) features have at least one missing value (np.nan)"%(np.sum(np.isnan(self.dat).any(axis = 0)), np.sum(np.isnan(self.dat).any(axis = 0)) / self.dat.shape[1] * 100))
 
         maxGroupSize = max((sum((grp == group for grp in self.groups)) for group in set(self.groups))) 
         maxGroupLabelSize = max((len(group) for group in self.groups))  
@@ -2272,21 +2239,20 @@ class DartMSAssay:
                     total += 1
             a[grp]["total"] = total
 
-        print("Detected   ", end = "")
+        logging.info("Detected   ", end = "")
         for group in sorted(list(set(self.groups))):
-            print("%%%ds  "%(maxGroupLabelSize)%(group), end = "")
-        print("")
+            logging.info("%%%ds  "%(maxGroupLabelSize)%(group), end = "")
+        logging.info("")
 
         for det in range(0, maxGroupSize + 1):
-            print("%%%dd   "%(maxGroupLabelSize)%(det), end = "")
+            logging.info("%%%dd   "%(maxGroupLabelSize)%(det), end = "")
             for group in sorted(list(set(self.groups))):
-                print("%%%ds  "%(maxGroupLabelSize)%(a[group][det] if a[group][det] > 0 else ""), end = "")
-            print("")
-        print("%%%ds   "%(maxGroupLabelSize)%("total"), end = "")
+                logging.info("%%%ds  "%(maxGroupLabelSize)%(a[group][det] if a[group][det] > 0 else ""), end = "")
+            logging.info("")
+        logging.info("%%%ds   "%(maxGroupLabelSize)%("total"), end = "")
         for group in sorted(list(set(self.groups))):
-            print("%%%ds  "%(maxGroupLabelSize)%(a[group]["total"] if a[group]["total"] > 0 else ""), end = "")
-        print("")
-
+            logging.info("%%%ds  "%(maxGroupLabelSize)%(a[group]["total"] if a[group]["total"] > 0 else ""), end = "")
+        logging.info("")
 
     def plot_mz_deviation_overview(self, brackRes, show = None, random_fraction = 1):
         if show is None:
@@ -2398,7 +2364,6 @@ class DartMSAssay:
             )
         print(p)
 
-
     def plot_feature_mz_deviations(self, featureInd, types = None):
         if types is None:
             types = ["consensus", "non-consensus", "raw-onlyFeatures", "raw-allSignals"]
@@ -2483,21 +2448,9 @@ class DartMSAssay:
         print(p)
 
 
-
-
-
-
-
-
-
-
     #####################################################################################################
-    ####################################################################################################
-    ##
     ## RSD overview
-    ##
     #
-
     def plot_RSDs_per_group(self, uGroups = None, include = None, plotType = "points", scales = "free_y"):
 
         if uGroups is None:
@@ -2609,3 +2562,168 @@ class DartMSAssay:
             raise RuntimeError("Unknown plot type. Must be 'histogram' or 'points'")
         
         print(temp.groupby(["group", "type"])["rsd"].describe().to_markdown())
+
+
+    #####################################################################################################
+    ## Convenience functions for a quick, statistical overview
+    #
+
+    def calc_volcano_plots(self, comparisons,
+                       alpha_critical = 0.05, minimum_fold_change = 2,
+                       keep_features = None, remove_features = None):
+
+        ## get data
+        dat, features, featureAnnotations, samples, groups, batches = self.get_data_matrix_and_meta(
+            keep_features = keep_features, remove_features = remove_features,
+            copy = True
+        )
+
+        
+        temp = {"pvalues": [], "folds": [], "trans_pvalues": [], "trans_folds": [], "effectSizes": [], "detectionsGrp1": [], "detectionsGrp2": [], "meanAbundanceGrp1": [], "meanAbundanceGrp2": [], "stdAbundanceGrp1": [], "stdAbundanceGrp2": [], "sigIndicators": [], "tests": [], "feature": []}
+
+        for grp1, grp2 in comparisons:
+
+            testName = "'%s' vs. '%s'"%(grp1, grp2)
+
+            notUsed = 0
+
+            grp1Inds = [i for i, group in enumerate(groups) if group == grp1]
+            grp2Inds = [i for i, group in enumerate(groups) if group == grp2]
+
+            for featurei in tqdm.tqdm(range(dat.shape[1])):
+                valsGrp1 = dat[grp1Inds, featurei]
+                valsGrp2 = dat[grp2Inds, featurei]
+
+                valsGrp1[np.isnan(valsGrp1)] = 0
+                valsGrp2[np.isnan(valsGrp2)] = 0
+
+                if np.all(valsGrp1 == 0) and np.all(valsGrp2 == 0):
+                    notUsed = notUsed + 1
+                else:
+                    if np.all(valsGrp1 == 0) and not np.all(valsGrp2 == 0):
+                        fold = 0
+                    elif not np.all(valsGrp1 == 0) and np.all(valsGrp2 == 0):
+                        fold = np.inf
+                    else:
+                        fold = np.mean(valsGrp1) / np.mean(valsGrp2)
+
+                    pval = scipy.stats.ttest_ind(valsGrp1, valsGrp2, equal_var = False, alternative = 'two-sided', trim = 0)[1]
+                    cohen = cohend(valsGrp1, valsGrp2)
+                    meanAbundance = np.mean(np.concatenate((valsGrp1, valsGrp2), axis = 0))
+                    sigInd = "sig" if pval <= alpha_critical and (fold >= minimum_fold_change or fold <= 1./minimum_fold_change) else "-"
+
+                    temp["pvalues"].append(pval)
+                    temp["folds"].append(fold)
+                    temp["trans_pvalues"].append(-np.log10(pval))
+                    temp["trans_folds"].append(np.log2(fold))
+                    temp["effectSizes"].append(cohen)
+                    temp["detectionsGrp1"].append(np.sum(valsGrp1 > 0))
+                    temp["detectionsGrp2"].append(np.sum(valsGrp2 > 0))
+                    temp["meanAbundanceGrp1"].append(np.mean(valsGrp1))
+                    temp["meanAbundanceGrp2"].append(np.mean(valsGrp2))
+                    temp["stdAbundanceGrp1"].append(np.std(valsGrp1))
+                    temp["stdAbundanceGrp2"].append(np.std(valsGrp2))
+                    temp["sigIndicators"].append(sigInd)
+                    temp["tests"].append(testName)
+                    temp["feature"].append("%d mz %8.4f"%(featurei, self.features[featurei][1]))
+
+        temp = pd.DataFrame(temp)
+        p = (p9.ggplot(data = temp, mapping = p9.aes(
+                x = "trans_folds", y = "trans_pvalues", colour = "sigIndicators"
+            ))
+            + p9.geom_hline(yintercept = -np.log10(alpha_critical), alpha = 0.3, colour = "slategrey")
+            + p9.geom_vline(xintercept = [np.log2(minimum_fold_change), np.log2(1/minimum_fold_change)], alpha = 0.3, colour = "slategrey")
+            
+            + p9.geom_point(alpha = 0.3)
+            + p9.facet_wrap("~tests")
+
+            + p9.ggtitle("Volcano plots")
+        )
+        
+        return p, temp
+
+    def calc_2D_Embedding(self, keep_features = None, remove_features = None,
+                       keep_samples = None, remove_samples = None,
+                       keep_groups = None, remove_groups = None,
+                       keep_batches = None, remove_batches = None,
+                       imputation = "zero", scaling = "standard", embedding = "pca"
+    ):
+
+        ## get data
+        dat, features, featureAnnotations, samples, groups, batches = self.get_data_matrix_and_meta(
+            keep_features = keep_features, remove_features = remove_features,
+            keep_samples = keep_samples, remove_samples = remove_samples, 
+            keep_groups = keep_groups, remove_groups = remove_groups,
+            keep_batches = keep_batches, remove_batches = remove_batches, 
+            copy = True
+        )
+        
+        ## missing values imputation
+        if imputation.lower() == "zero".lower():
+            datImp = np.nan_to_num(dat, nan = 0, copy = True)
+
+        elif imputation.lower() == "omitNA".lower():
+            keep = ~np.isnan(dat).any(axis = 0)
+            datImp = dat[:, keep]
+
+        else:
+            raise RuntimeError("Unknown imputation method specified, must be either of ['zero', 'omitNA']")
+        
+
+        ## scaling
+        if scaling is None or scaling == "" or scaling.lower() == "None".lower():
+            datImpSca = datImp
+
+        elif scaling.lower() == "standard".lower():
+            from sklearn.preprocessing import StandardScaler
+            scaler = StandardScaler()
+            datImpSca = scaler.fit_transform(datImp)
+
+        else:
+            raise RuntimeError("Unknown scaling method specified, must be either of [None, 'standard']")
+
+        ## embedding
+        if embedding.lower() == "pca".lower():
+            from sklearn.decomposition import PCA
+            pca = PCA(n_components=2)
+            pca = pca.fit(datImpSca)
+            scores = pca.transform(datImpSca)
+            comp1 = scores[:,0]
+            comp2 = scores[:,1]
+            comp1_title = "PC1 (%.1f %% covered variance)"%(pca.explained_variance_ratio_[0] * 100.)
+            comp2_title = "PC2 (%.1f %% covered variance)"%(pca.explained_variance_ratio_[1] * 100.)
+
+        elif embedding.lower() == "lda".lower(): 
+            from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+            lda = LinearDiscriminantAnalysis(n_components=2)
+            scores = lda.fit(datImp, groups).transform(datImp)
+            comp1 = scores[:,0]
+            comp2 = scores[:,1]
+            comp1_title = "Component 1"
+            comp2_title = "Component 2"
+
+        elif embedding.lower() == "umap".lower():
+            import umap
+            reducer = umap.UMAP()
+            scores = reducer.fit_transform(datImp)
+            comp1 = scores[:,0]
+            comp2 = scores[:,1]
+            comp1_title = "Component 1"
+            comp2_title = "Component 2"
+
+        else:
+            raise RuntimeError("Unknown embedding method specified, must be either of ['pca', 'lda', 'umap']")
+
+        ## plot 
+        temp = {"pc1": comp1, "pc2": comp2, "file": samples, "group": groups, "batch": batches}
+        temp = pd.DataFrame(temp)
+        temp['batch'] = temp['batch'].astype(object)
+        p = (p9.ggplot(data = temp, mapping = p9.aes(
+                x = "pc1", y = "pc2", colour = "group", group = "group", label = "file"
+            ))
+            + p9.stat_ellipse(data = temp, alpha = 0.5, level = 0.95)
+            + p9.geom_point(alpha = 0.8)
+            + p9.xlab(comp2_title) + p9.ylab(comp2_title)
+            + p9.ggtitle("%s with %s imputation and %s scaling"%(embedding, imputation, scaling))
+        )
+        return p, temp
