@@ -43,6 +43,7 @@ import dill
 from copy import deepcopy
 import logging
 import datetime
+import csv
 
 
 
@@ -459,6 +460,36 @@ class DartMSAssay:
 
         return self.dat, self.features, self.featureAnnotations, self.samples, self.groups, self.batches
 
+    def export_data_matrix(self, to_file): 
+        with open(to_file, "w") as fout:
+            tsvWriter = csv.writer(fout, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            headers = ["mzmean", "mzmin", "mzmax", "annotations"] + self.samples
+            tsvWriter.writerow(headers)
+
+            for rowi in range(self.dat.shape[1]):
+                row = [str(self.features[rowi][1]), str(self.features[rowi][0]), str(self.features[rowi][2]), str(self.featureAnnotations[rowi])]
+                row.extend((str(f) if not np.isnan(f) else "" for f in self.dat[:, rowi]))
+                tsvWriter.writerow(row)
+
+    def export_for_R(self, to_file):
+        self.export_data_matrix(to_file + ".tsv")
+        print("##")
+        print("## Import data matrix")
+        print("## ")
+        print("## The following code imports the generated data matrix.")
+        print("## Please note that when the file is moved or R is executed in a different")
+        print("##      working directory, the path to the tsv file needs to be adapted accordingly")
+        print("##")
+        print("data = read.table('%s', header = TRUE, sep = '\\t', stringsAsFactors = FALSE)"%(to_file + ".tsv"))
+        print("metaData = data[, 1:4]")
+        print("data = data[,-(1:4)]")
+        print("samples = c(%s)"%(", ".join("'%s'"%sample for sample in self.samples)))
+        print("groups = c(%s)"%(", ".join("'%s'"%group for group in self.groups)))
+        print("batches = c(%s)"%(", ".join("'%s'"%batche for batche in self.batches)))
+        print("")
+        print("print(sprintf('Data imported, there are %d features and %d samples in the data matrix', nrow(data), ncol(data)))")
+        print("")
+        
 
     #####################################################################################################
     ## Processing history
