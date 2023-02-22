@@ -485,7 +485,7 @@ class DartMSAssay:
         print("data = data[,-(1:4)]")
         print("samples = c(%s)"%(", ".join("'%s'"%sample for sample in self.samples)))
         print("groups = c(%s)"%(", ".join("'%s'"%group for group in self.groups)))
-        print("batches = c(%s)"%(", ".join("'%s'"%batche for batche in self.batches)))
+        print("batches = c(%s)"%(", ".join("%s"%batche for batche in self.batches)))
         print("")
         print("print(sprintf('Data imported, there are %d features and %d samples in the data matrix', nrow(data), ncol(data)))")
         print("")
