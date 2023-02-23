@@ -2695,7 +2695,7 @@ class DartMSAssay:
         )
 
         
-        temp = {"pvalues": [], "folds": [], "trans_pvalues": [], "trans_folds": [], "effectSizes": [], "detectionsGrp1": [], "detectionsGrp2": [], "meanAbundanceGrp1": [], "meanAbundanceGrp2": [], "stdAbundanceGrp1": [], "stdAbundanceGrp2": [], "sigIndicators": [], "tests": [], "feature": []}
+        temp = {}
 
         for grp1, grp2 in comparisons:
 
@@ -2728,20 +2728,25 @@ class DartMSAssay:
                     meanAbundance = np.mean(np.concatenate((valsGrp1, valsGrp2), axis = 0))
                     sigInd = "sig" if pval <= alpha_critical and (fold >= minimum_fold_change or fold <= 1./minimum_fold_change) else "-"
 
-                    temp["pvalues"].append(pval)
-                    temp["folds"].append(fold)
-                    temp["trans_pvalues"].append(-np.log10(pval))
-                    temp["trans_folds"].append(np.log2(fold))
-                    temp["effectSizes"].append(cohen)
-                    temp["detectionsGrp1"].append(np.sum(valsGrp1 > 0))
-                    temp["detectionsGrp2"].append(np.sum(valsGrp2 > 0))
-                    temp["meanAbundanceGrp1"].append(np.mean(valsGrp1))
-                    temp["meanAbundanceGrp2"].append(np.mean(valsGrp2))
-                    temp["stdAbundanceGrp1"].append(np.std(valsGrp1))
-                    temp["stdAbundanceGrp2"].append(np.std(valsGrp2))
-                    temp["sigIndicators"].append(sigInd)
-                    temp["tests"].append(testName)
-                    temp["feature"].append("%d mz %8.4f"%(featurei, self.features[featurei][1]))
+                    temp = _add_row_to_pandas_creation_dictionary(temp, 
+                        pvalues           = pval, 
+                        folds             = fold, 
+                        trans_pvalues     = -np.log10(pval), 
+                        trans_folds       = np.log2(fold), 
+                        effectSizes       = cohen, 
+                        detectionsGrp1    = np.sum(valsGrp1 > 0), 
+                        detectionsGrp2    = np.sum(valsGrp2 > 0), 
+                        meanAbundanceGrp1 = np.mean(valsGrp1), 
+                        meanAbundanceGrp2 = np.mean(valsGrp2), 
+                        stdAbundanceGrp1  = np.std(valsGrp1), 
+                        stdAbundanceGrp2  = np.std(valsGrp2), 
+                        sigIndicators     = sigInd, 
+                        tests             = testName, 
+                        feature           = "%d mz %8.4f"%(featurei, self.features[featurei][1]), 
+                        featurei          = featurei, 
+                    )
+
+                    
 
         temp = pd.DataFrame(temp)
         p = (p9.ggplot(data = temp, mapping = p9.aes(
