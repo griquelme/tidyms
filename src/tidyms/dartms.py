@@ -2200,7 +2200,8 @@ class DartMSAssay:
                             annotations[featurei].append({
                                 "otherType": searchIon, 
                                 "otherRatios": ratios, 
-                                "otherMZs": searchMZ
+                                "otherMZs": searchMZ,
+                                "mzDeviationPPM": (searchMZ - mz) / mz * 1E6
                             })
 
                     temp = _add_row_to_pandas_creation_dictionary(temp,
