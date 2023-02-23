@@ -365,7 +365,7 @@ class DartMSAssay:
 
         self.processingHistory = []
 
-    def clodeDartMSAssay(self):
+    def clone_DartMSAssay(self):
         _c = deepcopy(self)
         _c.add_data_processing_step("Clone", "This object is a clone.")
 
