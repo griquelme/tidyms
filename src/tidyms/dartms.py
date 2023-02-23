@@ -2754,6 +2754,25 @@ class DartMSAssay:
         
         return p, temp
 
+    def plot_feature(self, feature_index):
+        temp = pd.DataFrame({
+            "abundance": self.dat[:,feature_index],
+            "sample": self.samples,
+            "group": self.groups,
+            "batche": self.batches
+        })
+
+        p = (p9.ggplot(data = temp, mapping = p9.aes(
+                x = "group", y = "abundance", colour = "group"
+            ))
+            + p9.geom_boxplot()
+            + p9.geom_jitter()
+
+            + p9.ggtitle("Feature %d (meanmz: %.5f)"%(feature_index, self.features[feature_index][1]))
+        )
+
+        return p
+
     def calc_2D_Embedding(self, keep_features = None, remove_features = None,
                        keep_samples = None, remove_samples = None,
                        keep_groups = None, remove_groups = None,
