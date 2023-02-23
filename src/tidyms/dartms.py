@@ -1532,7 +1532,7 @@ class DartMSAssay:
         mzDesc[:,5] = (mzDesc[:,4] - mzDesc[:,2]) / mzDesc[:,3] * 1E6
         return mzDesc
 
-    def _collapse_mz_cluster(self, mz, original_mz, intensity, time, cluster, intensity_collapse_method = "sum"):
+    def _collapse_mz_cluster(self, mz, original_mz, intensity, time, cluster, intensity_collapse_method = "average"):
         clusts, ns = np.unique(cluster, return_counts = True)
         if -1 in clusts:
             clusts = clusts[1:]
@@ -1564,19 +1564,19 @@ class DartMSAssay:
             usedFeatures[j][toPut, 3] = original_mz[i]
         
         mz_ = mz_ / intensity_
-        if intensity_collapse_method == "sum":
-            pass
-        elif intensity_collapse_method == "average":
+        if intensity_collapse_method.lower() == "average".lower():
             intensity_ = intensity_ / ns
-        elif intensity_collapse_method == "max":
+        elif intensity_collapse_method.lower() == "sum".lower():
+            pass
+        elif intensity_collapse_method.lower() == "max".lower():
             intensity_ = np.max(intensity_)
         else:
-            raise RuntimeError("Unknown option for parameter intensity_collapse_method, allowed are 'sum' and 'average'")
+            raise RuntimeError("Unknown option for parameter intensity_collapse_method, must be either of ['average', 'sum', 'max']")
 
         ord = np.argsort(mz_)
         return mz_[ord], intensity_[ord], [usedFeatures[i] for i in ord]
 
-    def calculate_consensus_spectra_for_samples(self, min_difference_ppm = 30, min_signals_per_cluster = 10, minimum_intensity_for_signals = 0, cluster_quality_check_functions = None, aggregation_function = "sum", exportAsFeatureML = True, featureMLlocation = ".", verbose = True):
+    def calculate_consensus_spectra_for_samples(self, min_difference_ppm = 30, min_signals_per_cluster = 10, minimum_intensity_for_signals = 0, cluster_quality_check_functions = None, aggregation_function = "average", exportAsFeatureML = True, featureMLlocation = ".", verbose = True):
         """
         Function to collapse several spectra into a single consensus spectrum per spot
 
@@ -2000,7 +2000,7 @@ class DartMSAssay:
     ## Generate data matrix from bracketing information
     ## This setp also automatically re-integrates the results
     #
-    def build_data_matrix(self, on = "processedData", originalData_mz_deviation_multiplier_PPM = 0):
+    def build_data_matrix(self, on = "processedData", originalData_mz_deviation_multiplier_PPM = 0, aggregation_fun = "average"):
         self.add_data_processing_step("build data matrix", "build data matrix", {"on": on, "originalData_mz_deviation_multiplier_PPM": originalData_mz_deviation_multiplier_PPM})
         sampleNames = self.assay.manager.get_sample_names()
         sampleNamesToRowI = dict(((sample, i) for i, sample in enumerate(sampleNames)))
@@ -2020,16 +2020,25 @@ class DartMSAssay:
                         dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
 
                 elif on.lower() == "originalData".lower():
-                    s = 0
+                    s = np.array(())
                     for oSpectrumi, oSpectrum in msDataObj.original_MSData_object.get_spectra_iterator():
                         _mzmin, _mzmean, _mzmax = oSpectrum.reverseMZ(mzmin), oSpectrum.reverseMZ(mzmean), oSpectrum.reverseMZ(mzmax)
                         _mzmin, _mzmax = _mzmin * (1. - originalData_mz_deviation_multiplier_PPM / 1E6), _mzmax * (1. + originalData_mz_deviation_multiplier_PPM / 1E6)
 
                         use = np.logical_and(oSpectrum.original_mz >= _mzmin, oSpectrum.original_mz <= _mzmax)
                         if np.sum(use) > 0:
-                            s += np.sum(oSpectrum.spint[use])
+                            s = np.concatenate((s, oSpectrum.spint[use]))
 
-                    if s > 0:
+                    if s.shape[0] > 0:
+
+                        if aggregation_fun.lower() == "average".lower():
+                            s = np.average(s)
+                        elif aggregation_fun.lower() == "sum".lower():
+                            s = np.sum(s)
+                        elif aggregation_fun.lower() == "max".lower():
+                            s = np.max(s)
+                        else:
+                            raise RuntimeError("Unknown aggregation function provided, must be either of ['average', 'sum', 'max']")
                         dataMatrix[sampleNamesToRowI[sample], braci] = s
                     else:
                         dataMatrix[sampleNamesToRowI[sample], braci] = np.nan                    
