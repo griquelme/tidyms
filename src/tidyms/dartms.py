@@ -34,7 +34,6 @@ import scipy
 import tqdm
 import natsort
 import os
-import pickle
 import datetime
 import functools
 import bs4
@@ -2087,6 +2086,9 @@ class DartMSAssay:
                     pass
 
                 elif notInBlanks:
+                    assert keeps[featurei] <= 0
+                    keeps[featurei] -= 1
+
                     temp = _add_row_to_pandas_creation_dictionary(temp,
                         pvalues       = -np.inf,
                         folds         = np.inf,
@@ -2094,12 +2096,14 @@ class DartMSAssay:
                         comparisons   = "'%s' vs '%s'"%(toTestGroup, blankGroup)
                     )
 
-                    assert keeps[featurei] <= 0
-                    keeps[featurei] -= 1
-
                 else:
                     valsGroup = valsGroup[~np.isnan(valsGroup)]
-                    pval = scipy.stats.ttest_ind(valsBlanks, valsGroup, equal_var = False, alternative = 'two-sided', trim = 0)[1]
+                    if valsBlanks.shape[0] > 1:
+                        pval = scipy.stats.ttest_ind(valsGroup, valsBlanks, equal_var = False, alternative = 'greater', trim = 0)[1]
+                    elif valsBlanks.shape[0] == 1:
+                        pval = scipy.stats.ttest_1samp(valsGroup, valsBlanks[0], alternative = 'greater')[1]
+                    else:
+                        raise RuntimeError("No blank values avalable, implementation is incorrect")
                     fold = np.mean(valsGroup) / np.mean(valsBlanks)
                     sigInd = pval <= pvalueCutoff and fold >= foldCutoff
 
@@ -2119,9 +2123,9 @@ class DartMSAssay:
             p = (p9.ggplot(data = temp, mapping = p9.aes(
                     x = "folds", y = "pvalues", colour = "sigIndicators"
                 ))
-                + p9.geom_point(alpha = 0.8)
+                + p9.geom_point(alpha = 0.3)
                 + p9.geom_hline(yintercept = -np.log10(0.05), alpha = 0.3, colour = "black")
-                + p9.geom_vline(xintercept = [np.log2(foldCutoff), np.log2(1/foldCutoff)], alpha = 0.3, colour = "black")
+                + p9.geom_vline(xintercept = [np.log2(foldCutoff)], alpha = 0.3, colour = "black")
                 + p9.facet_wrap("comparisons")
                 + p9.theme_minimal()
                 #+ p9.theme(legend_position = "bottom")
@@ -2140,7 +2144,7 @@ class DartMSAssay:
                     logging.info("    .. %d features found in %d of the blank comparisons with higher abundances in the samples and in at least %d samples. These features will be used"%(sum([k == i for k in keeps]), i, minDetected))
             logging.info(" Significance criteria are pval <= pvalueCutoff (%.3f) and fold >= foldCutoff (%.1f) and detected in at least %d samples of a non-Blank group"%(pvalueCutoff, foldCutoff, minDetected))
         
-        keeps = [i for i in range(len(keeps)) if keeps[i]]
+        keeps = [i for i in range(len(keeps)) if keeps[i] != 0]
         self.subset_features(keeps)
 
         if verbose:
