@@ -97,10 +97,10 @@ def _find_feature_by_mz(features, mz, max_deviation_ppm=20):
     mzmin = mz * (1. - max_deviation_ppm / 1E6)
     ind = np.argmin(np.abs(features[:, 1] - mz))
 
-    if features[ind, 1] >= mzmin and features[ind, 1] <= mzmax:
-        return ind
+    if max_deviation_ppm is None or (features[ind, 1] >= mzmin and features[ind, 1] <= mzmax):
+        return ind, (features[ind, 1] - mz) / mz * 1E6
     else:
-        return None
+        return None, None
 
 
 def cohend(d1, d2):
@@ -441,13 +441,15 @@ class DartMSAssay:
 
     def export_data_matrix(self, to_file):
         with open(to_file, "w") as fout:
-            tsvWriter = csv.writer(fout, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            tsvWriter = csv.writer(fout, delimiter=separator, quotechar=quotechar, quoting=csv.QUOTE_MINIMAL)
             headers = ["mzmean", "mzmin", "mzmax", "annotations"] + self.samples
+            headers = [h.replace(separator, "--SEP--") for h in headers]
             tsvWriter.writerow(headers)
 
             for rowi in range(self.dat.shape[1]):
                 row = [str(self.features[rowi][1]), str(self.features[rowi][0]), str(self.features[rowi][2]), str(self.featureAnnotations[rowi])]
                 row.extend((str(f) if not np.isnan(f) else "" for f in self.dat[:, rowi]))
+                row = [r.replace(separator, "--SEP--") for r in row]
                 tsvWriter.writerow(row)
 
     def export_for_R(self, to_file):
@@ -721,6 +723,7 @@ class DartMSAssay:
                                                               sample=sample,
                                                               file=sample.split("::")[0],
                                                               group=sample_metadata.loc[sample, "group"],
+                                                              batch=sample_metadata.loc[sample, "batch"],
                                                               time=spectrum.time - msDataObj.get_spectrum(0).time,
                                                               kSpectrum=k,
                                                               totalIntensity=np.sum(spectrum.spint)
