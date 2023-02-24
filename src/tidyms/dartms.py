@@ -82,6 +82,16 @@ def _average_and_std_weighted(values, weights):
 
 
 def _relative_standard_deviation(vals, weights=None):
+    """
+    Calculated the relative standard deviation for vals, optionally using the weights
+
+    Args:
+        vals (list of numbers or numpy numeric array): the values of which the RSD is seeked
+        weights (list of numbers or numpy numeric array, optional): weights of the individual values. Defaults to None, in which case an equal weight will be used for each value.
+
+    Returns:
+        numeric: calculated relative standard deviation
+    """
     if weights == None:
         weights = np.ones((vals.shape[0]))
     avg, std = _average_and_std_weighted(vals, weights)
@@ -89,10 +99,31 @@ def _relative_standard_deviation(vals, weights=None):
 
 
 def _mz_deviationPPM_between(a, b):
+    """
+    Calculate the difference between the two mz values a and b in ppm relative to b
+
+    Args:
+        a (numeric): the first mz value
+        b (numeric): the second mz value
+
+    Returns:
+        numeric: the difference in ppm
+    """
     return (a - b) / b * 1E6
 
 
-def _find_feature_by_mz(features, mz, max_deviation_ppm=20):
+def _find_feature_by_mz(features, mz, max_deviation_ppm=None):
+    """
+    Search for the feature (in feature) that is closest to a given mz value (mz) and has a maximum deviation of (max_deviation_ppm)
+
+    Args:
+        features (list of numerics or numpy array of numeric values): all features to be used for the search
+        mz (numeric): the mz value to be searched for
+        max_deviation_ppm (int, optional): the maximum allowed deviation between the searched mz and potential hits. Defaults to None, which does not restrict the difference.
+
+    Returns:
+        index, mz_deviation: the index of the found feature closest to the reference mz value and the deviation in ppm
+    """
     mzmax = mz * (1. + max_deviation_ppm / 1E6)
     mzmin = mz * (1. - max_deviation_ppm / 1E6)
     ind = np.argmin(np.abs(features[:, 1] - mz))
@@ -104,6 +135,16 @@ def _find_feature_by_mz(features, mz, max_deviation_ppm=20):
 
 
 def cohend(d1, d2):
+    """
+    Calculate cohen's d value for effect size
+
+    Args:
+        d1 (list or numpy array of numerics): numeric values of group 1
+        d2 (list or numpy array of numerics): numeric values of group 2
+
+    Returns:
+        numeric: cohen's d value for the two groups
+    """
     # copied from https://machinelearningmastery.com/effect-size-measures-in-python/ and modified
     # calculate the size of samples
     n1, n2 = d1.shape[0], d2.shape[0]
@@ -125,6 +166,17 @@ def cohend(d1, d2):
 #
 
 def import_filter_mz_range(msData, min_mz, max_mz):
+    """
+    Filter mz values within a certain range before importing the mzML data
+
+    Args:
+        msData (MSData object of tidyms): the loaded mzML raw data to be filtered
+        min_mz (numeric): the lower mz value to be used
+        max_mz (numeric): the higher mz value to be used
+
+    Returns:
+        MSData: the altered or changed MSData object
+    """
     for spectrumi, spectrum in msData.get_spectra_iterator():
         use = np.logical_and(spectrum.mz >= min_mz, spectrum.mz <= max_mz)
 
@@ -135,6 +187,16 @@ def import_filter_mz_range(msData, min_mz, max_mz):
 
 
 def import_filter_artifact_removal(msData, artifacts):
+    """
+    Filter artefacts before importing the mzML data
+
+    Args:
+        msData (MSData object of tidyms): the loaded mzML raw data to be filtered
+        artifacts (list of (mz_min and mz_max) tuples): a variable number of artifacts to be removed from the dataset. Each eantry must be a tuple of a minimum and maximum mz value describing the artifacts
+
+    Returns:
+        MSData: the altered or changed MSData object
+    """
     for spectrumi, spectrum in msData.get_spectra_iterator():
         use = spectrum.mz >= 0
 
@@ -148,6 +210,16 @@ def import_filter_artifact_removal(msData, artifacts):
 
 
 def import_filter_remove_signals_below_intensity(msData, minimum_signal_intensity):
+    """
+    Filter signals below a minimum intensity threshold
+
+    Args:
+        msData (MSData object of tidyms): the loaded mzML raw data to be filtered
+        minimum_signal_intensity (numeric): the minimum intensity value for signals to be used
+
+    Returns:
+        MSData: the altered or changed MSData object
+    """
     for spectrumi, spectrum in msData.get_spectra_iterator():
         use = spectrum.spint >= minimum_signal_intensity
 
@@ -165,6 +237,24 @@ def import_filter_remove_signals_below_intensity(msData, minimum_signal_intensit
 #
 
 def cluster_quality_check_function__peak_form(sample, msDataObj, spectrumIDs, time, mz, intensity, cluster, min_correlation_for_cutoff=0.5):
+    """
+    A function to check the detected feature clusters for certain attributes. 
+    This particular function checks if the distribution form somehow resembles a spot (approximated by a normal distribution). 
+    Any cluster not resembling such a form will be removed in a subsequent step (by setting the cluster ids to -1)
+
+    Args:
+        sample (string): the name of the sample
+        msDataObj (MSData object of tidyms): the MSData object in which this feature was detected
+        spectrumIDs (list of ids): the spectrum id of each found signal in a cluster
+        time (list of numeric): the chronogram time of each found signal in a cluster
+        mz (list of numeric): the mz value of each found signal in a cluster
+        intensity (list of numeric): the intensity value of each found signal in a cluster
+        cluster (list of integer): the cluster ids each signal was assigned to
+        min_correlation_for_cutoff (float, optional): the minimum Pearson correlation cutoff for the spot shape form comparison [-1 to 1]. Defaults to 0.5.
+
+    Returns:
+        list of integer: the new cluster ids each signal is assigned to. clusters to be removed are set to -1
+    """
     removed = 0
     clustInds = np.unique(cluster)
     refTimes = []
@@ -205,6 +295,23 @@ def cluster_quality_check_function__peak_form(sample, msDataObj, spectrumIDs, ti
 
 
 def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectrumIDs, time, mz, intensity, cluster, max_weighted_ppm_deviation=15):
+    """
+    A function to check the detected feature clusters for certain attributes. 
+    This particular function checks if the clusters are within a certain ppm devaition. Any cluster exceeding this deviation will be removed in a subsequent step (by setting the cluster ids to -1)
+
+    Args:
+        sample (string): the name of the sample
+        msDataObj (MSData object of tidyms): the MSData object in which this feature was detected
+        spectrumIDs (list of ids): the spectrum id of each found signal in a cluster
+        time (list of numeric): the chronogram time of each found signal in a cluster
+        mz (list of numeric): the mz value of each found signal in a cluster
+        intensity (list of numeric): the intensity value of each found signal in a cluster
+        cluster (list of integer): the cluster ids each signal was assigned to
+        max_weighted_ppm_deviation (float, optional): the maximum allowed ppm deviation for all signals within a cluster.
+
+    Returns:
+        list of integer: the new cluster ids each signal is assigned to. clusters to be removed are set to -1
+    """
     removed = 0
     clustInds = np.unique(cluster)
 
@@ -236,6 +343,26 @@ global _refine_clustering_for_mz_list
 
 @numba.jit(nopython=True)
 def _refine_clustering_for_mz_list(sample, mzs, intensities, spectrumID, clusts, expected_mz_deviation_ppm=15, closest_signal_max_deviation_ppm=20, max_mz_deviation_ppm=None):
+    """
+    Function to refine a crude clustering of signals based on their mz values. This step is performed separately for each crude cluster (i.e., all signals put into the same cluster based on their cluster ids)
+    The idea of the refinement process resembles a hierarichal clustering. 
+    For each cluster, all signals will be treated considered in an iteration. Then, those two signals with the closest mz values are put into a new cluster and new signals not assigned to new clusters are added. 
+    However, once a new mz value with a too high mz deviation were to be added, the adding step is aborted, the previous new cluster is closed and a new cluster is started. This process is repeated until
+    no further signals remain in for the currently inspected cluster
+
+    Args:
+        sample (string): the name of the sample to be processed
+        mzs (list of numeric): the mz values of the signals or features
+        intensities (list of numeric): the intensity values of the signals or features
+        spectrumID (list of ids): the spectrum ids of the signals or features
+        clusts (list of ids): the cluster ids of the signals or features to which they were assigned
+        expected_mz_deviation_ppm (int, optional): the expected mz deviation. Any cluster below this value will not be split. Defaults to 15.
+        closest_signal_max_deviation_ppm (int, optional): the search window for adjacent signals. Defaults to 20.
+        max_mz_deviation_ppm (_type_, optional): the maximum mz devation above which a cluster is automatically split into subcluster. Defaults to None.
+
+    Returns:
+        list of ids: the new cluster ids for each signal or feature
+    """
     clustInds = np.unique(clusts)
     maxClust = np.max(clusts)
     newClusts = np.copy(clusts)
@@ -327,11 +454,20 @@ def _refine_clustering_for_mz_list(sample, mzs, intensities, spectrumID, clusts,
 #
 
 class DartMSAssay:
+    """
+    An object inspired by tidyms' Assay class that encapsulates a DARTMS experiment. 
+    """
 
     #####################################################################################################
     # Init
     #
     def __init__(self, name="Generic"):
+        """
+        Constructor for a new DartMSAssay object
+
+        Args:
+            name (str, optional): name of the experiment. Defaults to "Generic".
+        """
         self.name = name
 
         self.assay = None
@@ -345,6 +481,12 @@ class DartMSAssay:
         self.processingHistory = []
 
     def clone_DartMSAssay(self):
+        """
+        Clones the DartMSAssay object (deepcopy)
+
+        Returns:
+            DartMSAssay: the cloned, new DartMSAssay object
+        """
         _c = deepcopy(self)
         _c.add_data_processing_step("Clone", "This object is a clone.")
 
@@ -353,7 +495,18 @@ class DartMSAssay:
     #####################################################################################################
     # Data handling
     #
-    def set_data_matrix(self, dat, features, featureAnnotations, samples, groups, batches):
+    def set_data(self, dat, features, featureAnnotations, samples, groups, batches):
+        """
+        Sets the data for a DartMSAssay object
+
+        Args:
+            dat (numpy.ndarray of [n, m]): the feature table of the experiment
+            features (list of mz values): the features' information (mz values)
+            featureAnnotations (list of dictionaries): the features' derived information (sister ions, etc.)
+            samples (list of string): the names of the samples in the experiment
+            groups (list of str): the group names the samples in the experiment are assigned to
+            batches (list of int): the batch ids the samples in the experiment are assigned to
+        """
         self.dat = dat
         self.features = features
         self.featureAnnotations = featureAnnotations
@@ -362,6 +515,27 @@ class DartMSAssay:
         self.batches = batches
 
     def get_data_matrix_and_meta(self, keep_features=None, remove_features=None, keep_samples=None, remove_samples=None, keep_groups=None, remove_groups=None, keep_batches=None, remove_batches=None, copy=False):
+        """
+        Returns the data matrix as well as feature and samples informatoin available in the DartMSAssay object. 
+        Features and samples/groups/batches can be included or excluded before the export. 
+
+        Args:
+            keep_features (list of indices, optional): features to be included in the export. To export all, the parameter must be set to None. Defaults to None.
+            remove_features (list of indices, optional): features to be removed before exporting. To remove none, the parameter must be set to None. Defaults to None.
+            keep_samples (list of strings, optional): samples to be included in the export. To export all, the parameter must be set to None. Defaults to None.
+            remove_samples (list of strings, optional): samples to be removed before exporting. To remove none, the parameter must be set to None. Defaults to None.
+            keep_groups (list of strings, optional): groups to be included in the export. To export all, the parameter must be set to None. Defaults to None.
+            remove_groups (list of strings, optional): groups to be removed before exporting. To remove none, the parameter must be set to None. Defaults to None.
+            keep_batches (list of strings, optional): batches to be inlcuded in the export. To export all, the parameter must be set to None. Defaults to None.
+            remove_batches (list of integers, optional): batches to be removed before exporting. To remove none, the parameter must be set to None. Defaults to None.
+            copy (bool, optional): indicator if the object should be cloned before export. This will be done automatically if any inclusion or restriction is provided. Defaults to False.
+
+        Raises:
+            RuntimeError: an exception is raised when the necessary data is not available
+
+        Returns:
+            (numpy data matrix [samples x features], list of feature properties, list of feature annotaitons, list of sample names, list of assigned group names, list of assigned batches): data matrix and meta-data
+        """
         if self.dat is None:
             raise RuntimeError("Data matrix not set/generated")
 
@@ -439,7 +613,13 @@ class DartMSAssay:
 
         return self.dat, self.features, self.featureAnnotations, self.samples, self.groups, self.batches
 
-    def export_data_matrix(self, to_file):
+    def export_data_matrix(self, to_file, separator="\t", quotechar='"'):
+        """
+        Export the data matrix to a tsv file
+
+        Args:
+            to_file (string): the file to save the results to
+        """
         with open(to_file, "w") as fout:
             tsvWriter = csv.writer(fout, delimiter=separator, quotechar=quotechar, quoting=csv.QUOTE_MINIMAL)
             headers = ["mzmean", "mzmin", "mzmax", "annotations"] + self.samples
@@ -453,7 +633,13 @@ class DartMSAssay:
                 tsvWriter.writerow(row)
 
     def export_for_R(self, to_file):
-        self.export_data_matrix(to_file + ".tsv")
+        """
+        Export the results to a tsv file and generate R code to import it
+
+        Args:
+            to_file (string): the location of the file (without extension, '.tsv' will be added automatically)
+        """
+        self.export_data_matrix(to_file + ".tsv", separator="\t", quotechar='"')
         print("##")
         print("## Import data matrix")
         print("## ")
@@ -476,6 +662,14 @@ class DartMSAssay:
     #
 
     def add_data_processing_step(self, step_identifier_text, log_text, processing_data=None):
+        """
+        Adds a data processing step to the log of the DartMSAssay object
+
+        Args:
+            step_identifier_text (string): name of the data processing step
+            log_text (string): description of the data processing step
+            processing_data (dict, optional): further inforamtion (e.g., parameters) of the data processing step. Defaults to None.
+        """
         self.processingHistory.append({"step_identifier": step_identifier_text,
                                        "log_text": log_text,
                                        "processing_data": processing_data,
@@ -486,6 +680,12 @@ class DartMSAssay:
     #
 
     def save_self_to_dill_file(self, dill_file):
+        """
+        Save the DartMSAssay object to a file
+
+        Args:
+            dill_file (string): the *.dill file to save the DartMSAssay to
+        """
         self.add_data_processing_step("export", "exported assay to dill file", {"file": dill_file})
         with open(dill_file, "wb") as fout:
             dill.dump(
@@ -505,6 +705,15 @@ class DartMSAssay:
 
     @staticmethod
     def read_from_dill_file(dill_file):
+        """
+        Load a DartMSAssay from a file
+
+        Args:
+            dill_file (string): the *.dill file to load the DartMSAssay from
+
+        Returns:
+            DartMSAssay: the loaded DartMSAssay object
+        """
         with open(dill_file, "rb") as fin:
             di = dill.load(fin)
 
@@ -529,6 +738,16 @@ class DartMSAssay:
     #
 
     def subset_features(self, keep_features_with_indices=None, remove_features_with_indices=None):
+        """
+        Subset the detected features and include or exclude them
+
+        Args:
+            keep_features (list of indices, optional): features to be included in the export. To export all, the parameter must be set to None. Defaults to None.
+            remove_features (list of indices, optional): features to be removed before exporting. To remove none, the parameter must be set to None. Defaults to None.
+
+        Raises:
+            RuntimeError: if no features have been detected, this exception will be raised
+        """
         if self.dat is None:
             raise RuntimeError("Cannot subset DartMSAssay until a data matrix has been generated")
 
@@ -550,7 +769,20 @@ class DartMSAssay:
                 self.featureAnnotations = [self.featureAnnotations[i] for i in keeps]
 
     def subset_samples(self, keep_samples=None, keep_groups=None, keep_batches=None, remove_samples=None, remove_groups=None, remove_batches=None):
+        """
+        Subset certain samples, groups or batches in the DartMSAssay object
 
+        Args:
+            keep_samples (list of strings, optional): samples to be included in the export. To export all, the parameter must be set to None. Defaults to None.
+            remove_samples (list of strings, optional): samples to be removed before exporting. To remove none, the parameter must be set to None. Defaults to None.
+            keep_groups (list of strings, optional): groups to be included in the export. To export all, the parameter must be set to None. Defaults to None.
+            remove_groups (list of strings, optional): groups to be removed before exporting. To remove none, the parameter must be set to None. Defaults to None.
+            keep_batches (list of strings, optional): batches to be inlcuded in the export. To export all, the parameter must be set to None. Defaults to None.
+            remove_batches (list of integers, optional): batches to be removed before exporting. To remove none, the parameter must be set to None. Defaults to None.
+
+        Raises:
+            RuntimeError: if no features have been detected, this exception will be raised
+        """
         if self.samples is None or self.groups is None or self.batches is None:
             raise RuntimeError("Unknonw samples/group/batches in DartMSAssay")
 
@@ -612,6 +844,14 @@ class DartMSAssay:
     #
 
     def write_bracketing_results_to_featureML(self, featureMLlocation="./results.featureML", featureMLStartRT=0, featureMLEndRT=1400):
+        """
+        export the bracketed results to a featureML file for easy visualization in TOPPView
+
+        Args:
+            featureMLlocation (str, optional): path to the featureML file. Defaults to "./results.featureML".
+            featureMLStartRT (int, optional): the earliest chronogram time. Defaults to 0.
+            featureMLEndRT (int, optional): the latest chronogram time. Defaults to 1400.
+        """
         self.add_data_processing_step("export bracketed results to featureML", "export bracketed results to featureML", {"file": featureMLlocation})
         with open(featureMLlocation, "w") as fout:
 
@@ -656,6 +896,13 @@ class DartMSAssay:
             fout.write('  </featureMap>\n')
 
     def write_consensus_spectrum_to_featureML_file_per_sample(self, widthRT=40):
+        """
+        export the consensus results to a featureML file for easy visualization in TOPPView. A separate featureML file will be generated for each sample. 
+        The path of the file will be the path of the mlML file with the replaced extension '.featureML'
+
+        Args:
+            widthRT (int, optional): the with of the chronogram spots. Defaults to 40.
+        """
         self.add_data_processing_step("exporting consensus spectra to featureML files", "exporting consensus spectra to featureML files")
         for samplei, sample in tqdm.tqdm(enumerate(self.assay.manager.get_sample_names()), total=len(self.assay.manager.get_sample_names()), desc="exporting to featureML"):
 
@@ -698,6 +945,9 @@ class DartMSAssay:
     #
 
     def print_sample_overview(self):
+        """
+        Prints an overview of the samples
+        """
         temp = None
 
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
@@ -714,6 +964,13 @@ class DartMSAssay:
             print(temp.to_markdown())
 
     def plot_sample_TICs(self, separate=True, separate_by="group"):
+        """
+        Plots the detected spots of the chronograms
+
+        Args:
+            separate (bool, optional): indicator if a facetted plot shall be used or not. Defaults to True.
+            separate_by (str, optional): the variable used for grouping the results (can be file, group, or batch). Defaults to "group".
+        """
         temp = None
         sample_metadata = self.assay.manager.get_sample_metadata()
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
@@ -2200,24 +2457,23 @@ class DartMSAssay:
                 for searchIon in searchIons:
                     searchMZ = mz + searchIons[searchIon]
 
-                    inds = _find_feature_by_mz(features_, searchMZ, max_deviation_ppm=max_deviation_ppm)
-                    if inds is not None:
+                    ind, deviationPPM = _find_feature_by_mz(features_, searchMZ, max_deviation_ppm=max_deviation_ppm)
+                    if ind is not None:
                         ratios = []
                         for samplei, sample in enumerate(self.samples):
                             if useGroups is None or self.groups[samplei] in useGroups:
-                                ratio = dat_[samplei, inds] / dat_[samplei, featurei]
+                                ratio = dat_[samplei, ind] / dat_[samplei, featurei]
                                 if not np.isnan(ratio) and ratio > 0:
                                     ratios.append(ratio)
                         ratios = np.array(ratios)
 
                         if ratios.shape[0] > 10 and np.mean(ratios) > 2. and np.mean(ratios) < 200. and np.std(ratios) < 50.:
-                            for ind in [inds]:
-                                annotations[ind].append({
-                                    "i_am": searchIon,
-                                    "ratios": ratios,
-                                    "parentMZ": mz,
-                                    "mzDeviationPPM": (searchMZ - mz) / mz * 1E6
-                                })
+                            annotations[ind].append({
+                                "i_am": searchIon,
+                                "ratios": ratios,
+                                "parentMZ": mz,
+                                "mzDeviationPPM": (searchMZ - mz) / mz * 1E6
+                            })
 
                             if not iAmParent:
                                 annotations[featurei].append({
