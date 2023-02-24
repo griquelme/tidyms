@@ -5,7 +5,7 @@
 ##
 #
 
-__tidyMSdartmsVersion__ = "0.5.1"
+__tidyMSdartmsVersion__ = "0.6.0"
 
 
 
