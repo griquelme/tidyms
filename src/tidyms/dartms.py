@@ -2154,8 +2154,13 @@ class DartMSAssay:
     #####################################################################################################
     ## Feature annotation
     #
-    def annotate_features(self, useGroups = None, max_deviation_ppm = 100, plot = False):
-        self.add_data_processing_step("annotate features", "annotate features", {"useGroups": useGroups, "max_deviation_ppm": max_deviation_ppm})
+    def annotate_features(self, useGroups = None, max_deviation_ppm = 100, search_ions = None, remove_other_ions = True, plot = False):
+        self.add_data_processing_step("annotate features", "annotate features", {"useGroups": useGroups, "max_deviation_ppm": max_deviation_ppm, "search_ions": search_ions})
+
+        if search_ions is None:
+            searchIons = {"+Na": 22.989218 - 1.007276, "+NH4": 18.033823 - 1.007276, "+CH3OH+H": 33.033489 - 1.007276}#, "arbi1": 0.5, "arbi2": 0.75, "arbi3": 0.9, "arbi4": 1.04, "arbi5": 1.1}
+            for cn in range(1, 5):
+                searchIons["[13C%d]"%cn] = 1.00335484 * cn
 
         if useGroups is None:
             useGroups = list(set(self.groups))
@@ -2167,13 +2172,9 @@ class DartMSAssay:
 
         annotations = [[] for i in range(features_.shape[0])]
         temp = None
-
-        searchIons = {"+Na": 22.989218 - 1.007276, "+NH4": 18.033823 - 1.007276, "+CH3OH+H": 33.033489 - 1.007276}#, "arbi1": 0.5, "arbi2": 0.75, "arbi3": 0.9, "arbi4": 1.04, "arbi5": 1.1}
-        for cn in range(1, 5):
-            searchIons["[13C%d]"%cn] = 1.00335484 * cn
-
         for featurei in tqdm.tqdm(range(features_.shape[0]), desc = "annotating features"):
             mz = features_[featurei, 1]
+            iAmParent = False
 
             intensities = []
             for samplei, sample in enumerate(self.samples):
@@ -2181,42 +2182,48 @@ class DartMSAssay:
                     intensities.append(dat_[samplei, featurei]) 
             intensities = np.array(intensities)
 
-            for searchIon in searchIons:
+            if len(annotations[featurei]) == 0:
 
-                searchMZ = mz + searchIons[searchIon]
-                inds = _find_feature_by_mz(features_, searchMZ, max_deviation_ppm = max_deviation_ppm)
-                if inds is not None:
+                for searchIon in searchIons:
+                    searchMZ = mz + searchIons[searchIon]
                     
-                    ratios = []
-                    for samplei, sample in enumerate(self.samples):
-                        if useGroups is None or self.groups[samplei] in useGroups:
-                            ratio = dat_[samplei, inds] / dat_[samplei, featurei]
-                            if not np.isnan(ratio) and ratio > 0:
-                                ratios.append(ratio)
-                    ratios = np.array(ratios)
+                    inds = _find_feature_by_mz(features_, searchMZ, max_deviation_ppm = max_deviation_ppm)
+                    if inds is not None:
+                        ratios = []
+                        for samplei, sample in enumerate(self.samples):
+                            if useGroups is None or self.groups[samplei] in useGroups:
+                                ratio = dat_[samplei, inds] / dat_[samplei, featurei]
+                                if not np.isnan(ratio) and ratio > 0:
+                                    ratios.append(ratio)
+                        ratios = np.array(ratios)
 
-                    if ratios.shape[0] > 10 and np.mean(ratios) > 2. and np.mean(ratios) < 200. and np.std(ratios) < 50.:
-                        for ind in [inds]:
-                            annotations[featurei].append({
-                                "otherType": searchIon, 
-                                "otherRatios": ratios, 
-                                "otherMZs": searchMZ,
-                                "mzDeviationPPM": (searchMZ - mz) / mz * 1E6
-                            })
-
-                    temp = _add_row_to_pandas_creation_dictionary(temp,
-                                            searchIon      = "%s (%.4f)"%(searchIon, searchIons[searchIon]),
-                                            cns            = "%s (%.4f)"%(searchIon, searchIons[searchIon]),
-                                            MZs            = mz,
-                                            intensityMeans = np.mean(intensities) if intensities.shape[0] > 0 else 0,
-                                            deviations     = _mz_deviationPPM_between(features_[inds,1], searchMZ),
-                                            ratiosMean     = np.mean(ratios) if ratios.shape[0] > 0 else 0,
-                                            ratiosSTD      = np.std(ratios) if ratios.shape[0] > 1 else 0,
-                                            ratiosRSTD     = np.std(ratios) / np.mean(ratios) * 100. if ratios.shape[0] > 1 else 0,
-                                            ratiosCount    = ratios.shape[0]
-                    )
+                        if ratios.shape[0] > 10 and np.mean(ratios) > 2. and np.mean(ratios) < 200. and np.std(ratios) < 50.:
+                            for ind in [inds]:
+                                annotations[ind].append({
+                                    "i_am": searchIon, 
+                                    "ratios": ratios, 
+                                    "parentMZ": mz,
+                                    "mzDeviationPPM": (searchMZ - mz) / mz * 1E6
+                                })
+                            
+                            if not iAmParent:
+                                annotations[featurei].append({
+                                    "i_am": "parent", 
+                                })
+                                iAmParent = True
+                            
+                        temp = _add_row_to_pandas_creation_dictionary(temp,
+                            searchIon      = "%s (%.4f)"%(searchIon, searchIons[searchIon]),
+                            cns            = "%s (%.4f)"%(searchIon, searchIons[searchIon]),
+                            MZs            = mz,
+                            intensityMeans = np.mean(intensities) if intensities.shape[0] > 0 else 0,
+                            deviations     = _mz_deviationPPM_between(features_[inds,1], searchMZ),
+                            ratiosMean     = np.mean(ratios) if ratios.shape[0] > 0 else 0,
+                            ratiosSTD      = np.std(ratios) if ratios.shape[0] > 1 else 0,
+                            ratiosRSTD     = np.std(ratios) / np.mean(ratios) * 100. if ratios.shape[0] > 1 else 0,
+                            ratiosCount    = ratios.shape[0]
+                        )
         if plot: 
-            
             temp = pd.DataFrame(temp)
             temp['searchIon'] = temp['searchIon'].astype(object)
             p = (p9.ggplot(data = temp, mapping = p9.aes(
@@ -2248,6 +2255,17 @@ class DartMSAssay:
             logging.info(temp[temp["searchIon"] == "[13C1] (1.0034)"].groupby(["intensityMeansCUT"])[["ratiosRSTD"]].describe().to_markdown())
 
         self.featureAnnotations = [annotations[i] for i in np.argsort(order)]
+
+        if remove_other_ions:
+            keeps_indices = []
+            for i in range(self.dat.shape[1]):
+                annos = self.featureAnnotations[i]
+
+                if len(annos) == 0 or (len(annos) == 1 and annos[0]["i_am"] == "parent"):
+                    keeps_indices.append(i)
+
+            print("   .. removing %d (%.1f%%) features annotated as sister-ions of a parent"%(self.dat.shape[1] - len(keeps_indices), (self.dat.shape[1] - len(keeps_indices)) / self.dat.shape[1] * 100))
+            self.subset_features(keep_features_with_indices = keeps_indices)
 
 
     #####################################################################################################
