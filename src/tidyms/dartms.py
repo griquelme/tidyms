@@ -2435,8 +2435,7 @@ class DartMSAssay:
                 if on.lower() == "processedData".lower():
                     use = np.logical_and(spectrum.mz >= mzmin, spectrum.mz <= mzmax)
                     if np.sum(use) > 0:
-                        s = np.sum(spectrum.spint[use])
-                        dataMatrix[sampleNamesToRowI[sample], braci] = s
+                        dataMatrix[sampleNamesToRowI[sample], braci] = np.sum(spectrum.spint[use])
                     else:
                         dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
 
