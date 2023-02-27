@@ -35,6 +35,7 @@ from copy import deepcopy
 import logging
 import datetime
 import csv
+import tempfile
 
 
 #####################################################################################################
@@ -1071,7 +1072,8 @@ class DartMSAssay:
     # Chronogram import and separation
     #
 
-    def _subset_MSData_chronogram(self, msData, startInd, endInd):
+    @staticmethod
+    def _subset_MSData_chronogram(msData, startInd, endInd):
         """
         Function subsets a MSData object by chronogram time into a new MSData_subset_spectra object via an internal reference
 
@@ -1085,7 +1087,10 @@ class DartMSAssay:
         """
         return fileio.MSData_subset_spectra(start_ind=startInd, end_ind=endInd, from_MSData_object=msData)
 
-    def _get_separate_chronogram_indices(self, msData, msData_ID, spotsFile, intensityThreshold=0.00001, startTime_seconds=0, endTime_seconds=1e6):
+    @staticmethod
+    def _get_separate_chronogram_indices(
+        msData, msData_ID, spotsFile, intensityThreshold=0.00001, startTime_seconds=0, endTime_seconds=1e6, addNewSeparationIndices=False
+    ):
         """
         Function separats a chronogram MSData object into spots that are defined as being continuously above the set threshold.
         Spots are either automatically detected (when the sportsFile is not available) or user-guided (when the spotsFile exists)
@@ -1095,9 +1100,10 @@ class DartMSAssay:
             msData (MSData): The chronogram MSData object to separate into spots
             msData_ID (string): The name of the chronogram object
             spotsFile (string): The file to which the spots information will be written to. Furthermore, if the file already exists, information provided there will superseed the automated detection of the spots.
-            intensityThreshold (float, optional): _description_. Defaults to 0.00001.
-            startTime_seconds (int, optional): _description_. Defaults to 0.
-            endTime_seconds (_type_, optional): _description_. Defaults to 1E6.
+            intensityThreshold (float, optional): the intensity threshold for separate spots. Defaults to 0.00001.
+            startTime_seconds (int, optional): the minimum time to be used. Defaults to 0.
+            endTime_seconds (int, optional): the maximum time to be used. Defaults to 1E6.
+            addNewSeparationIndices (bool, optional): do not change!
 
         Raises:
             ValueError: raised when an invalid spots file is provided
@@ -1189,7 +1195,8 @@ class DartMSAssay:
             spots = pd.concat([spots, spotsCur], axis=0, ignore_index=True).reset_index(drop=True)
             spots["include"] = spots["include"].astype("bool")
             spots.to_csv(spotsFile, sep="\t", index=False)
-            separationInds = []
+            if not addNewSeparationIndices:
+                separationInds = []
 
         else:
             for index, row in spotsCur.iterrows():
@@ -1229,7 +1236,7 @@ class DartMSAssay:
                     msData.get_spectrum(sepInds[subseti][1]).time,
                 )
             )
-            subset = fileio.MSData_Proxy(self._subset_MSData_chronogram(msData, sepInds[subseti][0], sepInds[subseti][1]))
+            subset = fileio.MSData_Proxy(DartMSAssay._subset_MSData_chronogram(msData, sepInds[subseti][0], sepInds[subseti][1]))
             self.assay.add_virtual_sample(
                 MSData_object=subset,
                 virtual_name=subset_name,
@@ -1248,6 +1255,72 @@ class DartMSAssay:
                     }
                 ),
             )
+
+    @staticmethod
+    def show_sample_overview(filenames, ms_mode, instrument, separation_intensity=1e3):
+        """
+        Generates an overview of the data to be imported in subsequent steps
+
+        Args:
+            filenames (list of str): File path of the chronograms
+        """
+        for filename in filenames:
+            logging.info("    .. processing input file '%s'" % (filename))
+
+            msData = fileio.MSData.create_MSData_instance(
+                path=filename,
+                ms_mode=ms_mode,
+                instrument=instrument,
+                separation="None/DART",
+                data_import_mode=_constants.MEMORY,
+            )
+
+            tic = {}
+            maxInt = 0
+            for spectrumi, spectrum in msData.get_spectra_iterator():
+                inte = np.sum(spectrum.spint)
+                maxInt = max(maxInt, inte)
+                tic = _add_row_to_pandas_creation_dictionary(tic, intensity=inte, time=spectrum.time)
+
+            tmpName = next(tempfile._get_candidate_names())
+            sepInds = DartMSAssay._get_separate_chronogram_indices(
+                msData,
+                None,
+                tmpName,
+                intensityThreshold=separation_intensity,
+                startTime_seconds=0,
+                endTime_seconds=1e6,
+                addNewSeparationIndices=True,
+            )
+            t = {}
+            t2 = {}
+            for spotInd, (startInd, endInd, _, _, _, _) in enumerate(sepInds):
+                min_, max_ = len(tic["time"]) - 1, 0
+                for spectrumi, spectrum in msData.get_spectra_iterator():
+                    if startInd <= spectrumi <= endInd:
+                        t = _add_row_to_pandas_creation_dictionary(
+                            t, intensity=tic["intensity"][spectrumi], time=tic["time"][spectrumi], spotNumber=spotInd
+                        )
+                        min_ = min(min_, spectrumi)
+                        max_ = max(max_, spectrumi)
+                t = _add_row_to_pandas_creation_dictionary(t, intensity=tic["intensity"][min_], time=tic["time"][min_], spotNumber=spotInd)
+                t = _add_row_to_pandas_creation_dictionary(t, intensity=tic["intensity"][max_], time=tic["time"][max_], spotNumber=spotInd)
+                t2 = _add_row_to_pandas_creation_dictionary(
+                    t2, label=spotInd, spotNumber=spotInd, atTime=(tic["time"][min_] + tic["time"][max_]) / 2.0, atIntensity=maxInt * 0.9
+                )
+
+            temp = pd.DataFrame(tic)
+            t = pd.DataFrame(t)
+            t2 = pd.DataFrame(t2)
+            p = (
+                p9.ggplot()
+                + p9.geom_line(data=temp, mapping=p9.aes(x="time", y="intensity"))
+                + p9.geom_area(data=t, mapping=p9.aes(x="time", y="intensity", group="spotNumber", colour="spotNumber", fill="spotNumber", alpha=0.2))
+                + p9.geom_text(data=t2, mapping=p9.aes(x="atTime", y="atIntensity", group="spotNumber", label="label"))
+                + p9.theme_minimal()
+                + p9.ggtitle("TIC of '%s'" % (filename))
+            )
+            print(p)
 
     @staticmethod
     def create_assay_from_chronogramFiles(
@@ -1431,7 +1504,7 @@ class DartMSAssay:
                     spectrum.mz = spectrum.mz[useInds]
                     spectrum.spint = spectrum.spint[useInds]
 
-            sepInds = dartMSAssay._get_separate_chronogram_indices(
+            sepInds = DartMSAssay._get_separate_chronogram_indices(
                 msData,
                 os.path.basename(filename).replace(".mzML", "") + ("" if not rewriteRTinFiles else "_rtShifted"),
                 spot_file,
