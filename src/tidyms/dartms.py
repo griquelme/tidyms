@@ -2589,7 +2589,7 @@ class DartMSAssay:
 
         if on.lower() not in ["processedData".lower(), "originalData".lower()]:
             raise ValueError("Unknown option for parameter on. Must be either of ['processedData', 'originalData']")
-        if on.lower() == "originalData".lower() and aggregation_fun.lower not in ["average".lower(), "sum".lower(), "max".lower()]:
+        if on.lower() == "originalData".lower() and aggregation_fun.lower() not in ["average".lower(), "sum".lower(), "max".lower()]:
             raise ValueError("Unknown aggregation method provided, must be either of ['average', 'sum', 'max']")
 
         sampleNames = self.assay.manager.get_sample_names()
