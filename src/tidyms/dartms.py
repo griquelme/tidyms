@@ -2634,7 +2634,7 @@ class DartMSAssay:
                     elif valsBlanks.shape[0] == 1:
                         pval = scipy.stats.ttest_1samp(valsGroup, valsBlanks[0], alternative="greater")[1]
                     else:
-                        raise RuntimeError("No blank values avalable, implementation is incorrect")
+                        raise RuntimeError("No blank values available, implementation is incorrect")
                     fold = np.mean(valsGroup) / np.mean(valsBlanks)
                     sigInd = pval <= pvalueCutoff and fold >= foldCutoff
 
@@ -2872,6 +2872,9 @@ class DartMSAssay:
             % (minimum_ratio_found * 100, "all groups" if found_in_type.lower() == "allGroups".lower() else "any group")
         )
 
+        if found_in_type.lower() not in ["allGroups".lower(), "anyGroup".lower()]:
+            raise RuntimeError("Unknown option for parameter found_in_type, must be either of ['anyGroup', 'allGroups']")
+
         foundIn = [0 for i in range(self.dat.shape[1])]
         for featurei in range(self.dat.shape[1]):
             for grp in test_groups:
@@ -2995,7 +2998,7 @@ class DartMSAssay:
             print("%%%ds  " % (maxGroupLabelSize) % (a[group]["total"] if a[group]["total"] > 0 else ""), end="")
         print("")
 
-    def plot_mz_deviation_overview(self, brackRes, show=None, random_fraction=1):
+    def plot_mz_deviation_overview(self, show=None, random_fraction=1):
         """
         plots an overview of the mz deviation in the bracketed results
 
@@ -3014,7 +3017,7 @@ class DartMSAssay:
             raise RuntimeError("Unknown option(s) for show parameter. Must be a list with entries ['consensus', 'non-consensus', 'raw']")
 
         dat = None
-        useFeatures = brackRes
+        useFeatures = list(range(self.dat.shape[1]))
         if random_fraction < 1:
             useFeatures = random.sample(useFeatures, int(len(useFeatures) * random_fraction))
 
@@ -3024,7 +3027,7 @@ class DartMSAssay:
                 msDataObj = self.assay.get_ms_data(sample)
                 sample_metadata = self.assay.manager.get_sample_metadata()
                 for k, spectrum in msDataObj.get_spectra_iterator():
-                    usei = np.where(np.logical_and(spectrum.mz >= brackRes[featureInd][0], spectrum.mz <= brackRes[featureInd][2]))[0]
+                    usei = np.where(np.logical_and(spectrum.mz >= self.features[featureInd][0], spectrum.mz <= self.features[featureInd][2]))[0]
                     if usei.size > 0:
                         for i in usei:
                             if "consensus" in show:
