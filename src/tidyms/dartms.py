@@ -70,19 +70,21 @@ def _add_row_to_pandas_creation_dictionary(dict=None, **kwargs):
     return dict
 
 
-def _average_and_std_weighted(values, weights):
+def _average_and_std(values, weights=None):
     """
     Return the weighted average and standard deviation.
 
     values, weights -- Numpy ndarrays with the same shape.
     """
+    if weights is None:
+        weights = np.ones((values.shape[0]))
+
     average = np.average(values, weights=weights)
-    # Fast and numerically precise:
     variance = np.average((values - average) ** 2, weights=weights)
     return (average, math.sqrt(variance))
 
 
-def _relative_standard_deviation(vals, weights=None):
+def _relative_standard_deviation(values, weights=None):
     """
     Calculated the relative standard deviation for vals, optionally using the weights
 
@@ -94,8 +96,9 @@ def _relative_standard_deviation(vals, weights=None):
         numeric: calculated relative standard deviation
     """
     if weights == None:
-        weights = np.ones((vals.shape[0]))
-    avg, std = _average_and_std_weighted(vals, weights)
+        weights = np.ones((values.shape[0]))
+
+    avg, std = _average_and_std(values, weights)
     return std / avg
 
 
@@ -2917,7 +2920,7 @@ class DartMSAssay:
 
             temp = pd.DataFrame(temp)
             for name, group in temp.groupby(["type", "feature"]):
-                avgMZW, stdMZW = _average_and_std_weighted(group["mz"], group["intensity"])
+                avgMZW, stdMZW = _average_and_std(group["mz"], group["intensity"])
                 avgInt, stdInt = np.mean(group["intensity"]), np.std(group["intensity"])
 
                 dat = _add_row_to_pandas_creation_dictionary(
