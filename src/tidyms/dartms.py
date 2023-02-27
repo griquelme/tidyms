@@ -1448,7 +1448,7 @@ class DartMSAssay:
     # Spectra selection
     #
 
-    def drop_lower_spectra(self, drop_rate=None):
+    def drop_lower_spectra(self, drop_rate):
         self.add_data_processing_step("drop lower spectra", "drop lower spectra", {"drop_rate": drop_rate})
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
             totalInt = []
@@ -1456,18 +1456,17 @@ class DartMSAssay:
             for k, spectrum in msDataObj.get_spectra_iterator():
                 totalInt.append(np.sum(spectrum.spint))
 
-            if drop_rate is not None:
-                sampleObjNew = fileio.MSData_in_memory.generate_from_MSData_object(msDataObj)
-                ordInte = np.argsort(np.array(totalInt))
-                ordInte = ordInte[0 : math.floor(sampleObjNew.get_n_spectra() * drop_rate)]
-                ordInte = np.sort(ordInte)[::-1]
-                c = 0
-                while c < ordInte.shape[0] and msDataObj.get_n_spectra() > 0:
-                    sampleObjNew.delete_spectrum(ordInte[c])
-                    c = c + 1
-                msDataObj.to_MSData_object = sampleObjNew
+            sampleObjNew = fileio.MSData_in_memory.generate_from_MSData_object(msDataObj)
+            ordInte = np.argsort(np.array(totalInt))
+            ordInte = ordInte[0 : math.floor(sampleObjNew.get_n_spectra() * drop_rate)]
+            ordInte = np.sort(ordInte)[::-1]
+            c = 0
+            while c < ordInte.shape[0] and msDataObj.get_n_spectra() > 0:
+                sampleObjNew.delete_spectrum(ordInte[c])
+                c = c + 1
+            msDataObj.to_MSData_object = sampleObjNew
 
-    def select_top_n_spectra(self, n=None):
+    def select_top_n_spectra(self, n):
         self.add_data_processing_step("select top n spectra", "select top n spectra", {"n": n})
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
             totalInt = []
@@ -1475,16 +1474,15 @@ class DartMSAssay:
             for k, spectrum in msDataObj.get_spectra_iterator():
                 totalInt.append(np.sum(spectrum.spint))
 
-            if n is not None:
-                sampleObjNew = fileio.MSData_in_memory.generate_from_MSData_object(msDataObj)
-                ordInte = np.argsort(np.array(totalInt))
-                ordInte = ordInte[0 : ordInte.shape[0] - n]
-                ordInte = np.sort(ordInte)[::-1]
-                c = 0
-                while c < ordInte.shape[0] and msDataObj.get_n_spectra() > 0:
-                    sampleObjNew.delete_spectrum(ordInte[c])
-                    c = c + 1
-                msDataObj.to_MSData_object = sampleObjNew
+            sampleObjNew = fileio.MSData_in_memory.generate_from_MSData_object(msDataObj)
+            ordInte = np.argsort(np.array(totalInt))
+            ordInte = ordInte[0 : ordInte.shape[0] - n]
+            ordInte = np.sort(ordInte)[::-1]
+            c = 0
+            while c < ordInte.shape[0] and msDataObj.get_n_spectra() > 0:
+                sampleObjNew.delete_spectrum(ordInte[c])
+                c = c + 1
+            msDataObj.to_MSData_object = sampleObjNew
 
     #####################################################################################################
     # Sample normalization
