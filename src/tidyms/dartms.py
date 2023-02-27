@@ -1204,7 +1204,7 @@ class DartMSAssay:
 
         return separationInds
 
-    def _add_chronograms_samples_to_assay(self, sepInds, msData, filename, fileNameChangeFunction=None, verbose=True):
+    def _add_chronograms_samples_to_assay(self, sepInds, msData, filename, fileNameChangeFunction=None):
         """
         Function adds spots from a chronogram file to an existing assay
 
@@ -1213,7 +1213,6 @@ class DartMSAssay:
             sepInds (list of (startInd, endInd, spotName, group, class, batch)): Information of spots
             msData (MSData): Chronogram from which the spots are generated
             filename (str): Name of the chronogram sample
-            verbose (bool, optional): Print additional debugging information. Defaults to True.
         """
         if fileNameChangeFunction is None:
 
@@ -1222,19 +1221,18 @@ class DartMSAssay:
 
         for subseti, _ in enumerate(sepInds):
             subset_name = fileNameChangeFunction("VIRTUAL(%s::%s)" % (os.path.splitext(os.path.basename(filename))[0], sepInds[subseti][2]))
-            if verbose:
-                logging.info(
-                    "       .. adding subset %4d with name '%35s' (group '%s', class '%s'), width %6.1f sec, RTs %6.1f - %6.1f"
-                    % (
-                        subseti,
-                        subset_name,
-                        sepInds[subseti][3],
-                        sepInds[subseti][4],
-                        msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time,
-                        msData.get_spectrum(sepInds[subseti][0]).time,
-                        msData.get_spectrum(sepInds[subseti][1]).time,
-                    )
+            logging.info(
+                "       .. adding subset %4d with name '%35s' (group '%s', class '%s'), width %6.1f sec, RTs %6.1f - %6.1f"
+                % (
+                    subseti,
+                    subset_name,
+                    sepInds[subseti][3],
+                    sepInds[subseti][4],
+                    msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time,
+                    msData.get_spectrum(sepInds[subseti][0]).time,
+                    msData.get_spectrum(sepInds[subseti][1]).time,
                 )
+            )
             subset = fileio.MSData_Proxy(self._subset_MSData_chronogram(msData, sepInds[subseti][0], sepInds[subseti][1]))
             self.assay.add_virtual_sample(
                 MSData_object=subset,
@@ -1691,7 +1689,6 @@ class DartMSAssay:
         selection_criteria="mostAbundant",
         correct_on_level="file",
         plot=False,
-        verbose=True,
     ):
         """
         Function to correct systematic shifts of mz values in individual spot samples
@@ -1799,11 +1796,10 @@ class DartMSAssay:
                     else:
                         raise RuntimeError("Unknown mz correction method provided. Must be one of ['mzDeviationPPM', 'mzDeviation']")
 
-                if verbose:
-                    logging.info(
-                        "     .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"
-                        % (samplei + 1, len(self.assay.manager.get_sample_names()), sample, transformFactor, correctby)
-                    )
+                logging.info(
+                    "     .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"
+                    % (samplei + 1, len(self.assay.manager.get_sample_names()), sample, transformFactor, correctby)
+                )
 
         tempMod["mode"] = "corrected MZs (by %s)" % (correctby)
         temp_ = pd.concat([temp, tempMod], axis=0, ignore_index=True).reset_index(drop=False)
@@ -1973,7 +1969,6 @@ class DartMSAssay:
         aggregation_function="average",
         exportAsFeatureML=True,
         featureMLlocation=".",
-        verbose=True,
     ):
         """
         Function to collapse several spectra into a single consensus spectrum per spot
@@ -2108,21 +2103,20 @@ class DartMSAssay:
                     fout.write("    </featureList>\n")
                     fout.write("  </featureMap>\n")
 
-            if verbose:
-                logging.info(
-                    "    .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"
-                    % (
-                        samplei + 1,
-                        len(self.assay.manager.get_sample_names()),
-                        sample,
-                        summary_totalSpectra,
-                        summary_totalSignals,
-                        summary_clusterAfterCrude,
-                        summary_clusterAfterFine,
-                        summary_clusterAfterQualityFunctions,
-                        np.unique(temp["cluster"]).shape[0],
-                    )
+            logging.info(
+                "    .. Sample %4d / %4d (%45s): spectra %3d, signals %6d, cluster after crude %6d, fine %6d, quality control %6d, final number of features %6d"
+                % (
+                    samplei + 1,
+                    len(self.assay.manager.get_sample_names()),
+                    sample,
+                    summary_totalSpectra,
+                    summary_totalSignals,
+                    summary_clusterAfterCrude,
+                    summary_clusterAfterFine,
+                    summary_clusterAfterQualityFunctions,
+                    np.unique(temp["cluster"]).shape[0],
                 )
+            )
 
             mzs, intensities, usedFeatures = self._collapse_mz_cluster(
                 temp["mz"], temp["original_mz"], temp["intensity"], temp["time"], temp["cluster"], intensity_collapse_method=aggregation_function
@@ -2490,7 +2484,7 @@ class DartMSAssay:
     # Blank subtraction
     #
 
-    def blank_subtraction(self, blankGroup, toTestGroups, foldCutoff=2, pvalueCutoff=0.05, minDetected=2, plot=False, verbose=True):
+    def blank_subtraction(self, blankGroup, toTestGroups, foldCutoff=2, pvalueCutoff=0.05, minDetected=2, plot=False):
         self.add_data_processing_step(
             "blank subtraction",
             "blank subtraction",
@@ -2576,33 +2570,31 @@ class DartMSAssay:
             )
             print(p)
 
-        if verbose:
-            for i in sorted(list(set(keeps))):
-                if i < 0:
-                    logging.info(
-                        "    .. %d features not found in any of the blank samples, but at least in %d samples of %d groups and thus these features will be used"
-                        % (sum([k == i for k in keeps]), minDetected, -i)
-                    )
-                elif i == 0:
-                    logging.info(
-                        "    .. %d features found in None of the blank comparisons with higher abundances in the samples. These features will be removed"
-                        % (sum([k == i for k in keeps]))
-                    )
-                else:
-                    logging.info(
-                        "    .. %d features found in %d of the blank comparisons with higher abundances in the samples and in at least %d samples. These features will be used"
-                        % (sum([k == i for k in keeps]), i, minDetected)
-                    )
-            logging.info(
-                " Significance criteria are pval <= pvalueCutoff (%.3f) and fold >= foldCutoff (%.1f) and detected in at least %d samples of a non-Blank group"
-                % (pvalueCutoff, foldCutoff, minDetected)
-            )
+        for i in sorted(list(set(keeps))):
+            if i < 0:
+                logging.info(
+                    "    .. %d features not found in any of the blank samples, but at least in %d samples of %d groups and thus these features will be used"
+                    % (sum([k == i for k in keeps]), minDetected, -i)
+                )
+            elif i == 0:
+                logging.info(
+                    "    .. %d features found in None of the blank comparisons with higher abundances in the samples. These features will be removed"
+                    % (sum([k == i for k in keeps]))
+                )
+            else:
+                logging.info(
+                    "    .. %d features found in %d of the blank comparisons with higher abundances in the samples and in at least %d samples. These features will be used"
+                    % (sum([k == i for k in keeps]), i, minDetected)
+                )
+        logging.info(
+            " Significance criteria are pval <= pvalueCutoff (%.3f) and fold >= foldCutoff (%.1f) and detected in at least %d samples of a non-Blank group"
+            % (pvalueCutoff, foldCutoff, minDetected)
+        )
 
         keeps = [i for i in range(len(keeps)) if keeps[i] != 0]
         self.subset_features(keeps)
 
-        if verbose:
-            logging.info("    .. %d features remain in the dataset" % (self.dat.shape[1]))
+        logging.info("    .. %d features remain in the dataset" % (self.dat.shape[1]))
 
     #####################################################################################################
     # Feature annotation
