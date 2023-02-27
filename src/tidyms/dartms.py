@@ -1449,6 +1449,14 @@ class DartMSAssay:
     #
 
     def drop_lower_spectra(self, drop_rate):
+        """
+        A function to restrict chronogram spots to only certain spectra in the dataset (e.g., use the 'core' of the spot).
+        From the all spectra assigned to the spot, only the drop_rate % will be used
+        Use with caution, as a variable number of scans over the spot might affect abundances, especially when aggregation_method = "sum" is used
+
+        Args:
+            drop_rate (float): the ratio of the highest-abundant spectra to be used.
+        """
         self.add_data_processing_step("drop lower spectra", "drop lower spectra", {"drop_rate": drop_rate})
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
             totalInt = []
@@ -1467,6 +1475,12 @@ class DartMSAssay:
             msDataObj.to_MSData_object = sampleObjNew
 
     def select_top_n_spectra(self, n):
+        """
+        A function to restrict chronogram spots to only certain spectra in the dataset (e.g., use the 'core' of the spot).
+        From all spectra assigned to the spot, only the n most abundant will be used
+        Args:
+            n (integer): the number of highest-abundant spectra to be used.
+        """
         self.add_data_processing_step("select top n spectra", "select top n spectra", {"n": n})
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
             totalInt = []
@@ -1489,6 +1503,12 @@ class DartMSAssay:
     #
 
     def normalize_samples_by_TIC(self, multiplication_factor=1):
+        """
+        abundances of spot spectra can be normalized by the toal intensity of the spectra
+
+        Args:
+            multiplication_factor (int, optional): a factor that is applied on top of the normalization (i.e., shifts the maximum abundance to this value). Defaults to 1.
+        """
         self.add_data_processing_step("normalize to sample TICs", "normalize to sample TICs", {"muliplication_factor": multiplication_factor})
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
             totalInt = []
@@ -1507,6 +1527,14 @@ class DartMSAssay:
                 logging.error("   .. Error: cannot normalize sample '%35s' to TIC as it is zero" % (sample))
 
     def normalize_to_internal_standard(self, std, multiplication_factor=1, plot=False):
+        """
+        Abundances of spot spectra are normalized by the abundance of a selected internal standard
+
+        Args:
+            std (_type_): _description_
+            multiplication_factor (int, optional): _description_. Defaults to 1.
+            plot (bool, optional): _description_. Defaults to False.
+        """
         self.add_data_processing_step(
             "normalize to internal standard", "normalize to internal standard", {"std": std, "multiplication_factor": multiplication_factor}
         )
@@ -1547,6 +1575,18 @@ class DartMSAssay:
             print(p)
 
     def batch_correction(self, by_group, plot=True):
+        """
+        Correct the abundances of all detected features in different batches.
+        The algorithm is as follows
+        An overall mean-QC-overall-value is derived from all QC samples (regardless of the batch) using all features detected in these QC samples.
+        For each batch, a mean-QC-sample-value is derived from QC samples in each batch using all features detected in these QC samples.
+        All samples in the batch are corrected by this mean-QC-sample-value. For this, all feature abundances are divided by this value
+        Furthermore, this corrected abundance values are multiplied by the mean-QC-overall-value to achieve similar abundance values than before the correction.
+
+        Args:
+            by_group (string): the name of the group to be used for the batch correction
+            plot (bool, optional): show the correction results as plots. Defaults to True.
+        """
         self.add_data_processing_step("batch correction", "batch correction", {"by_group": by_group})
         datCorr = np.copy(self.dat)
 
@@ -1665,6 +1705,19 @@ class DartMSAssay:
         return pd.DataFrame(temp)
 
     def _reverse_applied_mz_offset(self, mz, correctby, *args, **kwargs):
+        """
+        Function to reverse the corrected mz values in a corrected spectrum
+
+        Args:
+            mz (float): the spectrums mz value to be reverse corrected
+            correctby (string): the correction type applied to the mz value
+
+        Raises:
+            RuntimeError: raised when an invalid option for correctby is provided
+
+        Returns:
+            float: the reverse corrected mz value
+        """
         if correctby == "mzDeviationPPM":
             transformFactor = kwargs["transformFactor"]
             return mz / (1.0 - transformFactor / 1e6)
@@ -1911,6 +1964,23 @@ class DartMSAssay:
         return mzDesc
 
     def _collapse_mz_cluster(self, mz, original_mz, intensity, time, cluster, intensity_collapse_method="average"):
+        """
+        Function to collapse several spectra (provided as different lists) into a consensus spectrum
+
+        Args:
+            mz (numpy array of mz values): the mz values to collapse
+            original_mz (list of mz values ): list of mz values used for the mz cluster
+            intensity (numpy array of intensity values): the intensity values to collapse
+            time (numpy array of chronogram time values): the chronogram time values to collapse
+            cluster (numpy array of cluster ids): the clusters the individual signals have been assigned to
+            intensity_collapse_method (str, optional): The method to be used for calculating the consensus signal intensity. Defaults to "average".
+
+        Raises:
+            RuntimeError: raised when an unknown option for intensity_collapse_method is provided
+
+        Returns:
+            (mz, intensity, used-features): returns a tuple of mz and intensity values and the mz values used for collapsing the signals
+        """
         clusts, ns = np.unique(cluster, return_counts=True)
         if -1 in clusts:
             clusts = clusts[1:]
@@ -2135,6 +2205,13 @@ class DartMSAssay:
     #
 
     def bracket_consensus_spectrum_samples(self, max_ppm_deviation=25, show_diagnostic_plots=False):
+        """
+        Function to bracket consensus spectra across different samples
+
+        Args:
+            max_ppm_deviation (float, optional): the maximum allowed devation (in ppm) a consensus group is allowed to have. Defaults to 25.
+            show_diagnostic_plots (bool, optional): indicator if a diagnostic plot shall be shown. Defaults to False.
+        """
         self.add_data_processing_step(
             "bracket consensus spectrum per sample", "bracket consensus spectrum per sample", {"max_ppm_deviation": max_ppm_deviation}
         )
@@ -2420,6 +2497,17 @@ class DartMSAssay:
     #
 
     def build_data_matrix(self, on="originalData", originalData_mz_deviation_multiplier_PPM=0, aggregation_fun="average"):
+        """
+        generates a data matrix from corrected, consensus spectra and bracketed features
+
+        Args:
+            on (str, optional): the data used to derived abundance values from. with 'processedData' the consensus spectra will be used, while with 'originalData' the raw-data will be used. Defaults to "originalData".
+            originalData_mz_deviation_multiplier_PPM (int, optional): an optional mz deviation allowed for the raw-data integration. Defaults to 0.
+            aggregation_fun (str, optional): the method to calculate the derived abundance on integration of raw data. Defaults to "average".
+
+        Raises:
+            RuntimeError: raised if parameters on and aggregation_fun have invalid values
+        """
         self.add_data_processing_step(
             "build data matrix", "build data matrix", {"on": on, "originalData_mz_deviation_multiplier_PPM": originalData_mz_deviation_multiplier_PPM}
         )
@@ -2480,6 +2568,21 @@ class DartMSAssay:
     #
 
     def blank_subtraction(self, blankGroup, toTestGroups, foldCutoff=2, pvalueCutoff=0.05, minDetected=2, plot=False):
+        """
+        Method to remove background features from the datamatrix. Repeated calls with different blank groups are possible.
+        Inspired by the background-subtraction module of MZmine3
+
+        Args:
+            blankGroup (string): the name of the blank group
+            toTestGroups (list of str): the name of the groups to test against the blank group
+            foldCutoff (int, optional): the minimum fold-change between at least one test-group and the blank group in order for a feature to not be considered a background. Defaults to 2.
+            pvalueCutoff (float, optional): the alpha-threshold for the ttest. Defaults to 0.05.
+            minDetected (int, optional): the minimum number a feature must be detected in the background samples in order to be considered a background features. Defaults to 2.
+            plot (bool, optional): indicator whether the subtraction shall be plotted as a volcano plot. Defaults to False.
+
+        Raises:
+            RuntimeError: should never be raised, but is if the algorithm's implementation is incorrect
+        """
         self.add_data_processing_step(
             "blank subtraction",
             "blank subtraction",
@@ -2596,6 +2699,16 @@ class DartMSAssay:
     #
 
     def annotate_features(self, useGroups=None, max_deviation_ppm=100, search_ions=None, remove_other_ions=True, plot=False):
+        """
+        Function to annotate the bracketed features with different sister ions (adducts, isotopologs, etc.) relative to parent ions (mostly [M+H]+ or [M-H]-)
+
+        Args:
+            useGroups (list of str, optional): groups to be used for the annotation (important for testing the ratio). Defaults to None.
+            max_deviation_ppm (int, optional): the maximum allowed deviation between the calculated and observed mz value of a sister ion. Defaults to 100.
+            search_ions (dict, optional): the ions to search for. keys are ion names, values are mz increments (no decrements allowed). Defaults to None.
+            remove_other_ions (bool, optional): indicator if annotated sister ions should be removed. Defaults to True.
+            plot (bool, optional): indicator if annotation results should be plotted. Defaults to False.
+        """
         self.add_data_processing_step(
             "annotate features", "annotate features", {"useGroups": useGroups, "max_deviation_ppm": max_deviation_ppm, "search_ions": search_ions}
         )
@@ -2715,6 +2828,13 @@ class DartMSAssay:
     #
 
     def restrict_to_high_quality_features__most_n_abundant(self, n_features):
+        """
+        Function to select high-quality features (after bracketing)
+        This function selects the top-n most abundant features
+
+        Args:
+            n_features (integer): the number of features to select
+        """
         self.add_data_processing_step("restricting to n most abundant features", "restricting to most abundant features", {"n_features": n_features})
         logging.info(" Restricting data matrix to a %d of the most abundant features" % (n_features))
 
@@ -2733,6 +2853,15 @@ class DartMSAssay:
         logging.info("    .. using %d features" % (self.dat.shape[1]))
 
     def restrict_to_high_quality_features__found_in_replicates(self, test_groups, minimum_ratio_found, found_in_type="anyGroup"):
+        """
+        Function to select high-quality features (after bracketing)
+        This function selects only features that are found in at least % of replicates
+
+        Args:
+            test_groups (list of str): the groups to be tested
+            minimum_ratio_found (float): the minimum ratio of all samples in a group in which the feature must have been detected
+            found_in_type (str, optional): indicator if the feature must be present in all or any group in at least % samples. Defaults to "anyGroup".
+        """
         self.add_data_processing_step(
             "restricting to found in replicates features",
             "restricting to found in replicates features",
@@ -2762,6 +2891,14 @@ class DartMSAssay:
         logging.info("    .. using %d features" % (self.dat.shape[1]))
 
     def restrict_to_high_quality_features__minimum_intensity_filter(self, test_groups, minimum_intensity):
+        """
+        Function to select high-quality features (after bracketing)
+        This function selects only features that have a minimum intensity in at least one samples of a group
+
+        Args:
+            test_groups (list of str): the groups to test
+            minimum_intensity (float): the mimimum requested signal intensity
+        """
         self.add_data_processing_step(
             "restricting to minimum intensity filter",
             "restricting to minimum intensity filter",
@@ -2785,6 +2922,14 @@ class DartMSAssay:
         logging.info("    .. using %d features" % (self.dat.shape[1]))
 
     def restrict_to_high_quality_features__low_RSD_in_groups(self, test_groups, maximum_RSD):
+        """
+        Function to select high-quality features (after bracketing)
+        This function selects only features that have a low within-group variability
+
+        Args:
+            test_groups (list of str): the groups to be tested
+            maximum_RSD (float): the maximum allowed rsd for a feature to be used, must be lower in all groups
+        """
         self.add_data_processing_step(
             "restricting to maximum rsd ", "restricting to maximum rsd", {"test_groups": test_groups, "maximum_RSD": maximum_RSD}
         )
@@ -2811,6 +2956,9 @@ class DartMSAssay:
     #
 
     def print_results_overview(self):
+        """
+        prints an overview of the bracketed results to the console
+        """
         print("There are %d features (columns) and %d samples (rows) in the dataset" % (self.dat.shape[1], self.dat.shape[0]))
         print(
             "   .. %d (%.1f%%) features have at least one missing value (np.nan)"
@@ -2848,6 +2996,16 @@ class DartMSAssay:
         print("")
 
     def plot_mz_deviation_overview(self, brackRes, show=None, random_fraction=1):
+        """
+        plots an overview of the mz deviation in the bracketed results
+
+        Args:
+            show (_type_, optional): indicator which plots should be shown. Defaults to None.
+            random_fraction (int, optional): use only a random fraction of the features. Defaults to 1.
+
+        Raises:
+            RuntimeError: _description_
+        """
         if show is None:
             show = ["consensus", "non-consensus", "raw"]
         elif type(show) == str:
@@ -2965,6 +3123,13 @@ class DartMSAssay:
         print(p)
 
     def plot_feature_mz_deviations(self, featureInd, types=None):
+        """
+        plots the mz deviation for a particular features
+
+        Args:
+            featureInd (index): the index of the feature to plot
+            types (list of str, optional): plots to include. Defaults to None.
+        """
         if types is None:
             types = ["consensus", "non-consensus", "raw-onlyFeatures", "raw-allSignals"]
         temp = None
@@ -3079,6 +3244,18 @@ class DartMSAssay:
     #
 
     def plot_RSDs_per_group(self, uGroups=None, include=None, plotType="points", scales="free_y"):
+        """
+        Plots an rsd distribution per group
+
+        Args:
+            uGroups (list of str, optional): the groups to be included in the overview. Defaults to None.
+            include (list of str, optional): missing values replacement strategies to be used. Defaults to None.
+            plotType (str, optional): type of plot (either points or histogram). Defaults to "points".
+            scales (str, optional): parameter for plotnine and the y-scale of facetted plots. Defaults to "free_y".
+
+        Raises:
+            RuntimeError: raised if an unknown plottype is provided
+        """
         if uGroups is None:
             uGroups = set(self.groups)
 
@@ -3204,6 +3381,21 @@ class DartMSAssay:
         sig_color="firebrick",
         not_different_color="cadetblue",
     ):
+        """
+        generate a volcano plot from the results
+
+        Args:
+            comparisons (list of tuple of (str, str)): the names of the two groups to be compared
+            alpha_critical (float, optional): the critical alpha value for a significant difference. Defaults to 0.05.
+            minimum_fold_change (int, optional): the mimimum required fold-change for a significant difference. Defaults to 2.
+            keep_features (_type_, optional): a list of indices to be used for the uni-variate comparison. Defaults to None.
+            remove_features (_type_, optional): a list of features to not be used for the uni-variate comparison. Defaults to None.
+            sig_color (str, optional): the name of the color used for plotting significantly different features. Defaults to "firebrick".
+            not_different_color (str, optional): the name of the color used for plotting not significantly different features. Defaults to "cadetblue".
+
+        Returns:
+            _type_: the data matrix for the volcano plot
+        """
         # get data
         dat, features, featureAnnotations, samples, groups, batches = self.get_data_matrix_and_meta(
             keep_features=keep_features, remove_features=remove_features, copy=True
@@ -3277,6 +3469,15 @@ class DartMSAssay:
         return p, temp
 
     def plot_feature(self, feature_index):
+        """
+        Shows a single feature
+
+        Args:
+            feature_index (index): the index of the feature to be plotted
+
+        Returns:
+            _type_: the data matrix for the plot
+        """
         temp = pd.DataFrame({"abundance": self.dat[:, feature_index], "sample": self.samples, "group": self.groups, "batche": self.batches})
 
         p = (
@@ -3302,6 +3503,28 @@ class DartMSAssay:
         scaling="standard",
         embedding="pca",
     ):
+        """
+        Calculates a two-dimensional embedding of the data matrix (or a subset) and illustrates it as a scores/component plot
+
+        Args:
+            keep_features (list of indices, optional): features to be included for the embedding. Defaults to None.
+            remove_features (list of indices, optional): features to not be included for the embedding. Defaults to None.
+            keep_samples (list of str, optional): samples to be included for the embedding. Defaults to None.
+            remove_samples (list of str, optional): samples to not be included for the embedding. Defaults to None.
+            keep_groups (list of str, optional): groups to be included for the embedding. Defaults to None.
+            remove_groups (list of str, optional): groups to not be included for the embedding. Defaults to None.
+            keep_batches (list of int, optional): batches to be included for the embedding. Defaults to None.
+            remove_batches (list of int, optional): batches to not be included for the embedding. Defaults to None.
+            imputation (str, optional): imputation method for features with missing values (i.e., no signals detected for them). Defaults to "zero", allowed are "zero" and "omitNA".
+            scaling (str, optional): the scaling to be applied before the embedding calculation. Defaults to "standard", allowed are None, "", "standard".
+            embedding (str, optional): the embedding type (). Defaults to "pca", allowed are "pca", "lda", "umap".
+
+        Raises:
+            RuntimeError: raised if invalid parameters are provided
+
+        Returns:
+            _type_: _description_
+        """
         # get data
         dat, features, featureAnnotations, samples, groups, batches = self.get_data_matrix_and_meta(
             keep_features=keep_features,
