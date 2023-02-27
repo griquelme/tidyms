@@ -4,7 +4,7 @@
 # File for many functions concerning the processing of a DART-MS experiment.
 #
 
-__tidyMSdartmsVersion__ = "0.6.0"
+__tidyMSdartmsVersion__ = "0.6.5"
 
 
 #####################################################################################################
