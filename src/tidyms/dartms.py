@@ -2,7 +2,6 @@
 ####################################################################################################
 ##
 # File for many functions concerning the processing of a DART-MS experiment.
-##
 #
 
 __tidyMSdartmsVersion__ = "0.6.0"
@@ -43,7 +42,6 @@ import csv
 ####################################################################################################
 ##
 # Convenience functions
-##
 #
 
 
@@ -166,7 +164,6 @@ def cohen_d(d1, d2):
 ####################################################################################################
 ##
 # MSData import filters
-##
 #
 
 
@@ -238,7 +235,6 @@ def import_filter_remove_signals_below_intensity(msData, minimum_signal_intensit
 ####################################################################################################
 ##
 # Feature quality test function
-##
 #
 
 
@@ -343,7 +339,6 @@ def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectru
 ####################################################################################################
 ##
 # Numba-based functions
-##
 #
 global _refine_clustering_for_mz_list
 
@@ -473,7 +468,6 @@ def _refine_clustering_for_mz_list(
 ####################################################################################################
 ##
 # Data handling assay
-##
 #
 
 
