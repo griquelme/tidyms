@@ -2667,7 +2667,7 @@ class DartMSAssay:
                             cns="%s (%.4f)" % (searchIon, searchIons[searchIon]),
                             MZs=mz,
                             intensityMeans=np.mean(intensities) if intensities.shape[0] > 0 else 0,
-                            deviations=_mz_deviationPPM_between(features_[inds, 1], searchMZ),
+                            deviations=_mz_deviationPPM_between(features_[ind, 1], searchMZ),
                             ratiosMean=np.mean(ratios) if ratios.shape[0] > 0 else 0,
                             ratiosSTD=np.std(ratios) if ratios.shape[0] > 1 else 0,
                             ratiosRSTD=np.std(ratios) / np.mean(ratios) * 100.0 if ratios.shape[0] > 1 else 0,
