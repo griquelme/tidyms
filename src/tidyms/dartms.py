@@ -2419,7 +2419,7 @@ class DartMSAssay:
     # This setp also automatically re-integrates the results
     #
 
-    def build_data_matrix(self, on="processedData", originalData_mz_deviation_multiplier_PPM=0, aggregation_fun="average"):
+    def build_data_matrix(self, on="originalData", originalData_mz_deviation_multiplier_PPM=0, aggregation_fun="average"):
         self.add_data_processing_step(
             "build data matrix", "build data matrix", {"on": on, "originalData_mz_deviation_multiplier_PPM": originalData_mz_deviation_multiplier_PPM}
         )
