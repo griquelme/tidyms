@@ -2423,6 +2423,12 @@ class DartMSAssay:
         self.add_data_processing_step(
             "build data matrix", "build data matrix", {"on": on, "originalData_mz_deviation_multiplier_PPM": originalData_mz_deviation_multiplier_PPM}
         )
+
+        if on.lower() not in ["processedData".lower(), "originalData".lower()]:
+            raise RuntimeError("Unknown option for parameter on. Must be either of ['processedData', 'originalData']")
+        if on.lower() == "originalData".lower() and aggregation_fun.lower not in ["average".lower(), "sum".lower(), "max".lower()]:
+            raise RuntimeError("Unknown aggregation function provided, must be either of ['average', 'sum', 'max']")
+
         sampleNames = self.assay.manager.get_sample_names()
         sampleNamesToRowI = dict(((sample, i) for i, sample in enumerate(sampleNames)))
 
@@ -2458,14 +2464,10 @@ class DartMSAssay:
                             s = np.sum(s)
                         elif aggregation_fun.lower() == "max".lower():
                             s = np.max(s)
-                        else:
-                            raise RuntimeError("Unknown aggregation function provided, must be either of ['average', 'sum', 'max']")
                         dataMatrix[sampleNamesToRowI[sample], braci] = s
+
                     else:
                         dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
-
-                else:
-                    raise RuntimeError("Unknown option for parameter on. Must be either of ['processedData', 'originalData']")
 
         sample_metadata = self.assay.get_sample_metadata()
         self.samples = sampleNames
