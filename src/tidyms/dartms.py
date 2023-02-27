@@ -3202,7 +3202,16 @@ class DartMSAssay:
     # Convenience functions for a quick, statistical overview
     #
 
-    def calc_volcano_plots(self, comparisons, alpha_critical=0.05, minimum_fold_change=2, keep_features=None, remove_features=None):
+    def calc_volcano_plots(
+        self,
+        comparisons,
+        alpha_critical=0.05,
+        minimum_fold_change=2,
+        keep_features=None,
+        remove_features=None,
+        sig_color="firebrick",
+        not_different_color="cadetblue",
+    ):
         # get data
         dat, features, featureAnnotations, samples, groups, batches = self.get_data_matrix_and_meta(
             keep_features=keep_features, remove_features=remove_features, copy=True
@@ -3238,7 +3247,9 @@ class DartMSAssay:
                     pval = scipy.stats.ttest_ind(valsGrp1, valsGrp2, equal_var=False, alternative="two-sided", trim=0)[1]
                     cohensD = cohen_d(valsGrp1, valsGrp2)
                     meanAbundance = np.mean(np.concatenate((valsGrp1, valsGrp2), axis=0))
-                    sigInd = "sig" if pval <= alpha_critical and (fold >= minimum_fold_change or fold <= 1.0 / minimum_fold_change) else "-"
+                    sigInd = (
+                        "sig. diff." if pval <= alpha_critical and (fold >= minimum_fold_change or fold <= 1.0 / minimum_fold_change) else "not diff."
+                    )
 
                     temp = _add_row_to_pandas_creation_dictionary(
                         temp,
@@ -3257,15 +3268,17 @@ class DartMSAssay:
                         tests=testName,
                         feature="%d mz %8.4f" % (featurei, self.features[featurei][1]),
                         featurei=featurei,
+                        meanFeatureAbundance=meanAbundance,
                     )
 
         temp = pd.DataFrame(temp)
         p = (
-            p9.ggplot(data=temp, mapping=p9.aes(x="trans_folds", y="trans_pvalues", colour="sigIndicators"))
+            p9.ggplot(data=temp, mapping=p9.aes(x="trans_folds", y="trans_pvalues", colour="sigIndicators", size="np.log2(meanFeatureAbundance)"))
             + p9.geom_hline(yintercept=-np.log10(alpha_critical), alpha=0.3, colour="slategrey")
             + p9.geom_vline(xintercept=[np.log2(minimum_fold_change), np.log2(1 / minimum_fold_change)], alpha=0.3, colour="slategrey")
             + p9.geom_point(alpha=0.3)
             + p9.facet_wrap("~tests")
+            + p9.scale_colour_manual(values={"sig. diff.": sig_color, "not diff.": not_different_color})
             + p9.ggtitle("Volcano plots")
         )
 
