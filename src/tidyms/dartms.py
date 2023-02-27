@@ -138,7 +138,7 @@ def _find_feature_by_mz(features, mz, max_deviation_ppm=None):
         return None, None
 
 
-def cohend(d1, d2):
+def cohen_d(d1, d2):
     """
     Calculate cohen's d value for effect size
 
@@ -3236,7 +3236,7 @@ class DartMSAssay:
                         fold = np.mean(valsGrp1) / np.mean(valsGrp2)
 
                     pval = scipy.stats.ttest_ind(valsGrp1, valsGrp2, equal_var=False, alternative="two-sided", trim=0)[1]
-                    cohen = cohend(valsGrp1, valsGrp2)
+                    cohensD = cohen_d(valsGrp1, valsGrp2)
                     meanAbundance = np.mean(np.concatenate((valsGrp1, valsGrp2), axis=0))
                     sigInd = "sig" if pval <= alpha_critical and (fold >= minimum_fold_change or fold <= 1.0 / minimum_fold_change) else "-"
 
@@ -3246,7 +3246,7 @@ class DartMSAssay:
                         folds=fold,
                         trans_pvalues=-np.log10(pval),
                         trans_folds=np.log2(fold),
-                        effectSizes=cohen,
+                        effectSizes=cohensD,
                         detectionsGrp1=np.sum(valsGrp1 > 0),
                         detectionsGrp2=np.sum(valsGrp2 > 0),
                         meanAbundanceGrp1=np.mean(valsGrp1),
