@@ -1100,13 +1100,13 @@ class DartMSAssay:
             endTime_seconds (_type_, optional): _description_. Defaults to 1E6.
 
         Raises:
-            RuntimeError:
+            ValueError: raised when an invalid spots file is provided
 
         Returns:
             list of (startInd, endInd, spotName, group, class, batch): Detected of user-guided spots.
         """
         if spotsFile is None:
-            raise RuntimeError("Parameter spotsFile must be specified either to save extracted spots to or to read from there. ")
+            raise ValueError("Parameter spotsFile must be specified either to save extracted spots to or to read from there. ")
 
         spots = None
         if type(spotsFile) is str:
@@ -1128,7 +1128,7 @@ class DartMSAssay:
                     }
                 )
         else:
-            raise RuntimeError("Parameter spotsFile must be a str")
+            raise ValueError("Parameter spotsFile must be a str")
 
         spotsCur = spots[spots["msData_ID"] == msData_ID]
         separationInds = []
@@ -1353,7 +1353,7 @@ class DartMSAssay:
                             continue
 
                     else:
-                        raise RuntimeError("Can only delete unused scans if the spots file has been created before and manually checked.")
+                        raise ValueError("Can only delete unused scans if the spots file has been created before and manually checked.")
 
                 rtShiftToApply = rtShiftToApply - earliestRT + 10
                 logging.info("       .. shifting RT by %.1f seconds" % (rtShiftToApply))
@@ -1669,6 +1669,10 @@ class DartMSAssay:
         Returns:
             _type_: _description_
         """
+
+        if selection_criteria.lower() not in ["closestMZ".lower(), "mostAbundant".lower()]:
+            raise ValueError("Unknown parameter selection_criteria, must be either of ['mostAbundant', 'closestMZ]")
+
         temp = None
 
         if type(referenceMZs) is list:
@@ -1679,14 +1683,12 @@ class DartMSAssay:
             for i, referenceMZ in enumerate(referenceMZs):
                 for spectrumi, spectrum in msDataObj.get_spectra_iterator():
                     ind = None
-                    if selection_criteria.lower() == "closestmz":
+                    if selection_criteria.lower() == "closestMZ".lower():
                         ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_closest_mz(referenceMZ, max_offset_absolute=max_mz_deviation_absolute)
-                    elif selection_criteria.lower() == "mostabundant":
+                    elif selection_criteria.lower() == "mostAbundant".lower():
                         ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_most_abundant_signal_in_range(
                             referenceMZ, max_offset_absolute=max_mz_deviation_absolute
                         )
-                    else:
-                        raise RuntimeError("Unknown parameter selection_criteria, should be either of['mostAbundant', 'closestMZ']")
 
                     if ind is not None:
                         temp = _add_row_to_pandas_creation_dictionary(
@@ -1713,7 +1715,7 @@ class DartMSAssay:
             correctby (string): the correction type applied to the mz value
 
         Raises:
-            RuntimeError: raised when an invalid option for correctby is provided
+            ValueError: raised when an invalid option for correctby is provided
 
         Returns:
             float: the reverse corrected mz value
@@ -1725,7 +1727,7 @@ class DartMSAssay:
             transformFactor = kwargs["transformFactor"]
             return mz + transformFactor
         else:
-            raise RuntimeError("Unknown correctby option '%s' specified. Must be either of ['mzDeviationPPM', 'mzDeviation']" % (correctby))
+            raise ValueError("Unknown correctby option '%s' specified. Must be either of ['mzDeviationPPM', 'mzDeviation']" % (correctby))
 
     def correct_MZ_shift_across_samples(
         self,
@@ -1767,7 +1769,7 @@ class DartMSAssay:
         )
 
         if not correct_on_level.lower() in ["file", "sample"]:
-            raise RuntimeError("Parameter correct_on_level has an unknown value '%s', must be either of ['file', 'sample']" % (correct_on_level))
+            raise ValueError("Parameter correct_on_level has an unknown value '%s', must be either of ['file', 'sample']" % (correct_on_level))
 
         temp = self._calculate_mz_offsets(
             referenceMZs=referenceMZs, max_mz_deviation_absolute=max_mz_deviation_absolute, selection_criteria=selection_criteria
@@ -1800,7 +1802,7 @@ class DartMSAssay:
                 correct_on_level
             )["mzDeviation"].transform("median")
         else:
-            raise RuntimeError("Unknown option for correctby parameter. Must be 'mzDeviation' or 'mzDeviationPPM'")
+            raise ValueError("Unknown option for correctby parameter. Must be 'mzDeviation' or 'mzDeviationPPM'")
 
         tempMod["mzDeviationPPM"] = (tempMod["mz"] - tempMod["referenceMZ"]) / tempMod["referenceMZ"] * 1e6
         tempMod["mzDeviation"] = tempMod["mz"] - tempMod["referenceMZ"]
@@ -1841,7 +1843,7 @@ class DartMSAssay:
                         )
                         spectrum.reverseMZDesc = "mzDeviation by %.5f (%s)" % (transformFactor, spectrum.reverseMZ)
                     else:
-                        raise RuntimeError("Unknown mz correction method provided. Must be one of ['mzDeviationPPM', 'mzDeviation']")
+                        raise ValueError("Unknown mz correction method provided. Must be one of ['mzDeviationPPM', 'mzDeviation']")
 
                 logging.info(
                     "     .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"
@@ -1976,7 +1978,7 @@ class DartMSAssay:
             intensity_collapse_method (str, optional): The method to be used for calculating the consensus signal intensity. Defaults to "average".
 
         Raises:
-            RuntimeError: raised when an unknown option for intensity_collapse_method is provided
+            ValueError: raised when an unknown option for intensity_collapse_method is provided
 
         Returns:
             (mz, intensity, used-features): returns a tuple of mz and intensity values and the mz values used for collapsing the signals
@@ -2019,7 +2021,7 @@ class DartMSAssay:
         elif intensity_collapse_method.lower() == "max".lower():
             intensity_ = np.max(intensity_)
         else:
-            raise RuntimeError("Unknown option for parameter intensity_collapse_method, must be either of ['average', 'sum', 'max']")
+            raise ValueError("Unknown option for parameter intensity_collapse_method, must be either of ['average', 'sum', 'max']")
 
         ord = np.argsort(mz_)
         return mz_[ord], intensity_[ord], [usedFeatures[i] for i in ord]
@@ -2506,16 +2508,16 @@ class DartMSAssay:
             aggregation_fun (str, optional): the method to calculate the derived abundance on integration of raw data. Defaults to "average".
 
         Raises:
-            RuntimeError: raised if parameters on and aggregation_fun have invalid values
+            ValueError: raised if parameters on and aggregation_fun have invalid values
         """
         self.add_data_processing_step(
             "build data matrix", "build data matrix", {"on": on, "originalData_mz_deviation_multiplier_PPM": originalData_mz_deviation_multiplier_PPM}
         )
 
         if on.lower() not in ["processedData".lower(), "originalData".lower()]:
-            raise RuntimeError("Unknown option for parameter on. Must be either of ['processedData', 'originalData']")
+            raise ValueError("Unknown option for parameter on. Must be either of ['processedData', 'originalData']")
         if on.lower() == "originalData".lower() and aggregation_fun.lower not in ["average".lower(), "sum".lower(), "max".lower()]:
-            raise RuntimeError("Unknown aggregation function provided, must be either of ['average', 'sum', 'max']")
+            raise ValueError("Unknown aggregation method provided, must be either of ['average', 'sum', 'max']")
 
         sampleNames = self.assay.manager.get_sample_names()
         sampleNamesToRowI = dict(((sample, i) for i, sample in enumerate(sampleNames)))
@@ -2581,7 +2583,7 @@ class DartMSAssay:
             plot (bool, optional): indicator whether the subtraction shall be plotted as a volcano plot. Defaults to False.
 
         Raises:
-            RuntimeError: should never be raised, but is if the algorithm's implementation is incorrect
+            NotImplementedError: should never be raised, but is if the algorithm's implementation is incorrect
         """
         self.add_data_processing_step(
             "blank subtraction",
@@ -2634,7 +2636,7 @@ class DartMSAssay:
                     elif valsBlanks.shape[0] == 1:
                         pval = scipy.stats.ttest_1samp(valsGroup, valsBlanks[0], alternative="greater")[1]
                     else:
-                        raise RuntimeError("No blank values available, implementation is incorrect")
+                        raise NotImplementedError("No blank values available, implementation is incorrect")
                     fold = np.mean(valsGroup) / np.mean(valsBlanks)
                     sigInd = pval <= pvalueCutoff and fold >= foldCutoff
 
@@ -2873,7 +2875,7 @@ class DartMSAssay:
         )
 
         if found_in_type.lower() not in ["allGroups".lower(), "anyGroup".lower()]:
-            raise RuntimeError("Unknown option for parameter found_in_type, must be either of ['anyGroup', 'allGroups']")
+            raise ValueError("Unknown option for parameter found_in_type, must be either of ['anyGroup', 'allGroups']")
 
         foundIn = [0 for i in range(self.dat.shape[1])]
         for featurei in range(self.dat.shape[1]):
@@ -3007,14 +3009,14 @@ class DartMSAssay:
             random_fraction (int, optional): use only a random fraction of the features. Defaults to 1.
 
         Raises:
-            RuntimeError: _description_
+            ValueError: _description_
         """
         if show is None:
             show = ["consensus", "non-consensus", "raw"]
         elif type(show) == str:
             show = [show]
         if type(show) == list and not ("consensus" in show or "non-consensus" in show or "raw" in show):
-            raise RuntimeError("Unknown option(s) for show parameter. Must be a list with entries ['consensus', 'non-consensus', 'raw']")
+            raise ValueError("Unknown option(s) for show parameter. Must be a list with entries ['consensus', 'non-consensus', 'raw']")
 
         dat = None
         useFeatures = list(range(self.dat.shape[1]))
@@ -3257,7 +3259,7 @@ class DartMSAssay:
             scales (str, optional): parameter for plotnine and the y-scale of facetted plots. Defaults to "free_y".
 
         Raises:
-            RuntimeError: raised if an unknown plottype is provided
+            ValueError: raised if an unknown plottype is provided
         """
         if uGroups is None:
             uGroups = set(self.groups)
@@ -3366,7 +3368,7 @@ class DartMSAssay:
             print(p)
 
         else:
-            raise RuntimeError("Unknown plot type. Must be 'histogram' or 'points'")
+            raise ValueError("Unknown plot type. Must be 'histogram' or 'points'")
 
         print(temp.groupby(["group", "type"])["rsd"].describe().to_markdown())
 
@@ -3523,7 +3525,7 @@ class DartMSAssay:
             embedding (str, optional): the embedding type (). Defaults to "pca", allowed are "pca", "lda", "umap".
 
         Raises:
-            RuntimeError: raised if invalid parameters are provided
+            ValueError: raised if invalid parameters are provided
 
         Returns:
             _type_: _description_
@@ -3550,7 +3552,7 @@ class DartMSAssay:
             datImp = dat[:, keep]
 
         else:
-            raise RuntimeError("Unknown imputation method specified, must be either of ['zero', 'omitNA']")
+            raise ValueError("Unknown imputation method specified, must be either of ['zero', 'omitNA']")
 
         # scaling
         if scaling is None or scaling == "" or scaling.lower() == "None".lower():
@@ -3563,7 +3565,7 @@ class DartMSAssay:
             datImpSca = scaler.fit_transform(datImp)
 
         else:
-            raise RuntimeError("Unknown scaling method specified, must be either of [None, 'standard']")
+            raise ValueError("Unknown scaling method specified, must be either of [None, 'standard']")
 
         # embedding
         if embedding.lower() == "pca".lower():
@@ -3598,7 +3600,7 @@ class DartMSAssay:
             comp2_title = "Component 2"
 
         else:
-            raise RuntimeError("Unknown embedding method specified, must be either of ['pca', 'lda', 'umap']")
+            raise ValueError("Unknown embedding method specified, must be either of ['pca', 'lda', 'umap']")
 
         # plot
         temp = {"pc1": comp1, "pc2": comp2, "file": samples, "group": groups, "batch": batches}
