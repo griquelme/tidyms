@@ -1556,13 +1556,14 @@ class DartMSAssay:
         """
         self.add_data_processing_step("select top n spectra", "select top n spectra", {"n": n})
         for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
-            totalInt = []
+            tic = []
             msDataObj = self.assay.get_ms_data(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
-                totalInt.append(np.sum(spectrum.spint))
+                tic.append(np.sum(spectrum.spint))
+            #print("   ... TIC of sample '%s' is %s" % (sample, str(sorted(tic))))
 
             sampleObjNew = fileio.MSData_in_memory.generate_from_MSData_object(msDataObj)
-            ordInte = np.argsort(np.array(totalInt))
+            ordInte = np.argsort(np.array(tic))
             ordInte = ordInte[0 : ordInte.shape[0] - n]
             ordInte = np.sort(ordInte)[::-1]
             c = 0
@@ -1570,6 +1571,11 @@ class DartMSAssay:
                 sampleObjNew.delete_spectrum(ordInte[c])
                 c = c + 1
             msDataObj.to_MSData_object = sampleObjNew
+
+            #tic = []
+            #for k, spectrum in msDataObj.get_spectra_iterator():
+            #    tic.append(np.sum(spectrum.spint))
+            #print("      ... used spctra of sample '%s' are %s" % (sample, str(sorted(tic))))
 
     #####################################################################################################
     # Sample normalization
