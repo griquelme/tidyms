@@ -41,6 +41,8 @@ import tempfile
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.preprocessing import StandardScaler
+from scipy.cluster.hierarchy import linkage, dendrogram
 import umap
 
 
@@ -3700,3 +3702,80 @@ class DartMSAssay:
             + p9.ggtitle("%s with %s imputation and %s scaling" % (embedding, imputation, scaling))
         )
         return p, temp
+
+    def plot_heatmap(
+        self,
+        keep_features=None,
+        remove_features=None,
+        keep_samples=None,
+        remove_samples=None,
+        keep_groups=None,
+        remove_groups=None,
+        keep_batches=None,
+        remove_batches=None,
+        linkage_method="ward",
+        distance_metric="euclidean",
+    ):
+        """
+        Calculates and plots a heatmap.
+
+        Args:
+            keep_features (list of indices, optional): features to be included for the embedding. Defaults to None.
+            remove_features (list of indices, optional): features to not be included for the embedding. Defaults to None.
+            keep_samples (list of str, optional): samples to be included for the embedding. Defaults to None.
+            remove_samples (list of str, optional): samples to not be included for the embedding. Defaults to None.
+            keep_groups (list of str, optional): groups to be included for the embedding. Defaults to None.
+            remove_groups (list of str, optional): groups to not be included for the embedding. Defaults to None.
+            keep_batches (list of int, optional): batches to be included for the embedding. Defaults to None.
+            remove_batches (list of int, optional): batches to not be included for the embedding. Defaults to None.
+            linkage_method (str, optional): linkage method to be used for generating the feature clustering. Defaults to 'ward', options are from scipy.linkage
+            distance_metric (str, optional): distnace method to be used for generating the feature clustering. Defaults to 'euclidean', options are from scipy.linkage
+
+        Raises:
+            ValueError: raised if invalid parameters are provided
+
+        Returns:
+            _type_: _description_
+        """
+        dat, features, featureAnnotations, samples, groups, batches = self.get_data_matrix_and_meta(
+            keep_features=keep_features,
+            remove_features=remove_features,
+            keep_samples=keep_samples,
+            remove_samples=remove_samples,
+            keep_groups=keep_groups,
+            remove_groups=remove_groups,
+            keep_batches=keep_batches,
+            remove_batches=remove_batches,
+            copy=True,
+        )
+
+        datImp = np.nan_to_num(dat, nan=0, copy=True)
+
+        scaler = StandardScaler()
+        datImpSca = scaler.fit_transform(datImp)
+
+        temp = datImpSca
+        temp = np.transpose(temp)
+        temp = scaler.fit_transform(temp)
+        linkage_data = dendrogram(linkage(temp, method=linkage_method, metric=distance_metric), no_plot=True)
+
+        temp = {}
+        for samplei in range(datImpSca.shape[0]):
+            sample, group, batch = samples[samplei], groups[samplei], batches[samplei]
+            for leavei, featurei in enumerate(linkage_data["leaves"]):
+                featurei = int(featurei)
+                val = datImpSca[samplei, featurei]
+
+                temp = _add_row_to_pandas_creation_dictionary(
+                    temp, sample=sample, group=group, batch=batch, feature=featurei, leave=leavei, value=val
+                )
+
+        temp = pd.DataFrame(temp)
+
+        p = (
+            p9.ggplot(temp, p9.aes(x="leave", y="sample", fill="value"))
+            + p9.theme_minimal()
+            + p9.geom_tile(color="white", size=0.1)
+            + p9.theme(legend_position="bottom", plot_title=p9.element_text(size=14), axis_text_y=p9.element_text(size=6))
+        )
+        print(p)
