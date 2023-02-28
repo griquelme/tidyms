@@ -38,6 +38,12 @@ import csv
 import tempfile
 
 
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+import umap
+
+
 #####################################################################################################
 ####################################################################################################
 ##
@@ -1560,7 +1566,7 @@ class DartMSAssay:
             msDataObj = self.assay.get_ms_data(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
                 tic.append(np.sum(spectrum.spint))
-            #print("   ... TIC of sample '%s' is %s" % (sample, str(sorted(tic))))
+            # print("   ... TIC of sample '%s' is %s" % (sample, str(sorted(tic))))
 
             sampleObjNew = fileio.MSData_in_memory.generate_from_MSData_object(msDataObj)
             ordInte = np.argsort(np.array(tic))
@@ -1572,10 +1578,10 @@ class DartMSAssay:
                 c = c + 1
             msDataObj.to_MSData_object = sampleObjNew
 
-            #tic = []
-            #for k, spectrum in msDataObj.get_spectra_iterator():
+            # tic = []
+            # for k, spectrum in msDataObj.get_spectra_iterator():
             #    tic.append(np.sum(spectrum.spint))
-            #print("      ... used spctra of sample '%s' are %s" % (sample, str(sorted(tic))))
+            # print("      ... used spctra of sample '%s' are %s" % (sample, str(sorted(tic))))
 
     #####################################################################################################
     # Sample normalization
@@ -3646,8 +3652,6 @@ class DartMSAssay:
             datImpSca = datImp
 
         elif scaling.lower() == "standard".lower():
-            from sklearn.preprocessing import StandardScaler
-
             scaler = StandardScaler()
             datImpSca = scaler.fit_transform(datImp)
 
@@ -3656,8 +3660,6 @@ class DartMSAssay:
 
         # embedding
         if embedding.lower() == "pca".lower():
-            from sklearn.decomposition import PCA
-
             pca = PCA(n_components=2)
             pca = pca.fit(datImpSca)
             scores = pca.transform(datImpSca)
@@ -3667,8 +3669,6 @@ class DartMSAssay:
             comp2_title = "PC2 (%.1f %% covered variance)" % (pca.explained_variance_ratio_[1] * 100.0)
 
         elif embedding.lower() == "lda".lower():
-            from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-
             lda = LinearDiscriminantAnalysis(n_components=2)
             scores = lda.fit(datImp, groups).transform(datImp)
             comp1 = scores[:, 0]
@@ -3677,8 +3677,6 @@ class DartMSAssay:
             comp2_title = "Component 2"
 
         elif embedding.lower() == "umap".lower():
-            import umap
-
             reducer = umap.UMAP()
             scores = reducer.fit_transform(datImp)
             comp1 = scores[:, 0]
