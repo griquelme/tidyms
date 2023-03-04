@@ -65,7 +65,7 @@ class MSSpectrum:
         ms_level: int = 1,
         polarity: Optional[int] = None,
         instrument: str = c.QTOF,
-        is_centroid: bool = True
+        is_centroid: bool = True,
     ):
         self.mz = mz
         self.spint = spint
@@ -89,9 +89,7 @@ class MSSpectrum:
             raise ValueError(msg.format(value, c.MS_INSTRUMENTS))
 
     def find_centroids(
-        self,
-        min_snr: float = 10.0,
-        min_distance: Optional[float] = None
+        self, min_snr: float = 10.0, min_distance: Optional[float] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
         r"""
         Find centroids in the spectrum.
@@ -132,8 +130,8 @@ class MSSpectrum:
         self,
         fig_params: Optional[dict] = None,
         line_params: Optional[dict] = None,
-        show: bool = True
-    ) -> bokeh.plotting.figure:     # pragma: no cover
+        show: bool = True,
+    ) -> bokeh.plotting.figure:  # pragma: no cover
         """
         Plot the spectrum using Bokeh.
 
@@ -172,48 +170,46 @@ class MSSpectrum:
 
 class Roi:
     """
-        m/z traces extracted from raw data. m/z information is stored besides
-        time and intensity information.
+    m/z traces extracted from raw data. m/z information is stored besides
+    time and intensity information.
 
-        Attributes
-        ----------
-        time : array
-            time in each scan.
-        spint : array
-            intensity in each scan.
-        mz : array
-            m/z in each scan.
-        scan : array
-            scan numbers where the ROI is defined.
-        mode : {"uplc", "hplc"}
-            Analytical platform used separation. Sets default values for peak
-            detection.
-        features : OptionalList[Feature]]
+    Attributes
+    ----------
+    time : array
+        time in each scan.
+    spint : array
+        intensity in each scan.
+    mz : array
+        m/z in each scan.
+    scan : array
+        scan numbers where the ROI is defined.
+    mode : {"uplc", "hplc"}
+        Analytical platform used separation. Sets default values for peak
+        detection.
+    features : OptionalList[Feature]]
 
-        """
-    def __init__(self, spint: np.ndarray, mz: np.ndarray, time: np.ndarray,
-                 scan: np.ndarray, mode: str):
+    """
+
+    def __init__(
+        self, spint: np.ndarray, mz: np.ndarray, time: np.ndarray, scan: np.ndarray, mode: str
+    ):
         self.mode = mode
         self.time = time
         self.spint = spint
         self.mz = mz
         self.scan = scan
-        self.features = None    # Type: Optional[List[Feature]]
+        self.features = None  # Type: Optional[List[Feature]]
 
     def plot(
-        self,
-        figure: Optional[bokeh.plotting.figure] = None,
-        show: bool = True
-    ) -> bokeh.plotting.figure:     # pragma: no cover
+        self, figure: Optional[bokeh.plotting.figure] = None, show: bool = True
+    ) -> bokeh.plotting.figure:  # pragma: no cover
         raise NotImplementedError
 
     def extract_features(self, **kwargs) -> List["Feature"]:
         raise NotImplementedError
 
     def describe_features(
-        self,
-        custom_descriptors: Optional[dict] = None,
-        filters: Optional[dict] = None
+        self, custom_descriptors: Optional[dict] = None, filters: Optional[dict] = None
     ) -> List[Dict[str, float]]:
         """
         Computes descriptors for the features detected in the ROI.
@@ -253,7 +249,7 @@ class Roi:
         _fill_filter_boundaries(filters)
 
         valid_features = list()
-        descriptor_list = list()      # Type: List[Dict[str, float]]
+        descriptor_list = list()  # Type: List[Dict[str, float]]
         for f in self.features:
             f_descriptors = f.get_descriptors(self)
             for descriptor, func in custom_descriptors.items():
@@ -289,10 +285,7 @@ class Roi:
         missing = np.isnan(self.spint)
         if missing.any():
             interpolator = interp1d(
-                self.time[~missing],
-                self.spint[~missing],
-                assume_sorted=True,
-                **kwargs
+                self.time[~missing], self.spint[~missing], assume_sorted=True, **kwargs
             )
             sp_max = np.nanmax(self.spint)
             sp_min = np.nanmin(self.spint)
@@ -313,29 +306,35 @@ class Roi:
 
 class LCRoi(Roi):
     """
-        m/z traces where chromatographic peaks may be found. m/z information
-        is stored besides time and intensity information.
+    m/z traces where chromatographic peaks may be found. m/z information
+    is stored besides time and intensity information.
 
-        Subclassed from Roi. Used for feature detection in LCMS data.
+    Subclassed from Roi. Used for feature detection in LCMS data.
 
-        Attributes
-        ----------
-        time : array
-            time in each scan.
-        spint : array
-            intensity in each scan.
-        mz : array
-            m/z in each scan.
-        scan : array
-            scan numbers where the ROI is defined.
-        mode : {"uplc", "hplc"}
-            Analytical platform used separation. Sets default values for peak
-            detection.
+    Attributes
+    ----------
+    time : array
+        time in each scan.
+    spint : array
+        intensity in each scan.
+    mz : array
+        m/z in each scan.
+    scan : array
+        scan numbers where the ROI is defined.
+    mode : {"uplc", "hplc"}
+        Analytical platform used separation. Sets default values for peak
+        detection.
 
-        """
+    """
 
-    def __init__(self, spint: np.ndarray, mz: np.ndarray, time: np.ndarray,
-                 scan: np.ndarray, mode: str = c.UPLC):
+    def __init__(
+        self,
+        spint: np.ndarray,
+        mz: np.ndarray,
+        time: np.ndarray,
+        scan: np.ndarray,
+        mode: str = c.UPLC,
+    ):
         super(LCRoi, self).__init__(spint, mz, time, scan, mode)
         self.baseline = None
         self.noise = None
@@ -353,10 +352,7 @@ class LCRoi(Roi):
             raise ValueError(msg.format(value, c.LC_MODES))
 
     def extract_features(
-        self,
-        smoothing_strength: Optional[float] = 1.0,
-        store_smoothed: bool = False,
-        **kwargs
+        self, smoothing_strength: Optional[float] = 1.0, store_smoothed: bool = False, **kwargs
     ) -> List["Peak"]:
         """
         Detect chromatographic peaks.
@@ -412,10 +408,8 @@ class LCRoi(Roi):
         return features
 
     def plot(
-        self,
-        figure: Optional[bokeh.plotting.figure] = None,
-        show: bool = True
-    ) -> bokeh.plotting.figure:     # pragma: no cover
+        self, figure: Optional[bokeh.plotting.figure] = None, show: bool = True
+    ) -> bokeh.plotting.figure:  # pragma: no cover
         """
         Plot the ROI.
 
@@ -459,7 +453,7 @@ class LCRoi(Roi):
         """
         if self.mode == c.HPLC:
             filters = {"width": (10, 90), "snr": (5, None)}
-        else:   # mode = "uplc"
+        else:  # mode = "uplc"
             filters = {"width": (4, 60), "snr": (5, None)}
         return filters
 
@@ -537,6 +531,7 @@ class Chromatogram(LCRoi):
         detection.
 
     """
+
     def __init__(self, time: np.ndarray, spint: np.ndarray, mode: str = c.UPLC):
         super(Chromatogram, self).__init__(spint, None, time, None, mode)
 
@@ -547,6 +542,7 @@ class InvalidPeakException(ValueError):
     Peak objects.
 
     """
+
     pass
 
 
@@ -581,16 +577,9 @@ class Feature:
         str_repr = str_repr.format(name, self.start, self.end)
         return str_repr
 
-    def plot(
-        self,
-        roi: Roi,
-        figure: bokeh.plotting.figure,
-        color: str,
-        **varea_params
-    ):
+    def plot(self, roi: Roi, figure: bokeh.plotting.figure, color: str, **varea_params):
         _plot_bokeh.fill_area(
-            figure, roi.time, roi.spint, self.start, self.end, color,
-            **varea_params
+            figure, roi.time, roi.spint, self.start, self.end, color, **varea_params
         )
 
     def get_descriptors(self, roi: Roi):
@@ -671,11 +660,11 @@ class Peak(Feature):
         loc : float
 
         """
-        weights = roi.spint[self.start:self.end]
+        weights = roi.spint[self.start : self.end]
         if roi.baseline is not None:
-            weights = weights - roi.baseline[self.start:self.end]
+            weights = weights - roi.baseline[self.start : self.end]
         weights = np.maximum(weights, 0)
-        loc = np.abs(np.average(roi.time[self.start:self.end], weights=weights))
+        loc = np.abs(np.average(roi.time[self.start : self.end], weights=weights))
         return loc
 
     def get_height(self, roi: LCRoi) -> float:
@@ -714,9 +703,10 @@ class Peak(Feature):
         area : positive number.
 
         """
-        baseline_corrected = (roi.spint[self.start:self.end] -
-                              roi.baseline[self.start:self.end])
-        area = trapz(baseline_corrected, roi.time[self.start:self.end])
+        baseline_corrected = (
+            roi.spint[self.start : self.end] - roi.baseline[self.start : self.end]
+        )
+        area = trapz(baseline_corrected, roi.time[self.start : self.end])
         return max(0.0, area)
 
     def get_width(self, roi: LCRoi) -> float:
@@ -734,11 +724,8 @@ class Peak(Feature):
         width : positive number.
 
         """
-        height = (
-                roi.spint[self.start:self.end] -
-                roi.baseline[self.start:self.end]
-        )
-        area = cumtrapz(height, roi.time[self.start:self.end])
+        height = roi.spint[self.start : self.end] - roi.baseline[self.start : self.end]
+        area = cumtrapz(height, roi.time[self.start : self.end])
         if area[-1] > 0:
             relative_area = area / area[-1]
             percentile = [0.025, 0.975]
@@ -804,9 +791,9 @@ class Peak(Feature):
         if roi.mz is None:
             mz_mean = None
         else:
-            weights = roi.spint[self.start:self.end]
+            weights = roi.spint[self.start : self.end]
             weights[weights < 0] = 0
-            mz_mean = np.average(roi.mz[self.start:self.end], weights=weights)
+            mz_mean = np.average(roi.mz[self.start : self.end], weights=weights)
             mz_mean = max(0.0, mz_mean)
         return mz_mean
 
@@ -827,7 +814,7 @@ class Peak(Feature):
         if roi.mz is None:
             mz_std = None
         else:
-            mz_std = roi.mz[self.start:self.end].std()
+            mz_std = roi.mz[self.start : self.end].std()
         return mz_std
 
     def get_descriptors(self, roi: LCRoi) -> Dict[str, float]:
@@ -853,7 +840,7 @@ class Peak(Feature):
             c.MZ: self.get_mean_mz(roi),
             c.MZ_STD: self.get_mz_std(roi),
             c.RT_START: self.get_rt_start(roi),
-            c.RT_END: self.get_rt_end(roi)
+            c.RT_END: self.get_rt_end(roi),
         }
         return descriptors
 
@@ -874,7 +861,7 @@ def get_find_centroid_params(instrument: str) -> dict:
     params = {"min_snr": 10}
     if instrument == c.QTOF:
         md = 0.01
-    else:   # orbitrap
+    else:  # orbitrap
         md = 0.005
     params["min_distance"] = md
     return params
@@ -895,8 +882,9 @@ def _fill_filter_boundaries(filter_dict: Dict[str, Tuple]):
         filter_dict[k] = (lb, ub)
 
 
-def _has_all_valid_descriptors(peak_descriptors: Dict[str, float],
-                               filters: Dict[str, Tuple[float, float]]) -> bool:
+def _has_all_valid_descriptors(
+    peak_descriptors: Dict[str, float], filters: Dict[str, Tuple[float, float]]
+) -> bool:
     """
     Check that the descriptors of a peak are in a valid range.
 
