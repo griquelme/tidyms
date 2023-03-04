@@ -49,7 +49,7 @@ def test_chromatogram_find_peaks(chromatogram_data):
 def centroid_mzml():
     mz = np.linspace(100, 110, 1000)
     spint = utils.gauss(mz, 105, 0.005, 100)
-    spint += + np.random.normal(size=mz.size, scale=1.0)
+    spint += +np.random.normal(size=mz.size, scale=1.0)
     return mz, spint
 
 
@@ -78,6 +78,7 @@ def test_find_centroids_qtof(centroid_mzml):
 
 
 # Test ROI
+
 
 @pytest.fixture
 def roi_data():
@@ -172,8 +173,8 @@ def test_peak_area(lc_roi_peak):
     lc_roi, peak = lc_roi_peak
     lc_roi.baseline = np.zeros_like(lc_roi.spint)
     test_area = peak.get_area(lc_roi)
-    y = lc_roi.spint[peak.start:peak.end]
-    x = lc_roi.time[peak.start:peak.end]
+    y = lc_roi.spint[peak.start : peak.end]
+    x = lc_roi.time[peak.start : peak.end]
     expected_area = trapz(y, x)
     assert test_area == expected_area
 
@@ -225,6 +226,7 @@ def test_peak_snr_zero_noise(lc_roi_peak):
 
 # test peak descriptors
 
+
 def test_fill_filter_boundaries_fill_upper_bound():
     filters = {"loc": (50, None), "snr": (5, 10)}
     ms.lcms._fill_filter_boundaries(filters)
@@ -273,16 +275,11 @@ def test_get_descriptors_custom_descriptors(lc_roi_peak):
 
 # Test ROI serialization
 
+
 @pytest.fixture
 def lc_roi(roi_data):
     rt, mz, spint, mode = roi_data
-    return lcms.LCRoi(
-        spint,
-        mz,
-        rt,
-        rt,
-        mode=mode
-    )
+    return lcms.LCRoi(spint, mz, rt, rt, mode=mode)
 
 
 def test_LCRoi_serialization_no_noise_no_baseline_no_features(lc_roi):
