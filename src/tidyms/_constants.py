@@ -33,6 +33,20 @@ ROI_INDEX: Final[str] = "roi_index"
 FT_INDEX: Final[str] = "ft_index"
 MERGED: Final[str] = "merged"
 
+# chromatogram names
+BASELINE: Final[str] = "baseline"
+NOISE: Final[str] = "noise"
+SPINT: Final[str] = "spint"  # spectral intensity
+ROI_FEATURE_LIST: Final[str] = "features"
+TIME: Final[str] = "time"
+SCAN: Final[str] = "scan"
+MODE: Final[str] = "mode"
+
+# peak names
+START: Final[str] = "start"
+APEX: Final[str] = "apex"
+END: Final[str] = "end"
+
 # isotopologue envelope annotation
 ENVELOPE_LABEL: Final[str] = "envelope_label"
 ENVELOPE_INDEX: Final[str] = "envelope_index"
