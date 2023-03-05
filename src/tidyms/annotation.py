@@ -1,8 +1,8 @@
 import bisect
 import numpy as np
 import pandas as pd
-from .lcms import LCRoi, Peak
-from .chem import EnvelopeFinder, EnvelopeValidator,  MMIFinder
+from .lcms import LCTrace, Peak
+from .chem import EnvelopeFinder, EnvelopeValidator, MMIFinder
 from .chem.atoms import EM, PeriodicTable
 from . import _constants as c
 from typing import Callable, Dict, List, Optional, Set, Tuple
@@ -69,7 +69,7 @@ def create_annotator(
         max_length=max_length,
         min_M_tol=min_M_tol,
         max_M_tol=max_M_tol,
-        p_tol=p_tol
+        p_tol=p_tol,
     )
     similarity_checker = _SimilarityChecker(
         min_similarity, _feature_similarity_lc, min_overlap=min_overlap
@@ -86,7 +86,7 @@ def create_annotator(
 
 def annotate(
     feature_table: pd.DataFrame,
-    roi_list: List[LCRoi],
+    roi_list: List[LCTrace],
     annotator: "_IsotopologueAnnotator",
 ) -> None:
     """
@@ -149,7 +149,7 @@ class _IsotopologueAnnotator:
         self.similarity_checker = similarity_checker
 
         # sample data
-        self._roi_list: Optional[List[LCRoi]] = None
+        self._roi_list: Optional[List[LCTrace]] = None
         self._mz_order: Optional[np.ndarray] = None
         self._mz: Optional[np.ndarray] = None
         self._int: Optional[np.ndarray] = None
@@ -181,7 +181,7 @@ class _IsotopologueAnnotator:
         self._label_counter = 0
         self._envelope_index = None
 
-    def load_data(self, feature_table: pd.DataFrame, roi_list: List[LCRoi]):
+    def load_data(self, feature_table: pd.DataFrame, roi_list: List[LCTrace]):
         """
         Load data from a sample.
 
@@ -237,15 +237,13 @@ class _IsotopologueAnnotator:
         return mmi_candidates
 
     def _get_envelope_candidates(self, mono_index: int, mmi: int, q: int):
-        candidates = self.envelope_finder.find(self._mz, mmi, q,
-                                               self._non_annotated)
+        candidates = self.envelope_finder.find(self._mz, mmi, q, self._non_annotated)
 
         # remove candidates where the monoisotopologue is not present
         if mmi != mono_index:
             candidates = [x for x in candidates if mono_index in x]
 
-        candidates = self.similarity_checker.filter_envelope_candidates(
-            candidates)
+        candidates = self.similarity_checker.filter_envelope_candidates(candidates)
         return candidates
 
     def annotate(self, mono_index: int):
@@ -353,7 +351,7 @@ class _SimilarityChecker:
             Key-value parameters passed to `func`.
 
         """
-        self._roi_list: Optional[List[LCRoi]] = None
+        self._roi_list: Optional[List[LCTrace]] = None
         self._roi_index: Optional[np.ndarray] = None
         self._ft_index: Optional[np.ndarray] = None
         self._cache: Optional[Dict] = None
@@ -371,9 +369,7 @@ class _SimilarityChecker:
         self._ft_index = None
         self._cache = None
 
-    def load_data(
-        self, roi_list: List[LCRoi], roi_index: np.ndarray, ft_index: np.ndarray
-    ):
+    def load_data(self, roi_list: List[LCTrace], roi_index: np.ndarray, ft_index: np.ndarray):
         """
         Loads data from a samples.
         """
@@ -439,7 +435,7 @@ class _SimilarityChecker:
 
 
 def _feature_similarity_lc(
-    roi1: LCRoi, ft1: Peak, roi2: LCRoi, ft2: Peak, min_overlap: float
+    roi1: LCTrace, ft1: Peak, roi2: LCTrace, ft2: Peak, min_overlap: float
 ) -> float:
     """
     Feature similarity function used in LC-MS data.
@@ -463,7 +459,7 @@ def _feature_similarity_lc(
     return similarity
 
 
-def _overlap_ratio(roi1: LCRoi, ft1: Peak, roi2: LCRoi, ft2: Peak) -> float:
+def _overlap_ratio(roi1: LCTrace, ft1: Peak, roi2: LCTrace, ft2: Peak) -> float:
     """
     Computes the overlap ratio, defined as the quotient between the overlap
     region and the extension of the longest feature.
@@ -502,7 +498,7 @@ def _overlap_ratio(roi1: LCRoi, ft1: Peak, roi2: LCRoi, ft2: Peak) -> float:
 
 
 def _get_overlap_index(
-    roi1: LCRoi, ft1: Peak, roi2: LCRoi, ft2: Peak
+    roi1: LCTrace, ft1: Peak, roi2: LCTrace, ft2: Peak
 ) -> Tuple[int, int, int, int]:
     """
     Computes the overlap indices for ft1 and ft2.
@@ -558,7 +554,7 @@ def _filter_mmi_candidates(
 
 
 def _get_candidate_abundance(
-    ind: List[int], roi_list: List[LCRoi], roi_index: np.ndarray, ft_index: np.ndarray
+    ind: List[int], roi_list: List[LCTrace], roi_index: np.ndarray, ft_index: np.ndarray
 ):
     scan_start = 0
     scan_end = 10000000000  # dummy value

@@ -287,12 +287,12 @@ def _get_fill_area(
 
     """
     chromatogram.extract_features(store_smoothed=True)
-    rt_ft = np.array([p.get_rt(chromatogram) for p in chromatogram.features])
+    rt_ft = np.array([p.get_rt() for p in chromatogram.features])
     if rt_ft.size:
         closest_feature = find_closest(rt_ft, rt)
         is_valid_peak = abs(rt_ft[closest_feature] - rt) < rt_std * n_deviations
         if is_valid_peak:
-            area = chromatogram.features[closest_feature].get_area(chromatogram)
+            area = chromatogram.features[closest_feature].get_area()
             chromatogram.features = [chromatogram.features[closest_feature]]
         else:
             area = None

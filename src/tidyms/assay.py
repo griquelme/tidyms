@@ -5,14 +5,14 @@ from functools import wraps
 from inspect import getfullargspec
 from joblib import Parallel, delayed
 from pathlib import Path
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 from . import _constants as c
 from . import validation as val
 from . import raw_data_utils
 from .container import DataContainer
 from .correspondence import match_features
 from .fileio import MSData, read_pickle
-from .lcms import Roi, LCRoi
+from .lcms import Feature, Roi, LCTrace
 from .utils import get_progress_bar
 from ._plot_bokeh import _LCAssayPlotter
 from .fill_missing import fill_missing_lc
@@ -41,16 +41,17 @@ def _manage_preprocessing_step(func):
     def wrapper(*args, **kwargs):
         # Get function parameters
         func_arg_spec = getfullargspec(func)
-        func_arg_names = func_arg_spec.args[1:]    # exclude self
+        func_arg_names = func_arg_spec.args[1:]  # exclude self
         params = dict(zip(func_arg_names, args[1:]))
         params.update(kwargs)
-        assay = args[0]     # type: Assay
+        assay = args[0]  # type: Assay
 
         step = func.__name__
         assay.manager.manage_step_before(step, params)
         results = func(assay, **params)
         assay.manager.manage_step_after(step, params)
         return results
+
     return wrapper
 
 
@@ -118,17 +119,12 @@ class Assay:
             assay_path = Path(assay_path)
 
         self.manager = _create_assay_manager(
-            assay_path,
-            data_path,
-            sample_metadata,
-            ms_mode,
-            instrument,
-            separation
+            assay_path, data_path, sample_metadata, ms_mode, instrument, separation
         )
         self.separation = separation
         self.instrument = instrument
         self.plot = _create_assay_plotter(self)
-        self.feature_table = None   # type: Optional[pd.DataFrame]
+        self.feature_table = None  # type: Optional[pd.DataFrame]
         self.data_matrix = None  # type: Optional[DataContainer]
         self.feature_metrics = dict()
 
@@ -190,9 +186,7 @@ class Assay:
         return func
 
     @staticmethod
-    def _get_feature_matching_strategy(
-            strategy: Union[str, Callable] = "default"
-    ) -> Callable:
+    def _get_feature_matching_strategy(strategy: Union[str, Callable] = "default") -> Callable:
         """
         Sets the function used for mathing_features.
 
@@ -269,7 +263,7 @@ class Assay:
         roi_path = self.manager.get_roi_path(sample)
 
         if self.separation in c.LC_MODES:
-            roi_class = LCRoi
+            roi_class = LCTrace
         else:
             roi_class = Roi
 
@@ -282,7 +276,7 @@ class Assay:
             offset, length = index[roi_index]
             fin.seek(offset)
             s = fin.read(length)
-            roi = roi_class.from_json(s)
+            roi = roi_class.from_string(s)
         return roi
 
     def load_roi_list(self, sample: str) -> List[Roi]:
@@ -317,7 +311,7 @@ class Assay:
         roi_path = self.manager.get_roi_path(sample)
 
         if self.separation in c.LC_MODES:
-            roi_class = LCRoi
+            roi_class = LCTrace
         else:
             roi_class = Roi
 
@@ -331,7 +325,7 @@ class Assay:
             for offset, length in index:
                 fin.seek(offset)
                 s = fin.read(length)
-                roi = roi_class.from_json(s)
+                roi = roi_class.from_string(s)
                 roi_list.append(roi)
         return roi_list
 
@@ -522,9 +516,10 @@ class Assay:
     @_manage_preprocessing_step
     def describe_features(
         self,
+        custom_descriptors: Optional[dict[str, Callable[[Feature], float]]] = None,
+        filters: Optional[dict[str, Tuple]] = None,
         n_jobs: Optional[int] = 1,
         verbose: bool = True,
-        **kwargs
     ) -> "Assay":
         """
         Compute feature descriptors for the features extracted from the data.
@@ -539,6 +534,21 @@ class Assay:
 
         Parameters
         ----------
+        custom_descriptors : dict or None, default=None
+            A dictionary of strings to callables, used to estimate custom
+            descriptors of a feature. The function must have the following
+            signature:
+
+            .. code-block:: python
+
+                "estimator_func(feature: Feature) -> float"
+
+        filters : dict or None, default=None
+            A dictionary of descriptor names to a tuple of minimum and maximum
+            acceptable values. To use only minimum/maximum values, use None
+            (e.g. (None, max_value) in the case of using only maximum). Features
+            with descriptors outside those ranges are removed. Filters for
+            custom descriptors can also be used.
         n_jobs: int or None, default=None
             Number of jobs to run in parallel. ``None`` means 1 unless in a
             :obj:`joblib.parallel_backend` context. ``-1`` means using all
@@ -551,6 +561,13 @@ class Assay:
         """
         process_samples = self.manager.sample_queue
         n_samples = len(process_samples)
+
+        if custom_descriptors is None:
+            custom_descriptors = dict()
+        if filters is None:
+            filters = _get_default_filters(self.separation)
+        _fill_filter_boundaries(filters)
+
         if n_samples:
 
             def iterator():
@@ -562,7 +579,7 @@ class Assay:
 
             def worker(args):
                 roi_path, ft_path, roi_list = args
-                ft_table = _describe_features_default(roi_list, **kwargs)
+                ft_table = _describe_features_default(roi_list, custom_descriptors, filters)
                 _save_roi_list(roi_path, roi_list)
                 ft_table.to_pickle(ft_path)
 
@@ -621,11 +638,7 @@ class Assay:
         return self
 
     @_manage_preprocessing_step
-    def match_features(
-        self,
-        strategy: Union[str, Callable] = "default",
-        **kwargs
-    ):
+    def match_features(self, strategy: Union[str, Callable] = "default", **kwargs):
         r"""
         Match features across samples. Each feature is labelled using an integer
         value to assign a common id. Features that do not belong to any group
@@ -721,7 +734,7 @@ class Assay:
                 mz_merge,
                 rt_merge,
                 merge_threshold,
-                annotate_isotopologues
+                annotate_isotopologues,
             )
             dc = DataContainer(data_matrix, feature_metadata, sample_metadata)
             dc.save(dc_path)
@@ -812,7 +825,7 @@ class Assay:
         n_deviations: float = 1.0,
         estimate_not_found: bool = True,
         n_jobs: Optional[int] = None,
-        verbose: bool = False
+        verbose: bool = False,
     ):
         """
         Fill missing values in the Data matrix by searching missing features in
@@ -878,7 +891,7 @@ class Assay:
                 n_deviations,
                 estimate_not_found,
                 n_jobs,
-                verbose
+                verbose,
             )
             self.data_matrix._data_matrix = data_matrix
             # TODO: update DataContainer Status
@@ -941,7 +954,7 @@ class _AssayManager:
     def add_samples(
         self,
         data_path: Optional[Union[str, List[str], Path]],
-        sample_metadata: Optional[Union[str, pd.DataFrame]]
+        sample_metadata: Optional[Union[str, pd.DataFrame]],
     ):
         # set data path and related attributes
         if self._sample_to_path is None:
@@ -952,7 +965,7 @@ class _AssayManager:
     def _add_samples_empty_assay(
         self,
         data_path: Optional[Union[str, List[str], Path]],
-        sample_metadata: Optional[Union[str, pd.DataFrame]]
+        sample_metadata: Optional[Union[str, pd.DataFrame]],
     ):
         path_list = sorted(_get_path_list(data_path))
         sample_to_path = {x.stem: x for x in path_list}
@@ -966,7 +979,7 @@ class _AssayManager:
     def _add_samples_existing_assay(
         self,
         data_path: Optional[Union[str, List[str], Path]],
-        sample_metadata: Optional[Union[str, pd.DataFrame]]
+        sample_metadata: Optional[Union[str, pd.DataFrame]],
     ):
         new_path_list = sorted(_get_path_list(data_path))
         new_sample_to_path = dict()
@@ -1013,7 +1026,7 @@ class _AssayManager:
         try:
             ind = c.PREPROCESSING_STEPS.index(step)
             previous = c.PREPROCESSING_STEPS[ind - 1]
-        except ValueError:      # manage optional steps
+        except ValueError:  # manage optional steps
             if step == c.ANNOTATE_ISOTOPOLOGUES:
                 previous = c.PREPROCESSING_STEPS[2]
             elif step == c.ANNOTATE_ADDUCTS:
@@ -1064,8 +1077,7 @@ class _AssayManager:
                 table_path.unlink(missing_ok=True)
         self.params["preprocess_steps"][step] = False
         processed_samples = self.params["processed_samples"][step]
-        self.params["processed_samples"][step] = \
-            processed_samples.difference(samples)
+        self.params["processed_samples"][step] = processed_samples.difference(samples)
 
     def flag_completed(self, step: str):
         """
@@ -1099,8 +1111,9 @@ class _AssayManager:
         # TODO: remove this method after refactoring DataContainer
         sm = self.sample_metadata.copy()
         sm.index.name = "sample"
-        sm = sm.rename(columns={c.CLASS: "class", "id_": "id",
-                                c.ORDER: "order", c.BATCH: "batch"})
+        sm = sm.rename(
+            columns={c.CLASS: "class", "id_": "id", c.ORDER: "order", c.BATCH: "batch"}
+        )
         return sm
 
     def send_samples_to_queue(self, step: str, kwargs: dict):
@@ -1162,6 +1175,7 @@ class PreprocessingOrderError(ValueError):
     order.
 
     """
+
     pass
 
 
@@ -1169,13 +1183,17 @@ def _extract_features_default(roi: Roi, **kwargs):
     return roi.extract_features(**kwargs)
 
 
-def _describe_features_default(roi_list: List[Roi], **kwargs) -> pd.DataFrame:
+def _describe_features_default(
+    roi_list: List[Roi],
+    custom_descriptors: dict[str, Callable[[Feature], float]],
+    filters: dict[str, Tuple],
+) -> pd.DataFrame:
     roi_index_list = list()
     ft_index = list()
     descriptors_list = list()
 
     for roi_index, roi in enumerate(roi_list):
-        descriptors = roi.describe_features(**kwargs)
+        descriptors = _process_features_roi(roi, custom_descriptors, filters)
         n_features = len(descriptors)
         descriptors_list.extend(descriptors)
         roi_index_list.append([roi_index] * n_features)
@@ -1196,6 +1214,158 @@ def _describe_features_default(roi_list: List[Roi], **kwargs) -> pd.DataFrame:
     return ft_table
 
 
+def _process_features_roi(
+    roi: Roi,
+    custom_descriptors: dict[str, Callable[[Feature], float]],
+    filters: dict[str, Tuple],
+) -> list[dict[str, float]]:
+    filtered_features = list()
+    descriptors = list()
+    if roi.features is not None:
+        for ft in roi.features:
+            d = _process_feature(ft, custom_descriptors, filters)
+            if d is not None:
+                filtered_features.append(ft)
+                descriptors.append(d)
+        roi.features = filtered_features
+    return descriptors
+
+
+def _process_feature(
+    feature: Feature,
+    custom_descriptors: dict[str, Callable[[Feature], float]],
+    filters: dict[str, Tuple],
+) -> Optional[dict[str, float]]:
+
+    descriptors = feature.describe()
+    is_valid_feature = _all_valid_descriptors(descriptors, filters)
+
+    if is_valid_feature:
+        custom = {k: v(feature) for k, v in custom_descriptors.items()}
+        is_valid_feature = _all_valid_descriptors(custom, filters)
+        if is_valid_feature:
+            descriptors.update(custom)
+
+    if not is_valid_feature:
+        descriptors = None
+
+    return descriptors
+
+
+def _all_valid_descriptors(
+    descriptors: dict[str, float], filters: dict[str, Tuple[float, float]]
+) -> bool:
+    """
+    Check that the descriptors of a peak are in a valid range.
+
+    aux function of get_peak_descriptors.
+
+    Parameters
+    ----------
+    peak_descriptors : dict
+        mapping of descriptor names to descriptor values.
+    filters : dict
+        Dictionary from descriptors names to minimum and maximum acceptable
+        values.
+
+    Returns
+    -------
+    is_valid : bool
+        True if all descriptors are inside the valid ranges.
+
+    """
+    is_valid = True
+    for k, (lb, ub) in filters.items():
+        if k in descriptors:
+            d_value = descriptors[k]
+            is_valid = (lb <= d_value) and (ub >= d_value)
+            if not is_valid:
+                break
+    return is_valid
+
+
+def _describe_feature_list(
+    self,
+    custom_descriptors: Optional[dict] = None,
+    filters: Optional[dict[str, Tuple]] = None,
+) -> List[dict[str, float]]:
+    """
+    Computes descriptors for the features detected in the ROI.
+
+    Parameters
+    ----------
+    custom_descriptors : dict or None, default=None
+        A dictionary of strings to callables, used to estimate custom
+        descriptors of a feature. The function must have the following
+        signature:
+
+        .. code-block:: python
+
+            "estimator_func(feature: Feature) -> float"
+
+    filters : dict or None, default=None
+        A dictionary of descriptor names to a tuple of minimum and maximum
+        acceptable values. To use only minimum/maximum values, use None
+        (e.g. (None, max_value) in the case of using only maximum). Features
+        with descriptors outside those ranges are removed. Filters for
+        custom descriptors can also be used.
+
+    Returns
+    -------
+    features : List[Feature]
+        filtered list of features.
+    descriptors: List[Dict[str, float]]
+        Descriptors for each feature.
+
+    """
+
+    if custom_descriptors is None:
+        custom_descriptors = dict()
+
+    if filters is None:
+        filters = self.get_default_filters()
+    _fill_filter_boundaries(filters)
+
+    valid_features = list()
+    descriptor_list = list()  # Type: List[Dict[str, float]]
+    for f in self.features:
+        f_descriptors = f.get_descriptors(self)
+        for descriptor, func in custom_descriptors.items():
+            f_descriptors[descriptor] = func(self, f)
+
+        if _has_all_valid_descriptors(f_descriptors, filters):
+            valid_features.append(f)
+            descriptor_list.append(f_descriptors)
+    self.features = valid_features
+    return descriptor_list
+
+
+def _fill_filter_boundaries(filter_dict: dict[str, Tuple[Optional[float], Optional[float]]]):
+    """
+    Replaces None in the filter boundaries to perform comparisons.
+
+    aux function of get_peak_descriptors
+    """
+    for k in filter_dict:
+        lb, ub = filter_dict[k]
+        if lb is None:
+            lb = -np.inf
+        if ub is None:
+            ub = np.inf
+        filter_dict[k] = (lb, ub)
+
+
+def _get_default_filters(mode: str) -> dict:
+    """
+    Default filters for peaks detected in LC data.
+    """
+    if mode == c.HPLC:
+        filters = {"width": (10, 90), "snr": (5, None)}
+    else:  # mode = "uplc"
+        filters = {"width": (4, 60), "snr": (5, None)}
+    return filters
+
+
 def _match_features_default(assay: Assay, **kwargs):
     # set defaults and validate input
     params = val.match_features_defaults(assay.separation, assay.instrument)
@@ -1203,26 +1373,13 @@ def _match_features_default(assay: Assay, **kwargs):
     validator = val.ValidatorWithLowerThan(val.match_features_schema())
     params = val.validate(params, validator)
 
-    class_to_n_samples = (
-        assay.manager.sample_metadata[c.CLASS]
-        .value_counts()
-        .to_dict()
-    )
-    results = match_features(
-        assay.feature_table,
-        class_to_n_samples,
-        **params
-    )
+    class_to_n_samples = assay.manager.sample_metadata[c.CLASS].value_counts().to_dict()
+    results = match_features(assay.feature_table, class_to_n_samples, **params)
     return results
 
 
 def _create_assay_manager(
-    assay_path,
-    data_path,
-    sample_metadata,
-    ms_mode,
-    instrument,
-    separation
+    assay_path, data_path, sample_metadata, ms_mode, instrument, separation
 ) -> _AssayManager:
     assay_path = _normalize_assay_path(assay_path)
 
@@ -1259,8 +1416,7 @@ def _create_assay_plotter(assay: Assay):
 
 
 def _create_sample_metadata(
-        sample_metadata: Optional[Union[str, pd.DataFrame]],
-        sample_names: List[str]
+    sample_metadata: Optional[Union[str, pd.DataFrame]], sample_names: List[str]
 ) -> pd.DataFrame:
     # sample metadata df
     if isinstance(sample_metadata, str) or isinstance(sample_metadata, Path):
@@ -1270,10 +1426,7 @@ def _create_sample_metadata(
     elif isinstance(sample_metadata, pd.DataFrame):
         df = sample_metadata
     else:
-        msg = (
-            "`sample_metadata` must be a path to a csv file, a DataFrame "
-            "or None."
-        )
+        msg = "`sample_metadata` must be a path to a csv file, a DataFrame " "or None."
         raise ValueError(msg)
     return df
 
@@ -1288,10 +1441,10 @@ def _normalize_sample_metadata(df: pd.DataFrame, name_to_path: List[str]):
         samples_in_metadata = set(df.index)
         missing_in_metadata = samples_in_path.difference(samples_in_metadata)
         missing_in_path = samples_in_metadata.difference(samples_in_path)
-        if len(missing_in_metadata):     # missing samples in df
+        if len(missing_in_metadata):  # missing samples in df
             msg = "The following samples are missing in the sample metadata: {}"
             raise ValueError(msg.format(missing_in_metadata))
-        elif len(missing_in_path):   # missing samples in path
+        elif len(missing_in_path):  # missing samples in path
             msg = "The following samples were not found in the data path {}"
             raise ValueError(msg.format(missing_in_path))
     else:
@@ -1360,7 +1513,7 @@ def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
         path_list = [Path(x) for x in path]
     elif isinstance(path, Path):
         if path.is_dir():
-            path_list = list(path.glob("*.mzML"))   # all mzML files in the dir
+            path_list = list(path.glob("*.mzML"))  # all mzML files in the dir
         elif path.is_file():
             path_list = [path]
         else:
@@ -1393,7 +1546,7 @@ def _save_roi_list(roi_path: Path, roi_list: List[Roi]):
         offset = len(dummy_header)
         index = list()
         for roi in roi_list:
-            serialized_roi = roi.to_json() + '\n'
+            serialized_roi = roi.to_string() + "\n"
             length = len(serialized_roi)
             index.append([offset, length])
             offset += len(serialized_roi)
@@ -1410,7 +1563,7 @@ def compare_dict(d1: Optional[dict], d2: Optional[dict]) -> bool:
     if (d1 is None) or (d2 is None):
         res = False
     else:
-        res = len(d1) == len(d2)    # first check of equality
+        res = len(d1) == len(d2)  # first check of equality
     if res:
         for k in d1:
             v1 = d1.get(k)
@@ -1439,7 +1592,7 @@ def _build_params_dict(ms_mode: str, separation: str, instrument: str):
             "instrument": instrument,
         },
         "processed_samples": {x: set() for x in c.PREPROCESSING_STEPS},
-        "preprocess_steps": {x: False for x in c.PREPROCESSING_STEPS}
+        "preprocess_steps": {x: False for x in c.PREPROCESSING_STEPS},
     }
     params_dict.update({x: dict() for x in c.PREPROCESSING_STEPS})
     return params_dict
@@ -1466,11 +1619,7 @@ def _is_assay_dir(p: Path) -> int:
         check_roi_dir = roi_dir.is_dir()
         check_ft_dir = ft_dir.is_dir()
         check_metadata = metadata_path.is_file()
-        is_valid_structure = (
-                check_roi_dir and
-                check_ft_dir and
-                check_metadata
-        )
+        is_valid_structure = check_roi_dir and check_ft_dir and check_metadata
         if is_valid_structure:
             status = 1
         else:

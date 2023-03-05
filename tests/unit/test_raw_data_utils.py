@@ -17,9 +17,7 @@ def sim_ms_data():
     # simulated features params
     mz_params = np.array([mz_list, [3, 10, 5, 31, 22]])
     mz_params = mz_params.T
-    rt_params = np.array(
-        [[30, 40, 60, 80, 80], [1, 2, 2, 3, 3], [1, 1, 1, 1, 1]]
-    )
+    rt_params = np.array([[30, 40, 60, 80, 80], [1, 2, 2, 3, 3], [1, 1, 1, 1, 1]])
     rt_params = rt_params.T
 
     noise_level = 0.1
@@ -28,12 +26,7 @@ def sim_ms_data():
 
 
 def test_make_roi(sim_ms_data):
-    roi_list = ms.make_roi(
-        sim_ms_data,
-        tolerance=0.005,
-        max_missing=0,
-        min_length=1
-    )
+    roi_list = ms.make_roi(sim_ms_data, tolerance=0.005, max_missing=0, min_length=1)
     assert len(roi_list) == sim_ms_data._reader.mz_params.shape[0]
 
 
@@ -46,7 +39,8 @@ def test_make_roi_targeted_mz(sim_ms_data):
         max_missing=0,
         min_length=1,
         min_intensity=0,
-        targeted_mz=targeted_mz)
+        targeted_mz=targeted_mz,
+    )
     assert len(roi_list) == targeted_mz.size
 
 
@@ -65,11 +59,8 @@ def test_make_roi_min_intensity(sim_ms_data):
 
 def test_make_roi_multiple_match_closest(sim_ms_data):
     roi_list = ms.make_roi(
-        sim_ms_data,
-        tolerance=0.005,
-        max_missing=0,
-        min_length=1,
-        multiple_match="closest")
+        sim_ms_data, tolerance=0.005, max_missing=0, min_length=1, multiple_match="closest"
+    )
     assert len(roi_list) == sim_ms_data._reader.mz_params.shape[0]
 
 
@@ -81,32 +72,21 @@ def test_make_roi_multiple_match_reduce_merge(sim_ms_data):
     targeted_mz = np.delete(targeted_mz, 3)
     tolerance = 31
     roi_list = ms.make_roi(
-        sim_ms_data,
-        tolerance=tolerance,
-        max_missing=0,
-        min_length=1,
-        targeted_mz=targeted_mz)
+        sim_ms_data, tolerance=tolerance, max_missing=0, min_length=1, targeted_mz=targeted_mz
+    )
     assert len(roi_list) == (sim_ms_data._reader.mz_params.shape[0] - 1)
 
 
 def test_make_roi_multiple_match_reduce_custom_mz_reduce(sim_ms_data):
     roi_list = ms.make_roi(
-        sim_ms_data,
-        tolerance=0.005,
-        max_missing=0,
-        min_length=1,
-        mz_reduce=np.median
+        sim_ms_data, tolerance=0.005, max_missing=0, min_length=1, mz_reduce=np.median
     )
     assert len(roi_list) == sim_ms_data._reader.mz_params.shape[0]
 
 
 def test_make_roi_multiple_match_reduce_custom_sp_reduce(sim_ms_data):
     roi_list = ms.make_roi(
-        sim_ms_data,
-        tolerance=0.005,
-        max_missing=0,
-        min_length=1,
-        sp_reduce=lambda x: 1
+        sim_ms_data, tolerance=0.005, max_missing=0, min_length=1, sp_reduce=lambda x: 1
     )
     assert len(roi_list) == sim_ms_data._reader.mz_params.shape[0]
 
@@ -118,17 +98,17 @@ def test_make_roi_invalid_multiple_match(sim_ms_data):
             tolerance=0.005,
             max_missing=0,
             min_length=0,
-            multiple_match="invalid-value"
+            multiple_match="invalid-value",
         )
 
 
 # # test accumulate spectra
 
+
 def test_accumulate_spectra_centroid(sim_ms_data):
     start_time = sim_ms_data._reader.rt.min()
     end_time = sim_ms_data._reader.rt.max()
-    sp = ms.accumulate_spectra(
-        sim_ms_data, start_time=start_time, end_time=end_time)
+    sp = ms.accumulate_spectra(sim_ms_data, start_time=start_time, end_time=end_time)
     assert sp.mz.size == sim_ms_data._reader.mz_params.shape[0]
 
 
@@ -140,13 +120,14 @@ def test_accumulate_spectra_centroid_subtract_left(sim_ms_data):
         sim_ms_data,
         start_time=start_time,
         end_time=end_time,
-        subtract_left_time=subtract_left_time
+        subtract_left_time=subtract_left_time,
     )
     # only two peaks at rt 80 should be present
     assert sp.mz.size == 2
 
 
 # test make_chromatogram
+
 
 def test_make_chromatograms(sim_ms_data):
     # test that the chromatograms generated are valid
@@ -185,6 +166,7 @@ def test_make_tic_bpi(sim_ms_data):
 
 
 # Test _RoiMaker
+
 
 def test_TempRoi_creation():
     troi = ms.raw_data_utils._TempRoi()
@@ -298,12 +280,9 @@ def test_TempRoi_convert_to_roi_di_roi():
     troi.append(1, 1, 5)
     scans = np.arange(6)
     time = np.arange(6)
-    roi = troi.convert_to_roi(time, scans, "di")
-
-    assert np.array_equal(roi.scan, [2, 3, 4, 5])
-    assert np.allclose(roi.time, [2, 3, 4, 5])
-    assert np.allclose(roi.mz, [1, np.nan, 1, 1], equal_nan=True)
-    assert np.allclose(roi.spint, [1, np.nan, 1, 1], equal_nan=True)
+    with pytest.raises(NotImplementedError):
+        # TODO: FIX after implementing DI ROI creation
+        troi.convert_to_roi(time, scans, "di")
 
 
 def test_RoiList_creation():
@@ -339,7 +318,7 @@ def test_RoiList_two_consecutive_insert():
     roi_list = ms.raw_data_utils._TempRoiList()
     # first insert
     scan1 = 1
-    mz1 = np.array([0, 1, 2, 3, 4, 6, 7, 9])     # 5 and 8 are missing
+    mz1 = np.array([0, 1, 2, 3, 4, 6, 7, 9])  # 5 and 8 are missing
     spint1 = mz1.copy()
     roi_list.insert(mz1, spint1, scan1)
 
@@ -358,7 +337,7 @@ def test_RoiList_two_consecutive_insert():
     assert np.allclose(roi_list.max_int, expected_mz)
     assert (roi_list.length == 1).all()
     assert (roi_list.missing_count == 0).all()
-    assert (np.diff(roi_list.mz_mean) >= 0).all()   # check is sorted
+    assert (np.diff(roi_list.mz_mean) >= 0).all()  # check is sorted
 
     # check roi values
     # values for mz and spint should be 0, 1, 2, 3, ...
@@ -567,7 +546,7 @@ def test_RoiProcessor_creation():
         tolerance,
         multiple_match,
         mz_reduce,
-        sp_reduce
+        sp_reduce,
     )
     assert np.array_equal(processor.mz_filter, mz_seed)
     assert processor.max_missing == max_missing
@@ -597,8 +576,9 @@ def roi_processor():
         tolerance,
         multiple_match,
         mz_reduce,
-        sp_reduce
+        sp_reduce,
     )
+
 
 def test_RoiProcessor_feed_spectrum_empty_processor_no_mz_filter(roi_processor):
     n = 5
@@ -611,6 +591,7 @@ def test_RoiProcessor_feed_spectrum_empty_processor_no_mz_filter(roi_processor):
     assert np.allclose(roi_processor.tmp_roi_list.max_int, sp)
     assert (roi_processor.tmp_roi_list.length == 1).all()
     assert (roi_processor.tmp_roi_list.missing_count == 0).all()
+
 
 def test_RoiProcessor_feed_spectrum_empty_processor_mz_filter(roi_processor):
 
@@ -648,9 +629,7 @@ def test_RoiProcessor_feed_spectrum_no_mz_filter(roi_processor):
     assert np.allclose(roi_processor.tmp_roi_list.mz_mean, expected_mz_mean)
     assert np.allclose(roi_processor.tmp_roi_list.max_int, expected_max_int)
     assert np.array_equal(roi_processor.tmp_roi_list.length, expected_length)
-    assert np.array_equal(
-        roi_processor.tmp_roi_list.missing_count, expected_missing_count
-    )
+    assert np.array_equal(roi_processor.tmp_roi_list.missing_count, expected_missing_count)
 
 
 def test_RoiProcessor_feed_spectrum_mz_filter(roi_processor):
@@ -677,14 +656,10 @@ def test_RoiProcessor_feed_spectrum_mz_filter(roi_processor):
     assert np.allclose(roi_processor.tmp_roi_list.mz_mean, expected_mz_mean)
     assert np.allclose(roi_processor.tmp_roi_list.max_int, expected_max_int)
     assert np.array_equal(roi_processor.tmp_roi_list.length, expected_length)
-    assert np.array_equal(
-        roi_processor.tmp_roi_list.missing_count, expected_missing_count
-    )
+    assert np.array_equal(roi_processor.tmp_roi_list.missing_count, expected_missing_count)
 
 
-def test_RoiProcessor_clear_completed_roi_min_intensity_None_min_length_None(
-    roi_processor
-):
+def test_RoiProcessor_clear_completed_roi_min_intensity_None_min_length_None(roi_processor):
     n = 5
     mz1 = np.arange(n)
     sp1 = np.arange(n)
@@ -706,15 +681,11 @@ def test_RoiProcessor_clear_completed_roi_min_intensity_None_min_length_None(
     assert np.allclose(roi_processor.tmp_roi_list.mz_mean, expected_mz_mean)
     assert np.allclose(roi_processor.tmp_roi_list.max_int, expected_max_int)
     assert np.array_equal(roi_processor.tmp_roi_list.length, expected_length)
-    assert np.array_equal(
-        roi_processor.tmp_roi_list.missing_count, expected_missing_count
-    )
+    assert np.array_equal(roi_processor.tmp_roi_list.missing_count, expected_missing_count)
     assert len(roi_processor.valid_roi) == 3
 
 
-def test_RoiProcessor_clear_completed_roi_min_intensity_int_min_length_None(
-    roi_processor
-):
+def test_RoiProcessor_clear_completed_roi_min_intensity_int_min_length_None(roi_processor):
     roi_processor.min_intensity = 2
     n = 5
     mz1 = np.arange(n)
@@ -737,9 +708,7 @@ def test_RoiProcessor_clear_completed_roi_min_intensity_int_min_length_None(
     assert np.allclose(roi_processor.tmp_roi_list.mz_mean, expected_mz_mean)
     assert np.allclose(roi_processor.tmp_roi_list.max_int, expected_max_int)
     assert np.array_equal(roi_processor.tmp_roi_list.length, expected_length)
-    assert np.array_equal(
-        roi_processor.tmp_roi_list.missing_count, expected_missing_count
-    )
+    assert np.array_equal(roi_processor.tmp_roi_list.missing_count, expected_missing_count)
     # using a min intensity filter of 2, only the ROI generated from mz1 = 2,
     # sp2 = 2 should be valid
     assert len(roi_processor.valid_roi) == 1
@@ -749,9 +718,7 @@ def test_RoiProcessor_clear_completed_roi_min_intensity_int_min_length_None(
     assert np.allclose(roi.scan[0], 1)
 
 
-def test_RoiProcessor_clear_completed_roi_min_intensity_int_min_length_int(
-    roi_processor
-):
+def test_RoiProcessor_clear_completed_roi_min_intensity_int_min_length_int(roi_processor):
     roi_processor.min_intensity = 2
     roi_processor.min_length = 2
     n = 5
@@ -775,9 +742,7 @@ def test_RoiProcessor_clear_completed_roi_min_intensity_int_min_length_int(
     assert np.allclose(roi_processor.tmp_roi_list.mz_mean, expected_mz_mean)
     assert np.allclose(roi_processor.tmp_roi_list.max_int, expected_max_int)
     assert np.array_equal(roi_processor.tmp_roi_list.length, expected_length)
-    assert np.array_equal(
-        roi_processor.tmp_roi_list.missing_count, expected_missing_count
-    )
+    assert np.array_equal(roi_processor.tmp_roi_list.missing_count, expected_missing_count)
     # using a min length filter of 2, all cleared ROI are invalid
     assert len(roi_processor.valid_roi) == 0
 
@@ -830,8 +795,9 @@ def test_match_mz_no_multiple_matches():
     mz2_match_index = np.array([1, 4, 6], dtype=int)
     mz2_no_match_index = np.array([0, 2, 3, 5], dtype=int)
     mode = "closest"
-    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = \
-        _match_mz(mz1, mz2, sp2, tolerance, mode, np.mean, np.mean)
+    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = _match_mz(
+        mz1, mz2, sp2, tolerance, mode, np.mean, np.mean
+    )
     # test match index
     assert np.array_equal(mz1_match_index, test_mz1_index)
     # test match mz and sp values
@@ -852,8 +818,9 @@ def test_match_mz_no_matches():
     mz2_match_index = np.array([], dtype=int)
     mz2_no_match_index = np.array([0, 1, 2, 3, 4, 5, 6], dtype=int)
     mode = "closest"
-    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = \
-        _match_mz(mz1, mz2, sp2, tolerance, mode, np.mean, np.mean)
+    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = _match_mz(
+        mz1, mz2, sp2, tolerance, mode, np.mean, np.mean
+    )
     # test match index
     assert np.array_equal(mz1_match_index, test_mz1_index)
     # test match mz and sp values
@@ -874,8 +841,9 @@ def test_match_mz_all_match():
     mz2_match_index = np.array([0, 1, 2, 3, 4], dtype=int)
     mz2_no_match_index = np.array([], dtype=int)
     mode = "closest"
-    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = \
-        _match_mz(mz1, mz2, sp2, tolerance, mode, np.mean, np.mean)
+    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = _match_mz(
+        mz1, mz2, sp2, tolerance, mode, np.mean, np.mean
+    )
     # test match index
     assert np.array_equal(mz1_match_index, test_mz1_index)
     # test match mz and sp values
@@ -899,8 +867,9 @@ def test_match_mz_multiple_matches_mode_closest():
     mz2_match_index = np.array([0, 4, 6, 7], dtype=int)
     mz2_no_match_index = np.array([1, 2, 3, 5, 8], dtype=int)
     mode = "closest"
-    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = \
-        _match_mz(mz1, mz2, sp2, tolerance, mode, np.mean, np.mean)
+    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = _match_mz(
+        mz1, mz2, sp2, tolerance, mode, np.mean, np.mean
+    )
     # test match index
     assert np.array_equal(mz1_match_index, test_mz1_index)
     # test match mz and sp values
@@ -926,8 +895,9 @@ def test_match_mz_multiple_matches_mode_reduce():
     expected_mz2_match = [50.0, 100.0, 126.0, 150.5]
     expected_sp2_match = [200, 300, 100, 200]
     mode = "reduce"
-    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = \
-        _match_mz(mz1, mz2, sp2, tolerance, mode, np.mean, np.sum)
+    test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = _match_mz(
+        mz1, mz2, sp2, tolerance, mode, np.mean, np.sum
+    )
     # test match index
     assert np.array_equal(mz1_match_index, test_mz1_index)
     # test match mz and sp values
@@ -952,8 +922,10 @@ def test_match_mz_invalid_mode():
     mz2_no_match_index = np.array([1, 2, 3, 5, 8], dtype=int)
     mode = "invalid-mode"
     with pytest.raises(ValueError):
-        test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = \
-            _match_mz(mz1, mz2, sp2, tolerance, mode, np.mean, np.mean)
+        test_mz1_index, mz2_match, sp2_match, mz2_no_match, sp2_no_match = _match_mz(
+            mz1, mz2, sp2, tolerance, mode, np.mean, np.mean
+        )
+
 
 # def test_accumulate_spectra_profile(profile_mzml):
 #     sp = ms.accumulate_spectra(profile_mzml, start_time=5, end_time=10)
