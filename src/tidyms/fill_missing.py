@@ -13,18 +13,9 @@ from sklearn.impute import KNNImputer
 
 
 missing_data_iterator_type = Generator[
-    Tuple[
-        MSData,
-        str,
-        np.ndarray,
-        np.ndarray,
-        np.ndarray,
-        np.ndarray,
-        np.ndarray,
-        pd.Index
-    ],
+    Tuple[MSData, str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, pd.Index],
     None,
-    None
+    None,
 ]
 
 
@@ -36,7 +27,7 @@ def fill_missing_lc(
     n_deviations: float,
     estimate_not_found: bool,
     n_jobs: Optional[int] = None,
-    verbose: bool = False
+    verbose: bool = False,
 ):
     """
     Fill missing values by searching missing peaks in the raw data.
@@ -93,29 +84,24 @@ def fill_missing_lc(
 
     """
     missing_iterator = _get_missing_data_iterator(
-        ms_data_generator, data_matrix, feature_metadata)
+        ms_data_generator, data_matrix, feature_metadata
+    )
     if verbose:
         progress_bar = get_progress_bar()
         total = data_matrix.shape[0]
         print("Filling missing values in {} samples".format(total))
-        missing_iterator = progress_bar(
-            missing_iterator,
-            total=total
-        )
+        missing_iterator = progress_bar(missing_iterator, total=total)
 
     func = partial(
         _get_sample_fill_values,
         mz_tolerance=mz_tolerance,
         n_deviations=n_deviations,
-        estimate_not_found=estimate_not_found
+        estimate_not_found=estimate_not_found,
     )
     func = delayed(func)
     fill_results = Parallel(n_jobs=n_jobs)(func(*x) for x in missing_iterator)
     missing = pd.DataFrame(
-        data=0,
-        index=data_matrix.index,
-        columns=data_matrix.columns,
-        dtype=int
+        data=0, index=data_matrix.index, columns=data_matrix.columns, dtype=int
     )
     for res in fill_results:
         sample, found_area, found_index, not_found_area, not_found_index = res
@@ -178,7 +164,7 @@ def _apply_imputer(df: pd.DataFrame, imputer: KNNImputer) -> pd.DataFrame:
 def _get_missing_data_iterator(
     ms_data_generator: Generator[Tuple[str, MSData], None, None],
     data_matrix: pd.DataFrame,
-    feature_metadata: pd.DataFrame
+    feature_metadata: pd.DataFrame,
 ) -> missing_data_iterator_type:
     mz = feature_metadata[c.MZ]
     rt = feature_metadata[c.RT]
@@ -195,7 +181,7 @@ def _get_missing_data_iterator(
             rt_std[missing_mask].to_numpy(),
             rt_start[missing_mask].to_numpy(),
             rt_end[missing_mask].to_numpy(),
-            missing_mask[missing_mask].index
+            missing_mask[missing_mask].index,
         )
         yield missing_data
 
@@ -211,7 +197,7 @@ def _get_sample_fill_values(
     features: pd.Index,
     mz_tolerance: float,
     n_deviations: float,
-    estimate_not_found: bool
+    estimate_not_found: bool,
 ) -> Tuple[str, np.ndarray, pd.Index, np.ndarray, pd.Index]:
     """
     Finds fill values for features not detected during feature extraction in a
@@ -258,7 +244,7 @@ def _get_sample_fill_values(
             if estimate_not_found:
                 area = trapz(
                     chrom.spint[c_start_index:c_end_index],
-                    chrom.time[c_start_index:c_end_index]
+                    chrom.time[c_start_index:c_end_index],
                 )
 
             else:
@@ -277,10 +263,7 @@ def _get_sample_fill_values(
 
 
 def _get_fill_area(
-    chromatogram: Chromatogram,
-    rt: float,
-    rt_std: float,
-    n_deviations: float
+    chromatogram: Chromatogram, rt: float, rt_std: float, n_deviations: float
 ) -> Optional[float]:
     """
     Search a peak in a region defined between ``rt - rt_std`` and
