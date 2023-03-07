@@ -36,6 +36,9 @@ import logging
 import datetime
 import csv
 import tempfile
+import traceback
+import time
+from collections import OrderedDict
 
 
 from sklearn.preprocessing import StandardScaler
@@ -473,6 +476,103 @@ def _refine_clustering_for_mz_list(
                         lastPPMDev = (np.max(usedMZs[used == 1]) - np.min(usedMZs[used == 1])) / np.average(usedMZs[used == 1]) * 1e6
 
     return newClusts
+
+
+#####################################################################################################
+####################################################################################################
+##
+# Data handling assay
+#
+
+
+class Parameters:
+    def __init__(self, name, comment=None, args=None, kwargs=None):
+        if type(name) != str:
+            raise ValueError("name of Parameters must be a str")
+        if comment is not None and type(comment) != str:
+            raise ValueError("comment of Parameters must be a str")
+        if args is not None and type(args) != list:
+            raise ValueError("args of Parameters must be a list")
+        if kwargs is not None and type(kwargs) != dict:
+            raise ValueError("kwargs of Parameters must be dict")
+
+        if args is None:
+            args = []
+        if kwargs is None:
+            kwargs = {}
+
+        self.name = name
+        self.comment = comment
+        self.args = args
+        self.kwargs = kwargs
+
+
+def compare_parameters_for_function(function_to_optimize, parameter_values, add_args=False, add_kwargs=False, add_execution_time=True):
+    succeeded = {}
+    failed = {}
+
+    print("")
+    print("")
+    print("##############################################################################")
+    print("##############################################################################")
+    print("")
+    print("Starting parameter comparison")
+    print("")
+    print("")
+
+    _startTime = time.time()
+    for parami, param in enumerate(parameter_values):
+        print("##############################################################################")
+        print("Setname: %s" % (param.name))
+        print("Comment: %s" % (param.comment))
+
+        try:
+            result = function_to_optimize(*param.args, **param.kwargs)
+            res = OrderedDict()
+            res["_parameterSet"] = param.name
+            res["_parameterSetComment"] = param.comment
+            res["_executionTime"] = time.time() - _startTime
+            if add_args:
+                res = res | dict([("_argpos_%d" % (i), param.args[i]) for i in range(len(param.args))])
+            if add_kwargs:
+                res = res | param.kwargs
+            res = res | result
+
+            succeeded = _add_row_to_pandas_creation_dictionary(succeeded, **res)
+
+        except Exception as ex:
+            print("***************")
+            print("Exception occurred")
+            print(traceback.print_exc())
+
+            res = OrderedDict()
+            res["_parameterSet"] = param.name
+            res["_parameterSetComment"] = param.comment
+            res["_executionTime"] = time.time() - _startTime
+            if add_args:
+                res = res | dict([("_argpos_%d" % (i), param.args[i]) for i in range(len(param.args))])
+            if add_kwargs:
+                res = res | param.kwargs
+            res = res | {"exception": traceback.format_exc()}
+
+            failed = _add_row_to_pandas_creation_dictionary(failed, **res)
+
+        print("")
+        print("")
+
+    print("##############################################################################")
+    print("")
+
+    print("Parameter comparison finished")
+    print("   .. took %.1f minutes" % ((time.time() - _startTime) % 60.0))
+    print("   .. %d sets finished, %d sets failed" % (len(succeeded), len(failed)))
+
+    print("##############################################################################")
+    print("##############################################################################")
+    print("")
+    print("")
+
+    return succeeded, failed
 
 
 #####################################################################################################
@@ -3783,3 +3883,46 @@ class DartMSAssay:
             + p9.theme(legend_position="bottom", plot_title=p9.element_text(size=14), axis_text_y=p9.element_text(size=6))
         )
         print(p)
+
+    #####################################################################################################
+    # Convenience function for semi-automated parameter optimization
+    #
+
+    def get_summary_of_results(self, reference_features=None, reference_features_allowed_deviationPPM=20.0):
+        if reference_features is None:
+            reference_features = []
+
+        results = {}
+
+        ## total number of detected features
+        results["n(feats)"] = self.dat.shape[1]
+
+        ## number of detected reference features
+        found = 0
+        ppmDeviations = []
+        mzs_ = np.array([self.features[i][1] for i in range(len(self.features))])
+        for refi in range(len(reference_features)):
+            referenceMZmin, referenceMZ, referenceMZmax = (
+                reference_features[refi] * (1.0 - reference_features_allowed_deviationPPM / 1.0e6),
+                reference_features[refi],
+                reference_features[refi] * (1.0 + reference_features_allowed_deviationPPM / 1.0e6),
+            )
+            if any((referenceMZmin <= self.features[i][1] <= referenceMZmax for i in range(len(self.features)))):
+                ind = np.argmin(np.abs(mzs_ - referenceMZ))
+                mzDevPPM = (mzs_[ind] - referenceMZ) / referenceMZ * 1e6
+                ppmDeviations.append(mzDevPPM)
+                found += 1
+        results["n(ref.found)"] = found
+        results["avg(ref.MZDevPPM)"] = np.average(np.array(ppmDeviations)) if found > 0 else -1
+
+        ## ppm deviation of features
+        mzDevs = np.array([(self.features[i][2] - self.features[i][0]) / self.features[i][1] * 1e6 for i in range(len(self.features))])
+        avg, std = _average_and_std(mzDevs)
+        results["avg(feats.MZDevPPM)"] = avg
+        results["std(feats.MZDevPPM)"] = std
+
+        ## number of missing values in data matrix
+        results["n(nan)"] = np.sum(np.isnan(self.dat))
+        results["r(nan)"] = np.sum(np.isnan(self.dat) / (self.dat.shape[0] * self.dat.shape[1]))
+
+        return results
