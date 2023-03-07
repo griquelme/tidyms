@@ -134,11 +134,14 @@ def _find_feature_by_mz(features, mz, max_deviation_ppm=None):
     Returns:
         index, mz_deviation: the index of the found feature closest to the reference mz value and the deviation in ppm
     """
-    mzmax = mz * (1.0 + max_deviation_ppm / 1e6)
-    mzmin = mz * (1.0 - max_deviation_ppm / 1e6)
+    mzmax = 1e6
+    mzmin = 0
+    if max_deviation_ppm is not None:
+        mzmax = mz * (1.0 + max_deviation_ppm / 1e6)
+        mzmin = mz * (1.0 - max_deviation_ppm / 1e6)
     ind = np.argmin(np.abs(features[:, 1] - mz))
 
-    if max_deviation_ppm is None or (features[ind, 1] >= mzmin and features[ind, 1] <= mzmax):
+    if max_deviation_ppm is None or (mzmin <= features[ind, 1] <= mzmax):
         return ind, (features[ind, 1] - mz) / mz * 1e6
     else:
         return None, None
