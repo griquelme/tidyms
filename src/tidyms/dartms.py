@@ -3327,7 +3327,7 @@ class DartMSAssay:
             types (list of str, optional): plots to include. Defaults to None.
         """
         if types is None:
-            types = ["consensus", "non-consensus", "raw-corrected", "raw"]
+            types = ["consensus", "raw-corrected", "raw"]
         temp = None
 
         for featureInd in [featureInd]:
@@ -3351,7 +3351,7 @@ class DartMSAssay:
                                     feature=featureInd,
                                 )
 
-                            if "non-consensus" in types:
+                            if "raw-corrected" in types:
                                 for j in range(spectrum.usedFeatures[i].shape[0]):
                                     temp = _add_row_to_pandas_creation_dictionary(
                                         temp,
@@ -3361,31 +3361,9 @@ class DartMSAssay:
                                         sample=sample,
                                         file=sample.split("::")[0],
                                         group=sample_metadata.loc[sample, "group"],
-                                        type="non-consensus",
+                                        type="raw-corrected",
                                         feature=featureInd,
                                     )
-
-                if "raw-corrected" in types:
-                    for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
-                        usei = np.where(
-                            np.logical_and(
-                                spectrum.mz >= self.features[featureInd][0],
-                                spectrum.mz <= self.features[featureInd][2],
-                            )
-                        )[0]
-                        if usei.size > 0:
-                            for i in usei:
-                                temp = _add_row_to_pandas_creation_dictionary(
-                                    temp,
-                                    rt=spectrum.time,
-                                    mz=spectrum.original_mz[i],
-                                    intensity=spectrum.spint[i],
-                                    sample=sample,
-                                    file=sample.split("::")[0],
-                                    group=sample_metadata.loc[sample, "group"],
-                                    type="raw-corrected",
-                                    feature=featureInd,
-                                )
 
                 if "raw" in types:
                     for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
