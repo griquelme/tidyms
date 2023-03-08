@@ -3626,6 +3626,8 @@ class DartMSAssay:
                         effectSizes=cohensD,
                         detectionsGrp1=np.sum(valsGrp1 > 0),
                         detectionsGrp2=np.sum(valsGrp2 > 0),
+                        zerosGrp1=np.sum(valsGrp1 == 0),
+                        zerosGrp2=np.sum(valsGrp2 == 0),
                         meanAbundanceGrp1=np.mean(valsGrp1),
                         meanAbundanceGrp2=np.mean(valsGrp2),
                         stdAbundanceGrp1=np.std(valsGrp1),
