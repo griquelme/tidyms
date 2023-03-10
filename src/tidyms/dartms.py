@@ -520,8 +520,8 @@ def compare_parameters_for_function(function_to_optimize, parameter_values, add_
     print("")
     print("")
 
-    _startTime = time.time()
     for parami, param in enumerate(parameter_values):
+        _startTime = time.time()
         print("##############################################################################")
         print("Setname: %s" % (param.name))
         print("Comment: %s" % (param.comment))
