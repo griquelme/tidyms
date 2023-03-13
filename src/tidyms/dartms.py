@@ -3882,6 +3882,16 @@ class DartMSAssay:
         ## total number of detected features
         results["n(feats)"] = self.dat.shape[1]
 
+        ## ppm deviation of features
+        mzDevs = np.array([(self.features[i][2] - self.features[i][0]) / self.features[i][1] * 1e6 for i in range(len(self.features))])
+        avg, std = _average_and_std(mzDevs)
+        results["avg(feats.MZDevPPM)"] = avg
+        results["std(feats.MZDevPPM)"] = std
+
+        ## number of missing values in data matrix
+        results["n(nan)"] = np.sum(np.isnan(self.dat))
+        results["r(nan)"] = np.sum(np.isnan(self.dat) / (self.dat.shape[0] * self.dat.shape[1]))
+
         ## number of detected reference features
         found = 0
         ppmDeviations = []
@@ -3897,17 +3907,8 @@ class DartMSAssay:
                 mzDevPPM = (mzs_[ind] - referenceMZ) / referenceMZ * 1e6
                 ppmDeviations.append(mzDevPPM)
                 found += 1
-        results["n(ref.found)"] = found
+        results["n(ref)"] = found
         results["avg(ref.MZDevPPM)"] = np.average(np.array(ppmDeviations)) if found > 0 else -1
-
-        ## ppm deviation of features
-        mzDevs = np.array([(self.features[i][2] - self.features[i][0]) / self.features[i][1] * 1e6 for i in range(len(self.features))])
-        avg, std = _average_and_std(mzDevs)
-        results["avg(feats.MZDevPPM)"] = avg
-        results["std(feats.MZDevPPM)"] = std
-
-        ## number of missing values in data matrix
-        results["n(nan)"] = np.sum(np.isnan(self.dat))
-        results["r(nan)"] = np.sum(np.isnan(self.dat) / (self.dat.shape[0] * self.dat.shape[1]))
+        results["std(ref.mzDevPPM)"] = np.std(np.array(ppmDeviations)) if found > 0 else -1
 
         return results
