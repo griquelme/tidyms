@@ -3318,7 +3318,7 @@ class DartMSAssay:
         )
         print(p)
 
-    def plot_feature_mz_deviations(self, featureInd, types=None):
+    def plot_feature_mz_deviations(self, featureInd, refMZ=None, types=None):
         """
         plots the mz deviation for a particular features
 
@@ -3329,6 +3329,9 @@ class DartMSAssay:
         if types is None:
             types = ["consensus", "raw-corrected", "raw"]
         temp = None
+
+        if refMZ is None:
+            refMZ = self.features[featureInd][1]
 
         for featureInd in [featureInd]:
             for samplei, sample in enumerate(self.assay.manager.get_sample_names()):
@@ -3399,11 +3402,12 @@ class DartMSAssay:
             + p9.geom_hline(
                 data=temp.groupby(["type"]).max("mz").reset_index(), mapping=p9.aes(yintercept="mz"), size=1.25, alpha=0.5, colour="lightgrey"
             )
+            + p9.geom_hline(yintercept=refMZ, size=1.5, alpha=0.5, colour="firebrick")
             + p9.geom_point()
             + p9.facet_wrap("type")
             + p9.theme_minimal()
             + p9.ggtitle(
-                "Feature %.5f (%.5f - %.5f)\nmz deviation overall: %.1f (ppm, non-consensus) and %.1f (ppm, consensus)"
+                "Feature %.5f (%.5f - %.5f)\nmz deviation overall: %.1f (ppm, non-consensus) and %.1f (ppm, consensus), relative to reference: %.1f ppm"
                 % (
                     self.features[featureInd][1],
                     self.features[featureInd][0],
@@ -3414,6 +3418,7 @@ class DartMSAssay:
                     (temp[temp["type"] == "consensus"]["mz"].max() - temp[temp["type"] == "consensus"]["mz"].min())
                     / temp[temp["type"] == "consensus"]["mz"].mean()
                     * 1e6,
+                    (self.features[featureInd][1] - refMZ) / refMZ * 1e6,
                 )
             )
             + p9.theme(axis_text_x=p9.element_text(angle=45, hjust=1))
