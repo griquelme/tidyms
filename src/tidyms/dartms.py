@@ -17,7 +17,8 @@ from . import fileio, _constants
 from . import assay as Assay
 
 import numpy as np
-import numba
+
+# import numba
 import pandas as pd
 import plotnine as p9
 import math
@@ -82,7 +83,7 @@ def _add_row_to_pandas_creation_dictionary(dict=None, **kwargs):
 global _average_and_std
 
 
-@numba.jit(nopython=True)
+# @numba.jit(nopython=True)
 def _average_and_std(values, weights=None):
     """
     Return the weighted average and standard deviation.
@@ -100,7 +101,7 @@ def _average_and_std(values, weights=None):
 global _relative_standard_deviation
 
 
-@numba.jit(nopython=True)
+# @numba.jit(nopython=True)
 def _relative_standard_deviation(values, weights=None):
     """
     Calculated the relative standard deviation for vals, optionally using the weights
@@ -360,7 +361,7 @@ def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectru
 global _refine_clustering_for_mz_list
 
 
-@numba.jit(nopython=True)
+# @numba.jit(nopython=True)
 def _refine_clustering_for_mz_list(
     sample,
     mzs,
