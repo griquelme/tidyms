@@ -360,14 +360,13 @@ def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectru
 global _refine_clustering_for_mz_list
 
 
-# @numba.jit(nopython=True)
+@numba.jit(nopython=True)
 def _refine_clustering_for_mz_list(
     sample,
     mzs,
     intensities,
     spectrumID,
     clusts,
-    expected_mz_deviation_ppm=15,
     closest_signal_max_deviation_ppm=None,
     max_mz_deviation_ppm=None,
     max_ppm_std_deviation_in_cluster=None,
@@ -385,7 +384,6 @@ def _refine_clustering_for_mz_list(
         intensities (list of numeric): the intensity values of the signals or features
         spectrumID (list of ids): the spectrum ids of the signals or features
         clusts (list of ids): the cluster ids of the signals or features to which they were assigned
-        expected_mz_deviation_ppm (int, optional): the expected mz deviation. Any cluster below this value will not be split. Defaults to 15.
         closest_signal_max_deviation_ppm (int, optional): the search window for adjacent signals. Defaults to 20.
         max_mz_deviation_ppm (_type_, optional): the maximum mz devation above which a cluster is automatically split into subcluster. Defaults to None.
 
@@ -394,7 +392,7 @@ def _refine_clustering_for_mz_list(
     """
     clustInds = np.unique(clusts)
     nextClust = 0
-    newClusts = np.zeros_like(clusts)
+    newClusts = np.zeros_like(clusts) - 1
 
     debugPrint_ = False
 
@@ -412,14 +410,15 @@ def _refine_clustering_for_mz_list(
         ord_ = np.argsort(mzs_)
         mzs_ = mzs_[ord_]
         intensities_ = intensities_[ord_]
+        diffs_ = mzs_[1:] - mzs_[: mzs_.shape[0] - 1]
+        maxmz_ = np.amax(mzs_) * 2
+        usedSignals_ = 0
 
         if debugPrint_:
             print("  size of signals in cluster", mzs_.shape[0])
 
         ## test signals until no more are available
-        while mzs_.shape[0] >= 2:
-            diffs_ = mzs_[1:] - mzs_[: mzs_.shape[0] - 1]
-
+        while mzs_.shape[0] - usedSignals_ >= 2:
             ## find seed to start, two closest mz values
             minInd = np.argmin(diffs_)
             start, end = minInd, minInd
@@ -446,17 +445,17 @@ def _refine_clustering_for_mz_list(
                         print("     - closing cluster without extension to left/right")
                     closeCluster = True
 
-                elif (left and right and curMean - mzs_[start - 1] <= mzs_[end + 1] - curMean) or (left and not right):
+                elif (left and right and abs(curMean - mzs_[start - 1]) <= abs(mzs_[end + 1] - curMean)) or (left and not right):
                     newStart = start - 1
-                    addedPPMDev = (mzs_[start] - mzs_[newStart]) / curMean * 1e6
-                    newTotalPPMDev = (mzs_[end] - mzs_[newStart]) / curMean * 1e6
+                    addedPPMDev = abs(mzs_[start] - mzs_[newStart]) / curMean * 1e6
+                    newTotalPPMDev = abs(mzs_[end] - mzs_[newStart]) / curMean * 1e6
                     if debugPrint_:
                         print("     - extending cluster to the left with new values", addedPPMDev, newTotalPPMDev)
 
-                elif (left and right and mzs_[end + 1] - curMean < curMean - mzs_[start - 1]) or (not left and right):
+                elif (left and right and abs(mzs_[end + 1] - curMean) < abs(curMean - mzs_[start - 1])) or (not left and right):
                     newEnd = end + 1
-                    addedPPMDev = (mzs_[newEnd] - mzs_[end]) / curMean * 1e6
-                    newTotalPPMDev = (mzs_[newEnd] - mzs_[start]) / curMean * 1e6
+                    addedPPMDev = abs(mzs_[newEnd] - mzs_[end]) / curMean * 1e6
+                    newTotalPPMDev = abs(mzs_[newEnd] - mzs_[start]) / curMean * 1e6
                     if debugPrint_:
                         print("     - extending cluster to the right with new values", addedPPMDev, newTotalPPMDev)
 
@@ -474,15 +473,20 @@ def _refine_clustering_for_mz_list(
                     or (max_mz_deviation_ppm is not None and newTotalPPMDev > max_mz_deviation_ppm)
                     or (max_ppm_std_deviation_in_cluster is not None and newStd / newMean * 1e6 > max_ppm_std_deviation_in_cluster)
                 ):
-                    used = np.s_[start : end + 1]
                     if debugPrint_:
-                        print("    --> closing cluster as ", nextClust, "using", start, end, "which are", mzs_[used])
+                        print("    --> closing cluster as ", nextClust, "using", start, end, "which are", mzs_[start : end + 1])
 
-                    newClusts[pos[ord_[used]]] = nextClust
+                    for i in range(start, end + 1):
+                        newClusts[pos[ord_[i]]] = nextClust
 
-                    ord_ = np.delete(ord_, used)
-                    mzs_ = np.delete(mzs_, used)
-                    intensities_ = np.delete(intensities_, used)
+                    for i in range(start, end):
+                        diffs_[i] = maxmz_
+                    if start > 0:
+                        diffs_[start - 1] = maxmz_
+                    if end < diffs_.shape[0]:
+                        diffs_[end] = maxmz_
+
+                    usedSignals_ += end - start + 1
 
                     nextClust += 1
                     run = False
@@ -494,13 +498,14 @@ def _refine_clustering_for_mz_list(
                     curMean = newMean
                     curStd = newStd
 
-        if mzs_.shape[0] > 0:
-            if debugPrint_:
-                print("    --> closing last cluster as ", nextClust, "which are", mzs_)
-
-            newClusts[pos[ord_]] = nextClust
-
-            nextClust += 1
+        ## Closing last cluster no longer necessary since this is done already at the beginning
+        # if mzs_.shape[0] - usedSignals_ > 0:
+        #    if debugPrint_:
+        #        print("    --> closing last cluster as ", nextClust, "which are", mzs_)
+        #
+        #    ## Not necessary any more, is set per default earlier
+        #    #newClusts[pos[ord_]] = nextClust
+        #    #nextClust += 1
 
     return newClusts
 
@@ -2143,8 +2148,11 @@ class DartMSAssay:
 
         use = 0
         for i, clustInd in enumerate(clustInds):
-            newClust[cluster == clustInd] = use
-            use += 1
+            if clustInd == -1:
+                pass
+            else:
+                newClust[cluster == clustInd] = use
+                use += 1
 
         return newClust
 
