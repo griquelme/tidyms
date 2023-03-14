@@ -79,6 +79,10 @@ def _add_row_to_pandas_creation_dictionary(dict=None, **kwargs):
     return dict
 
 
+global _average_and_std
+
+
+@numba.jit(nopython=True)
 def _average_and_std(values, weights=None):
     """
     Return the weighted average and standard deviation.
@@ -90,9 +94,13 @@ def _average_and_std(values, weights=None):
 
     average = np.average(values, weights=weights)
     variance = np.average((values - average) ** 2, weights=weights)
-    return (average, math.sqrt(variance))
+    return (average, np.sqrt(variance))
 
 
+global _relative_standard_deviation
+
+
+@numba.jit(nopython=True)
 def _relative_standard_deviation(values, weights=None):
     """
     Calculated the relative standard deviation for vals, optionally using the weights
@@ -349,17 +357,20 @@ def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectru
     return cluster
 
 
-#####################################################################################################
-####################################################################################################
-##
-# Numba-based functions
-#
 global _refine_clustering_for_mz_list
 
 
-@numba.jit(nopython=True)
+# @numba.jit(nopython=True)
 def _refine_clustering_for_mz_list(
-    sample, mzs, intensities, spectrumID, clusts, expected_mz_deviation_ppm=15, closest_signal_max_deviation_ppm=20, max_mz_deviation_ppm=None
+    sample,
+    mzs,
+    intensities,
+    spectrumID,
+    clusts,
+    expected_mz_deviation_ppm=15,
+    closest_signal_max_deviation_ppm=None,
+    max_mz_deviation_ppm=None,
+    max_ppm_std_deviation_in_cluster=None,
 ):
     """
     Function to refine a crude clustering of signals based on their mz values. This step is performed separately for each crude cluster (i.e., all signals put into the same cluster based on their cluster ids)
@@ -382,98 +393,114 @@ def _refine_clustering_for_mz_list(
         list of ids: the new cluster ids for each signal or feature
     """
     clustInds = np.unique(clusts)
-    maxClust = np.max(clusts)
-    newClusts = np.copy(clusts)
+    nextClust = 0
+    newClusts = np.zeros_like(clusts)
 
-    degubPrint_ = False
-    debugPrintMZ = 358.3079
-    debugPrintError = 1
+    debugPrint_ = False
 
     for i, clust in enumerate(clustInds):
         n = np.sum(clusts == i)
 
-        if n > 1:
-            maxClust = maxClust + 1
-            pos = clusts == clust
-            mzs_ = mzs[pos]
-            intensities_ = intensities[pos]
-            pos = np.argwhere(pos)
-            used = np.zeros((mzs_.shape[0]), dtype=numba.int32)
-            usedMZs = np.zeros_like(mzs_)
+        if debugPrint_:
+            print("current cluster is ", i, clust)
 
-            if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError:
-                print("\n\nsample", sample)
-            if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError:
-                print("starting new cluster")
-            if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError:
-                print("mzs_ is", mzs_.shape, mzs_)
+        pos = np.argwhere(clusts == clust)[:, 0]
+        mzs_ = mzs[pos]
+        intensities_ = intensities[pos]
 
-            while sum(used == 0) > 0:
-                c = np.argmax(intensities_ * (used == 0))
-                used[c] = 1
-                usedMZs[c] = mzs_[c]
-                newClusts[pos[c]] = maxClust + 1
-                lastPPMDev = 0
+        ## suggestion by Gabriel: sort array to improve speed of algorithm
+        ord_ = np.argsort(mzs_)
+        mzs_ = mzs_[ord_]
+        intensities_ = intensities_[ord_]
 
-                if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError:
-                    print("seed mz is", usedMZs[c])
+        if debugPrint_:
+            print("  size of signals in cluster", mzs_.shape[0])
 
-                cont = sum(used == 0) > 0
-                while cont:
-                    tTop = np.abs(mzs_ - np.max(usedMZs[used == 1])) + np.abs(used) * 1e6
-                    closestTop = np.argmin(tTop)
-                    tLow = np.abs(mzs_ - np.min(usedMZs[used == 1])) + np.abs(used) * 1e6
-                    closestLow = np.argmin(tLow)
+        ## test signals until no more are available
+        while mzs_.shape[0] >= 2:
+            diffs_ = mzs_[1:] - mzs_[: mzs_.shape[0] - 1]
 
-                    closest = closestTop if tTop[closestTop] < tLow[closestLow] else closestLow
+            ## find seed to start, two closest mz values
+            minInd = np.argmin(diffs_)
+            start, end = minInd, minInd
 
-                    used[closest] = 1
-                    usedMZs[closest] = mzs_[closest]
-                    newClusts[pos[closest]] = maxClust + 1
+            ## calculate extending variance and mean
+            newMean, newStd = mzs_[start], 0
+            curMean, curStd = newMean, newStd
 
-                    newPPMDev = (np.max(usedMZs[used == 1]) - np.min(usedMZs[used == 1])) / np.average(usedMZs[used == 1]) * 1e6
-                    if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError:
-                        print(
-                            "closest new mz is ",
-                            usedMZs[closest],
-                            "added ppm deviation",
-                            (newPPMDev - lastPPMDev),
-                            "min/max are ",
-                            np.min(usedMZs[used == 1]),
-                            np.max(usedMZs[used == 1]),
-                        )
-                    if (newPPMDev - lastPPMDev) > closest_signal_max_deviation_ppm or (
-                        max_mz_deviation_ppm is not None and newPPMDev > max_mz_deviation_ppm
-                    ):
-                        cont = False
+            if debugPrint_:
+                print("  selected mz as seed", curMean, diffs_[minInd])
 
-                        used[closest] = 0
-                        usedMZs[closest] = 0
-                        newClusts[pos[closest]] = clusts[pos[closest]]
+            ## extend similar mz values until difference gets too large
+            run = True
+            while run:
+                left = start > 0
+                right = end < mzs_.shape[0] - 1
 
-                        used = -np.abs(used)
-                        usedMZs = usedMZs * 0.0
-                        maxClust = maxClust + 1
-                        if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError:
-                            print(
-                                "closing cluster, remaining elements",
-                                sum(used == 0) == 0,
-                                (newPPMDev - lastPPMDev) > closest_signal_max_deviation_ppm,
-                                (max_mz_deviation_ppm is not None and newPPMDev > max_mz_deviation_ppm),
-                                "\n",
-                            )
+                newStart = start
+                newEnd = end
 
-                    elif sum(used == 0) == 0:
-                        if degubPrint_ and abs(np.mean(mzs_) - debugPrintMZ) < debugPrintError:
-                            print("closing cluster, last element" "\n")
-                        cont = False
+                closeCluster = False
+                if not left and not right:
+                    if debugPrint_:
+                        print("     - closing cluster without extension to left/right")
+                    closeCluster = True
 
-                        used = -np.abs(used)
-                        usedMZs = usedMZs * 0.0
-                        maxClust = maxClust + 1
+                elif (left and right and curMean - mzs_[start - 1] <= mzs_[end + 1] - curMean) or (left and not right):
+                    newStart = start - 1
+                    addedPPMDev = (mzs_[start] - mzs_[newStart]) / curMean * 1e6
+                    newTotalPPMDev = (mzs_[end] - mzs_[newStart]) / curMean * 1e6
+                    if debugPrint_:
+                        print("     - extending cluster to the left with new values", addedPPMDev, newTotalPPMDev)
 
-                    else:
-                        lastPPMDev = (np.max(usedMZs[used == 1]) - np.min(usedMZs[used == 1])) / np.average(usedMZs[used == 1]) * 1e6
+                elif (left and right and mzs_[end + 1] - curMean < curMean - mzs_[start - 1]) or (not left and right):
+                    newEnd = end + 1
+                    addedPPMDev = (mzs_[newEnd] - mzs_[end]) / curMean * 1e6
+                    newTotalPPMDev = (mzs_[newEnd] - mzs_[start]) / curMean * 1e6
+                    if debugPrint_:
+                        print("     - extending cluster to the right with new values", addedPPMDev, newTotalPPMDev)
+
+                else:
+                    raise NotImplementedError("Unknwon branch, aborting")
+
+                if max_ppm_std_deviation_in_cluster is not None:
+                    newMean, newStd = _average_and_std(mzs_[newStart : newEnd + 1], weights=intensities_[newStart : newEnd + 1])
+                if debugPrint_:
+                    print("     - new mean is", newMean, newStd, newStd / newMean * 1e6, "old was", curMean, curStd, curStd / curMean * 1e6)
+
+                if (
+                    closeCluster
+                    or (closest_signal_max_deviation_ppm is not None and addedPPMDev > closest_signal_max_deviation_ppm)
+                    or (max_mz_deviation_ppm is not None and newTotalPPMDev > max_mz_deviation_ppm)
+                    or (max_ppm_std_deviation_in_cluster is not None and newStd / newMean * 1e6 > max_ppm_std_deviation_in_cluster)
+                ):
+                    used = np.s_[start : end + 1]
+                    if debugPrint_:
+                        print("    --> closing cluster as ", nextClust, "using", start, end, "which are", mzs_[used])
+
+                    newClusts[pos[ord_[used]]] = nextClust
+
+                    ord_ = np.delete(ord_, used)
+                    mzs_ = np.delete(mzs_, used)
+                    intensities_ = np.delete(intensities_, used)
+
+                    nextClust += 1
+                    run = False
+
+                else:
+                    start = newStart
+                    end = newEnd
+
+                    curMean = newMean
+                    curStd = newStd
+
+        if mzs_.shape[0] > 0:
+            if debugPrint_:
+                print("    --> closing last cluster as ", nextClust, "which are", mzs_)
+
+            newClusts[pos[ord_]] = nextClust
+
+            nextClust += 1
 
     return newClusts
 
@@ -2220,6 +2247,8 @@ class DartMSAssay:
     def calculate_consensus_spectra_for_samples(
         self,
         min_difference_ppm=30,
+        closest_signal_max_deviation_ppm=20,
+        max_mz_deviation_ppm=20,
         min_signals_per_cluster=10,
         minimum_intensity_for_signals=0,
         cluster_quality_check_functions=None,
@@ -2268,9 +2297,9 @@ class DartMSAssay:
             temp["sample"] = np.array(temp["sample"])
             temp["spectrumInd"] = np.array(temp["spectrumInd"])
             temp["time"] = np.array(temp["time"])
-            temp["mz"] = np.concatenate(temp["mz"], axis=0)
+            temp["mz"] = np.concatenate(temp["mz"], axis=0, dtype=np.float64)
             temp["original_mz"] = np.concatenate(temp["original_mz"], axis=0)
-            temp["intensity"] = np.concatenate(temp["intensity"], axis=0)
+            temp["intensity"] = np.concatenate(temp["intensity"], axis=0, dtype=np.float64)
             summary_totalSignals = len(temp["mz"])
 
             temp["cluster"] = self._crude_clustering_for_mz_list(sample, temp["mz"], temp["intensity"], min_difference_ppm=min_difference_ppm)
@@ -2292,7 +2321,15 @@ class DartMSAssay:
             temp["cluster"] = self._reindex_cluster(temp["cluster"][keep])
 
             # refine cluster
-            temp["cluster"] = _refine_clustering_for_mz_list(sample, temp["mz"], temp["intensity"], temp["spectrumInd"], temp["cluster"])
+            temp["cluster"] = _refine_clustering_for_mz_list(
+                sample,
+                temp["mz"],
+                temp["intensity"],
+                temp["spectrumInd"],
+                temp["cluster"],
+                closest_signal_max_deviation_ppm=closest_signal_max_deviation_ppm,
+                max_mz_deviation_ppm=max_mz_deviation_ppm,
+            )
             temp["cluster"] = self._reindex_cluster(temp["cluster"])
             summary_clusterAfterFine = np.unique(temp["cluster"]).shape[0]
 
@@ -2397,7 +2434,7 @@ class DartMSAssay:
     # Bracketing of several samples
     #
 
-    def bracket_consensus_spectrum_samples(self, max_ppm_deviation=25, show_diagnostic_plots=False):
+    def bracket_consensus_spectrum_samples(self, closest_signal_max_deviation_ppm=20, max_ppm_deviation=25, show_diagnostic_plots=False):
         """
         Function to bracket consensus spectra across different samples
 
@@ -2439,7 +2476,7 @@ class DartMSAssay:
         temp["spectrumInd"] = np.array(temp["spectrumInd"])
         temp["time"] = np.array(temp["time"])
         temp["mz"] = np.array(temp["mz"], dtype=np.float64)
-        temp["intensity"] = np.array(temp["intensity"])
+        temp["intensity"] = np.array(temp["intensity"], dtype=np.float64)
         # temp["original_usedFeatures"] = temp["original_usedFeatures"]
         temp["startRT"] = np.array(temp["startRT"])
         temp["endRT"] = np.array(temp["endRT"])
@@ -2487,7 +2524,15 @@ class DartMSAssay:
             temp["cluster"] = self._reindex_cluster(temp["cluster"][keep])
 
             # refine cluster
-            temp["cluster"] = _refine_clustering_for_mz_list("bracketed_list", temp["mz"], temp["intensity"], temp["spectrumInd"], temp["cluster"])
+            temp["cluster"] = _refine_clustering_for_mz_list(
+                "bracketed_list",
+                temp["mz"],
+                temp["intensity"],
+                temp["spectrumInd"],
+                temp["cluster"],
+                closest_signal_max_deviation_ppm=closest_signal_max_deviation_ppm,
+                max_mz_deviation_ppm=max_ppm_deviation,
+            )
 
             # remove wrong cluster
             keep = temp["cluster"] >= 0
