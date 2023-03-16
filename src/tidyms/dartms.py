@@ -1139,6 +1139,9 @@ class DartMSAssay:
     # General functions
     #
 
+    def get_groups(self):
+        return list(set(self.groups))
+
     def print_sample_overview(self):
         """
         Prints an overview of the samples
