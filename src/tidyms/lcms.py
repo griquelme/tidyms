@@ -19,11 +19,14 @@ get_find_centroid_params
 
 """
 
+import bisect
 import bokeh.plotting
 import json
 import numpy as np
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from scipy.ndimage import gaussian_filter1d
-from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar
+from typing import Any, cast, Optional, Tuple, Type, TypeVar, Union
 from scipy.interpolate import interp1d
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
@@ -31,14 +34,11 @@ from . import peaks
 from . import _plot_bokeh
 from . import _constants as c
 from .utils import array1d_to_str, str_to_array1d
-from abc import ABC, abstractmethod
 
-
-# TODO: Move describe features to assay
-# TODO: Move custom descriptors to assay
 
 # Replace with Self when code is updated to Python 3.11
 AnyRoi = TypeVar("AnyRoi", bound="Roi")
+AnyFeature = TypeVar("AnyFeature", bound="Feature")
 
 
 class MSSpectrum:
@@ -177,8 +177,7 @@ class MSSpectrum:
 
 
 class Roi(ABC):
-
-    features: Optional[List["Feature"]] = None
+    features: Optional[list["Feature"]] = None
 
     """
     Regions of interest extracted from raw MS data.
@@ -189,10 +188,10 @@ class Roi(ABC):
         ...
 
     @abstractmethod
-    def extract_features(self, **kwargs) -> List["Feature"]:
+    def extract_features(self, **kwargs) -> list["Feature"]:
         ...
 
-    def get_default_filters(self) -> Dict[str, float]:
+    def get_default_filters(self) -> dict[str, float]:
         raise NotImplementedError
 
     @classmethod
@@ -258,10 +257,10 @@ class MZTrace(Roi):
 
     def __init__(
         self,
-        time: np.ndarray,
-        spint: np.ndarray,
-        mz: Optional[np.ndarray],
-        scan: Optional[np.ndarray],
+        time: np.ndarray[Any, np.dtype[np.floating]],
+        spint: np.ndarray[Any, np.dtype[np.floating]],
+        mz: np.ndarray[Any, np.dtype[np.floating]],
+        scan: np.ndarray[Any, np.dtype[np.integer]],
         mode: Optional[str],
         noise: Optional[np.ndarray] = None,
         baseline: Optional[np.ndarray] = None,
@@ -271,7 +270,7 @@ class MZTrace(Roi):
         self.spint = spint
         self.mz = mz
         self.scan = scan
-        self.features: Optional[List[Feature]] = None
+        self.features: Optional[list[Feature]] = None
         self.baseline = baseline
         self.noise = noise
 
@@ -368,14 +367,14 @@ class LCTrace(MZTrace):
 
     """
 
-    features: List["Peak"]
+    features: list["Peak"]
 
     def __init__(
         self,
-        time: np.ndarray,
-        spint: np.ndarray,
-        mz: Optional[np.ndarray],
-        scan: Optional[np.ndarray],
+        time: np.ndarray[Any, np.dtype[np.floating]],
+        spint: np.ndarray[Any, np.dtype[np.floating]],
+        mz: np.ndarray[Any, np.dtype[np.floating]],
+        scan: np.ndarray[Any, np.dtype[np.integer]],
         mode: Optional[str] = c.UPLC,
         noise: Optional[np.ndarray] = None,
         baseline: Optional[np.ndarray] = None,
@@ -395,8 +394,11 @@ class LCTrace(MZTrace):
             raise ValueError(msg.format(value, c.LC_MODES))
 
     def extract_features(
-        self, smoothing_strength: Optional[float] = 1.0, store_smoothed: bool = False, **kwargs
-    ) -> List["Peak"]:
+        self,
+        smoothing_strength: Optional[float] = 1.0,
+        store_smoothed: bool = False,
+        **kwargs,
+    ) -> list["Peak"]:
         """
         Detect chromatographic peaks.
 
@@ -432,11 +434,13 @@ class LCTrace(MZTrace):
         """
         self.fill_nan(fill_value="extrapolate")
         noise = peaks.estimate_noise(self.spint)
-
         if smoothing_strength is None:
             x = self.spint
         else:
-            x = gaussian_filter1d(self.spint, smoothing_strength)
+            x = cast(
+                np.ndarray[Any, np.dtype[np.floating]],
+                gaussian_filter1d(self.spint, smoothing_strength),
+            )
 
         if store_smoothed:
             self.spint = x
@@ -513,10 +517,13 @@ class Chromatogram(LCTrace):
 
     """
 
-    mz: Optional[float]
+    mz: Optional[np.ndarray]
+    scan: Optional[np.ndarray]
 
     def __init__(self, time: np.ndarray, spint: np.ndarray, mode: str = c.UPLC):
-        super(Chromatogram, self).__init__(time, spint, None, None, mode)
+        super(Chromatogram, self).__init__(time, spint, spint, spint, mode)
+        self.mz = None
+        self.scan = None
 
 
 class InvalidPeakException(ValueError):
@@ -535,19 +542,59 @@ class Feature(ABC):
 
     Attributes
     ----------
-    start: int
-        index where the peak begins. Must be smaller than `apex`
-    end: int
-        index where the peak ends. Start and end used as slices defines the
-        peak region.
+    roi: Roi
+    annotation: Optional[Annotation]
 
     """
 
-    def __init__(self, roi: AnyRoi):
+    def __init__(self, roi: Roi):
         self.roi = roi
+        self._mz = None
+        self._area = None
+        self.annotation = Annotation(-1, -1, -1, -1)
+
+    @property
+    def mz(self) -> float:
+        if self._mz is None:
+            self._mz = self.get_mz()
+        return self._mz
+
+    @property
+    def area(self) -> float:
+        if self._area is None:
+            self._area = self.get_area()
+        return self._area
+
+    def __lt__(self, other: Union["Feature", float]):
+        if isinstance(other, float):
+            return self.mz < other
+        elif isinstance(other, Feature):
+            return self.mz < other.mz
+
+    def __le__(self, other: Union["Feature", float]):
+        if isinstance(other, float):
+            return self.mz <= other
+        elif isinstance(other, Feature):
+            return self.mz <= other.mz
+
+    def __gt__(self, other: Union["Feature", float]):
+        if isinstance(other, float):
+            return self.mz > other
+        elif isinstance(other, Feature):
+            return self.mz > other.mz
+
+    def __ge__(self, other: Union["Feature", float]):
+        if isinstance(other, float):
+            return self.mz >= other
+        elif isinstance(other, Feature):
+            return self.mz >= other.mz
 
     @abstractmethod
     def get_mz(self) -> float:
+        ...
+
+    @abstractmethod
+    def get_area(self) -> float:
         ...
 
     @abstractmethod
@@ -570,6 +617,13 @@ class Feature(ABC):
     @staticmethod
     @abstractmethod
     def _deserialize(s: str) -> dict:
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def compute_isotopic_envelope(
+        feature: list["Feature"],
+    ) -> Tuple[list[float], list[float]]:
         ...
 
 
@@ -619,7 +673,13 @@ class Peak(Feature):
 
     def plot(self, figure: bokeh.plotting.figure, color: str, **varea_params):
         _plot_bokeh.fill_area(
-            figure, self.roi.time, self.roi.spint, self.start, self.end, color, **varea_params
+            figure,
+            self.roi.time,
+            self.roi.spint,
+            self.start,
+            self.end,
+            color,
+            **varea_params,
         )
 
     def get_rt_start(self) -> float:
@@ -686,10 +746,11 @@ class Peak(Feature):
         area : positive number.
 
         """
-        baseline_corrected = (
-            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
-        )
-        area = trapz(baseline_corrected, self.roi.time[self.start : self.end])
+        peak_extension = self.roi.spint[self.start : self.end]
+        if self.roi.baseline is not None:
+            peak_extension = peak_extension - self.roi.baseline[self.start : self.end]
+
+        area = trapz(peak_extension, self.roi.time[self.start : self.end])
         return max(0.0, area)
 
     def get_width(self) -> float:
@@ -703,14 +764,15 @@ class Peak(Feature):
 
         """
         height = (
-            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
+            self.roi.spint[self.start : self.end]
+            - self.roi.baseline[self.start : self.end]
         )
         area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
             relative_area = area / area[-1]
             percentile = [0.025, 0.975]
             start, end = self.start + np.searchsorted(relative_area, percentile)
-            width = self.roi.time[end] - self.roi.time[start]
+            width = float(self.roi.time[end] - self.roi.time[start])
         else:
             width = 0.0
         return max(0.0, width)
@@ -744,7 +806,7 @@ class Peak(Feature):
             snr = self.get_height() / peak_noise
         return snr
 
-    def get_mz(self) -> Optional[float]:
+    def get_mz(self) -> float:
         """
         Computes the weighted average m/z of the peak.
 
@@ -754,12 +816,13 @@ class Peak(Feature):
 
         """
         if self.roi.mz is None:
-            mz_mean = None
+            msg = "mz not specified for ROI."
+            raise ValueError(msg)
         else:
             weights = self.roi.spint[self.start : self.end]
-            weights[weights < 0] = 0
+            weights[weights < 0.0] = 0
             mz_mean = np.average(self.roi.mz[self.start : self.end], weights=weights)
-            mz_mean = max(0.0, mz_mean)
+            mz_mean = max(0.0, mz_mean.item())
         return mz_mean
 
     def get_mz_std(self) -> Optional[float]:
@@ -777,7 +840,7 @@ class Peak(Feature):
             mz_std = self.roi.mz[self.start : self.end].std()
         return mz_std
 
-    def describe(self) -> Dict[str, float]:
+    def describe(self) -> dict[str, float]:
         """
         Computes peak height, area, location, width and SNR.
 
@@ -800,7 +863,34 @@ class Peak(Feature):
         return descriptors
 
     def compare(self, other: "Peak") -> float:
-        return 1.0
+        return _compare_features_lc(self, other)
+
+    @staticmethod
+    def compute_isotopic_envelope(
+        features: list["Peak"],
+    ) -> Tuple[list[float], list[float]]:
+        """
+        Computes a m/z and relative abundance for a list of features.
+
+        """
+        start, end = 0, features[0].end
+        for ft in features:
+            start = max(ft.start, start)
+            end = min(ft.end, end)
+        overlap_features = [Peak(start, x.apex, end, x.roi) for x in features]
+        mz = [x.get_mz() for x in overlap_features]
+        p = [x.get_area() for x in overlap_features]
+        total_area = sum(p)
+        p = [x / total_area for x in p]
+        return mz, p
+
+
+@dataclass
+class Annotation:
+    label: int
+    isotopologue_label: int
+    isotopologue_index: int
+    charge: int
 
 
 def get_find_centroid_params(instrument: str) -> dict:
@@ -816,10 +906,106 @@ def get_find_centroid_params(instrument: str) -> dict:
     params : dict
 
     """
-    params = {"min_snr": 10}
+    params = {"min_snr": 10.0}
     if instrument == c.QTOF:
         md = 0.01
     else:  # orbitrap
         md = 0.005
     params["min_distance"] = md
     return params
+
+
+def _compare_features_lc(ft1: Peak, ft2: Peak) -> float:
+    """
+    Feature similarity function used in LC-MS data.
+    """
+    start1 = ft1.roi.scan[ft1.start]
+    start2 = ft2.roi.scan[ft2.start]
+    if start1 > start2:
+        ft1, ft2 = ft2, ft1
+    overlap_ratio = _overlap_ratio(ft1, ft2)
+    min_overlap = 0.5
+    has_overlap = overlap_ratio > min_overlap
+    if has_overlap:
+        os1, oe1, os2, oe2 = _get_overlap_index(ft1, ft2)
+        norm1 = np.linalg.norm(ft1.roi.spint[ft1.start : ft1.end])
+        norm2 = np.linalg.norm(ft2.roi.spint[ft2.start : ft2.end])
+        x1 = ft1.roi.spint[os1:oe1] / norm1
+        x2 = ft2.roi.spint[os2:oe2] / norm2
+        similarity = np.dot(x1, x2)
+    else:
+        similarity = 0.0
+    return similarity
+
+
+def _overlap_ratio(ft1: Peak, ft2: Peak) -> float:
+    """
+    Computes the overlap ratio, defined as the quotient between the overlap
+    region and the extension of the longest feature.
+
+    `ft1` must start before `ft2`
+
+    Parameters
+    ----------
+    roi1 : LCRoi
+    ft1 : Peak
+    roi2 : LCRoi
+    ft2 : Peak
+
+    Returns
+    -------
+    overlap_ratio : float
+
+    """
+    start2 = ft2.roi.scan[ft2.start]
+    end1 = ft1.roi.scan[ft1.end - 1]
+    end2 = ft2.roi.scan[ft2.end - 1]
+    # start1 <= start2. end1 > start2 is a sufficient condition for overlap
+    if end1 > start2:
+        # the overlap ratio is the quotient between the length overlapped region
+        # and the extension of the shortest feature.
+        if end1 <= end2:
+            start2_index_in1 = bisect.bisect_left(ft1.roi.scan, start2)
+            overlap_length = ft1.end - start2_index_in1
+        else:
+            overlap_length = ft2.end - ft2.start
+        min_length = min(ft1.end - ft1.start, ft2.end - ft2.start)
+        res = overlap_length / min_length
+    else:
+        res = 0.0
+    return res
+
+
+def _get_overlap_index(ft1: Peak, ft2: Peak) -> Tuple[int, int, int, int]:
+    """
+    Computes the overlap indices for ft1 and ft2.
+
+    `ft1` must start before `ft2`
+
+    Parameters
+    ----------
+    ft1 : Peak
+    ft2 : Peak
+
+    Returns
+    -------
+    overlap_start1 : int
+    overlap_end1 : int
+    overlap_start2 : int
+    overlap_end2 : int
+
+    """
+    end1 = ft1.roi.scan[ft1.end - 1]
+    end2 = ft2.roi.scan[ft2.end - 1]
+    start2 = ft2.roi.scan[ft2.start]
+    if end1 >= end2:
+        overlap_start1 = bisect.bisect_left(ft1.roi.scan, start2)
+        overlap_end1 = bisect.bisect(ft1.roi.scan, end2)
+        overlap_start2 = ft2.start
+        overlap_end2 = ft2.end
+    else:
+        overlap_start1 = bisect.bisect_left(ft1.roi.scan, start2)
+        overlap_end1 = ft1.end
+        overlap_start2 = ft2.start
+        overlap_end2 = bisect.bisect(ft2.roi.scan, end1)
+    return overlap_start1, overlap_end1, overlap_start2, overlap_end2
