@@ -18,7 +18,7 @@ from ._plot_bokeh import _LCAssayPlotter
 from .fill_missing import fill_missing_lc
 from ._build_data_matrix import build_data_matrix
 import json
-from .annotation import create_annotator, annotate
+from .annotation.annotation import create_annotator, annotate
 import copy
 
 # TODO: add id_ column to sample metadata
