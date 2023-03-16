@@ -1146,6 +1146,9 @@ class DartMSAssay:
     def get_msDataObj_for_sample(self, sample):
         return self.assay.get_ms_data(sample)
 
+    def get_metaData_for_sample(self, sampke, metaData):
+        self.assay.manager.get_sample_metadata().loc[sample, metaData]
+
     def print_sample_overview(self):
         """
         Prints an overview of the samples
@@ -1175,7 +1178,6 @@ class DartMSAssay:
             separate_by (str, optional): the variable used for grouping the results (can be file, group, or batch). Defaults to "group".
         """
         temp = None
-        sample_metadata = self.assay.manager.get_sample_metadata()
         for samplei, sample in enumerate(self.get_sample_names()):
             msDataObj = self.get_msDataObj_for_sample(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
@@ -1183,8 +1185,8 @@ class DartMSAssay:
                     temp,
                     sample=sample,
                     file=sample.split("::")[0],
-                    group=sample_metadata.loc[sample, "group"],
-                    batch=sample_metadata.loc[sample, "batch"],
+                    group=self.get_metaData_for_sample(sample, "group"),
+                    batch=self.get_metaData_for_sample(sample, "batch"),
                     time=spectrum.time - msDataObj.get_spectrum(0).time,
                     kSpectrum=k,
                     totalIntensity=np.sum(spectrum.spint),
@@ -1771,11 +1773,9 @@ class DartMSAssay:
         )
         stdMZmin, stdMZmax = std
 
-        sample_metadata = self.assay.manager.get_sample_metadata()
-
         temp = None
         for samplei, sample in enumerate(self.get_sample_names()):
-            sampleType = sample_metadata.loc[sample, "group"]
+            sampleType = self.get_metaData_for_sample(sample, "group")
             totalSTDInt = 0
             msDataObj = self.get_msDataObj_for_sample(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
@@ -2619,7 +2619,6 @@ class DartMSAssay:
             for featurei in tqdm.tqdm(range(len(tempClusterInfo["minMZ"])), desc="bracketing: generating plots"):
                 for samplei, sample in enumerate(self.get_sample_names()):
                     msDataObj = self.get_msDataObj_for_sample(sample)
-                    sample_metadata = self.assay.manager.get_sample_metadata()
                     for k, spectrum in msDataObj.get_spectra_iterator():
                         usei = np.where(
                             np.logical_and(spectrum.mz >= tempClusterInfo["minMZ"][featurei], spectrum.mz <= tempClusterInfo["maxMZ"][featurei])
@@ -2633,7 +2632,7 @@ class DartMSAssay:
                                     intensity=spectrum.spint[i],
                                     sample=sample,
                                     file=sample.split("::")[0],
-                                    group=sample_metadata.loc[sample, "group"],
+                                    group=self.get_metaData_for_sample(sample, "group"),
                                     type="consensus",
                                     feature=featurei,
                                 )
@@ -2646,7 +2645,7 @@ class DartMSAssay:
                                         intensity=spectrum.usedFeatures[i][j, 1],
                                         sample=sample,
                                         file=sample.split("::")[0],
-                                        group=sample_metadata.loc[sample, "group"],
+                                        group=self.get_metaData_for_sample(sample, "group"),
                                         type="non-consensus",
                                         feature=featurei,
                                     )
@@ -2659,7 +2658,7 @@ class DartMSAssay:
                                         intensity=spectrum.usedFeatures[i][j, 1],
                                         sample=sample,
                                         file=sample.split("::")[0],
-                                        group=sample_metadata.loc[sample, "group"],
+                                        group=self.get_metaData_for_sample(sample, "group"),
                                         type="raw-onlyFeatures",
                                         feature=featurei,
                                     )
@@ -2680,7 +2679,7 @@ class DartMSAssay:
                                     intensity=spectrum.spint[i],
                                     sample=sample,
                                     file=sample.split("::")[0],
-                                    group=sample_metadata.loc[sample, "group"],
+                                    group=self.get_metaData_for_sample(sample, "group"),
                                     type="raw-allSignals",
                                     feature=featurei,
                                 )
@@ -3277,7 +3276,6 @@ class DartMSAssay:
             temp = None
             for samplei, sample in enumerate(self.get_sample_names()):
                 msDataObj = self.get_msDataObj_for_sample(sample)
-                sample_metadata = self.assay.manager.get_sample_metadata()
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     usei = np.where(np.logical_and(spectrum.mz >= self.features[featureInd][0], spectrum.mz <= self.features[featureInd][2]))[0]
                     if usei.size > 0:
@@ -3290,7 +3288,7 @@ class DartMSAssay:
                                     intensity=spectrum.spint[i],
                                     sample=sample,
                                     file=sample.split("::")[0],
-                                    group=sample_metadata.loc[sample, "group"],
+                                    group=self.get_metaData_for_sample(sample, "group"),
                                     type="consensus",
                                     feature=featureInd,
                                 )
@@ -3304,7 +3302,7 @@ class DartMSAssay:
                                         intensity=spectrum.usedFeatures[i][j, 1],
                                         sample=sample,
                                         file=sample.split("::")[0],
-                                        group=sample_metadata.loc[sample, "group"],
+                                        group=self.get_metaData_for_sample(sample, "group"),
                                         type="non-consensus",
                                         feature=featureInd,
                                     )
@@ -3318,7 +3316,7 @@ class DartMSAssay:
                                         intensity=spectrum.usedFeatures[i][j, 1],
                                         sample=sample,
                                         file=sample.split("::")[0],
-                                        group=sample_metadata.loc[sample, "group"],
+                                        group=self.get_metaData_for_sample(sample, "group"),
                                         type="raw",
                                         feature=featureInd,
                                     )
@@ -3395,7 +3393,6 @@ class DartMSAssay:
         for featureInd in [featureInd]:
             for samplei, sample in enumerate(self.get_sample_names()):
                 msDataObj = self.get_msDataObj_for_sample(sample)
-                sample_metadata = self.assay.manager.get_sample_metadata()
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     usei = np.where(np.logical_and(spectrum.mz >= self.features[featureInd][0], spectrum.mz <= self.features[featureInd][2]))[0]
                     if usei.size > 0:
@@ -3408,7 +3405,7 @@ class DartMSAssay:
                                     intensity=spectrum.spint[i],
                                     sample=sample,
                                     file=sample.split("::")[0],
-                                    group=sample_metadata.loc[sample, "group"],
+                                    group=self.get_metaData_for_sample(sample, "group"),
                                     type="consensus",
                                     feature=featureInd,
                                 )
@@ -3422,7 +3419,7 @@ class DartMSAssay:
                                         intensity=spectrum.usedFeatures[i][j, 1],
                                         sample=sample,
                                         file=sample.split("::")[0],
-                                        group=sample_metadata.loc[sample, "group"],
+                                        group=self.get_metaData_for_sample(sample, "group"),
                                         type="raw-corrected",
                                         feature=featureInd,
                                     )
@@ -3444,7 +3441,7 @@ class DartMSAssay:
                                     intensity=spectrum.spint[i],
                                     sample=sample,
                                     file=sample.split("::")[0],
-                                    group=sample_metadata.loc[sample, "group"],
+                                    group=self.get_metaData_for_sample(sample, "group"),
                                     type="raw",
                                     feature=featureInd,
                                 )
