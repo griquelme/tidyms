@@ -1098,7 +1098,7 @@ class DartMSAssay:
         self.add_data_processing_step("exporting consensus spectra to featureML files", "exporting consensus spectra to featureML files")
         for samplei, sample in tqdm.tqdm(enumerate(self.get_sample_names()), total=len(self.get_sample_names()), desc="exporting to featureML"):
             with open(os.path.join(".", "%s.featureML" % (sample)).replace(":", "_"), "w") as fout:
-                msDataObj = self.assay.get_ms_data(sample)
+                msDataObj = self.get_msDataObj_for_sample(sample)
                 spectra = []
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     spectra.append(spectrum)
@@ -1143,6 +1143,9 @@ class DartMSAssay:
     def get_sample_names(self):
         return self.assay.manager.get_sample_names()
 
+    def get_msDataObj_for_sample(self, sample):
+        return self.assay.get_ms_data(sample)
+
     def print_sample_overview(self):
         """
         Prints an overview of the samples
@@ -1150,7 +1153,7 @@ class DartMSAssay:
         temp = None
 
         for samplei, sample in enumerate(self.get_sample_names()):
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
 
             temp = _add_row_to_pandas_creation_dictionary(
                 temp,
@@ -1174,7 +1177,7 @@ class DartMSAssay:
         temp = None
         sample_metadata = self.assay.manager.get_sample_metadata()
         for samplei, sample in enumerate(self.get_sample_names()):
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
                 temp = _add_row_to_pandas_creation_dictionary(
                     temp,
@@ -1681,7 +1684,7 @@ class DartMSAssay:
         self.add_data_processing_step("drop lower spectra", "drop lower spectra", {"drop_rate": drop_rate})
         for samplei, sample in enumerate(self.get_sample_names()):
             totalInt = []
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
                 totalInt.append(np.sum(spectrum.spint))
 
@@ -1706,7 +1709,7 @@ class DartMSAssay:
         if n is not None:
             for samplei, sample in enumerate(self.get_sample_names()):
                 tic = []
-                msDataObj = self.assay.get_ms_data(sample)
+                msDataObj = self.get_msDataObj_for_sample(sample)
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     tic.append(np.sum(spectrum.spint))
                 # print("   ... TIC of sample '%s' is %s" % (sample, str(sorted(tic))))
@@ -1740,7 +1743,7 @@ class DartMSAssay:
         self.add_data_processing_step("normalize to sample TICs", "normalize to sample TICs", {"muliplication_factor": multiplication_factor})
         for samplei, sample in enumerate(self.get_sample_names()):
             totalInt = []
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
                 totalInt.append(np.sum(spectrum.spint))
             totalInt = np.sum(np.array(totalInt))
@@ -1774,7 +1777,7 @@ class DartMSAssay:
         for samplei, sample in enumerate(self.get_sample_names()):
             sampleType = sample_metadata.loc[sample, "group"]
             totalSTDInt = 0
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
                 use = np.logical_and(spectrum.mz >= stdMZmin, spectrum.mz <= stdMZmax)
                 if np.sum(use) > 0:
@@ -1907,7 +1910,7 @@ class DartMSAssay:
             referenceMZs = np.array(referenceMZs)
 
         for sample in self.get_sample_names():
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
             for i, referenceMZ in enumerate(referenceMZs):
                 for spectrumi, spectrum in msDataObj.get_spectra_iterator():
                     ind = None
@@ -2036,7 +2039,7 @@ class DartMSAssay:
         tempMod["mzDeviation"] = tempMod["mz"] - tempMod["referenceMZ"]
 
         for samplei, sample in enumerate(self.get_sample_names()):
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
             if issubclass(type(msDataObj), fileio.MSData_in_memory):
                 raise RuntimeError(
                     "Function correct_MZ_shift_across_samples only works with objects of class fileio.MSData_in_memory. Please switch data_import_mode to _constancts.MEMORY"
@@ -2296,7 +2299,7 @@ class DartMSAssay:
 
         for samplei, sample in enumerate(self.get_sample_names()):
             temp = {"sample": [], "spectrumInd": [], "time": [], "mz": [], "original_mz": [], "intensity": []}
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
             summary_totalSpectra = 0
             for k, spectrum in msDataObj.get_spectra_iterator():
                 temp["sample"].extend((sample for i in range(spectrum.mz.shape[0])))
@@ -2471,7 +2474,7 @@ class DartMSAssay:
         }
 
         for samplei, sample in tqdm.tqdm(enumerate(self.get_sample_names()), total=len(self.get_sample_names()), desc="bracketing: fetching data"):
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
                 temp["sample"].extend((sample for i in range(spectrum.mz.shape[0])))
                 temp["spectrumInd"].extend((k for i in range(spectrum.mz.shape[0])))
@@ -2615,7 +2618,7 @@ class DartMSAssay:
             temp = None
             for featurei in tqdm.tqdm(range(len(tempClusterInfo["minMZ"])), desc="bracketing: generating plots"):
                 for samplei, sample in enumerate(self.get_sample_names()):
-                    msDataObj = self.assay.get_ms_data(sample)
+                    msDataObj = self.get_msDataObj_for_sample(sample)
                     sample_metadata = self.assay.manager.get_sample_metadata()
                     for k, spectrum in msDataObj.get_spectra_iterator():
                         usei = np.where(
@@ -2771,7 +2774,7 @@ class DartMSAssay:
 
         dataMatrix = np.zeros((len(sampleNames), len(self.features)))
         for samplei, sample in tqdm.tqdm(enumerate(sampleNames), total=len(sampleNames), desc="data matrix: gathering data"):
-            msDataObj = self.assay.get_ms_data(sample)
+            msDataObj = self.get_msDataObj_for_sample(sample)
             spectrum = msDataObj.get_spectrum(0)
 
             for braci, (mzmin, mzmean, mzmax, _) in enumerate(self.features):
@@ -3273,7 +3276,7 @@ class DartMSAssay:
         for featureInd in tqdm.tqdm(range(len(useFeatures)), desc="plot: gathering data"):
             temp = None
             for samplei, sample in enumerate(self.get_sample_names()):
-                msDataObj = self.assay.get_ms_data(sample)
+                msDataObj = self.get_msDataObj_for_sample(sample)
                 sample_metadata = self.assay.manager.get_sample_metadata()
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     usei = np.where(np.logical_and(spectrum.mz >= self.features[featureInd][0], spectrum.mz <= self.features[featureInd][2]))[0]
@@ -3391,7 +3394,7 @@ class DartMSAssay:
 
         for featureInd in [featureInd]:
             for samplei, sample in enumerate(self.get_sample_names()):
-                msDataObj = self.assay.get_ms_data(sample)
+                msDataObj = self.get_msDataObj_for_sample(sample)
                 sample_metadata = self.assay.manager.get_sample_metadata()
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     usei = np.where(np.logical_and(spectrum.mz >= self.features[featureInd][0], spectrum.mz <= self.features[featureInd][2]))[0]
