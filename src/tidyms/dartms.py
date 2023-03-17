@@ -1475,6 +1475,107 @@ class DartMSAssay:
             )
             print(p)
 
+    def plot_signal_neighborhood(self):
+        temp = None
+
+        for samplei, sample in enumerate(self.get_sample_names()):
+            msData = self.get_msDataObj_for_sample(sample)
+            group = self.get_metaData_for_sample(sample, "group")
+            for k, spectrum in msData.get_spectra_iterator():
+                prevMZPPM = np.concatenate(
+                    (
+                        [250],
+                        (spectrum.mz[1 : spectrum.mz.shape[0]] - spectrum.mz[0 : (spectrum.mz.shape[0] - 1)])
+                        / spectrum.mz[0 : (spectrum.mz.shape[0] - 1)]
+                        * 1e6,
+                    )
+                )
+                nextMZPPM = np.concatenate(
+                    (
+                        (spectrum.mz[1 : spectrum.mz.shape[0]] - spectrum.mz[0 : (spectrum.mz.shape[0] - 1)])
+                        / spectrum.mz[1 : spectrum.mz.shape[0]]
+                        * 1e6,
+                        [250],
+                    )
+                )
+                prevMZPPMInt = np.concatenate(
+                    (
+                        [0],
+                        spectrum.spint[1 : spectrum.spint.shape[0]] / spectrum.spint[0 : (spectrum.spint.shape[0] - 1)],
+                    )
+                )
+                nextMZPPMInt = np.concatenate(
+                    (
+                        spectrum.spint[1 : spectrum.spint.shape[0]] / spectrum.mz[0 : (spectrum.mz.shape[0] - 1)],
+                        [0],
+                    )
+                )
+
+                prevSpectrumMZPPM = []
+                if k > 0:
+                    oSpectrum = msData.get_spectrum(k - 1)
+                    for mz in spectrum.mz:
+                        a = np.argmin(np.abs(oSpectrum.mz - mz))
+                        prevSpectrumMZPPM.append((oSpectrum.mz[a] - mz) / mz * 1e6)
+                else:
+                    prevSpectrumMZPPM = [0 for i in range(spectrum.mz.shape[0])]
+
+                nextSpectrumMZPPM = []
+                if k < msData.get_n_spectra() - 1:
+                    oSpectrum = msData.get_spectrum(k + 1)
+                    for mz in spectrum.mz:
+                        a = np.argmin(np.abs(oSpectrum.mz - mz))
+                        nextSpectrumMZPPM.append((oSpectrum.mz[a] - mz) / mz * 1e6)
+                else:
+                    nextSpectrumMZPPM = [0 for i in range(spectrum.mz.shape[0])]
+
+                for i in range(spectrum.mz.shape[0]):
+                    temp = _add_row_to_pandas_creation_dictionary(
+                        temp,
+                        sample=sample,
+                        group=group,
+                        mz=spectrum.mz[i],
+                        intensity=spectrum.spint[i],
+                        scan_prev_signal_devPPM=prevMZPPM[i],
+                        scan_next_signal_devPPM=nextMZPPM[i],
+                        scan_prev_signal_intRatio=prevMZPPMInt[i] if prevMZPPMInt[i] < 1 else 1 / prevMZPPMInt[i],
+                        scan_next_signal_intRatio=nextMZPPMInt[i] if nextMZPPMInt[i] < 1 else 1 / nextMZPPMInt[i],
+                        spectrum_prev_signal_devPPM=prevSpectrumMZPPM[i],
+                        spectrum_next_signal_devPPM=nextSpectrumMZPPM[i],
+                    )
+
+        temp = pd.DataFrame(temp)
+
+        p = (
+            p9.ggplot()
+            + p9.geom_point(
+                data=temp[temp["scan_next_signal_devPPM"] <= 250],
+                mapping=p9.aes(y="mz", x="scan_next_signal_devPPM", alpha="scan_next_signal_intRatio"),
+            )
+            + p9.geom_point(
+                data=temp[temp["scan_prev_signal_devPPM"] <= 250],
+                mapping=p9.aes(y="mz", x="-scan_prev_signal_devPPM", alpha="scan_prev_signal_intRatio"),
+            )
+            + p9.scale_alpha(range=(0, 0.01))
+            + p9.xlab("Distance previous/next feature in the same scan (ppm)")
+            + p9.ggtitle("Previous/next signal in the same scan")
+            + p9.theme(legend_position="none")
+        )
+        print(p)
+
+        p = (
+            p9.ggplot()
+            + p9.geom_point(
+                data=temp[abs(temp["spectrum_next_signal_devPPM"]) <= 250], mapping=p9.aes(y="mz", x="spectrum_next_signal_devPPM"), alpha=0.002
+            )
+            + p9.geom_point(
+                data=temp[abs(temp["spectrum_prev_signal_devPPM"]) <= 250], mapping=p9.aes(y="mz", x="-spectrum_prev_signal_devPPM"), alpha=0.002
+            )
+            + p9.xlab("Distance of the 'same' signal in the previous/next scan (ppm)")
+            + p9.ggtitle("Similar features in neighboring scans")
+        )
+        print(p)
+
     @staticmethod
     def create_assay_from_chronogramFiles(
         assay_name,
