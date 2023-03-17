@@ -30,18 +30,28 @@ class AnnotationData:
     def get_monoisotopologue(self) -> Optional[Feature]:
         """Gets the current non-annotated feature with the greatest area."""
         if self._monoisotopologues:
-            return self._monoisotopologues[-1]
+            mono = self._monoisotopologues[-1]
+            while mono not in self.non_annotated:
+                self._monoisotopologues.pop()
+                if self._monoisotopologues:
+                    mono = self._monoisotopologues[-1]
+                else:
+                    mono = None
         else:
-            return None
+            mono = None
+        return mono
 
-    def annotate(self, features: list[Feature], charge: int):
+    def annotate(self, features: Sequence[Feature], charge: int):
         """Labels a list of features as an isotopic envelope."""
-        for k, ft in enumerate(features):
-            ft.annotation.charge = charge
-            ft.annotation.isotopologue_label = self._label_counter
-            ft.annotation.isotopologue_index = k
-            self._flag_annotated(ft)
-        self._label_counter += 1
+        if len(features) > 1:
+            for k, ft in enumerate(features):
+                ft.annotation.charge = charge
+                ft.annotation.isotopologue_label = self._label_counter
+                ft.annotation.isotopologue_index = k
+                self._flag_annotated(ft)
+            self._label_counter += 1
+        else:
+            self._flag_annotated(features[0])
 
     def _flag_annotated(self, feature: Feature):
         """Flag features as annotated."""
