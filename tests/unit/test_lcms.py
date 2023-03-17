@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 from scipy.integrate import trapz
 from typing import Tuple
+from math import isclose
 
 # # Test Chromatogram object
 
@@ -20,24 +21,29 @@ def chromatogram_data():
 def test_chromatogram_creation(chromatogram_data):
     # test building a chromatogram with default mode
     rt, spint = chromatogram_data
-    chromatogram = lcms.Chromatogram(rt, spint)
+    index = 0
+    chromatogram = lcms.Chromatogram(rt, spint, index)
     assert chromatogram.mode == "uplc"
 
 
 def test_chromatogram_creation_with_mode(chromatogram_data):
     rt, spint = chromatogram_data
-    chromatogram = lcms.Chromatogram(rt, spint, mode="hplc")
+    index = 0
+    chromatogram = lcms.Chromatogram(rt, spint, index, mode="hplc")
     assert chromatogram.mode == "hplc"
 
 
 def test_chromatogram_creation_invalid_mode(chromatogram_data):
     rt, spint = chromatogram_data
+    index = 0
     with pytest.raises(ValueError):
-        lcms.Chromatogram(rt, spint, mode="invalid-mode")
+        lcms.Chromatogram(rt, spint, index, mode="invalid-mode")
 
 
 def test_chromatogram_find_peaks(chromatogram_data):
-    chromatogram = lcms.Chromatogram(*chromatogram_data)
+    rt, spint = chromatogram_data
+    index = 0
+    chromatogram = lcms.Chromatogram(rt, spint, index)
     chromatogram.extract_features()
     # chromatogram.describe_features()
     assert len(chromatogram.features) == 1
@@ -95,14 +101,14 @@ def roi_data() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 
 
 @pytest.fixture
-def lc_roi_with_peak():
+def lc_roi_with_peak() -> tuple[lcms.LCTrace, lcms.Peak]:
     n = 200
     # it is not necessary that the signal is an actual peak and make tests
     # easier
     x = np.arange(n)
     y = np.ones_like(x)
     mode = "uplc"
-    lc_roi = ms.lcms.LCTrace(x, y, y, x, mode)
+    lc_roi = ms.lcms.LCTrace(x, y, y, x, mode=mode)
     apex = n // 2
     peak = ms.lcms.Peak(apex - 10, apex, apex + 10, lc_roi)
     return lc_roi, peak
@@ -127,18 +133,21 @@ def test_fill_nan(roi_data):
 
 def test_peak_location_init(lc_roi_with_peak):
     # test peak construction
-    ms.lcms.Peak(0, 10, 20, lc_roi_with_peak)
+    roi, _ = lc_roi_with_peak
+    ms.lcms.Peak(0, 10, 20, roi)
     assert True
 
 
 def test_peak_location_end_lower_than_loc(lc_roi_with_peak):
+    roi, _ = lc_roi_with_peak
     with pytest.raises(ms.lcms.InvalidPeakException):
-        ms.lcms.Peak(0, 10, 10, lc_roi_with_peak)
+        ms.lcms.Peak(0, 10, 10, roi)
 
 
 def test_peak_location_loc_lower_than_start(lc_roi_with_peak):
+    roi, _ = lc_roi_with_peak
     with pytest.raises(ms.lcms.InvalidPeakException):
-        ms.lcms.Peak(10, 9, 20, lc_roi_with_peak)
+        ms.lcms.Peak(10, 9, 20, roi)
 
 
 def test_peak_rt(lc_roi_with_peak):
@@ -197,7 +206,7 @@ def test_peak_width_bad_width():
     # test that the width is zero when the peak is badly shaped
     y = np.zeros(100)
     x = np.arange(100)
-    lc_roi = ms.lcms.LCTrace(y, y, x, x)
+    lc_roi = ms.lcms.LCTrace(y, y, x.astype(float), x)
     peak = ms.lcms.Peak(10, 20, 30, lc_roi)
     lc_roi.baseline = y
     test_width = peak.get_width()
@@ -265,3 +274,118 @@ def test_LCRoi_serialization(lc_roi_with_peak):
         assert expected.start == test.start
         assert expected.apex == test.apex
         assert expected.end == test.end
+
+
+def test__overlap_ratio_overlapping_peaks():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[25:55]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(5, 10, 15, roi1)
+    ft2 = lcms.Peak(5, 10, 15, roi2)
+    test_result = lcms._overlap_ratio(ft1, ft2)
+    expected_result = 0.5
+    assert isclose(expected_result, test_result)
+
+
+def test__overlap_ratio_non_overlapping_peaks():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[30:50]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(5, 10, 15, roi1)
+    ft2 = lcms.Peak(15, 16, 20, roi2)
+    test_result = lcms._overlap_ratio(ft1, ft2)
+    expected_result = 0.0
+    assert isclose(expected_result, test_result)
+
+
+def test__overlap_ratio_perfect_overlap():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[30:50]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    ft2 = lcms.Peak(0, 5, 10, roi2)
+    test_result = lcms._overlap_ratio(ft1, ft2)
+    expected_result = 1.0
+    assert isclose(expected_result, test_result)
+
+
+def test__get_overlap_index_partial_overlap():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[25:55]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(5, 10, 15, roi1)
+    ft2 = lcms.Peak(5, 10, 15, roi2)
+    test_result = lcms._get_overlap_index(ft1, ft2)
+    expected_result = 10, 15, 5, 10
+    assert test_result == expected_result
+
+
+def test__get_overlap_index_perfect_overlap():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[25:55]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(5, 10, 15, roi1)
+    ft2 = lcms.Peak(0, 5, 10, roi2)
+    test_result = lcms._get_overlap_index(ft1, ft2)
+    expected_result = 5, 15, 0, 10
+    assert test_result == expected_result
+
+
+def test__overlap_ratio_ft2_contained_in_ft1():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[30:50]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    ft2 = lcms.Peak(2, 5, 8, roi2)
+    test_result = lcms._overlap_ratio(ft1, ft2)
+    # if ft2 is contained in ft1, the overlap ratio is 1.0
+    expected_result = 1.0
+    assert isclose(expected_result, test_result)
+
+
+def test__feature_similarity_same_features():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    test_result = ft1.compare(ft1)
+    expected_result = 1.0
+    assert isclose(expected_result, test_result)
+
+
+def test__feature_similarity_non_overlapping_features():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    scans_roi2 = scans[50:70]
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft2 = lcms.Peak(10, 15, 20, roi2)
+    test_result = ft1.compare(ft2)
+    expected_result = 0.0
+    assert isclose(expected_result, test_result)
+
+
+def test__feature_similarity_non_overlapping_features_ft1_starts_after_ft2():
+    scans = np.arange(100)
+    scans_roi1 = scans[50:70]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    scans_roi2 = scans[20:40]
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft2 = lcms.Peak(10, 15, 20, roi2)
+    test_result = ft1.compare(ft2)
+    expected_result = 0.0
+    assert isclose(expected_result, test_result)

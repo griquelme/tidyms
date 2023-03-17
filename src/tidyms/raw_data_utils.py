@@ -272,7 +272,9 @@ def make_roi(
         if min_intensity is None:
             mz_filter = None
         else:
-            mz_filter = _make_mz_filter(ms_data, min_intensity, ms_level, start_time, end_time)
+            mz_filter = _make_mz_filter(
+                ms_data, min_intensity, ms_level, start_time, end_time
+            )
         targeted = False
     else:
         mz_filter = np.sort(targeted_mz)
@@ -313,6 +315,11 @@ def make_roi(
     processor.clear_completed_roi()
     scans = np.array(scans)
     roi_list = processor.tmp_roi_to_roi(scans, rt, pad, ms_data.separation)
+
+    # TODO: workaround, move code to _RoiMaker
+    for k, roi in enumerate(roi_list):
+        roi.index = k
+
     return roi_list
 
 
@@ -352,11 +359,21 @@ def accumulate_spectra(
     """
     if ms_data.ms_mode == "centroid":
         sp = _accumulate_spectra_centroid(
-            ms_data, start_time, end_time, subtract_left_time, subtract_right_time, ms_level
+            ms_data,
+            start_time,
+            end_time,
+            subtract_left_time,
+            subtract_right_time,
+            ms_level,
         )
     else:  # profile
         sp = _accumulate_spectra_profile(
-            ms_data, start_time, end_time, subtract_left_time, subtract_right_time, ms_level
+            ms_data,
+            start_time,
+            end_time,
+            subtract_left_time,
+            subtract_right_time,
+            ms_level,
         )
     return sp
 
@@ -595,7 +612,9 @@ class _RoiMaker:
         finished_mask = self.tmp_roi_list.missing_count > self.max_missing
         finished_roi_index = np.where(finished_mask)[0]
         if self.min_intensity is not None:
-            valid_mask = finished_mask & (self.tmp_roi_list.max_int >= self.min_intensity)
+            valid_mask = finished_mask & (
+                self.tmp_roi_list.max_int >= self.min_intensity
+            )
         else:
             valid_mask = finished_mask
 
@@ -900,7 +919,11 @@ class _TempRoi:
 
 
 def _make_mz_filter(
-    ms_data: MSData, min_intensity: float, ms_level: int, start_time: float, end_time: float
+    ms_data: MSData,
+    min_intensity: float,
+    ms_level: int,
+    start_time: float,
+    end_time: float,
 ):
     """
     Creates a list of m/z values to initialize ROI for untargeted feature
@@ -1046,7 +1069,9 @@ def _match_mz(
         elif mode == "closest":
             match_index_mz = np.where(match_mask)[0][match_first]
             multiple_match_index_mz = match_index_mz[multiple_match_mask]
-            iterator = zip(multiple_match_index_mz, multiple_match_first, multiple_match_count)
+            iterator = zip(
+                multiple_match_index_mz, multiple_match_first, multiple_match_count
+            )
             for mz2_index, first, count in iterator:
                 closest = np.argmin(dmz[mz2_index : mz2_index + count])
                 # flag all multiple matches as no match except the closest one

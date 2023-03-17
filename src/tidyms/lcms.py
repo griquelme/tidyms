@@ -26,7 +26,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from scipy.ndimage import gaussian_filter1d
-from typing import Any, cast, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, cast, Optional, Sequence, Tuple, Type, TypeVar, Union
 from scipy.interpolate import interp1d
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
@@ -177,12 +177,15 @@ class MSSpectrum:
 
 
 class Roi(ABC):
-    features: Optional[list["Feature"]] = None
 
     """
     Regions of interest extracted from raw MS data.
 
     """
+
+    def __init__(self, index: int):
+        self.index = index
+        self.features: Optional[list[Feature]] = None
 
     def plot(self) -> bokeh.plotting.figure:
         ...
@@ -261,10 +264,12 @@ class MZTrace(Roi):
         spint: np.ndarray[Any, np.dtype[np.floating]],
         mz: np.ndarray[Any, np.dtype[np.floating]],
         scan: np.ndarray[Any, np.dtype[np.integer]],
-        mode: Optional[str],
+        index: int = 0,
+        mode: Optional[str] = None,
         noise: Optional[np.ndarray] = None,
         baseline: Optional[np.ndarray] = None,
     ):
+        super().__init__(index)
         self.mode = mode
         self.time = time
         self.spint = spint
@@ -295,6 +300,7 @@ class MZTrace(Roi):
 
         """
         d = dict()
+        d["index"] = self.index
         d[c.MODE] = self.mode
         d[c.TIME] = array1d_to_str(self.time)
         d[c.SPINT] = array1d_to_str(self.spint)
@@ -375,11 +381,12 @@ class LCTrace(MZTrace):
         spint: np.ndarray[Any, np.dtype[np.floating]],
         mz: np.ndarray[Any, np.dtype[np.floating]],
         scan: np.ndarray[Any, np.dtype[np.integer]],
+        index: int = 0,
         mode: Optional[str] = c.UPLC,
         noise: Optional[np.ndarray] = None,
         baseline: Optional[np.ndarray] = None,
     ):
-        super().__init__(time, spint, mz, scan, mode, noise, baseline)
+        super().__init__(time, spint, mz, scan, index, mode, noise, baseline)
 
     @property
     def mode(self):
@@ -447,7 +454,11 @@ class LCTrace(MZTrace):
 
         baseline = peaks.estimate_baseline(x, noise)
         start, apex, end = peaks.detect_peaks(x, noise, baseline, **kwargs)
-        features = [Peak(s, a, e, self) for s, a, e in zip(start, apex, end)]
+        n_peaks = start.size
+        features = [
+            Peak(s, a, e, self, i)
+            for s, a, e, i in zip(start, apex, end, range(n_peaks))
+        ]
 
         self.features = features
         self.baseline = baseline
@@ -520,8 +531,10 @@ class Chromatogram(LCTrace):
     mz: Optional[np.ndarray]
     scan: Optional[np.ndarray]
 
-    def __init__(self, time: np.ndarray, spint: np.ndarray, mode: str = c.UPLC):
-        super(Chromatogram, self).__init__(time, spint, spint, spint, mode)
+    def __init__(
+        self, time: np.ndarray, spint: np.ndarray, index: int = 0, mode: str = c.UPLC
+    ):
+        super(Chromatogram, self).__init__(time, spint, spint, spint, index, mode)
         self.mz = None
         self.scan = None
 
@@ -544,14 +557,16 @@ class Feature(ABC):
     ----------
     roi: Roi
     annotation: Optional[Annotation]
+    index: int
 
     """
 
-    def __init__(self, roi: Roi):
+    def __init__(self, roi: Roi, index: int = 0):
         self.roi = roi
         self._mz = None
         self._area = None
         self.annotation = Annotation(-1, -1, -1, -1)
+        self.index = index
 
     @property
     def mz(self) -> float:
@@ -622,7 +637,7 @@ class Feature(ABC):
     @staticmethod
     @abstractmethod
     def compute_isotopic_envelope(
-        feature: list["Feature"],
+        feature: Sequence["Feature"],
     ) -> Tuple[list[float], list[float]]:
         ...
 
@@ -640,12 +655,16 @@ class Peak(Feature):
     end: int
         index where the peak ends. Start and end used as slices defines the
         peak region.
+    roi: LCTrace
+        ROI associated with the Peak.
+    index: int
+        Unique index for features detected a ROI.
 
     """
 
     roi: LCTrace
 
-    def __init__(self, start: int, apex: int, end: int, roi: LCTrace):
+    def __init__(self, start: int, apex: int, end: int, roi: LCTrace, index: int = 0):
         try:
             assert start < end
             assert start < apex
@@ -653,13 +672,18 @@ class Peak(Feature):
         except AssertionError:
             msg = "start must be lower than loc and loc must be lower than end"
             raise InvalidPeakException(msg)
-        super().__init__(roi)
+        super().__init__(roi, index)
         self.start = int(start)
         self.end = int(end)
         self.apex = int(apex)
 
     def to_str(self) -> str:
-        d = {c.START: self.start, c.APEX: self.apex, c.END: self.end}
+        d = {
+            c.START: self.start,
+            c.APEX: self.apex,
+            c.END: self.end,
+            "index": self.index,
+        }
         s = json.dumps(d)
         return s
 
@@ -873,13 +897,21 @@ class Peak(Feature):
         Computes a m/z and relative abundance for a list of features.
 
         """
-        start, end = 0, features[0].end
+        scan_start = 0
+        scan_end = 10000000000  # dummy value
         for ft in features:
-            start = max(ft.start, start)
-            end = min(ft.end, end)
-        overlap_features = [Peak(start, x.apex, end, x.roi) for x in features]
-        mz = [x.get_mz() for x in overlap_features]
-        p = [x.get_area() for x in overlap_features]
+            scan_start = max(scan_start, ft.roi.scan[ft.start])
+            scan_end = min(scan_end, ft.roi.scan[ft.end - 1])
+
+        p = list()
+        mz = list()
+        if scan_start < scan_end:
+            for ft in features:
+                start = bisect.bisect(ft.roi.scan, scan_start)
+                end = bisect.bisect(ft.roi.scan, scan_end)
+                tmp_peak = Peak(start, ft.apex, end, ft.roi)
+                p.append(tmp_peak.area)
+                mz.append(tmp_peak.mz)
         total_area = sum(p)
         p = [x / total_area for x in p]
         return mz, p
