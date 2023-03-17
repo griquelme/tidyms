@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tidyms import annotation
+from tidyms.annotation import annotation
 from tidyms.raw_data_utils import make_roi
 from tidyms import _constants as c
 from tidyms.fileio import SimulatedMSData

@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional
 from ..lcms import Feature
 from collections.abc import Sequence
 
@@ -40,6 +40,7 @@ class AnnotationData:
             ft.annotation.charge = charge
             ft.annotation.isotopologue_label = self._label_counter
             ft.annotation.isotopologue_index = k
+            self._flag_annotated(ft)
         self._label_counter += 1
 
     def _flag_annotated(self, feature: Feature):
