@@ -10,12 +10,13 @@ Provides:
 
 Functions
 ---------
-annotate_isotopologues
+annotate
+create_annotation_table
+create_annotation_tools
 
-Objects
--------
-IsotopologueAnnotator
 
 """
 
-from .annotation import annotate, IsotopologueAnnotator
+from .annotation import annotate, create_annotation_table, create_annotation_tools
+
+__all__ = ["annotate", "create_annotation_tools", "create_annotation_table"]
