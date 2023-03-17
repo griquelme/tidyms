@@ -108,7 +108,7 @@ class EnvelopeFinder(object):
             List of isotopic envelope candidates.
 
         """
-        return _find_envelopes(
+        envelopes = _find_envelopes(
             data.features,
             mmi,
             data.non_annotated,
@@ -119,6 +119,24 @@ class EnvelopeFinder(object):
             self.min_similarity,
             self.bounds,
         )
+        envelopes = _remove_sub_candidates(envelopes)
+        return envelopes
+
+
+def _remove_sub_candidates(
+    candidates: list[Sequence[Feature]],
+) -> list[Sequence[Feature]]:
+    """Remove candidates that are subsets of other candidates."""
+    validated = list()
+    while candidates:
+        last = candidates.pop()
+        last_set = set(last)
+        is_subset = False
+        for candidate in candidates:
+            is_subset = last_set <= set(candidate)
+        if not is_subset:
+            validated.append(last)
+    return validated
 
 
 def _find_envelopes(
