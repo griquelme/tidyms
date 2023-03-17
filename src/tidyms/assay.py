@@ -18,7 +18,7 @@ from ._plot_bokeh import _LCAssayPlotter
 from .fill_missing import fill_missing_lc
 from ._build_data_matrix import build_data_matrix
 import json
-from .annotation.annotation import create_annotator, annotate
+from .annotation import annotate, create_annotation_table, create_annotation_tools
 import copy
 
 # TODO: add id_ column to sample metadata
@@ -186,7 +186,9 @@ class Assay:
         return func
 
     @staticmethod
-    def _get_feature_matching_strategy(strategy: Union[str, Callable] = "default") -> Callable:
+    def _get_feature_matching_strategy(
+        strategy: Union[str, Callable] = "default"
+    ) -> Callable:
         """
         Sets the function used for mathing_features.
 
@@ -366,7 +368,7 @@ class Assay:
         strategy: Union[str, Callable] = "default",
         n_jobs: Optional[int] = None,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> "Assay":
         """
         Builds Regions Of Interest (ROI) from raw data for each sample.
@@ -441,7 +443,7 @@ class Assay:
         strategy: Union[str, Callable] = "default",
         n_jobs: Optional[int] = None,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> "Assay":
         """
         Extract features from the ROIs detected on each sample.
@@ -579,7 +581,9 @@ class Assay:
 
             def worker(args):
                 roi_path, ft_path, roi_list = args
-                ft_table = _describe_features_default(roi_list, custom_descriptors, filters)
+                ft_table = _describe_features_default(
+                    roi_list, custom_descriptors, filters
+                )
                 _save_roi_list(roi_path, roi_list)
                 ft_table.to_pickle(ft_path)
 
@@ -793,13 +797,19 @@ class Assay:
                     ft_path = self.manager.get_feature_path(sample)
                     roi_list = self.load_roi_list(sample)
                     ft_table = self.load_features(sample)
-                    yield ft_table, ft_path, roi_list
+                    ft_list = list()
+                    for roi in roi_list:
+                        if roi.features is not None:
+                            ft_list.extend(roi.features)
+                    yield ft_list, ft_table, ft_path
 
-            def worker(args):
-                ft_table, ft_path, roi_list = args
-                ann = create_annotator(**kwargs)
-                annotate(ft_table, roi_list, ann)
+            def worker(args: tuple[list[Feature], pd.DataFrame, Path]):
+                ft_list, ft_table, ft_path = args
+                tools = create_annotation_tools(**kwargs)
+                annotate(ft_list, *tools)
+                annotation_table = create_annotation_table(ft_list)
                 ft_table.to_pickle(ft_path)
+                ft_table = ft_table.join(annotation_table, [c.ROI_INDEX, c.FT_INDEX])
 
             worker = delayed(worker)
             if verbose:
@@ -1236,7 +1246,6 @@ def _process_feature(
     custom_descriptors: dict[str, Callable[[Feature], float]],
     filters: dict[str, Tuple],
 ) -> Optional[dict[str, float]]:
-
     descriptors = feature.describe()
     is_valid_feature = _all_valid_descriptors(descriptors, filters)
 
@@ -1340,7 +1349,9 @@ def _describe_feature_list(
     return descriptor_list
 
 
-def _fill_filter_boundaries(filter_dict: dict[str, Tuple[Optional[float], Optional[float]]]):
+def _fill_filter_boundaries(
+    filter_dict: dict[str, Tuple[Optional[float], Optional[float]]]
+):
     """
     Replaces None in the filter boundaries to perform comparisons.
 
@@ -1490,7 +1501,6 @@ def _normalize_sample_metadata(df: pd.DataFrame, name_to_path: List[str]):
 
 
 def _normalize_assay_path(assay_path: Union[Path, str]):
-
     if not isinstance(assay_path, Path):
         assay_path = Path(assay_path)
 
