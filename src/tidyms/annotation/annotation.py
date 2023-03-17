@@ -1,13 +1,14 @@
 import bisect
 import numpy as np
 import pandas as pd
-from ..lcms import LCTrace, Peak
+from .annotation_data import AnnotationData
+from ..lcms import LCTrace, Feature
 from ..chem import EnvelopeValidator
 from .envelope_finder import EnvelopeFinder
 from .mmi_finder import MMIFinder
 from ..chem.atoms import EM, PeriodicTable
 from .. import _constants as c
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 from scipy.integrate import trapz
 
 
@@ -38,7 +39,7 @@ def create_annotator(
     min_M_tol : float
         Minimum mass tolerance used during search. isotopologues with abundance
         equal to 1 use this value. Isotopologues with abundance equal to 0 use
-        `max_M_tol`. For values inbetween, a weighted tolerance is used based
+        `max_M_tol`. For values in between, a weighted tolerance is used based
         on the abundance.
     max_M_tol : float
     p_tol : float
@@ -87,12 +88,12 @@ def create_annotator(
 
 
 def annotate(
-    feature_table: pd.DataFrame,
-    roi_list: List[LCTrace],
-    annotator: "IsotopologueAnnotator",
+    feature_list: List[Feature],
+    mmi_finder: MMIFinder,
+    envelope_finder: EnvelopeFinder,
+    envelope_validator: EnvelopeValidator,
 ) -> None:
-    """
-    Annotates isotopologues in a sample.
+    """Annotates isotopologues in a sample.
 
     Annotations are added as three columns in the feature table:
 
@@ -108,18 +109,52 @@ def annotate(
 
     Parameters
     ----------
-    feature_table : DataFrame
-    roi_list : List[ROI]
-    annotator : _IsotopologueAnnotator
+    feature_list : List[LCTrace]
+        List of features obtained after feature extraction.
+    mmi_finder : MMIFinder
+    envelope_finder : EnvelopeFinder
+    envelope_validator : EnvelopeValidator
 
     """
-    annotator.load_data(feature_table, roi_list)
-    mono_index = annotator.get_next_monoisotopologue_index()
-    while mono_index > -1:
-        annotator.annotate(mono_index)
-        mono_index = annotator.get_next_monoisotopologue_index()
-    annotator.add_annotations(feature_table)
-    annotator.clear_data()
+    data = AnnotationData(feature_list)
+    monoisotopologue = data.get_monoisotopologue()
+    while monoisotopologue is not None:
+        mmi_candidates = mmi_finder.find(data)
+        best_length = 0
+        best_candidate = [monoisotopologue]
+        best_charge = -1
+        for mmi, charge in mmi_candidates:
+            envelope_candidates = envelope_finder.find(data, mmi, charge)
+            for candidate in envelope_candidates:
+                validated_length = _validate_candidate(
+                    candidate, monoisotopologue, charge, best_length, envelope_validator
+                )
+                if validated_length > best_length:
+                    best_length = validated_length
+                    best_candidate = candidate[:validated_length]
+                    best_charge = charge
+        data.annotate(best_candidate, best_charge)
+        monoisotopologue = data.get_monoisotopologue()
+
+
+def _validate_candidate(
+    candidate: Sequence[Feature],
+    monoisotopologue: Feature,
+    charge: int,
+    min_length: int,
+    validator: EnvelopeValidator,
+) -> int:
+
+    if len(candidate) <= min_length:
+        return 0
+
+    if monoisotopologue not in candidate:
+        return 0
+
+    M, p = candidate[0].compute_isotopic_envelope(candidate)
+    M = [x / charge for x in M]
+
+    return validator.validate(M, p)
 
 
 class IsotopologueAnnotator:
