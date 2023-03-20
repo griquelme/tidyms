@@ -2944,10 +2944,9 @@ class DartMSAssay:
                     else:
                         dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
 
-        sample_metadata = self.assay.get_sample_metadata()
         self.samples = sampleNames
-        self.groups = [sample_metadata.loc[sample, "group"] for sample in self.samples]
-        self.batches = [sample_metadata.loc[sample, "batch"] for sample in self.samples]
+        self.groups = [self.get_metaData_for_sample(sample, "group") for sample in self.samples]
+        self.batches = [self.get_metaData_for_sample(sample, "batch") for sample in self.samples]
         self.dat = dataMatrix
 
     #####################################################################################################
