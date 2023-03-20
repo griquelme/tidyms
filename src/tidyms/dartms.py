@@ -1995,7 +1995,11 @@ class DartMSAssay:
 
         Args:
             self (DartMSAssay): The self of the experiment
-            referenceMZs (list of MZ values (floats)): The reference features for which the offsets shall be calculated. Defaults to [165.078978594 + 1.007276].
+            referenceMZs (list of MZ values (floats) or dict): The reference features for which the offsets shall be calculated.
+                       Defaults to [165.078978594 + 1.007276].
+                       If the user provides an mz value, these mz values will be used in all samples and the search mz is the refernce mz
+                       If the user provides a dictionary, it must consist of the entries 'observedMZ', 'referenceMZ' and samples.
+                       observedMZ is the mz to search for, referenceMZ to correct to and samples is a list of sample names to be used for this particular correction
             max_mz_deviation_absolute (float, optional): Maximum deviation used for the search. Defaults to 0.1.
 
         Returns:
@@ -2013,28 +2017,48 @@ class DartMSAssay:
         for sample in self.get_sample_names():
             msDataObj = self.get_msDataObj_for_sample(sample)
             for i, referenceMZ in enumerate(referenceMZs):
-                for spectrumi, spectrum in msDataObj.get_spectra_iterator():
-                    ind = None
-                    if selection_criteria.lower() == "closestMZ".lower():
-                        ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_closest_mz(referenceMZ, max_offset_absolute=max_mz_deviation_absolute)
-                    elif selection_criteria.lower() == "mostAbundant".lower():
-                        ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_most_abundant_signal_in_range(
-                            referenceMZ, max_offset_absolute=max_mz_deviation_absolute
-                        )
+                observedMZ = referenceMZ
+                forSamples = None
+                referenceMZ = referenceMZ
 
-                    if ind is not None:
-                        temp = _add_row_to_pandas_creation_dictionary(
-                            temp,
-                            referenceMZ=referenceMZ,
-                            mz=curMZ,
-                            mzDeviation=deltaMZ,
-                            mzDeviationPPM=deltaMZPPM,
-                            time=spectrum.time,
-                            intensity=inte,
-                            sample=sample,
-                            file=sample.split("::")[0],
-                            chromID="%s %.4f" % (sample, referenceMZ),
-                        )
+                if type(referenceMZ) == float:
+                    observedMZ = referenceMZ - max_mz_deviation_absolute, referenceMZ + max_mz_deviation_absolute
+
+                elif type(referenceMZ) == dict:
+                    observedMZ = referenceMZ["observedMZ"]
+                    forSamples = referenceMZ["forSamples"]
+                    referenceMZ = referenceMZ["referenceMZ"]
+                else:
+                    raise RuntimeError(
+                        "Unknown parameter for referenceMZ. Must be either an mz value or a dict with 'observedMZ': float, 'forSamples': [List of sample names], 'referenceMZ': float"
+                    )
+
+                if forSamples is None or sample in forSamples:
+                    # print("correcting sample ", sample, " from ", observedMZ, " to ", referenceMZ)
+                    for spectrumi, spectrum in msDataObj.get_spectra_iterator():
+                        ind = None
+                        if selection_criteria.lower() == "closestMZ".lower():
+                            ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_closest_mz(observedMZ, max_offset_absolute=max_mz_deviation_absolute)
+
+                        elif selection_criteria.lower() == "mostAbundant".lower():
+                            ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_most_abundant_signal_in_range(
+                                observedMZ, max_offset_absolute=max_mz_deviation_absolute
+                            )
+
+                        # print("   .. found correction by ", curMZ - referenceMZ, (curMZ - referenceMZ) / referenceMZ * 1e6)
+                        if ind is not None:
+                            temp = _add_row_to_pandas_creation_dictionary(
+                                temp,
+                                referenceMZ=referenceMZ,
+                                mz=curMZ,
+                                mzDeviation=curMZ - referenceMZ,
+                                mzDeviationPPM=(curMZ - referenceMZ) / referenceMZ * 1e6,
+                                time=spectrum.time,
+                                intensity=inte,
+                                sample=sample,
+                                file=sample.split("::")[0],
+                                chromID="%s %.4f" % (sample, referenceMZ),
+                            )
 
         return pd.DataFrame(temp)
 
@@ -2124,7 +2148,7 @@ class DartMSAssay:
                 .transform("median")
                 / 1e6
             )  # * (1. - (temp.groupby("chromID")["mzDeviationPPM"].transform("median")) / 1E6)  ## Error
-        
+
         elif correctby.lower() == "mzDeviation".lower():
             transformFactors = (
                 tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)]
@@ -2134,7 +2158,7 @@ class DartMSAssay:
             tempMod["mz"] = tempMod["mz"] - tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby(
                 correct_on_level
             )["mzDeviation"].transform("median")
-        
+
         else:
             raise ValueError("Unknown option for correctby parameter. Must be 'mzDeviation' or 'mzDeviationPPM'")
 
@@ -2155,7 +2179,10 @@ class DartMSAssay:
                 transformFactor = transformFactors.loc[sample.split("::")[0]]
 
             if transformFactor is None:
-                logging.error("Error: Sample %3d / %3d (%45s) could not be corrected as no reference MZs were detected in it" % (samplei + 1, len(self.get_sample_names), sample))
+                logging.error(
+                    "Error: Sample %3d / %3d (%45s) could not be corrected as no reference MZs were detected in it"
+                    % (samplei + 1, len(self.get_sample_names), sample)
+                )
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     spectrum.original_mz = spectrum.mz
             else:
