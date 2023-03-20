@@ -2111,7 +2111,7 @@ class DartMSAssay:
         tempMod = temp.copy()
         tempMod["mode"] = "corrected MZs (by ppm mz deviation)"
         transformFactors = None
-        if correctby == "mzDeviationPPM":
+        if correctby.lower() == "mzDeviationPPM".lower():
             transformFactors = (
                 tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)]
                 .groupby(correct_on_level)["mzDeviationPPM"]
@@ -2124,7 +2124,8 @@ class DartMSAssay:
                 .transform("median")
                 / 1e6
             )  # * (1. - (temp.groupby("chromID")["mzDeviationPPM"].transform("median")) / 1E6)  ## Error
-        elif correctby == "mzDeviation":
+        
+        elif correctby.lower() == "mzDeviation".lower():
             transformFactors = (
                 tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)]
                 .groupby(correct_on_level)["mzDeviation"]
@@ -2133,6 +2134,7 @@ class DartMSAssay:
             tempMod["mz"] = tempMod["mz"] - tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby(
                 correct_on_level
             )["mzDeviation"].transform("median")
+        
         else:
             raise ValueError("Unknown option for correctby parameter. Must be 'mzDeviation' or 'mzDeviationPPM'")
 
@@ -2153,29 +2155,35 @@ class DartMSAssay:
                 transformFactor = transformFactors.loc[sample.split("::")[0]]
 
             if transformFactor is None:
-                logging.error("Error: sample '%s' could not be corrected as no reference MZs were detected in it" % (sample))
+                logging.error("Error: Sample %3d / %3d (%45s) could not be corrected as no reference MZs were detected in it" % (samplei + 1, len(self.get_sample_names), sample))
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     spectrum.original_mz = spectrum.mz
             else:
                 for k, spectrum in msDataObj.get_spectra_iterator():
-                    spectrum.original_mz = spectrum.mz
-                    if not ("reverseMZ" in dir(spectrum) and callable(spectrum.reverseMZ)):
+                    if "reverseMZ" not in dir(spectrum):
                         spectrum.reverseMZ = None
                         spectrum.reverseMZDesc = "None"
-                    if correctby == "mzDeviationPPM":
+                        spectrum.original_mz = spectrum.mz
+
+                    refFun = None
+                    refFunDesc = None
+                    if correctby.lower() == "mzDeviationPPM".lower():
                         spectrum.mz = spectrum.mz * (1.0 - transformFactor / 1e6)
-                        spectrum.reverseMZ = functools.partial(
-                            self._reverse_applied_mz_offset, correctby="mzDeviationPPM", transformFactor=transformFactor
-                        )  # TODO chain reverseMZ lambdas here
-                        spectrum.reverseMZDesc = "mzDeviationPPM by %.5f (%s)" % (transformFactor, spectrum.reverseMZ)
-                    elif correctby == "mzDeviation":
+                        refFun = functools.partial(self._reverse_applied_mz_offset, correctby="mzDeviationPPM", transformFactor=transformFactor)
+                        refFunDesc = "mzDeviationPPM by %.5f (%s)" % (transformFactor, spectrum.reverseMZ)
+
+                    elif correctby.lower() == "mzDeviation".lower():
                         spectrum.mz = spectrum.mz - transformFactor
-                        spectrum.reverseMZ = functools.partial(
-                            self._reverse_applied_mz_offset, correctby="mzDeviation", transformFactor=transformFactor
-                        )
-                        spectrum.reverseMZDesc = "mzDeviation by %.5f (%s)" % (transformFactor, spectrum.reverseMZ)
+                        refFun = functools.partial(self._reverse_applied_mz_offset, correctby="mzDeviation", transformFactor=transformFactor)
+                        refFunDesc = "mzDeviation by %.5f (%s)" % (transformFactor, spectrum.reverseMZ)
+
+                    ## chain reverse mz functions if needed
+                    if spectrum.reverseMZ is not None:
+                        spectrum.reverseMZ = functools.partial(functools.reduce, lambda p, f: f(p), (refFun, spectrum.reverseMZ))
+                        spectrum.reverseMZDesc = refFunDesc + ";" + spectrum.reverseMZDesc
                     else:
-                        raise ValueError("Unknown mz correction method provided. Must be one of ['mzDeviationPPM', 'mzDeviation']")
+                        spectrum.reverseMZ = refFun
+                        spectrum.reverseMZDesc = refFunDesc
 
                 logging.info(
                     "     .. Sample %3d / %3d (%45s): correcting by %.1f (%s)"
