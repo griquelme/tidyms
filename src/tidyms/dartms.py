@@ -1147,7 +1147,7 @@ class DartMSAssay:
         return self.assay.get_ms_data(sample)
 
     def get_metaData_for_sample(self, sample, metaData):
-        self.assay.manager.get_sample_metadata().loc[sample, metaData]
+        return self.assay.manager.get_sample_metadata().loc[sample].loc[metaData]
 
     def print_sample_overview(self):
         """
