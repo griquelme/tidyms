@@ -3907,7 +3907,9 @@ class DartMSAssay:
 
         return p, temp
 
-    def plot_feature(self, feature_index):
+    def generate_feature_abundance_plot(
+        self, feature_index, keep_samples=None, remove_samples=None, keep_groups=None, remove_groups=None, keep_batches=None, remove_batches=None
+    ):
         """
         Shows a single feature
 
@@ -3917,7 +3919,19 @@ class DartMSAssay:
         Returns:
             _type_: the data matrix for the plot
         """
-        temp = pd.DataFrame({"abundance": self.dat[:, feature_index], "sample": self.samples, "group": self.groups, "batche": self.batches})
+        temp = pd.DataFrame({"abundance": self.dat[:, feature_index], "sample": self.samples, "group": self.groups, "batch": self.batches})
+        if keep_samples:
+            temp = temp[temp["sample"].isin(keep_samples)]
+        if remove_samples:
+            temp = temp[~temp["sample"].isin(remove_samples)]
+        if keep_groups:
+            temp = temp[temp["group"].isin(keep_groups)]
+        if remove_groups:
+            temp = temp[~temp["group"].isin(remove_groups)]
+        if keep_batches:
+            temp = temp[temp["batch"].isin(keep_batches)]
+        if remove_batches:
+            temp = temp[~temp["batch"].isin(remove_batches)]
 
         p = (
             p9.ggplot(data=temp, mapping=p9.aes(x="group", y="abundance", colour="group"))
