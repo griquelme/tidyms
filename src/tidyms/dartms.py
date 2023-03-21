@@ -3940,7 +3940,103 @@ class DartMSAssay:
             + p9.ggtitle("Feature %d (meanmz: %.5f)" % (feature_index, self.features[feature_index][1]))
         )
 
-        return p
+        return p, temp
+
+    def generate_feature_raw_plot(
+        self,
+        refMZ,
+        reverseCorrectMZ=True,
+        ppmDev=20,
+        keep_samples=None,
+        remove_samples=None,
+        keep_groups=None,
+        remove_groups=None,
+        keep_batches=None,
+        remove_batches=None,
+    ):
+        """
+        generates a raw data plot for a detected feature
+
+        Args:
+            refMZ (float): the mz value of the feature to plot after mz correction (reverseCorrectMZ = True) or in the raw data (reverseCorrectMZ = False)
+            reverseCorrectMZ (boolean, optional): indicates if the refMZ value is after (True) or before (False) mz correction
+            ppmDev (float, optional): the allowed mz deviation for the feature
+
+        Raises:
+            ValueError: raised if parameters on and aggregation_fun have invalid values
+        """
+        sampleNames = self.get_sample_names()
+        temp = {}
+
+        for samplei, sample in enumerate(sampleNames):
+            sgroup = self.get_metaData_for_sample(sample, "group")
+            sbatch = self.get_metaData_for_sample(sample, "batch")
+            if (
+                (keep_samples is None or sample in keep_samples)
+                and (remove_samples is None or sample not in remove_samples)
+                and (keep_groups is None or sgroup in keep_groups)
+                and (remove_groups is None or sgroup not in remove_groups)
+                and (keep_batches is None or sbatch in keep_batches)
+                and (remove_batches is None or sbatch not in remove_batches)
+            ):
+                msDataObj = self.get_msDataObj_for_sample(sample)
+                for oSpectrumi, oSpectrum in msDataObj.original_MSData_object.get_spectra_iterator():
+                    _refMZ = oSpectrum.reverseMZ(refMZ) if reverseCorrectMZ else refMZ
+                    _mzmin, _mzmax = _refMZ * (1.0 - ppmDev / 1e6), _refMZ * (1.0 + ppmDev / 1e6)
+
+                    use = np.argwhere(np.logical_and(oSpectrum.original_mz >= _mzmin, oSpectrum.original_mz <= _mzmax))[:, 0]
+                    if len(use) > 0:
+                        for mzi in use:
+                            temp = _add_row_to_pandas_creation_dictionary(
+                                temp,
+                                sample=sample,
+                                group=self.get_metaData_for_sample(sample, "group"),
+                                batch=self.get_metaData_for_sample(sample, "batch"),
+                                spectrum=oSpectrumi,
+                                chronogramTime=oSpectrum.time,
+                                mz=oSpectrum.original_mz[mzi],
+                                intensity=oSpectrum.spint[mzi],
+                            )
+
+        temp = pd.DataFrame(temp)
+
+        if len(temp.index) > 0:
+            p1 = (
+                p9.ggplot(
+                    data=temp,
+                    mapping=p9.aes(x="chronogramTime", y="mz", colour="group", alpha="intensity"),
+                )
+                + p9.geom_hline(yintercept=refMZ, alpha=0.3, colour="slategrey")
+                + p9.geom_point()
+                + p9.ggtitle("raw data plot of %.4f (+- %f ppm)" % (refMZ, ppmDev))
+            )
+            p2 = (
+                p9.ggplot(
+                    data=temp,
+                    mapping=p9.aes(x="chronogramTime", y="intensity", colour="group"),
+                )
+                + p9.geom_point()
+                + p9.ggtitle("raw data plot of %.4f (+- %f ppm)" % (refMZ, ppmDev))
+            )
+            temph = temp.groupby(["sample"]).agg({"intensity": "sum", "chronogramTime": "mean", "group": "first", "batch": "first"})
+            temph["type"] = "sum of intensity"
+            tempj = temp.groupby(["sample"]).agg({"intensity": "mean", "chronogramTime": "mean", "group": "first", "batch": "first"})
+            tempj["type"] = "average intensity"
+            temph = pd.concat([temph, tempj])
+            p3 = (
+                p9.ggplot(
+                    data=temph,
+                    mapping=p9.aes(x="chronogramTime", y="intensity", colour="group"),
+                )
+                + p9.geom_point()
+                + p9.facet_wrap("~ type", scales="free_y")
+                + p9.ggtitle("raw data plot of %.4f (+- %f ppm), all signals have been aggregated (sum and average)" % (refMZ, ppmDev))
+            )
+
+            return p1, p2, p3, temp
+
+        else:
+            return None, None, None, None
 
     def calc_2D_Embedding(
         self,
