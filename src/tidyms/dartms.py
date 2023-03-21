@@ -3786,6 +3786,9 @@ class DartMSAssay:
         minimum_fold_change=2,
         keep_features=None,
         remove_features=None,
+        highlight_features=None,
+        min_ratio_samples_for_found=0.75,
+        min_ratio_samples_for_not_found=0.25,
         sig_color="firebrick",
         not_different_color="cadetblue",
     ):
@@ -3798,6 +3801,7 @@ class DartMSAssay:
             minimum_fold_change (int, optional): the mimimum required fold-change for a significant difference. Defaults to 2.
             keep_features (_type_, optional): a list of indices to be used for the uni-variate comparison. Defaults to None.
             remove_features (_type_, optional): a list of features to not be used for the uni-variate comparison. Defaults to None.
+            highlight_features (list of featre inds, optional): features to highlight, indices according to self.dat matrix and self.features must be provided.
             sig_color (str, optional): the name of the color used for plotting significantly different features. Defaults to "firebrick".
             not_different_color (str, optional): the name of the color used for plotting not significantly different features. Defaults to "cadetblue".
 
@@ -3809,12 +3813,15 @@ class DartMSAssay:
             keep_features=keep_features, remove_features=remove_features, copy=True
         )
 
+        if highlight_features is None:
+            highlight_features = []
+
         temp = {}
 
         for grp1, grp2 in comparisons:
             testName = "'%s' vs. '%s'" % (grp1, grp2)
 
-            notUsed = 0
+            notTested = 0
 
             grp1Inds = [i for i, group in enumerate(groups) if group == grp1]
             grp2Inds = [i for i, group in enumerate(groups) if group == grp2]
@@ -3826,9 +3833,20 @@ class DartMSAssay:
                 valsGrp1[np.isnan(valsGrp1)] = 0
                 valsGrp2[np.isnan(valsGrp2)] = 0
 
-                if np.all(valsGrp1 == 0) and np.all(valsGrp2 == 0):
-                    notUsed = notUsed + 1
-                else:
+                if (
+                    (
+                        sum(valsGrp1 != 0) / valsGrp1.shape[0] >= min_ratio_samples_for_found
+                        and sum(valsGrp2 != 0) / valsGrp2.shape[0] >= min_ratio_samples_for_found
+                    )
+                    or (
+                        sum(valsGrp1 != 0) / valsGrp1.shape[0] >= min_ratio_samples_for_found
+                        and sum(valsGrp2 != 0) / valsGrp2.shape[0] <= min_ratio_samples_for_not_found
+                    )
+                    or (
+                        sum(valsGrp1 != 0) / valsGrp1.shape[0] <= min_ratio_samples_for_not_found
+                        and sum(valsGrp2 != 0) / valsGrp2.shape[0] >= min_ratio_samples_for_found
+                    )
+                ):
                     if np.all(valsGrp1 == 0) and not np.all(valsGrp2 == 0):
                         fold = 0
                     elif not np.all(valsGrp1 == 0) and np.all(valsGrp2 == 0):
@@ -3848,7 +3866,7 @@ class DartMSAssay:
                         pvalues=pval,
                         folds=fold,
                         trans_pvalues=-np.log10(pval),
-                        trans_folds=np.log2(fold),
+                        trans_folds=np.log2(fold) if fold > 0 else -np.inf,
                         effectSizes=cohensD,
                         detectionsGrp1=np.sum(valsGrp1 > 0),
                         detectionsGrp2=np.sum(valsGrp2 > 0),
@@ -3861,19 +3879,30 @@ class DartMSAssay:
                         sigIndicators=sigInd,
                         tests=testName,
                         feature="%d mz %8.4f" % (featurei, self.features[featurei][1]),
+                        featuremz=self.features[featurei][1],
                         featurei=featurei,
+                        highlightFeature=featurei in highlight_features,
                         meanFeatureAbundance=meanAbundance,
                     )
 
+                else:
+                    notTested += 1
+
         temp = pd.DataFrame(temp)
         p = (
-            p9.ggplot(data=temp, mapping=p9.aes(x="trans_folds", y="trans_pvalues", colour="sigIndicators", size="np.log2(meanFeatureAbundance)"))
-            + p9.geom_hline(yintercept=-np.log10(alpha_critical), alpha=0.3, colour="slategrey")
-            + p9.geom_vline(xintercept=[np.log2(minimum_fold_change), np.log2(1 / minimum_fold_change)], alpha=0.3, colour="slategrey")
-            + p9.geom_point(alpha=0.3)
+            p9.ggplot(
+                data=temp,
+                mapping=p9.aes(
+                    x="trans_folds", y="trans_pvalues", fill="sigIndicators", colour="sigIndicators", size="np.log2(meanFeatureAbundance)"
+                ),
+            )
+            + p9.geom_hline(yintercept=-np.log10(alpha_critical), alpha=0.3, colour="darkgrey")
+            + p9.geom_vline(xintercept=[np.log2(minimum_fold_change), np.log2(1 / minimum_fold_change)], alpha=0.3, colour="darkgrey")
+            + p9.geom_point(alpha=0.15, colour="ghostwhite")
+            + p9.geom_point(data=temp[temp["highlightFeature"]], colour="slategrey")
             + p9.facet_wrap("~tests")
-            + p9.scale_colour_manual(values={"sig. diff.": sig_color, "not diff.": not_different_color})
-            + p9.ggtitle("Volcano plots")
+            + p9.scale_fill_manual(values={"sig. diff.": sig_color, "not diff.": not_different_color})
+            + p9.ggtitle("Volcano plots (%d comparisons, %d not tested)" % (len(temp.index), notTested))
         )
 
         return p, temp
