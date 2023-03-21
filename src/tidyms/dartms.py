@@ -1435,7 +1435,12 @@ class DartMSAssay:
                 maxInt = max(maxInt, inte)
                 tic = _add_row_to_pandas_creation_dictionary(tic, intensity=inte, time=spectrum.time)
 
-            tmpName = next(tempfile._get_candidate_names())
+            tmpName = None
+            while tmpName is None:
+                tmpName = os.path.join(tempfile.gettempdir(), next(tempfile._get_candidate_names()))
+                if os.path.exists(tmpName):
+                    tmpName = None
+
             sepInds = DartMSAssay._get_separate_chronogram_indices(
                 msData,
                 None,
@@ -1474,6 +1479,10 @@ class DartMSAssay:
                 + p9.ggtitle("TIC of '%s'" % (filename))
             )
             print(p)
+            try:
+                os.remove(tmpName)
+            except:
+                pass
 
     def plot_signal_neighborhood(self):
         temp = None
