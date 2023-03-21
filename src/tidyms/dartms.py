@@ -3519,7 +3519,18 @@ class DartMSAssay:
         )
         print(p)
 
-    def plot_feature_mz_deviations(self, featureInd, refMZ=None, types=None):
+    def plot_feature_mz_deviations(
+        self,
+        featureInd,
+        refMZ=None,
+        types=None,
+        keep_samples=None,
+        remove_samples=None,
+        keep_groups=None,
+        remove_groups=None,
+        keep_batches=None,
+        remove_batches=None,
+    ):
         """
         plots the mz deviation for a particular features
 
@@ -3536,59 +3547,69 @@ class DartMSAssay:
 
         for featureInd in [featureInd]:
             for samplei, sample in enumerate(self.get_sample_names()):
-                msDataObj = self.get_msDataObj_for_sample(sample)
-                for k, spectrum in msDataObj.get_spectra_iterator():
-                    usei = np.where(np.logical_and(spectrum.mz >= self.features[featureInd][0], spectrum.mz <= self.features[featureInd][2]))[0]
-                    if usei.size > 0:
-                        for i in usei:
-                            if "consensus" in types:
-                                temp = _add_row_to_pandas_creation_dictionary(
-                                    temp,
-                                    rt=spectrum.time,
-                                    mz=spectrum.mz[i],
-                                    intensity=spectrum.spint[i],
-                                    sample=sample,
-                                    file=sample.split("::")[0],
-                                    group=self.get_metaData_for_sample(sample, "group"),
-                                    type="consensus",
-                                    feature=featureInd,
-                                )
-
-                            if "raw-corrected" in types:
-                                for j in range(spectrum.usedFeatures[i].shape[0]):
+                sgroup = self.get_metaData_for_sample(sample, "group")
+                sbatch = self.get_metaData_for_sample(sample, "batch")
+                if (
+                    (keep_samples is None or sample in keep_samples)
+                    and (remove_samples is None or sample not in remove_samples)
+                    and (keep_groups is None or sgroup in keep_groups)
+                    and (remove_groups is None or sgroup not in remove_groups)
+                    and (keep_batches is None or sbatch in keep_batches)
+                    and (remove_batches is None or sbatch not in remove_batches)
+                ):
+                    msDataObj = self.get_msDataObj_for_sample(sample)
+                    for k, spectrum in msDataObj.get_spectra_iterator():
+                        usei = np.where(np.logical_and(spectrum.mz >= self.features[featureInd][0], spectrum.mz <= self.features[featureInd][2]))[0]
+                        if usei.size > 0:
+                            for i in usei:
+                                if "consensus" in types:
                                     temp = _add_row_to_pandas_creation_dictionary(
                                         temp,
-                                        rt=spectrum.usedFeatures[i][j, 2],
-                                        mz=spectrum.usedFeatures[i][j, 0],
-                                        intensity=spectrum.usedFeatures[i][j, 1],
+                                        rt=spectrum.time,
+                                        mz=spectrum.mz[i],
+                                        intensity=spectrum.spint[i],
                                         sample=sample,
                                         file=sample.split("::")[0],
                                         group=self.get_metaData_for_sample(sample, "group"),
-                                        type="raw-corrected",
+                                        type="consensus",
                                         feature=featureInd,
                                     )
 
-                if "raw" in types:
-                    for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
-                        usei = np.where(
-                            np.logical_and(
-                                spectrum.original_mz >= spectrum.reverseMZ(self.features[featureInd][0]),
-                                spectrum.original_mz <= spectrum.reverseMZ(self.features[featureInd][2]),
-                            )
-                        )[0]
-                        if usei.size > 0:
-                            for i in usei:
-                                temp = _add_row_to_pandas_creation_dictionary(
-                                    temp,
-                                    rt=spectrum.time,
-                                    mz=spectrum.original_mz[i],
-                                    intensity=spectrum.spint[i],
-                                    sample=sample,
-                                    file=sample.split("::")[0],
-                                    group=self.get_metaData_for_sample(sample, "group"),
-                                    type="raw",
-                                    feature=featureInd,
+                                if "raw-corrected" in types:
+                                    for j in range(spectrum.usedFeatures[i].shape[0]):
+                                        temp = _add_row_to_pandas_creation_dictionary(
+                                            temp,
+                                            rt=spectrum.usedFeatures[i][j, 2],
+                                            mz=spectrum.usedFeatures[i][j, 0],
+                                            intensity=spectrum.usedFeatures[i][j, 1],
+                                            sample=sample,
+                                            file=sample.split("::")[0],
+                                            group=self.get_metaData_for_sample(sample, "group"),
+                                            type="raw-corrected",
+                                            feature=featureInd,
+                                        )
+
+                    if "raw" in types:
+                        for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
+                            usei = np.where(
+                                np.logical_and(
+                                    spectrum.original_mz >= spectrum.reverseMZ(self.features[featureInd][0]),
+                                    spectrum.original_mz <= spectrum.reverseMZ(self.features[featureInd][2]),
                                 )
+                            )[0]
+                            if usei.size > 0:
+                                for i in usei:
+                                    temp = _add_row_to_pandas_creation_dictionary(
+                                        temp,
+                                        rt=spectrum.time,
+                                        mz=spectrum.original_mz[i],
+                                        intensity=spectrum.spint[i],
+                                        sample=sample,
+                                        file=sample.split("::")[0],
+                                        group=self.get_metaData_for_sample(sample, "group"),
+                                        type="raw",
+                                        feature=featureInd,
+                                    )
 
         temp = pd.DataFrame(temp)
         p = (
