@@ -1597,7 +1597,7 @@ class DartMSAssay:
         use_signal_function=None,
         rewriteRTinFiles=False,
         rewriteDeleteUnusedScans=True,
-        intensity_threshold_spot_extraction=1e3,
+        intensity_threshold_spot_extraction=0,
         import_filters=None,
     ):
         """
@@ -3743,6 +3743,7 @@ class DartMSAssay:
                             temp["type"].append("nan=0")
 
         temp = pd.DataFrame(temp)
+        p = None
         if plotType == "histogram":
             p = (
                 p9.ggplot(data=temp, mapping=p9.aes(x="rsd", fill="group"))
@@ -3753,7 +3754,6 @@ class DartMSAssay:
                 # + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
                 + p9.ggtitle("RSD plots")
             )
-            print(p)
 
         elif plotType == "points":
             p = (
@@ -3768,12 +3768,11 @@ class DartMSAssay:
                 # + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.15, 'left':0.15})
                 + p9.ggtitle("RSD plots")
             )
-            print(p)
 
         else:
             raise ValueError("Unknown plot type. Must be 'histogram' or 'points'")
 
-        print(temp.groupby(["group", "type"])["rsd"].describe().to_markdown())
+        return p, temp
 
     #####################################################################################################
     # Convenience functions for a quick, statistical overview
@@ -3855,6 +3854,11 @@ class DartMSAssay:
                         fold = np.mean(valsGrp1) / np.mean(valsGrp2)
 
                     pval = scipy.stats.ttest_ind(valsGrp1, valsGrp2, equal_var=False, alternative="two-sided", trim=0)[1]
+                    pvalWRST = scipy.stats.ranksums(
+                        valsGrp1,
+                        valsGrp2,
+                        alternative="two-sided",
+                    ).pvalue
                     cohensD = cohen_d(valsGrp1, valsGrp2)
                     meanAbundance = np.mean(np.concatenate((valsGrp1, valsGrp2), axis=0))
                     sigInd = (
@@ -3864,6 +3868,7 @@ class DartMSAssay:
                     temp = _add_row_to_pandas_creation_dictionary(
                         temp,
                         pvalues=pval,
+                        pvalues_WilcoxonRankTest=pvalWRST,
                         folds=fold,
                         trans_pvalues=-np.log10(pval),
                         trans_folds=np.log2(fold) if fold > 0 else -np.inf,
@@ -4032,11 +4037,21 @@ class DartMSAssay:
                 + p9.facet_wrap("~ type", scales="free_y")
                 + p9.ggtitle("raw data plot of %.4f (+- %f ppm), all signals have been aggregated (sum and average)" % (refMZ, ppmDev))
             )
+            pa = (
+                p9.ggplot(
+                    data=temph,
+                    mapping=p9.aes(x="group", y="intensity", colour="group"),
+                )
+                + p9.geom_boxplot()
+                + p9.geom_jitter(height=0, width=0.5)
+                + p9.facet_wrap("~ type", scales="free_y")
+                + p9.ggtitle("raw data plot of %.4f (+- %f ppm), all signals have been aggregated (sum and average)" % (refMZ, ppmDev))
+            )
 
-            return p1, p2, p3, temp
+            return p1, p2, p3, pa, temp
 
         else:
-            return None, None, None, None
+            return None, None, None, None, None
 
     def calc_2D_Embedding(
         self,
