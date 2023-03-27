@@ -2020,9 +2020,6 @@ class DartMSAssay:
 
         temp = None
 
-        if type(referenceMZs) is list:
-            referenceMZs = np.array(referenceMZs)
-
         for sample in self.get_sample_names():
             msDataObj = self.get_msDataObj_for_sample(sample)
             for i, referenceMZ in enumerate(referenceMZs):
@@ -2031,15 +2028,17 @@ class DartMSAssay:
                 referenceMZ = referenceMZ
 
                 if type(referenceMZ) == float:
-                    observedMZ = referenceMZ - max_mz_deviation_absolute, referenceMZ + max_mz_deviation_absolute
+                    pass
 
                 elif type(referenceMZ) == dict:
                     observedMZ = referenceMZ["observedMZ"]
                     forSamples = referenceMZ["forSamples"]
                     referenceMZ = referenceMZ["referenceMZ"]
+
                 else:
                     raise RuntimeError(
-                        "Unknown parameter for referenceMZ. Must be either an mz value or a dict with 'observedMZ': float, 'forSamples': [List of sample names], 'referenceMZ': float"
+                        "Unknown parameter type for referenceMZ (%s). Must be either an mz value or a dict with 'observedMZ': float, 'forSamples': [List of sample names], 'referenceMZ': float"
+                        % (type(referenceMZ))
                     )
 
                 if forSamples is None or sample in forSamples:
