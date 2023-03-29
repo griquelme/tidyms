@@ -636,6 +636,10 @@ def compare_parameters_for_function(function_to_optimize, parameter_values, add_
     return succeeded, failed
 
 
+## Generic pipeline for data processing and semi-automated parameter optimization
+## Each parameter of the function is translated to a parameter of the respective method in the pipeline
+## Different parameter combinations can easily be tested. The keys of the dictionary must be the names of the parameters
+## and the values the parameter values.
 def prefab_DARTMS_dataProcessing_pipeline(
     spotFile,
     files,
