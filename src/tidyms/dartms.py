@@ -2990,8 +2990,8 @@ class DartMSAssay:
                     for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
                         usei = np.where(
                             np.logical_and(
-                                spectrum.original_mz >= spectrum.reverseMZ(self.features[featureInd][0]),
-                                spectrum.original_mz <= spectrum.reverseMZ(self.features[featureInd][2]),
+                                spectrum.original_mz >= spectrum.reverseMZ(self.features[featurei][0]),
+                                spectrum.original_mz <= spectrum.reverseMZ(self.features[featurei][2]),
                             )
                         )[0]
                         if usei.size > 0:
