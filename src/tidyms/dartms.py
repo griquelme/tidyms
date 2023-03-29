@@ -58,6 +58,36 @@ import umap
 #
 
 
+## Object to record processing times
+## useage with RecordExecutionTime():
+##     code...
+class RecordExecutionTime(object):
+    def __init__(self, name=None):
+        self.name = name
+        self.start = None
+
+    def __enter__(self):
+        self.startTime = time.perf_counter()
+
+    def __exit__(self, *args):
+        duration = time.perf_counter() - self.startTime
+        unit = "seconds"
+        if duration > 60 * 60:
+            duration = duration / 60 / 60
+            unit = "hours"
+        elif duration > 60:
+            duration = duration / 60
+            unit = "minutes"
+        elif duration > 0:
+            pass
+        elif duration > 1 / 1e3:
+            duration = duration * 1e3
+            unit = "milli-seconds"
+        elif duration > 1 / 1e6:
+            duration = duration * 1e6
+        logging.info(".. took %.1f %s to execute" % (duration, unit))
+
+
 def _add_row_to_pandas_creation_dictionary(dict=None, **kwargs):
     """
     Generate or extend a dictonary object with list objects that can later be converted to a pandas dataframe.
@@ -604,6 +634,172 @@ def compare_parameters_for_function(function_to_optimize, parameter_values, add_
     print()
 
     return succeeded, failed
+
+
+def prefab_DARTMS_dataProcessing_pipeline(
+    spotFile,
+    files,
+    _ms_mode="centroid",
+    _instrument="qtof",
+    _fileNameChangeFunction=None,
+    create_assay_from_chronogramFiles__import_filters=None,
+    select_top_n_spectra__top_n_spectra=None,
+    correct_mz_shift__referenceMZs=None,
+    correct_mz_shift__max_mz_deviation_absolute=0.1,
+    correct_mz_shift__max_deviationPPM_to_use_for_correction=200,
+    correct_mz_shift__correctby="mzDeviationPPM",
+    correct_mz_shift__selection_criteria="mostabundant",
+    correct_mz_shift__correct_on_level="file",
+    calculate_consensus_spectra_for_samples__min_difference_ppm=100,
+    calculate_consensus_spectra_for_samples__min_signals_per_cluster=5,
+    calculate_consensus_spectra_for_samples__minimum_intensity_for_signals=2.5e2,
+    calculate_consensus_spectra_for_samples__cluster_quality_check_functions=None,
+    normalize_to_internal_standard__perform=False,
+    normalize_to_internal_standard__internal_standard_mzs=None,
+    normalize_to_internal_standard__multiplication_factor=1,
+    bracket_consensus_spectrum_samples__max_ppm_deviation=25,
+    annotate_features__useGroups=None,
+    annotate_features_remove_other_ions=False,
+    build_data_matrix__originalData_mz_deviation_multiplier_PPM=30,
+    build_data_matrix__aggregation_fun="average",
+    results_file=None,
+    dill_file=None,
+    get_summary_of_results__reference_features=None,
+    get_summary_of_results__allowedPPMDev=20,
+):
+    if create_assay_from_chronogramFiles__import_filters is None:
+        create_assay_from_chronogramFiles__import_filters = []
+    if _fileNameChangeFunction is None:
+        _fileNameChangeFunction = lambda x: x
+    if correct_mz_shift__referenceMZs is None:
+        correct_mz_shift__referenceMZs = [149.02671]
+    if calculate_consensus_spectra_for_samples__cluster_quality_check_functions is None:
+        calculate_consensus_spectra_for_samples__cluster_quality_check_functions = list(
+            [
+                functools.partial(
+                    cluster_quality_check_function__ppmDeviationCheck,
+                    max_weighted_ppm_deviation=15,
+                ),
+                functools.partial(
+                    cluster_quality_check_function__peak_form,
+                    min_correlation_for_cutoff=0.25,
+                ),
+            ],
+        )
+    if normalize_to_internal_standard__internal_standard_mzs is None:
+        normalize_to_internal_standard__internal_standard_mzs = (316.29, 316.325)
+    if annotate_features__useGroups is None:
+        annotate_features__useGroups = []
+    if get_summary_of_results__reference_features is None:
+        get_summary_of_results__reference_features = [
+            149.02671,
+            369.37817,
+            369.28755,
+            370.29189,
+            370.3642,
+            371.29333,
+            371.36694,
+            279.16533,
+            279.23805,
+            90.05728,
+            90.09405,
+            1077.99152,
+            1078.99716,
+            1017.95975,
+        ]
+
+    ## Process samples if the last results cannot be loaded
+    ## Import chronograms and separate them into spots.
+    with RecordExecutionTime():
+        logging.info("Importing and separating chronograms")
+        dartMSAssay = DartMSAssay.create_assay_from_chronogramFiles(
+            "Semi-automated parameter optimization",
+            files,
+            ms_mode=_ms_mode,
+            instrument=_instrument,
+            spot_file=spotFile,
+            centroid_profileMode=True,
+            fileNameChangeFunction=_fileNameChangeFunction,
+            intensity_threshold_spot_extraction=0,
+            import_filters=create_assay_from_chronogramFiles__import_filters,
+        )
+    logging.info("")
+
+    ## Select only top-n spectra
+    with RecordExecutionTime():
+        logging.info("Selecting only top-n abundant scans")
+        dartMSAssay.select_top_n_spectra(n=select_top_n_spectra__top_n_spectra)
+    logging.info("")
+
+    ## Account for and correct mz values of individual spots by reference mz values
+    with RecordExecutionTime():
+        logging.info("Correcting for mz shifts between samples (not chronograms) with reference mz values")
+        dartMSAssay.correct_MZ_shift_across_samples(
+            correct_mz_shift__referenceMZs,
+            max_mz_deviation_absolute=correct_mz_shift__max_mz_deviation_absolute,
+            max_deviationPPM_to_use_for_correction=correct_mz_shift__max_deviationPPM_to_use_for_correction,
+            correctby=correct_mz_shift__correctby,
+            selection_criteria=correct_mz_shift__selection_criteria,
+            correct_on_level=correct_mz_shift__correct_on_level,
+            plot=False,
+        )
+    logging.info("")
+
+    ## Calculate consensus spectra for each spot file to reduce following processing time
+    with RecordExecutionTime():
+        logging.info("Collapsing multiple spectra of samples to consensus spectra for each sample")
+        dartMSAssay.calculate_consensus_spectra_for_samples(
+            min_difference_ppm=calculate_consensus_spectra_for_samples__min_difference_ppm,
+            min_signals_per_cluster=calculate_consensus_spectra_for_samples__min_signals_per_cluster,
+            minimum_intensity_for_signals=calculate_consensus_spectra_for_samples__minimum_intensity_for_signals,
+            cluster_quality_check_functions=calculate_consensus_spectra_for_samples__cluster_quality_check_functions,
+            aggregation_function="average",
+            exportAsFeatureML=False,
+        )
+    logging.info("")
+
+    ## Normalize to internal standard
+    if normalize_to_internal_standard__perform:
+        with RecordExecutionTime():
+            logging.info("Normalize to internal standard")
+            dartMSAssay.normalize_to_internal_standard(
+                normalize_to_internal_standard__internal_standard_mzs,
+                multiplication_factor=normalize_to_internal_standard__multiplication_factor,
+                plot=False,
+            )
+        logging.info("")
+
+    ## Bracket/group mz features across samples of the experiment
+    with RecordExecutionTime():
+        logging.info("Bracketing features across samples")
+        dartMSAssay.bracket_consensus_spectrum_samples(
+            max_ppm_deviation=bracket_consensus_spectrum_samples__max_ppm_deviation, show_diagnostic_plots=False
+        )
+        logging.info("   .. bracketed to %d features" % (len(dartMSAssay.features)))
+    logging.info("")
+
+    ## Generate data matrix
+    with RecordExecutionTime():
+        logging.info("Generating matrix")
+        dartMSAssay.build_data_matrix(
+            on="originalData",
+            originalData_mz_deviation_multiplier_PPM=build_data_matrix__originalData_mz_deviation_multiplier_PPM,
+            aggregation_fun=build_data_matrix__aggregation_fun,
+        )
+        dartMSAssay.annotate_features(useGroups=annotate_features__useGroups, remove_other_ions=annotate_features_remove_other_ions, plot=False)
+    logging.info("")
+
+    ## Save results to file for another user-check
+    with RecordExecutionTime():
+        if dill_file is not None:
+            dartMSAssay.save_self_to_dill_file(dill_file)
+        if results_file is not None:
+            dartMSAssay.write_bracketing_results_to_featureML(featureMLlocation=results_file, featureMLStartRT=0, featureMLEndRT=1400)
+
+    ## test if features were detected
+    return dartMSAssay.get_summary_of_results(
+        reference_features=get_summary_of_results__reference_features, reference_features_allowed_deviationPPM=get_summary_of_results__allowedPPMDev
+    )
 
 
 #####################################################################################################
