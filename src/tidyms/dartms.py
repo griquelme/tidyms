@@ -568,7 +568,16 @@ class Parameters:
         self.kwargs = kwargs
 
 
-def compare_parameters_for_function(function_to_optimize, parameter_values, add_args=False, add_kwargs=False, add_execution_time=True):
+def compare_parameters_for_function(
+    function_to_optimize,
+    parameter_values,
+    spotFile,
+    dartMSFiles,
+    referenceFeatures,
+    referenceFeatures_allowedPPMDev,
+    qualityTestFunction=None,
+    add_execution_time=True,
+):
     succeeded = {}
     failed = {}
 
@@ -588,15 +597,19 @@ def compare_parameters_for_function(function_to_optimize, parameter_values, add_
         print("Comment: %s" % (param.comment))
 
         try:
-            result = function_to_optimize(*param.args, **param.kwargs)
+            dartMSAssay = function_to_optimize(*param.args, **(param.kwargs | {"spotFile": spotFile, "files": dartMSFiles}))
+            result = None
+            if qualityTestFunction is None:
+                result = dartMSAssay.get_summary_of_results(
+                    reference_features=referenceFeatures, reference_features_allowed_deviationPPM=referenceFeatures_allowedPPMDev
+                )
+            else:
+                result = qualityTestFunction(dartMSAssay)
+
             res = OrderedDict()
             res["_parameterSet"] = param.name
             res["_parameterSetComment"] = param.comment
             res["_executionTime"] = time.time() - _startTime
-            if add_args:
-                res = res | dict([("_argpos_%d" % (i), param.args[i]) for i in range(len(param.args))])
-            if add_kwargs:
-                res = res | param.kwargs
             res = res | result
 
             succeeded = _add_row_to_pandas_creation_dictionary(succeeded, **res)
@@ -610,10 +623,6 @@ def compare_parameters_for_function(function_to_optimize, parameter_values, add_
             res["_parameterSet"] = param.name
             res["_parameterSetComment"] = param.comment
             res["_executionTime"] = time.time() - _startTime
-            if add_args:
-                res = res | dict([("_argpos_%d" % (i), param.args[i]) for i in range(len(param.args))])
-            if add_kwargs:
-                res = res | param.kwargs
             res = res | {"exception": traceback.format_exc()}
 
             failed = _add_row_to_pandas_creation_dictionary(failed, **res)
@@ -643,9 +652,9 @@ def compare_parameters_for_function(function_to_optimize, parameter_values, add_
 def prefab_DARTMS_dataProcessing_pipeline(
     spotFile,
     files,
-    _ms_mode="centroid",
-    _instrument="qtof",
-    _fileNameChangeFunction=None,
+    ms_mode="centroid",
+    instrument="qtof",
+    fileNameChangeFunction=None,
     create_assay_from_chronogramFiles__import_filters=None,
     select_top_n_spectra__top_n_spectra=None,
     correct_mz_shift__referenceMZs=None,
@@ -668,13 +677,11 @@ def prefab_DARTMS_dataProcessing_pipeline(
     build_data_matrix__aggregation_fun="average",
     results_file=None,
     dill_file=None,
-    get_summary_of_results__reference_features=None,
-    get_summary_of_results__allowedPPMDev=20,
 ):
     if create_assay_from_chronogramFiles__import_filters is None:
         create_assay_from_chronogramFiles__import_filters = []
-    if _fileNameChangeFunction is None:
-        _fileNameChangeFunction = lambda x: x
+    if fileNameChangeFunction is None:
+        fileNameChangeFunction = lambda x: x
     if correct_mz_shift__referenceMZs is None:
         correct_mz_shift__referenceMZs = [149.02671]
     if calculate_consensus_spectra_for_samples__cluster_quality_check_functions is None:
@@ -694,23 +701,6 @@ def prefab_DARTMS_dataProcessing_pipeline(
         normalize_to_internal_standard__internal_standard_mzs = (316.29, 316.325)
     if annotate_features__useGroups is None:
         annotate_features__useGroups = []
-    if get_summary_of_results__reference_features is None:
-        get_summary_of_results__reference_features = [
-            149.02671,
-            369.37817,
-            369.28755,
-            370.29189,
-            370.3642,
-            371.29333,
-            371.36694,
-            279.16533,
-            279.23805,
-            90.05728,
-            90.09405,
-            1077.99152,
-            1078.99716,
-            1017.95975,
-        ]
 
     ## Process samples if the last results cannot be loaded
     ## Import chronograms and separate them into spots.
@@ -719,11 +709,11 @@ def prefab_DARTMS_dataProcessing_pipeline(
         dartMSAssay = DartMSAssay.create_assay_from_chronogramFiles(
             "Semi-automated parameter optimization",
             files,
-            ms_mode=_ms_mode,
-            instrument=_instrument,
+            ms_mode=ms_mode,
+            instrument=instrument,
             spot_file=spotFile,
             centroid_profileMode=True,
-            fileNameChangeFunction=_fileNameChangeFunction,
+            fileNameChangeFunction=fileNameChangeFunction,
             intensity_threshold_spot_extraction=0,
             import_filters=create_assay_from_chronogramFiles__import_filters,
         )
@@ -800,10 +790,7 @@ def prefab_DARTMS_dataProcessing_pipeline(
         if results_file is not None:
             dartMSAssay.write_bracketing_results_to_featureML(featureMLlocation=results_file, featureMLStartRT=0, featureMLEndRT=1400)
 
-    ## test if features were detected
-    return dartMSAssay.get_summary_of_results(
-        reference_features=get_summary_of_results__reference_features, reference_features_allowed_deviationPPM=get_summary_of_results__allowedPPMDev
-    )
+    return dartMSAssay
 
 
 #####################################################################################################
