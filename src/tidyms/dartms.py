@@ -678,6 +678,34 @@ def prefab_DARTMS_dataProcessing_pipeline(
     results_file=None,
     dill_file=None,
 ):
+    """
+    Entire DART-MS workflow
+
+    Function processes samples (parameter file) and their spots (spotFile) using
+    1. Top-N spectra selection (optional)
+    2. m/z shift correction
+    3. Consensus spectra generation
+    4. Internal standard normalizatoin
+    5. Bracketing of features across samples
+    6. Generation of data matrix
+    7. Annotation of common adducts and isotopologs
+
+    The results of the processing are returned in form of a new DartMSAssay object and can optionally also be saved
+    to a dill file.
+
+    For a detailed explanation of the parameters <parameter_name> please see the respective function function_name.
+    Each parameter name has the form <function_name>__<parameter_name>.
+
+    Note: the spotFile must already exist
+
+    Args:
+        spotFile (string): The path to the spotFile
+        files (list of str): The path to the raw-data
+        dill_file (optional, str): the path to the dill file for storing the results
+
+    Returns:
+        (DartMSAssay object of the processing)
+    """
     if create_assay_from_chronogramFiles__import_filters is None:
         create_assay_from_chronogramFiles__import_filters = []
     if fileNameChangeFunction is None:
