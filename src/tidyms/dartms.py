@@ -15,6 +15,9 @@ __tidyMSdartmsVersion__ = "0.7.0"
 
 from . import fileio, _constants
 from . import assay as Assay
+from .chem import Formula
+
+print(Formula("C6H12O6").get_exact_mass())
 
 import numpy as np
 
@@ -42,6 +45,7 @@ import tempfile
 import traceback
 import time
 from collections import OrderedDict
+import json
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -1028,6 +1032,11 @@ class DartMSAssay:
                 row = [r.replace(separator, "--SEP--") for r in row]
                 tsvWriter.writerow(row)
 
+    def export_annotations(self, to_file):
+        with open(to_file, "w") as fout:
+            fout.write(json.dumps(self.featureAnnotations, indent=2))
+            fout.write("\n")
+
     def export_for_R(self, to_file):
         """
         Export the results to a tsv file and generate R code to import it
@@ -1036,22 +1045,59 @@ class DartMSAssay:
             to_file (string): the location of the file (without extension, '.tsv' will be added automatically)
         """
         self.export_data_matrix(to_file + ".tsv", separator="\t", quotechar='"')
-        print("##")
-        print("## Import data matrix")
-        print("## ")
-        print("## The following code imports the generated data matrix.")
-        print("## Please note that when the file is moved or R is executed in a different")
-        print("##      working directory, the path to the tsv file needs to be adapted accordingly")
-        print("##")
-        print("data = read.table('%s', header = TRUE, sep = '\\t', stringsAsFactors = FALSE)" % (to_file + ".tsv"))
-        print("metaData = data[, 1:4]")
-        print("data = data[,-(1:4)]")
-        print("samples = c(%s)" % (", ".join("'%s'" % sample for sample in self.samples)))
-        print("groups = c(%s)" % (", ".join("'%s'" % group for group in self.groups)))
-        print("batches = c(%s)" % (", ".join("%s" % batche for batche in self.batches)))
-        print()
-        print("print(sprintf('Data imported, there are %d features and %d samples in the data matrix', nrow(data), ncol(data)))")
-        print()
+        self.export_annotations(to_file + ".json")
+        with open(to_file + "_import.R", "w") as fout:
+            fout.write("## Optional package installs")
+            fout.write("\n")
+            fout.write("")
+            fout.write("\n")
+            fout.write("## (execute if necessary)")
+            fout.write("\n")
+            fout.write("## install.packages('rjson')")
+            fout.write("\n")
+            fout.write("")
+            fout.write("\n")
+            fout.write("## Load required libraries")
+            fout.write("\n")
+            fout.write("library('rjson')")
+            fout.write("\n")
+            fout.write("")
+            fout.write("\n")
+            fout.write("## Import data matrix")
+            fout.write("\n")
+            fout.write("## ")
+            fout.write("\n")
+            fout.write("## The following code imports the generated data matrix.")
+            fout.write("\n")
+            fout.write("## Please note that when the file is moved or R is executed in a different")
+            fout.write("\n")
+            fout.write("##      working directory, the path to the tsv file needs to be adapted accordingly")
+            fout.write("\n")
+            fout.write("##")
+            fout.write("\n")
+            fout.write("data = read.table('%s', header = TRUE, sep = '\\t', stringsAsFactors = FALSE)" % (to_file + ".tsv"))
+            fout.write("\n")
+            fout.write("annotations = fromJSON(paste(readLines('%s'), collapse=''))" % (to_file + ".json"))
+            fout.write("\n")
+            fout.write("metaData = data[, 1:4]")
+            fout.write("\n")
+            fout.write("data = data[,-(1:4)]")
+            fout.write("\n")
+            fout.write("samples = c(%s)" % (", ".join("'%s'" % sample for sample in self.samples)))
+            fout.write("\n")
+            fout.write("groups = c(%s)" % (", ".join("'%s'" % group for group in self.groups)))
+            fout.write("\n")
+            fout.write("batches = c(%s)" % (", ".join("%s" % batche for batche in self.batches)))
+            fout.write("\n")
+            fout.write("")
+            fout.write("\n")
+            fout.write("print(sprintf('Data imported, there are %d features and %d samples in the data matrix', nrow(data), ncol(data)))")
+            fout.write("\n")
+            fout.write("")
+            fout.write("\n")
+
+            print("load the data into R with the command 'source('%s')'" % (to_file + "_import.R").replace("\\", "/"))
+            print("## absolute path version: 'source('%s')'" % str(Path(to_file + "_import.R").absolute()).replace("\\", "/"))
 
     #####################################################################################################
     # Processing history
@@ -3353,7 +3399,13 @@ class DartMSAssay:
 
                         if ratios.shape[0] > 10 and np.mean(ratios) > 2.0 and np.mean(ratios) < 200.0 and np.std(ratios) < 50.0:
                             annotations[ind].append(
-                                {"i_am": searchIon, "ratios": ratios, "parentMZ": mz, "mzDeviationPPM": (searchMZ - mz) / mz * 1e6}
+                                {
+                                    "i_am": searchIon,
+                                    "ratiosMean": np.mean(ratios),
+                                    "ratiosSD": np.std(ratios),
+                                    "parentMZ": mz,
+                                    "mzDeviationPPM": (searchMZ - mz) / mz * 1e6,
+                                }
                             )
 
                             if not iAmParent:
@@ -3405,12 +3457,22 @@ class DartMSAssay:
             temp["intensityMeansCUT"] = pd.cut(np.log10(temp["intensityMeans"]), 10)
             logging.info(temp[temp["searchIon"] == "[13C1] (1.0034)"].groupby(["intensityMeansCUT"])[["ratiosRSTD"]].describe().to_markdown())
 
-        self.featureAnnotations = [annotations[i] for i in np.argsort(order)]
+        annotations = [{"Adducts": annotations[i]} if len(annotations[i]) > 0 else {} for i in np.argsort(order)]
+        if self.featureAnnotations is None:
+            self.featureAnnotations = annotations
+        else:
+            for featurei in range(len(self.features)):
+                if len(annotations[featurei]) > 0:
+                    x = annotations[featurei]
+                    if "Adducts" in self.featureAnnotations[featurei]:
+                        x = self.featureAnnotations[featurei]["Adducts"] | annotations[featurei]["Adducts"]
+                    if len(x) > 0:
+                        self.featureAnnotations[featurei]["Adducts"] = x
 
         if remove_other_ions:
             keeps_indices = []
             for i in range(self.dat.shape[1]):
-                annos = self.featureAnnotations[i]
+                annos = self.featureAnnotations[i]["Adducts"]
 
                 if len(annos) == 0 or (len(annos) == 1 and annos[0]["i_am"] == "parent"):
                     keeps_indices.append(i)
@@ -4488,3 +4550,118 @@ class DartMSAssay:
         results["std(ref.mzDevPPM)"] = np.std(np.array(ppmDeviations)) if found > 0 else -1
 
         return results
+
+    #####################################################################################################
+    # Database search
+    #
+
+    @staticmethod
+    def generate_database_template(to_tsv_file):
+        with open(to_tsv_file, "w") as fout:
+            fout.write("\t".join(["_ID", "CompoundName", "InChi", "SMILES", "ChemicalFormula", "Adducts", "MZ", "IonMode"]))
+            fout.write("\n")
+            fout.write("# Lines starting with the hash (#) symbol are comments")
+            fout.write("\n")
+            fout.write("# Provide either ")
+            fout.write("\n")
+            fout.write("#  - a compound's sum formula and adducts to be searched for (no MZ or IonMode required)")
+            fout.write("\n")
+            fout.write("#  - a compound's MZ value and the IonMode (+ or -)")
+            fout.write("\n")
+            fout.write("#")
+            fout.write("\n")
+            fout.write(
+                "\t".join(
+                    [
+                        "1",
+                        "L-Phenylalanine",
+                        "InChI=1S/C9H11NO2/c10-8(9(11)12)6-7-4-2-1-3-5-7/h1-5,8H,6,10H2,(H,11,12)/t8-/m0/s1/i6D2",
+                        "[2H]C([2H])(c1ccccc1)[C@@H](C(=O)O)N",
+                        "C9H11NO2",
+                        "[M+H]+, [M-H]-",
+                        "",
+                        "",
+                    ]
+                )
+            )
+            fout.write("\n")
+            fout.write("\t".join(["2", "Unknown 2", "", "", "", "", "557.4069", "-"]))
+            fout.write("\n")
+
+    def annotate_with_compounds(self, tsv_file, max_ppm_dev=15.0, adducts=None, delimiter="\t", quote_character="", comment_character="#"):
+        tempAdducts = {
+            "[M+H]+": (1, 1.007276),
+            "[M+Na]+": (1, 22.989218),
+            "[M+NH4]+": (1, 18.033823),
+            "[M]+": (1, -0.00054857990924),
+            "[M-H]-": (1, -1.007276),
+            "[M+Cl]-": (1, 34.969402),
+            "[M]-": (1, 0.00054857990924),
+        }
+
+        if adducts is not None:
+            adducts = tempAdducts | adducts
+        else:
+            adducts = tempAdducts
+
+        if self.featureAnnotations is None:
+            self.featureAnnotations = [[] for _ in range(len(self.features))]
+
+        with open(tsv_file, "r") as fin:
+            tsvReader = None
+            if quote_character != "":
+                tsvReader = csv.reader(fin, delimiter=delimiter, quotechar=quote_character)
+            else:
+                tsvReader = csv.reader(fin, delimiter=delimiter)
+            headers = None
+            headersDict = {}
+
+            for rowi, row in enumerate(tsvReader):
+                if rowi == 0:
+                    headers = row
+                    headersDict = dict(((header, i) for i, header in enumerate(row)))
+
+                elif row[0].startswith(comment_character):
+                    pass
+
+                else:
+                    types = []
+                    mzs = []
+                    mz = row[headersDict["MZ"]]
+                    if mz is None or mz == "":
+                        m = ms.chem.Formula(row[headersDict["ChemicalFormula"]]).get_exact_mass()
+                        for add in row[headersDict["Adducts"]].replace(" ", "").split(","):
+                            addInfo = adducts[add]
+                            mz = m / addInfo[0] + addInfo[1]
+                            mzs.append(mz)
+                            types.append("%s as %s" % (row[headersDict["MZ"]], add))
+
+                    else:
+                        mzs.append(float(mz))
+                        types.append("%s as direct mz match" % (row[headersDict["CompoundName"]]))
+
+                    for typei in range(len(types)):
+                        refMZ = mzs[typei]
+                        typ = types[typei]
+
+                        for featurei in range(len(self.features)):
+                            meanMZ = self.features[featurei][1]
+
+                            if abs(meanMZ - refMZ) / refMZ * 1e6 <= max_ppm_dev:
+                                t = []
+                                if "Database" in self.featureAnnotations[featurei]:
+                                    t = self.featureAnnotations[featurei]["Database"]
+                                else:
+                                    self.featureAnnotations[featurei]["Database"] = t
+
+                                t.append(
+                                    {
+                                        "DatabaseFile": tsv_file,
+                                        "Compound": row[headersDict["CompoundName"]],
+                                        "InChi": row[headersDict["InChi"]],
+                                        "SMILES": row[headersDict["SMILES"]],
+                                        "ChemicalFormula": row[headersDict["ChemicalFormula"]],
+                                        "Adduct": typ,
+                                        "MZDev_ppm": (meanMZ - refMZ) / refMZ * 1e6,
+                                    }
+                                )
