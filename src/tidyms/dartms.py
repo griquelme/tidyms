@@ -17,8 +17,6 @@ from . import fileio, _constants
 from . import assay as Assay
 from .chem import Formula
 
-print(Formula("C6H12O6").get_exact_mass())
-
 import numpy as np
 
 # import numba
