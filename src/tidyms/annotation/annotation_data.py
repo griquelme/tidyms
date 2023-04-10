@@ -23,7 +23,7 @@ class AnnotationData:
     def __init__(self, features: Sequence[Feature]):
         self.features = sorted(features)
         self.non_annotated = set(features)
-        self._monoisotopologues = sorted(features, key=lambda x: x.area)
+        self._monoisotopologues = sorted(features, key=lambda x: x.height)
         self.similarity_cache = SimilarityCache()
         self._label_counter = 0
 
