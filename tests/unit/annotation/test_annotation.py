@@ -1,19 +1,23 @@
 import numpy as np
-import pandas as pd
 import pytest
 
 from tidyms.annotation import annotation
 from tidyms.raw_data_utils import make_roi
-from tidyms import _constants as c
 from tidyms.fileio import SimulatedMSData
-from tidyms.lcms import Peak, LCTrace
-from tidyms.chem import get_chnops_bounds, Formula
+from tidyms.lcms import Peak
+from tidyms.chem import Formula
 
 
 @pytest.fixture
 def annotation_tools_params():
-    bounds = get_chnops_bounds(1000)
-    bounds.update({"Cl": (0, 2)})
+    bounds = {
+        "C": (0, 50),
+        "H": (0, 100),
+        "O": (0, 20),
+        "N": (0, 20),
+        "Cl": (0, 2),
+        "B": (0, 1),
+    }
     params = {
         "bounds": bounds,
         "max_mass": 2500,
@@ -38,13 +42,14 @@ def test__annotate_empty_feature_list(annotation_tools_params):
 def compound_data():
     compounds = [
         "[C10H20O2]-",
-        "[C10H20SO3]-",
-        "[C20H40SO5]2-",
+        "[C10H20BO3]-",
+        "[C20H40BO5]2-",
         "[C18H19N2O3]-",
         "[C18H20N2O3Cl]-",
+        "[C10H20Cl]-",
     ]
-    rt_list = [50, 75, 150, 200, 200]
-    amp_list = [1000, 2000, 3000, 2500, 2500]
+    rt_list = [50, 75, 150, 200, 200, 175]
+    amp_list = [10000, 20000, 30000, 25000, 25000, 20000]
     return compounds, rt_list, amp_list
 
 
@@ -86,11 +91,9 @@ def test_annotate(feature_list, annotation_tools_params):
     # group features by isotopologue label.
     annotation_check = dict()
     for ft in feature_list:
-        group_list = annotation_check.setdefault(
-            ft.annotation.isotopologue_label, list()
-        )
+        group_list = annotation_check.setdefault(ft.annotation.isotopologue_label, list())
         group_list.append(ft)
     annotation_check.pop(-1)
-    assert len(annotation_check) == 5
+    assert len(annotation_check) == 6
     for v in annotation_check.values():
         assert len(v) == 4  # features where generated with 4 isotopologues.
