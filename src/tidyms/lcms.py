@@ -456,8 +456,7 @@ class LCTrace(MZTrace):
         start, apex, end = peaks.detect_peaks(x, noise, baseline, **kwargs)
         n_peaks = start.size
         features = [
-            Peak(s, a, e, self, i)
-            for s, a, e, i in zip(start, apex, end, range(n_peaks))
+            Peak(s, a, e, self, i) for s, a, e, i in zip(start, apex, end, range(n_peaks))
         ]
 
         self.features = features
@@ -565,6 +564,7 @@ class Feature(ABC):
         self.roi = roi
         self._mz = None
         self._area = None
+        self._height = None
         self.annotation = Annotation(-1, -1, -1, -1)
         self.index = index
 
@@ -579,6 +579,12 @@ class Feature(ABC):
         if self._area is None:
             self._area = self.get_area()
         return self._area
+
+    @property
+    def height(self) -> float:
+        if self._height is None:
+            self._height = self.get_height()
+        return self._height
 
     def __lt__(self, other: Union["Feature", float]):
         if isinstance(other, float):
@@ -610,6 +616,10 @@ class Feature(ABC):
 
     @abstractmethod
     def get_area(self) -> float:
+        ...
+
+    @abstractmethod
+    def get_height(self) -> float:
         ...
 
     @abstractmethod
@@ -755,7 +765,9 @@ class Peak(Feature):
         than y, the height is set to zero.
 
         """
-        height = self.roi.spint[self.apex] - self.roi.baseline[self.apex]
+        height = self.roi.spint[self.apex]
+        if self.roi.baseline is not None:
+            height -= self.roi.baseline[self.apex]
         return max(0.0, height)
 
     def get_area(self) -> float:
@@ -788,8 +800,7 @@ class Peak(Feature):
 
         """
         height = (
-            self.roi.spint[self.start : self.end]
-            - self.roi.baseline[self.start : self.end]
+            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
         )
         area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
@@ -890,9 +901,7 @@ class Peak(Feature):
         return _compare_features_lc(self, other)
 
     @staticmethod
-    def compute_isotopic_envelope(
-        features: list["Peak"],
-    ) -> Tuple[list[float], list[float]]:
+    def compute_isotopic_envelope(features: list["Peak"]) -> Tuple[list[float], list[float]]:
         """
         Computes a m/z and relative abundance for a list of features.
 
@@ -909,8 +918,10 @@ class Peak(Feature):
             for ft in features:
                 start = bisect.bisect(ft.roi.scan, scan_start)
                 end = bisect.bisect(ft.roi.scan, scan_end)
-                tmp_peak = Peak(start, ft.apex, end, ft.roi)
-                p.append(tmp_peak.area)
+                apex = (start + end) // 2  # dummy value
+                tmp_peak = Peak(start, apex, end, ft.roi)
+                p_area = trapz(tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end])
+                p.append(p_area)
                 mz.append(tmp_peak.mz)
         total_area = sum(p)
         p = [x / total_area for x in p]
@@ -919,6 +930,24 @@ class Peak(Feature):
 
 @dataclass
 class Annotation:
+    """
+    Contains annotation information of features.
+
+    If an annotation is not available, ``-1`` is used.
+
+    Attributes
+    ----------
+    label : int
+        Correspondence label of features.
+    isotopologue_label : int
+        Groups features from the same isotopic envelope.
+    isotopologue_index : int
+        Position of the feature in an isotopic envelope.
+    charge : int
+        Charge state.
+
+    """
+
     label: int
     isotopologue_label: int
     isotopologue_index: int
@@ -957,8 +986,7 @@ def _compare_features_lc(ft1: Peak, ft2: Peak) -> float:
         ft1, ft2 = ft2, ft1
     overlap_ratio = _overlap_ratio(ft1, ft2)
     min_overlap = 0.5
-    has_overlap = overlap_ratio > min_overlap
-    if has_overlap:
+    if overlap_ratio > min_overlap:
         os1, oe1, os2, oe2 = _get_overlap_index(ft1, ft2)
         norm1 = np.linalg.norm(ft1.roi.spint[ft1.start : ft1.end])
         norm2 = np.linalg.norm(ft2.roi.spint[ft2.start : ft2.end])
