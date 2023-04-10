@@ -186,9 +186,7 @@ class Assay:
         return func
 
     @staticmethod
-    def _get_feature_matching_strategy(
-        strategy: Union[str, Callable] = "default"
-    ) -> Callable:
+    def _get_feature_matching_strategy(strategy: Union[str, Callable] = "default") -> Callable:
         """
         Sets the function used for mathing_features.
 
@@ -581,9 +579,7 @@ class Assay:
 
             def worker(args):
                 roi_path, ft_path, roi_list = args
-                ft_table = _describe_features_default(
-                    roi_list, custom_descriptors, filters
-                )
+                ft_table = _describe_features_default(roi_list, custom_descriptors, filters)
                 _save_roi_list(roi_path, roi_list)
                 ft_table.to_pickle(ft_path)
 
@@ -808,8 +804,8 @@ class Assay:
                 tools = create_annotation_tools(**kwargs)
                 annotate(ft_list, *tools)
                 annotation_table = create_annotation_table(ft_list)
+                ft_table = pd.merge(ft_table, annotation_table, on=[c.ROI_INDEX, c.FT_INDEX])
                 ft_table.to_pickle(ft_path)
-                ft_table = ft_table.join(annotation_table, [c.ROI_INDEX, c.FT_INDEX])
 
             worker = delayed(worker)
             if verbose:
@@ -1232,9 +1228,14 @@ def _process_features_roi(
     filtered_features = list()
     descriptors = list()
     if roi.features is not None:
+        # TODO: temporary workaround to update feature index. This should be
+        #   replaced in the new implementation of Assay.
+        new_index = 0
         for ft in roi.features:
             d = _process_feature(ft, custom_descriptors, filters)
             if d is not None:
+                ft.index = new_index
+                new_index += 1
                 filtered_features.append(ft)
                 descriptors.append(d)
         roi.features = filtered_features
@@ -1349,9 +1350,7 @@ def _describe_feature_list(
     return descriptor_list
 
 
-def _fill_filter_boundaries(
-    filter_dict: dict[str, Tuple[Optional[float], Optional[float]]]
-):
+def _fill_filter_boundaries(filter_dict: dict[str, Tuple[Optional[float], Optional[float]]]):
     """
     Replaces None in the filter boundaries to perform comparisons.
 
