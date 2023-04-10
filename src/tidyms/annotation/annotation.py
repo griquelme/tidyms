@@ -88,9 +88,7 @@ def create_annotation_tools(
         p_tol,
         min_similarity,
     )
-    envelope_finder = EnvelopeFinder(
-        elements, max_M_tol, max_length, min_p, min_similarity
-    )
+    envelope_finder = EnvelopeFinder(elements, max_M_tol, max_length, min_p, min_similarity)
     envelope_validator = EnvelopeValidator(
         bounds,
         max_M=max_mass,
@@ -147,7 +145,7 @@ def find_best_envelope(
     envelope_finder: EnvelopeFinder,
     envelope_validator: EnvelopeValidator,
 ) -> tuple[Sequence[Feature], int]:
-    best_length = 0
+    best_length = 1
     best_candidate = [monoisotopologue]
     best_charge = -1
     for mmi, charge in mmi_candidates:
@@ -184,6 +182,6 @@ def _validate_candidate(
 
     M, p = candidate[0].compute_isotopic_envelope(candidate)
     em_correction = EM * charge * polarity
-    M = np.array(M) / charge - em_correction
+    M = np.array(M) * charge - em_correction
     p = np.array(p)
     return validator.validate(M, p)

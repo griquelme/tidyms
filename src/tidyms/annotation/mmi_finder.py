@@ -93,7 +93,7 @@ class MMIFinder:
             return candidates
 
         for charge in range(1, self.max_charge + 1):
-            M_mono = mono.mz / charge - self.polarity * charge * EM
+            M_mono = mono.mz * charge - self.polarity * charge * EM
             if M_mono < self.max_mass:
                 candidates.append((mono, charge))
             M_bin = int(M_mono // self.bin_size)
@@ -128,10 +128,10 @@ def _find_candidate(
     min_dM, max_dM = i_rules["dM"]
     min_mz = mono.mz - max_dM / charge - mz_tol
     max_mz = mono.mz - min_dM / charge + mz_tol
-    min_qp = i_rules["qp"][0]
+    min_qp = i_rules["qp"][0] - p_tol
     max_qp = i_rules["qp"][1] + p_tol
 
-    if (mono.mz / charge) < max_mass:
+    if (mono.mz * charge) < max_mass:
         start = bisect.bisect(data.features, min_mz)
         end = bisect.bisect(data.features, max_mz)
     else:
@@ -142,9 +142,7 @@ def _find_candidate(
     if start < end:
         for k in range(start, end):
             candidate = data.features[k]
-            is_valid = _check_candidate(
-                data, mono, candidate, min_similarity, min_qp, max_qp
-            )
+            is_valid = _check_candidate(data, mono, candidate, min_similarity, min_qp, max_qp)
             if is_valid:
                 candidates.append((candidate, charge))
     return candidates
