@@ -4627,7 +4627,7 @@ class DartMSAssay:
                     mzs = []
                     mz = row[headersDict["MZ"]]
                     if mz is None or mz == "":
-                        m = ms.chem.Formula(row[headersDict["ChemicalFormula"]]).get_exact_mass()
+                        m = Formula(row[headersDict["ChemicalFormula"]]).get_exact_mass()
                         for add in row[headersDict["Adducts"]].replace(" ", "").split(","):
                             addInfo = adducts[add]
                             mz = m / addInfo[0] + addInfo[1]
