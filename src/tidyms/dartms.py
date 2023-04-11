@@ -3641,6 +3641,9 @@ class DartMSAssay:
                     total += 1
             a[grp]["total"] = total
 
+        print(
+            "This table displays the number of features detected in a set of experimental conditions, arranged in rows representing the number of samples and columns representing the different conditions. Each cell in the table contains a numerical value indicating the number of features that were detected in exactly the corresponding number of samples and under the corresponding experimental condition. Overall, the table provides a summary of the number of features that were identified across the different experimental conditions and sample sizes."
+        )
         print("Detected   ", end="")
         for group in sorted(list(set(self.groups))):
             print("%%%ds  " % (maxGroupLabelSize) % (group), end="")
