@@ -3660,6 +3660,13 @@ class DartMSAssay:
         print()
 
     def plot_sample_abundances(self):
+        """
+        plots an overview of the feature abundances per sample an dgroup
+
+        Returns:
+            plotnine plot: the generated plot
+        """
+
         dat = {}
         for samplei, sample in enumerate(self.get_sample_names()):
             group = self.get_metaData_for_sample(sample, "group")
