@@ -3659,6 +3659,28 @@ class DartMSAssay:
             print("%%%ds  " % (maxGroupLabelSize) % (a[group]["total"] if a[group]["total"] > 0 else ""), end="")
         print()
 
+    def plot_sample_abundances(self):
+        dat = {}
+        for samplei, sample in enumerate(self.get_sample_names()):
+            group = self.get_metaData_for_sample(sample, "group")
+            batch = self.get_metaData_for_sample(sample, "batch")
+            for featureInd in range(self.dat.shape[1]):
+                if not np.isnan(self.dat[samplei, featureInd]):
+                    dat = _add_row_to_pandas_creation_dictionary(
+                        dat, sample=sample, group=group, batch=batch, feature=featureInd, abundance=self.dat[samplei, featureInd]
+                    )
+
+        dat = pd.DataFrame(dat)
+
+        p = (
+            p9.ggplot(data=dat, mapping=p9.aes(x="np.log2(abundance)", colour="group", group="sample"))
+            + p9.geom_freqpoly(bins=24)
+            + p9.facet_wrap("~ group")
+            + p9.ggtitle("Overview of feature abundances per sample")
+        )
+
+        return p
+
     def plot_mz_deviation_overview(self, show=None, random_fraction=1):
         """
         plots an overview of the mz deviation in the bracketed results
