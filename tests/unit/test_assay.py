@@ -1,4 +1,4 @@
-from tidyms import assay
+from tidyms.assay import assay
 from tidyms.lcms import LCTrace, Peak
 from tidyms import _constants as c
 import pytest

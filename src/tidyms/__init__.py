@@ -39,9 +39,11 @@ SETTINGS = utils.get_settings()
 if SETTINGS["bokeh"]["apply_theme"]:
     from bokeh.themes import Theme as _Theme
     from bokeh.io import curdoc as _curdoc
+
     theme = SETTINGS["bokeh"]["theme"]
     _curdoc().theme = _Theme(json=theme)
 
 if utils.is_notebook():
     from bokeh.plotting import output_notebook as _output_notebook
+
     _output_notebook()
