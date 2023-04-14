@@ -383,7 +383,6 @@ def test_assay_manager_add_samples(tmpdir):
 
 
 class DummyAssay(assay.Assay):
-
     n_roi = 5
     roi_length = 20
     n_ft = 5
@@ -575,9 +574,9 @@ def test_assay_load_features(tmpdir):
     for sample in sample_list:
         features = test_assay.load_features(sample)
         n_features = DummyAssay.n_ft * DummyAssay.n_roi
-        # descriptors = area, width, height, snr, mz, mz_std, rt, rt start,
-        # rt end, roi index, ft index == 11
-        n_descriptors = 11
+        # 12 descriptors = area, width, height, snr, mz, mz_std, rt, rt start,
+        # rt end, roi index, ft index, extension
+        n_descriptors = 12
         expected_shape = (n_features, n_descriptors)
         assert features.shape == expected_shape
     assert True
@@ -593,7 +592,7 @@ def test_assay_build_feature_table(tmpdir):
     test_assay.describe_features(filters=filters)
     test_assay.build_feature_table()
     n_features = DummyAssay.n_ft * DummyAssay.n_roi * n_samples
-    n_descriptors = 13
+    n_descriptors = 14
     expected_shape = (n_features, n_descriptors)
     assert test_assay.feature_table.shape == expected_shape
 
