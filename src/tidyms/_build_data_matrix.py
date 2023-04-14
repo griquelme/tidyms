@@ -19,7 +19,7 @@ def build_data_matrix(
     mz_merge: Optional[float],
     rt_merge: Optional[float],
     merge_threshold: Optional[float],
-    annotate_isotopologues: bool
+    annotate_isotopologues: bool,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Creates a data matrix and feature metadata with aggregated descriptors from
@@ -108,8 +108,8 @@ def _build_lc_feature_metadata(
     estimators = {
         "mz": ["mean", "std", "min", "max"],
         "rt": ["mean", "std", "min", "max"],
-        "rt start": ["mean"],
-        "rt end": ["mean"],
+        "rt_start": ["mean"],
+        "rt_end": ["mean"],
     }
     feature_metadata: pd.DataFrame = feature_table.groupby(c.LABEL).agg(estimators)
 
@@ -126,8 +126,8 @@ def _build_lc_feature_metadata(
         "rtstd": "rt std",
         "rtmin": "rt min",
         "rtmax": "rt max",
-        "rt startmean": "rt start",
-        "rt endmean": "rt end",
+        "rt_startmean": "rt start",
+        "rt_endmean": "rt end",
     }
     new_columns = [col_name_map[x + y] for x, y in zip(level_0, level_1)]
     feature_metadata.columns = new_columns
