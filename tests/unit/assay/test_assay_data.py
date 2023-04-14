@@ -104,3 +104,60 @@ def test_AssayData_add_roi_list(tmp_path: Path):
     assay_data.add_samples([sample])
     roi_list = [create_dummy_roi(x) for x in range(20)]
     assay_data.add_roi_list(roi_list, sample)
+
+
+def test_AssayData_get_roi_list(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData(path, LCTrace, Peak)
+    sample = create_dummy_sample(path, 1)
+    assay_data.add_samples([sample])
+    expected_roi_list = [create_dummy_roi(x) for x in range(20)]
+    assay_data.add_roi_list(expected_roi_list, sample)
+    test_roi_list = assay_data.get_roi_list(sample)
+    assert expected_roi_list == test_roi_list
+
+
+def test_AssayData_add_empty_list(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData(path, LCTrace, Peak)
+    sample = create_dummy_sample(path, 1)
+    assay_data.add_samples([sample])
+    roi_list = list()
+    assay_data.add_roi_list(roi_list, sample)
+
+
+def test_AssayData_get_empty_list(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData(path, LCTrace, Peak)
+    sample = create_dummy_sample(path, 1)
+    assay_data.add_samples([sample])
+    expected_roi_list = list()
+    assay_data.add_roi_list(expected_roi_list, sample)
+    test_roi_list = assay_data.get_roi_list(sample)
+    assert test_roi_list == expected_roi_list
+
+
+def test_AssayData_delete_roi_list(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData(path, LCTrace, Peak)
+    sample = create_dummy_sample(path, 1)
+    assay_data.add_samples([sample])
+    roi_list = [create_dummy_roi(x) for x in range(20)]
+    assay_data.add_roi_list(roi_list, sample)
+    assay_data.delete_roi_list(sample)
+    test_roi_list = assay_data.get_roi_list(sample)
+    expected_roi_list = list()
+    assert expected_roi_list == test_roi_list
+
+
+def test_AssayData_delete_roi_list_no_delete(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData(path, LCTrace, Peak)
+    sample = create_dummy_sample(path, 1)
+    sample2 = create_dummy_sample(path, 2)
+    assay_data.add_samples([sample])
+    expected_roi_list = [create_dummy_roi(x) for x in range(20)]
+    assay_data.add_roi_list(expected_roi_list, sample)
+    assay_data.delete_roi_list(sample2)
+    test_roi_list = assay_data.get_roi_list(sample)
+    assert expected_roi_list == test_roi_list

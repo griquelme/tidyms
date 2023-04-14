@@ -9,7 +9,7 @@ from ..lcms import Feature, Roi
 
 # TODO: get sample by processing stage
 # TODO: get ROI with and without features.
-# TODO: Idea: Assays are created using create_asay and load_assay functions.
+# TODO: Idea: Assays are created using create_assay and load_assay functions.
 
 
 @dataclass
@@ -121,3 +121,9 @@ class AssayData:
                 roi = self.roi.from_string(rm.data)
                 roi_list.append(roi)
             return roi_list
+    
+    def delete_roi_list(self, sample: Sample):
+        with self.SessionFactory() as session:
+            stmt = delete(self.RoiModel).where(self.RoiModel.sample_id == sample.id)
+            session.execute(stmt)
+            session.commit()
