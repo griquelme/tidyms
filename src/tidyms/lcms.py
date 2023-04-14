@@ -456,7 +456,8 @@ class LCTrace(MZTrace):
         start, apex, end = peaks.detect_peaks(x, noise, baseline, **kwargs)
         n_peaks = start.size
         features = [
-            Peak(s, a, e, self, i) for s, a, e, i in zip(start, apex, end, range(n_peaks))
+            Peak(s, a, e, self, i)
+            for s, a, e, i in zip(start, apex, end, range(n_peaks))
         ]
 
         self.features = features
@@ -503,6 +504,15 @@ class LCTrace(MZTrace):
         if show:
             bokeh.plotting.show(figure)
         return figure
+
+    def __eq__(self, other: "LCTrace") -> bool:
+        is_eq = (
+            np.array_equal(self.mz, other.mz)
+            and np.array_equal(self.time, other.time)
+            and np.array_equal(self.spint, other.spint)
+            and np.array_equal(self.scan, other.scan)
+        )
+        return is_eq
 
     @staticmethod
     def _get_feature_type():
@@ -559,6 +569,8 @@ class Feature(ABC):
     index: int
 
     """
+
+    _descriptors = None
 
     def __init__(self, roi: Roi, index: int = 0):
         self.roi = roi
@@ -622,9 +634,11 @@ class Feature(ABC):
     def get_height(self) -> float:
         ...
 
-    @abstractmethod
     def describe(self) -> dict[str, float]:
-        ...
+        descriptors: dict[str, float] = dict()
+        for descriptor in self.descriptor_names():
+            descriptors[descriptor] = self.get(descriptor)
+        return descriptors
 
     @abstractmethod
     def compare(self, other: "Feature") -> float:
@@ -650,6 +664,20 @@ class Feature(ABC):
         feature: Sequence["Feature"],
     ) -> Tuple[list[float], list[float]]:
         ...
+
+    def get(self, descriptor: str):
+        return self.__getattribute__(f"get_{descriptor}")()
+
+    @classmethod
+    def descriptor_names(cls) -> list[str]:
+        if cls._descriptors is None:
+            descriptors = [
+                x.split("_", 1)[-1] for x in cls.__dict__ if x.startswith("get_")
+            ]
+            cls._descriptors = descriptors
+        else:
+            descriptors = cls._descriptors
+        return descriptors
 
 
 class Peak(Feature):
@@ -800,7 +828,8 @@ class Peak(Feature):
 
         """
         height = (
-            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
+            self.roi.spint[self.start : self.end]
+            - self.roi.baseline[self.start : self.end]
         )
         area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
@@ -875,33 +904,13 @@ class Peak(Feature):
             mz_std = self.roi.mz[self.start : self.end].std()
         return mz_std
 
-    def describe(self) -> dict[str, float]:
-        """
-        Computes peak height, area, location, width and SNR.
-
-        Returns
-        -------
-        descriptors: dict
-            A mapping of descriptor names to descriptor values.
-        """
-        descriptors = {
-            c.HEIGHT: self.get_height(),
-            c.AREA: self.get_area(),
-            c.RT: self.get_rt(),
-            c.WIDTH: self.get_width(),
-            c.SNR: self.get_snr(),
-            c.MZ: self.get_mz(),
-            c.MZ_STD: self.get_mz_std(),
-            c.RT_START: self.get_rt_start(),
-            c.RT_END: self.get_rt_end(),
-        }
-        return descriptors
-
     def compare(self, other: "Peak") -> float:
         return _compare_features_lc(self, other)
 
     @staticmethod
-    def compute_isotopic_envelope(features: list["Peak"]) -> Tuple[list[float], list[float]]:
+    def compute_isotopic_envelope(
+        features: list["Peak"],
+    ) -> Tuple[list[float], list[float]]:
         """
         Computes a m/z and relative abundance for a list of features.
 
@@ -920,7 +929,9 @@ class Peak(Feature):
                 end = bisect.bisect(ft.roi.scan, scan_end)
                 apex = (start + end) // 2  # dummy value
                 tmp_peak = Peak(start, apex, end, ft.roi)
-                p_area = trapz(tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end])
+                p_area = trapz(
+                    tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end]
+                )
                 p.append(p_area)
                 mz.append(tmp_peak.mz)
         total_area = sum(p)
