@@ -1,6 +1,6 @@
 from tidyms import assay
 from tidyms import _constants as c
-from tidyms.lcms import LCRoi, Peak
+from tidyms.lcms import LCTrace, Peak
 from tidyms import _constants as c
 import pytest
 from pathlib import Path
@@ -28,9 +28,7 @@ def create_sample_names(n: int, start: int = 1):
     return [template.format(k) for k in range(start, n + start)]
 
 
-def create_assay_dir(
-    path, n, start=1, data_dir_name: str = "data-dir", assay_dir_name: str = "assay-dir"
-):
+def create_assay_dir(path, n, start=1, data_dir_name: str = "data-dir", assay_dir_name: str = "assay-dir"):
     tmpdir = Path(str(path))
     assay_path = tmpdir.joinpath(assay_dir_name)
     data_path = tmpdir.joinpath(data_dir_name)
@@ -49,7 +47,7 @@ def create_dummy_assay_manager(assay_path, data_path, metadata) -> assay._AssayM
         ms_mode=c.CENTROID,
         instrument=c.QTOF,
         separation=c.UPLC,
-        data_import_mode = c.SIMULATED
+        data_import_mode=c.SIMULATED,
     )
 
 
@@ -366,9 +364,7 @@ def test_assay_manager_add_samples(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, n1)
     metadata = create_dummy_assay_manager(assay_path, data_path, None)
     metadata.create_assay_dir()
-    _, new_data_path = create_assay_dir(
-        tmpdir, n2, start=n1 + 1, data_dir_name="new-data-path"
-    )
+    _, new_data_path = create_assay_dir(tmpdir, n2, start=n1 + 1, data_dir_name="new-data-path")
     metadata.add_samples(new_data_path, None)
 
     assert metadata.sample_metadata.shape[0] == n1 + n2
@@ -385,13 +381,12 @@ def test_assay_manager_add_samples(tmpdir):
 
 
 class DummyAssay(assay.Assay):
-
     n_roi = 5
     roi_length = 20
     n_ft = 5
 
     def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs, data_import_mode = c.SIMULATED)
+        super().__init__(*args, **kwargs, data_import_mode=c.SIMULATED)
 
     def get_ms_data(self, sample: str):
         return sample
@@ -401,7 +396,7 @@ def detect_features_dummy(ms_data: str, **kwargs):
     results = list()
     for k in range(DummyAssay.n_roi):
         x = np.arange(DummyAssay.roi_length)
-        roi = LCRoi(x, x, x, x, "uplc")
+        roi = LCTrace(x, x, x, x, "uplc")
         results.append(roi)
     return results
 
@@ -409,7 +404,7 @@ def detect_features_dummy(ms_data: str, **kwargs):
 def extract_features_dummy(roi, **kwargs):
     roi.noise = np.zeros_like(roi.spint) + 1e-8
     roi.baseline = np.zeros_like(roi.spint) + 1e-8
-    roi.features = [Peak(0, 5, 10) for _ in range(DummyAssay.n_ft)]
+    roi.features = [Peak(0, 5, 10, roi) for _ in range(DummyAssay.n_ft)]
 
 
 def test_assay_creation(tmpdir):
@@ -601,3 +596,30 @@ def test_assay_build_feature_table(tmpdir):
     n_descriptors = 13
     expected_shape = (n_features, n_descriptors)
     assert test_assay.feature_table.shape == expected_shape
+
+
+# test peak descriptors
+
+
+def test_fill_filter_boundaries_fill_upper_bound():
+    filters = {"loc": (50, None), "snr": (5, 10)}
+    assay._fill_filter_boundaries(filters)
+    assert np.isclose(filters["loc"][1], np.inf)
+
+
+def test_fill_filter_boundaries_fill_lower_bound():
+    filters = {"loc": (None, 50), "snr": (5, 10)}
+    assay._fill_filter_boundaries(filters)
+    assert np.isclose(filters["loc"][0], -np.inf)
+
+
+def test_has_all_valid_descriptors():
+    descriptors = {"loc": 50, "height": 10, "snr": 5}
+    filters = {"snr": (3, 10)}
+    assert assay._all_valid_descriptors(descriptors, filters)
+
+
+def test_has_all_valid_descriptors_descriptors_outside_valid_ranges():
+    descriptors = {"loc": 50, "height": 10, "snr": 5}
+    filters = {"snr": (10, 20)}
+    assert not assay._all_valid_descriptors(descriptors, filters)

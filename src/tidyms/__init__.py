@@ -32,7 +32,7 @@ from .lcms import Chromatogram, MSSpectrum
 from .assay import Assay
 from .raw_data_utils import *
 from . import dartms
-from . import annotation
+from .annotation import annotation
 
 utils.create_tidyms_dir()
 SETTINGS = utils.get_settings()
@@ -45,4 +45,5 @@ if SETTINGS["bokeh"]["apply_theme"]:
 
 if utils.is_notebook():
     from bokeh.plotting import output_notebook as _output_notebook
+
     _output_notebook()

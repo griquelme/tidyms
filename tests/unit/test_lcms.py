@@ -4,6 +4,8 @@ import tidyms as ms
 import numpy as np
 import pytest
 from scipy.integrate import trapz
+from typing import Tuple
+from math import isclose
 
 # # Test Chromatogram object
 
@@ -19,26 +21,31 @@ def chromatogram_data():
 def test_chromatogram_creation(chromatogram_data):
     # test building a chromatogram with default mode
     rt, spint = chromatogram_data
-    chromatogram = lcms.Chromatogram(rt, spint)
+    index = 0
+    chromatogram = lcms.Chromatogram(rt, spint, index)
     assert chromatogram.mode == "uplc"
 
 
 def test_chromatogram_creation_with_mode(chromatogram_data):
     rt, spint = chromatogram_data
-    chromatogram = lcms.Chromatogram(rt, spint, mode="hplc")
+    index = 0
+    chromatogram = lcms.Chromatogram(rt, spint, index, mode="hplc")
     assert chromatogram.mode == "hplc"
 
 
 def test_chromatogram_creation_invalid_mode(chromatogram_data):
     rt, spint = chromatogram_data
+    index = 0
     with pytest.raises(ValueError):
-        lcms.Chromatogram(rt, spint, mode="invalid-mode")
+        lcms.Chromatogram(rt, spint, index, mode="invalid-mode")
 
 
 def test_chromatogram_find_peaks(chromatogram_data):
-    chromatogram = lcms.Chromatogram(*chromatogram_data)
+    rt, spint = chromatogram_data
+    index = 0
+    chromatogram = lcms.Chromatogram(rt, spint, index)
     chromatogram.extract_features()
-    chromatogram.describe_features()
+    # chromatogram.describe_features()
     assert len(chromatogram.features) == 1
 
 
@@ -49,7 +56,7 @@ def test_chromatogram_find_peaks(chromatogram_data):
 def centroid_mzml():
     mz = np.linspace(100, 110, 1000)
     spint = utils.gauss(mz, 105, 0.005, 100)
-    spint += + np.random.normal(size=mz.size, scale=1.0)
+    spint += +np.random.normal(size=mz.size, scale=1.0)
     return mz, spint
 
 
@@ -79,8 +86,9 @@ def test_find_centroids_qtof(centroid_mzml):
 
 # Test ROI
 
+
 @pytest.fixture
-def roi_data():
+def roi_data() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     rt = np.arange(200)
     spint = utils.gauss(rt, 50, 2, 100)
     mz = np.random.normal(loc=150.0, scale=0.001, size=spint.size)
@@ -92,219 +100,292 @@ def roi_data():
     return rt, mz, spint, mode
 
 
-def test_roi_creation(roi_data):
-    rt, mz, spint, mode = roi_data
-    lcms.Roi(spint, mz, rt, rt, mode)
-    assert True
-
-
-def test_fill_nan(roi_data):
-    rt, mz, spint, mode = roi_data
-    roi = lcms.Roi(spint, mz, rt, rt, mode)
-    roi.fill_nan(fill_value="extrapolate")
-    has_nan = np.any(np.isnan(roi.mz) & np.isnan(roi.spint))
-    assert not has_nan
-
-
-def test_peak_location_init():
-    # test peak construction
-    ms.lcms.Peak(0, 10, 20)
-    assert True
-
-
-def test_peak_location_end_lower_than_loc():
-    with pytest.raises(ms.lcms.InvalidPeakException):
-        ms.lcms.Peak(0, 10, 10)
-
-
-def test_peak_location_loc_lower_than_start():
-    with pytest.raises(ms.lcms.InvalidPeakException):
-        ms.lcms.Peak(10, 9, 20)
-
-
 @pytest.fixture
-def lc_roi_peak():
+def lc_roi_with_peak() -> tuple[lcms.LCTrace, lcms.Peak]:
     n = 200
     # it is not necessary that the signal is an actual peak and make tests
     # easier
     x = np.arange(n)
     y = np.ones_like(x)
-    lc_roi = ms.lcms.LCRoi(y, y, x, x)
+    mode = "uplc"
+    lc_roi = ms.lcms.LCTrace(x, y, y, x, mode=mode)
     apex = n // 2
-    peak = ms.lcms.Peak(apex - 10, apex, apex + 10)
+    peak = ms.lcms.Peak(apex - 10, apex, apex + 10, lc_roi)
     return lc_roi, peak
 
 
-def test_peak_rt(lc_roi_peak):
+def test_LCTrace_creation(roi_data):
+    rt, mz, spint, mode = roi_data
+    trace = lcms.LCTrace(rt, spint, mz, rt, mode)
+    assert np.array_equal(rt, trace.time, equal_nan=True)
+    assert np.array_equal(spint, trace.spint, equal_nan=True)
+    assert np.array_equal(mz, trace.mz, equal_nan=True)
+    assert mode == trace.mode
+
+
+def test_fill_nan(roi_data):
+    rt, mz, spint, mode = roi_data
+    roi = lcms.LCTrace(rt, spint, mz, rt, mode)
+    roi.fill_nan(fill_value="extrapolate")
+    has_nan = np.any(np.isnan(roi.mz) & np.isnan(roi.spint))
+    assert not has_nan
+
+
+def test_peak_location_init(lc_roi_with_peak):
+    # test peak construction
+    roi, _ = lc_roi_with_peak
+    ms.lcms.Peak(0, 10, 20, roi)
+    assert True
+
+
+def test_peak_location_end_lower_than_loc(lc_roi_with_peak):
+    roi, _ = lc_roi_with_peak
+    with pytest.raises(ms.lcms.InvalidPeakException):
+        ms.lcms.Peak(0, 10, 10, roi)
+
+
+def test_peak_location_loc_lower_than_start(lc_roi_with_peak):
+    roi, _ = lc_roi_with_peak
+    with pytest.raises(ms.lcms.InvalidPeakException):
+        ms.lcms.Peak(10, 9, 20, roi)
+
+
+def test_peak_rt(lc_roi_with_peak):
     # check that the location of the peak is close to the estimation
-    lc_roi, peak = lc_roi_peak
-    test_rt = peak.get_rt(lc_roi)
+    lc_roi, peak = lc_roi_with_peak
+    test_rt = peak.get_rt()
     expected_rt = (lc_roi.time[peak.start] + lc_roi.time[peak.end - 1]) / 2
     assert np.isclose(test_rt, expected_rt)
 
 
-def test_Peak_get_rt_start(lc_roi_peak):
-    lc_roi, peak = lc_roi_peak
-    test_rt_start = peak.get_rt_start(lc_roi)
+def test_Peak_get_rt_start(lc_roi_with_peak):
+    lc_roi, peak = lc_roi_with_peak
+    test_rt_start = peak.get_rt_start()
     expected_rt_start = lc_roi.time[peak.start]
     assert np.isclose(test_rt_start, expected_rt_start)
 
 
-def test_Peak_get_rt_end(lc_roi_peak):
-    lc_roi, peak = lc_roi_peak
-    test_rt_end = peak.get_rt_end(lc_roi)
+def test_Peak_get_rt_end(lc_roi_with_peak):
+    lc_roi, peak = lc_roi_with_peak
+    test_rt_end = peak.get_rt_end()
     expected_rt_end = lc_roi.time[peak.end - 1]
     assert np.isclose(test_rt_end, expected_rt_end)
 
 
-def test_peak_height(lc_roi_peak):
+def test_peak_height(lc_roi_with_peak):
     # check that the height of the peak is close to the estimation
-    lc_roi, peak = lc_roi_peak
+    lc_roi, peak = lc_roi_with_peak
     baseline = np.zeros_like(lc_roi.spint)
     lc_roi.baseline = baseline
-    test_height = peak.get_height(lc_roi)
+    test_height = peak.get_height()
     expected_height = lc_roi.spint[peak.apex]
     assert test_height == expected_height
 
 
-def test_peak_area(lc_roi_peak):
+def test_peak_area(lc_roi_with_peak):
     # check that the area of the peak is close to the estimation
-    lc_roi, peak = lc_roi_peak
+    lc_roi, peak = lc_roi_with_peak
     lc_roi.baseline = np.zeros_like(lc_roi.spint)
-    test_area = peak.get_area(lc_roi)
-    y = lc_roi.spint[peak.start:peak.end]
-    x = lc_roi.time[peak.start:peak.end]
+    test_area = peak.get_area()
+    y = lc_roi.spint[peak.start : peak.end]
+    x = lc_roi.time[peak.start : peak.end]
     expected_area = trapz(y, x)
     assert test_area == expected_area
 
 
-def test_peak_width(lc_roi_peak):
+def test_peak_width(lc_roi_with_peak):
     # check that the area of the peak is close to the estimation
-    lc_roi, peak = lc_roi_peak
+    lc_roi, peak = lc_roi_with_peak
     lc_roi.baseline = np.zeros_like(lc_roi.spint)
-    test_width = peak.get_width(lc_roi)
+    test_width = peak.get_width()
     width_bound = lc_roi.time[peak.end] - lc_roi.time[peak.start]
     assert test_width <= width_bound
 
 
 def test_peak_width_bad_width():
     # test that the width is zero when the peak is badly shaped
-    peak = ms.lcms.Peak(10, 20, 30)
     y = np.zeros(100)
     x = np.arange(100)
-    lc_roi = ms.lcms.LCRoi(y, y, x, x)
+    lc_roi = ms.lcms.LCTrace(y, y, x.astype(float), x)
+    peak = ms.lcms.Peak(10, 20, 30, lc_roi)
     lc_roi.baseline = y
-    test_width = peak.get_width(lc_roi)
+    test_width = peak.get_width()
     assert np.isclose(test_width, 0.0)
 
 
-def test_peak_extension(lc_roi_peak):
-    lc_roi, peak = lc_roi_peak
-    test_extension = peak.get_extension(lc_roi)
+def test_peak_extension(lc_roi_with_peak):
+    lc_roi, peak = lc_roi_with_peak
+    test_extension = peak.get_extension()
     expected_extension = lc_roi.time[peak.end] - lc_roi.time[peak.start]
     assert expected_extension == test_extension
 
 
-def test_peak_snr(lc_roi_peak):
-    lc_roi, peak = lc_roi_peak
+def test_peak_snr(lc_roi_with_peak):
+    lc_roi, peak = lc_roi_with_peak
     lc_roi.noise = np.ones_like(lc_roi.spint)
     lc_roi.baseline = np.zeros_like(lc_roi.spint)
-    test_snr = peak.get_snr(lc_roi)
+    test_snr = peak.get_snr()
     expected_snr = 1.0
     assert np.isclose(test_snr, expected_snr)
 
 
-def test_peak_snr_zero_noise(lc_roi_peak):
-    lc_roi, peak = lc_roi_peak
+def test_peak_snr_zero_noise(lc_roi_with_peak):
+    lc_roi, peak = lc_roi_with_peak
     lc_roi.noise = np.zeros_like(lc_roi.spint)
     lc_roi.baseline = np.zeros_like(lc_roi.spint)
-    test_snr = peak.get_snr(lc_roi)
+    test_snr = peak.get_snr()
     expected_snr = np.inf
     assert np.isclose(test_snr, expected_snr)
 
 
-# test peak descriptors
-
-def test_fill_filter_boundaries_fill_upper_bound():
-    filters = {"loc": (50, None), "snr": (5, 10)}
-    ms.lcms._fill_filter_boundaries(filters)
-    assert np.isclose(filters["loc"][1], np.inf)
-
-
-def test_fill_filter_boundaries_fill_lower_bound():
-    filters = {"loc": (None, 50), "snr": (5, 10)}
-    ms.lcms._fill_filter_boundaries(filters)
-    assert np.isclose(filters["loc"][0], -np.inf)
-
-
-def test_has_all_valid_descriptors():
-    descriptors = {"loc": 50, "height": 10, "snr": 5}
-    filters = {"snr": (3, 10)}
-    assert ms.lcms._has_all_valid_descriptors(descriptors, filters)
-
-
-def test_has_all_valid_descriptors_descriptors_outside_valid_ranges():
-    descriptors = {"loc": 50, "height": 10, "snr": 5}
-    filters = {"snr": (10, 20)}
-    assert not ms.lcms._has_all_valid_descriptors(descriptors, filters)
-
-
-def test_get_descriptors(lc_roi_peak):
-    lc_roi, peak = lc_roi_peak
+def test_Feature_describe(lc_roi_with_peak):
+    lc_roi, peak = lc_roi_with_peak
     lc_roi.noise = np.zeros_like(lc_roi.spint)
     lc_roi.baseline = np.zeros_like(lc_roi.spint)
-    peak.get_descriptors(lc_roi)
+    peak.describe()
     assert True
-
-
-def test_get_descriptors_custom_descriptors(lc_roi_peak):
-    lc_roi, peak = lc_roi_peak
-    lc_roi.features = [peak]
-    lc_roi.noise = np.zeros_like(lc_roi.spint)
-    lc_roi.baseline = np.zeros_like(lc_roi.spint)
-
-    def return_one(roi, peak):
-        return 1
-
-    custom_descriptor = {"custom": return_one}
-    descriptors = lc_roi.describe_features(custom_descriptors=custom_descriptor)
-    assert descriptors[0]["custom"] == 1
 
 
 # Test ROI serialization
 
-@pytest.fixture
-def lc_roi(roi_data):
-    rt, mz, spint, mode = roi_data
-    return lcms.LCRoi(
-        spint,
-        mz,
-        rt,
-        rt,
-        mode=mode
-    )
+
+def test_LCRoi_serialization_no_noise_no_baseline_no_features(lc_roi_with_peak):
+    roi, _ = lc_roi_with_peak
+    roi_str = roi.to_string()
+    roi_from_str = lcms.LCTrace.from_string(roi_str)
+    assert np.array_equal(roi.time, roi_from_str.time)
+    assert np.array_equal(roi.spint, roi_from_str.spint, equal_nan=True)
+    assert np.array_equal(roi.mz, roi_from_str.mz, equal_nan=True)
+    assert np.array_equal(roi.scan, roi_from_str.scan)
 
 
-def test_LCRoi_serialization_no_noise_no_baseline_no_features(lc_roi):
-    roi_str = lc_roi.to_json()
-    roi_from_str = lcms.LCRoi.from_json(roi_str)
-    assert np.array_equal(lc_roi.time, roi_from_str.time)
-    assert np.array_equal(lc_roi.spint, roi_from_str.spint, equal_nan=True)
-    assert np.array_equal(lc_roi.mz, roi_from_str.mz, equal_nan=True)
-    assert np.array_equal(lc_roi.scan, roi_from_str.scan)
-
-
-def test_LCRoi_serialization(lc_roi):
-    lc_roi.extract_features()
-    roi_str = lc_roi.to_json()
-    roi_from_str = lcms.LCRoi.from_json(roi_str)
-    assert np.array_equal(lc_roi.time, roi_from_str.time)
-    assert np.array_equal(lc_roi.spint, roi_from_str.spint, equal_nan=True)
-    assert np.array_equal(lc_roi.mz, roi_from_str.mz, equal_nan=True)
-    assert np.array_equal(lc_roi.scan, roi_from_str.scan)
-    assert np.array_equal(lc_roi.noise, roi_from_str.noise)
-    assert np.array_equal(lc_roi.baseline, roi_from_str.baseline)
-    for expected, test in zip(lc_roi.features, roi_from_str.features):
+def test_LCRoi_serialization(lc_roi_with_peak):
+    roi, _ = lc_roi_with_peak
+    roi.extract_features()
+    roi_str = roi.to_string()
+    roi_from_str = lcms.LCTrace.from_string(roi_str)
+    assert np.array_equal(roi.time, roi_from_str.time)
+    assert np.array_equal(roi.spint, roi_from_str.spint, equal_nan=True)
+    assert np.array_equal(roi.mz, roi_from_str.mz, equal_nan=True)
+    assert np.array_equal(roi.scan, roi_from_str.scan)
+    assert np.array_equal(roi.noise, roi_from_str.noise)
+    assert np.array_equal(roi.baseline, roi_from_str.baseline)
+    for expected, test in zip(roi.features, roi_from_str.features):
         assert expected.start == test.start
         assert expected.apex == test.apex
         assert expected.end == test.end
+
+
+def test__overlap_ratio_overlapping_peaks():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[25:55]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(5, 10, 15, roi1)
+    ft2 = lcms.Peak(5, 10, 15, roi2)
+    test_result = lcms._overlap_ratio(ft1, ft2)
+    expected_result = 0.5
+    assert isclose(expected_result, test_result)
+
+
+def test__overlap_ratio_non_overlapping_peaks():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[30:50]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(5, 10, 15, roi1)
+    ft2 = lcms.Peak(15, 16, 20, roi2)
+    test_result = lcms._overlap_ratio(ft1, ft2)
+    expected_result = 0.0
+    assert isclose(expected_result, test_result)
+
+
+def test__overlap_ratio_perfect_overlap():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[30:50]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    ft2 = lcms.Peak(0, 5, 10, roi2)
+    test_result = lcms._overlap_ratio(ft1, ft2)
+    expected_result = 1.0
+    assert isclose(expected_result, test_result)
+
+
+def test__get_overlap_index_partial_overlap():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[25:55]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(5, 10, 15, roi1)
+    ft2 = lcms.Peak(5, 10, 15, roi2)
+    test_result = lcms._get_overlap_index(ft1, ft2)
+    expected_result = 10, 15, 5, 10
+    assert test_result == expected_result
+
+
+def test__get_overlap_index_perfect_overlap():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[25:55]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(5, 10, 15, roi1)
+    ft2 = lcms.Peak(0, 5, 10, roi2)
+    test_result = lcms._get_overlap_index(ft1, ft2)
+    expected_result = 5, 15, 0, 10
+    assert test_result == expected_result
+
+
+def test__overlap_ratio_ft2_contained_in_ft1():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    scans_roi2 = scans[30:50]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    ft2 = lcms.Peak(2, 5, 8, roi2)
+    test_result = lcms._overlap_ratio(ft1, ft2)
+    # if ft2 is contained in ft1, the overlap ratio is 1.0
+    expected_result = 1.0
+    assert isclose(expected_result, test_result)
+
+
+def test__feature_similarity_same_features():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    test_result = ft1.compare(ft1)
+    expected_result = 1.0
+    assert isclose(expected_result, test_result)
+
+
+def test__feature_similarity_non_overlapping_features():
+    scans = np.arange(100)
+    scans_roi1 = scans[20:40]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    scans_roi2 = scans[50:70]
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft2 = lcms.Peak(10, 15, 20, roi2)
+    test_result = ft1.compare(ft2)
+    expected_result = 0.0
+    assert isclose(expected_result, test_result)
+
+
+def test__feature_similarity_non_overlapping_features_ft1_starts_after_ft2():
+    scans = np.arange(100)
+    scans_roi1 = scans[50:70]
+    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
+    ft1 = lcms.Peak(10, 15, 20, roi1)
+    scans_roi2 = scans[20:40]
+    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    ft2 = lcms.Peak(10, 15, 20, roi2)
+    test_result = ft1.compare(ft2)
+    expected_result = 0.0
+    assert isclose(expected_result, test_result)

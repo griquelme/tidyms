@@ -1,5 +1,5 @@
 """
-Functions and objects for working with LC-MS data read from pyopenms.
+Functions and objects for working with LC-MS data.
 
 Objects
 -------
@@ -19,11 +19,14 @@ get_find_centroid_params
 
 """
 
+import bisect
 import bokeh.plotting
 import json
 import numpy as np
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from scipy.ndimage import gaussian_filter1d
-from typing import Dict, List, Optional, Tuple
+from typing import Any, cast, Optional, Sequence, Tuple, Type, TypeVar, Union
 from scipy.interpolate import interp1d
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
@@ -31,6 +34,11 @@ from . import peaks
 from . import _plot_bokeh
 from . import _constants as c
 from .utils import array1d_to_str, str_to_array1d
+
+
+# Replace with Self when code is updated to Python 3.11
+AnyRoi = TypeVar("AnyRoi", bound="Roi")
+AnyFeature = TypeVar("AnyFeature", bound="Feature")
 
 
 class MSSpectrum:
@@ -65,7 +73,7 @@ class MSSpectrum:
         ms_level: int = 1,
         polarity: Optional[int] = None,
         instrument: str = c.QTOF,
-        is_centroid: bool = True
+        is_centroid: bool = True,
     ):
         self.mz = mz
         self.spint = spint
@@ -89,9 +97,7 @@ class MSSpectrum:
             raise ValueError(msg.format(value, c.MS_INSTRUMENTS))
 
     def find_centroids(
-        self,
-        min_snr: float = 10.0,
-        min_distance: Optional[float] = None
+        self, min_snr: float = 10.0, min_distance: Optional[float] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
         r"""
         Find centroids in the spectrum.
@@ -158,8 +164,8 @@ class MSSpectrum:
         self,
         fig_params: Optional[dict] = None,
         line_params: Optional[dict] = None,
-        show: bool = True
-    ) -> bokeh.plotting.figure:     # pragma: no cover
+        show: bool = True,
+    ) -> bokeh.plotting.figure:  # pragma: no cover
         """
         Plot the spectrum using Bokeh.
 
@@ -196,110 +202,153 @@ class MSSpectrum:
         return fig
 
 
-class Roi:
+class Roi(ABC):
+
     """
-        m/z traces extracted from raw data. m/z information is stored besides
-        time and intensity information.
+    Regions of interest extracted from raw MS data.
 
-        Attributes
-        ----------
-        time : array
-            time in each scan.
-        spint : array
-            intensity in each scan.
-        mz : array
-            m/z in each scan.
-        scan : array
-            scan numbers where the ROI is defined.
-        mode : {"uplc", "hplc"}
-            Analytical platform used separation. Sets default values for peak
-            detection.
-        features : OptionalList[Feature]]
+    """
 
+    def __init__(self, index: int):
+        self.index = index
+        self.features: Optional[list[Feature]] = None
+
+    def plot(self) -> bokeh.plotting.figure:
+        ...
+
+    @abstractmethod
+    def extract_features(self, **kwargs) -> list["Feature"]:
+        ...
+
+    def get_default_filters(self) -> dict[str, float]:
+        raise NotImplementedError
+
+    @classmethod
+    def from_string(cls: Type[AnyRoi], s: str) -> AnyRoi:
+        """Loads a ROI from a JSON string."""
+
+        d = cls._deserialize(s)
+        features = d.pop(c.ROI_FEATURE_LIST)
+        roi = cls(**d)
+        ft_class = cls._get_feature_type()
+        if features is not None:
+            roi.features = [ft_class.from_str(x, roi) for x in features]
+        return roi
+
+    @staticmethod
+    @abstractmethod
+    def _deserialize(s: str) -> dict:
         """
-    def __init__(self, spint: np.ndarray, mz: np.ndarray, time: np.ndarray,
-                 scan: np.ndarray, mode: str):
+        Converts JSON str into a dictionary used to create a ROI instance.
+
+        This method needs to be overwritten in case that the attributes needs
+        to be further deserialized before instantiating a ROI.
+
+        See MZTrace as an example.
+        """
+        ...
+
+    @abstractmethod
+    def to_string(self) -> str:
+        """Serializes a ROI into a string."""
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def _get_feature_type() -> Type["Feature"]:
+        """Feature Class stored under features attribute."""
+        ...
+
+
+class MZTrace(Roi):
+    """
+    ROI Implementation using MZ traces.
+
+    MZ traces are 1D traces containing time, intensity and m/z associated with
+    each scan.
+
+    Attributes
+    ----------
+    time : array
+        time in each scan.
+    spint : array
+        intensity in each scan.
+    mz : array
+        m/z in each scan.
+    scan : array
+        scan numbers where the ROI is defined.
+    mode : {"uplc", "hplc"}
+        Analytical platform used separation. Sets default values for peak
+        detection.
+    features : OptionalList[Feature]]
+
+    """
+
+    def __init__(
+        self,
+        time: np.ndarray[Any, np.dtype[np.floating]],
+        spint: np.ndarray[Any, np.dtype[np.floating]],
+        mz: np.ndarray[Any, np.dtype[np.floating]],
+        scan: np.ndarray[Any, np.dtype[np.integer]],
+        index: int = 0,
+        mode: Optional[str] = None,
+        noise: Optional[np.ndarray] = None,
+        baseline: Optional[np.ndarray] = None,
+    ):
+        super().__init__(index)
         self.mode = mode
         self.time = time
         self.spint = spint
         self.mz = mz
         self.scan = scan
-        self.features = None    # Type: Optional[List[Feature]]
+        self.features: Optional[list[Feature]] = None
+        self.baseline = baseline
+        self.noise = noise
 
-    def plot(
-        self,
-        figure: Optional[bokeh.plotting.figure] = None,
-        show: bool = True
-    ) -> bokeh.plotting.figure:     # pragma: no cover
-        raise NotImplementedError
+    @staticmethod
+    def _deserialize(s: str) -> dict[str, Any]:
+        d = json.loads(s)
+        d[c.SPINT] = str_to_array1d(d[c.SPINT])
+        d[c.MZ] = None if d[c.MZ] is None else str_to_array1d(d[c.MZ])
+        d[c.TIME] = str_to_array1d(d[c.TIME])
+        d[c.SCAN] = None if d[c.SCAN] is None else str_to_array1d(d[c.SCAN])
+        d[c.NOISE] = None if d[c.NOISE] is None else str_to_array1d(d[c.NOISE])
+        d[c.BASELINE] = None if d[c.BASELINE] is None else str_to_array1d(d[c.BASELINE])
+        return d
 
-    def extract_features(self, **kwargs) -> List["Feature"]:
-        raise NotImplementedError
-
-    def describe_features(
-        self,
-        custom_descriptors: Optional[dict] = None,
-        filters: Optional[dict] = None
-    ) -> List[Dict[str, float]]:
+    def to_string(self) -> str:
         """
-        Computes descriptors for the features detected in the ROI.
-
-        Parameters
-        ----------
-        custom_descriptors : dict or None, default=None
-            A dictionary of strings to callables, used to estimate custom
-            descriptors of a feature. The function must have the following
-            signature:
-
-            .. code-block:: python
-
-                "estimator_func(roi: Roi, feature: Feature) -> float"
-
-        filters : dict or None, default=None
-            A dictionary of descriptor names to a tuple of minimum and maximum
-            acceptable values. To use only minimum/maximum values, use None
-            (e.g. (None, max_value) in the case of using only maximum). Features
-            with descriptors outside those ranges are removed. Filters for
-            custom descriptors can also be used.
+        Serializes the LCRoi into a JSON str.
 
         Returns
         -------
-        features : List[Feature]
-            filtered list of features.
-        descriptors: List[Dict[str, float]]
-            Descriptors for each feature.
+        str
 
         """
+        d = dict()
+        d["index"] = self.index
+        d[c.MODE] = self.mode
+        d[c.TIME] = array1d_to_str(self.time)
+        d[c.SPINT] = array1d_to_str(self.spint)
+        d[c.SCAN] = None if self.scan is None else array1d_to_str(self.scan)
+        d[c.MZ] = None if self.mz is None else array1d_to_str(self.mz)
+        d[c.BASELINE] = None if self.baseline is None else array1d_to_str(self.baseline)
+        d[c.NOISE] = None if self.noise is None else array1d_to_str(self.noise)
+        if self.features is None:
+            d[c.ROI_FEATURE_LIST] = None
+        else:
+            d[c.ROI_FEATURE_LIST] = [x.to_str() for x in self.features]
 
-        if custom_descriptors is None:
-            custom_descriptors = dict()
-
-        if filters is None:
-            filters = self.get_default_filters()
-        _fill_filter_boundaries(filters)
-
-        valid_features = list()
-        descriptor_list = list()      # Type: List[Dict[str, float]]
-        for f in self.features:
-            f_descriptors = f.get_descriptors(self)
-            for descriptor, func in custom_descriptors.items():
-                f_descriptors[descriptor] = func(self, f)
-
-            if _has_all_valid_descriptors(f_descriptors, filters):
-                valid_features.append(f)
-                descriptor_list.append(f_descriptors)
-        self.features = valid_features
-        return descriptor_list
-
-    def get_default_filters(self) -> Dict[str, float]:
-        raise NotImplementedError
+        d_json = json.dumps(d)
+        return d_json
 
     def fill_nan(self, **kwargs):
         """
-        Fill missing values. Missing m/z values are filled using the mean m/z
-        of the ROI. Missing intensity values are filled using linear
-        interpolation. Missing values on the boundaries are filled by
-        extrapolation. Negative values are set to 0.
+        Fill missing values in the trace.
+
+        Missing m/z values are filled using the mean m/z of the ROI. Missing intensity
+        values are filled using linear interpolation. Missing values on the boundaries
+        are filled by extrapolation. Negative values are set to 0.
 
         Parameters
         ----------
@@ -315,10 +364,7 @@ class Roi:
         missing = np.isnan(self.spint)
         if missing.any():
             interpolator = interp1d(
-                self.time[~missing],
-                self.spint[~missing],
-                assume_sorted=True,
-                **kwargs
+                self.time[~missing], self.spint[~missing], assume_sorted=True, **kwargs
             )
             sp_max = np.nanmax(self.spint)
             sp_min = np.nanmin(self.spint)
@@ -329,42 +375,44 @@ class Roi:
         if isinstance(self.mz, np.ndarray):
             self.mz[missing] = np.nanmean(self.mz)
 
-    @staticmethod
-    def from_json(s: str) -> "Roi":
-        raise NotImplementedError
 
-    def to_json(self) -> str:
-        raise NotImplementedError
-
-
-class LCRoi(Roi):
+class LCTrace(MZTrace):
     """
-        m/z traces where chromatographic peaks may be found. m/z information
-        is stored besides time and intensity information.
+    m/z traces where chromatographic peaks may be found. m/z information
+    is stored besides time and intensity information.
 
-        Subclassed from Roi. Used for feature detection in LCMS data.
+    Subclassed from Roi. Used for feature detection in LCMS data.
 
-        Attributes
-        ----------
-        time : array
-            time in each scan.
-        spint : array
-            intensity in each scan.
-        mz : array
-            m/z in each scan.
-        scan : array
-            scan numbers where the ROI is defined.
-        mode : {"uplc", "hplc"}
-            Analytical platform used separation. Sets default values for peak
-            detection.
+    Attributes
+    ----------
+    time : array
+        time in each scan.
+    spint : array
+        intensity in each scan.
+    mz : array
+        m/z in each scan.
+    scan : array
+        scan numbers where the ROI is defined.
+    mode : {"uplc", "hplc"}
+        Analytical platform used separation. Sets default values for peak
+        detection.
 
-        """
+    """
 
-    def __init__(self, spint: np.ndarray, mz: np.ndarray, time: np.ndarray,
-                 scan: np.ndarray, mode: str = c.UPLC):
-        super(LCRoi, self).__init__(spint, mz, time, scan, mode)
-        self.baseline = None
-        self.noise = None
+    features: list["Peak"]
+
+    def __init__(
+        self,
+        time: np.ndarray[Any, np.dtype[np.floating]],
+        spint: np.ndarray[Any, np.dtype[np.floating]],
+        mz: np.ndarray[Any, np.dtype[np.floating]],
+        scan: np.ndarray[Any, np.dtype[np.integer]],
+        index: int = 0,
+        mode: Optional[str] = c.UPLC,
+        noise: Optional[np.ndarray] = None,
+        baseline: Optional[np.ndarray] = None,
+    ):
+        super().__init__(time, spint, mz, scan, index, mode, noise, baseline)
 
     @property
     def mode(self):
@@ -382,8 +430,8 @@ class LCRoi(Roi):
         self,
         smoothing_strength: Optional[float] = 1.0,
         store_smoothed: bool = False,
-        **kwargs
-    ) -> List["Peak"]:
+        **kwargs,
+    ) -> list["Peak"]:
         """
         Detect chromatographic peaks.
 
@@ -419,18 +467,23 @@ class LCRoi(Roi):
         """
         self.fill_nan(fill_value="extrapolate")
         noise = peaks.estimate_noise(self.spint)
-
         if smoothing_strength is None:
             x = self.spint
         else:
-            x = gaussian_filter1d(self.spint, smoothing_strength)
+            x = cast(
+                np.ndarray[Any, np.dtype[np.floating]],
+                gaussian_filter1d(self.spint, smoothing_strength),
+            )
 
         if store_smoothed:
             self.spint = x
 
         baseline = peaks.estimate_baseline(x, noise)
         start, apex, end = peaks.detect_peaks(x, noise, baseline, **kwargs)
-        features = [Peak(s, a, e) for s, a, e in zip(start, apex, end)]
+        n_peaks = start.size
+        features = [
+            Peak(s, a, e, self, i) for s, a, e, i in zip(start, apex, end, range(n_peaks))
+        ]
 
         self.features = features
         self.baseline = baseline
@@ -438,10 +491,8 @@ class LCRoi(Roi):
         return features
 
     def plot(
-        self,
-        figure: Optional[bokeh.plotting.figure] = None,
-        show: bool = True
-    ) -> bokeh.plotting.figure:     # pragma: no cover
+        self, figure: Optional[bokeh.plotting.figure] = None, show: bool = True
+    ) -> bokeh.plotting.figure:  # pragma: no cover
         """
         Plot the ROI.
 
@@ -479,74 +530,12 @@ class LCRoi(Roi):
             bokeh.plotting.show(figure)
         return figure
 
-    def get_default_filters(self) -> dict:
-        """
-        Default filters for peaks detected in LC data.
-        """
-        if self.mode == c.HPLC:
-            filters = {"width": (10, 90), "snr": (5, None)}
-        else:   # mode = "uplc"
-            filters = {"width": (4, 60), "snr": (5, None)}
-        return filters
-
     @staticmethod
-    def from_json(s: str):
-        """
-        Creates a LCRoi from a JSON str. Used to serialize LCRoi objects.
-
-        Parameters
-        ----------
-        s : str
-
-        Returns
-        -------
-        LCRoi
-
-        """
-        d = json.loads(s)
-        roi = LCRoi(
-            str_to_array1d(d["spint"]),
-            str_to_array1d(d["mz"]),
-            str_to_array1d(d["time"]),
-            str_to_array1d(d["scan"]),
-        )
-        if "noise" in d:
-            roi.noise = str_to_array1d(d["noise"])
-
-        if "baseline" in d:
-            roi.baseline = str_to_array1d(d["baseline"])
-
-        if "features" in d:
-            roi.features = [Peak(x, y, z) for (x, y, z) in d["features"]]
-        return roi
-
-    def to_json(self) -> str:
-        """
-        Serializes the LCRoi into a JSON str.
-
-        Returns
-        -------
-        str
-
-        """
-        d = dict()
-        d["time"] = array1d_to_str(self.time)
-        d["spint"] = array1d_to_str(self.spint)
-        d["scan"] = array1d_to_str(self.scan)
-        d["mz"] = array1d_to_str(self.mz)
-        if self.features is not None:
-            d["features"] = [[x.start, x.apex, x.end] for x in self.features]
-
-        if self.baseline is not None:
-            d["baseline"] = array1d_to_str(self.baseline)
-
-        if self.noise is not None:
-            d["noise"] = array1d_to_str(self.noise)
-        d_json = json.dumps(d)
-        return d_json
+    def _get_feature_type():
+        return Peak
 
 
-class Chromatogram(LCRoi):
+class Chromatogram(LCTrace):
     """
     Representation of a chromatogram. Manages plotting and peak detection.
 
@@ -563,8 +552,16 @@ class Chromatogram(LCRoi):
         detection.
 
     """
-    def __init__(self, time: np.ndarray, spint: np.ndarray, mode: str = c.UPLC):
-        super(Chromatogram, self).__init__(spint, None, time, None, mode)
+
+    mz: Optional[np.ndarray]
+    scan: Optional[np.ndarray]
+
+    def __init__(
+        self, time: np.ndarray, spint: np.ndarray, index: int = 0, mode: str = c.UPLC
+    ):
+        super(Chromatogram, self).__init__(time, spint, spint, spint, index, mode)
+        self.mz = None
+        self.scan = None
 
 
 class InvalidPeakException(ValueError):
@@ -573,54 +570,112 @@ class InvalidPeakException(ValueError):
     Peak objects.
 
     """
+
     pass
 
 
-class Feature:
+class Feature(ABC):
     """
     Abstract representation of a feature.
 
     Attributes
     ----------
-    start: int
-        index where the peak begins. Must be smaller than `apex`
-    end: int
-        index where the peak ends. Start and end used as slices defines the
-        peak region.
+    roi: Roi
+    annotation: Optional[Annotation]
+    index: int
 
     """
 
-    def __init__(self, start: int, end: int):
+    def __init__(self, roi: Roi, index: int = 0):
+        self.roi = roi
+        self._mz = None
+        self._area = None
+        self._height = None
+        self.annotation = Annotation(-1, -1, -1, -1)
+        self.index = index
 
-        try:
-            assert start < end
-        except AssertionError:
-            msg = "start must be lower than end"
-            raise ValueError(msg)
+    @property
+    def mz(self) -> float:
+        if self._mz is None:
+            self._mz = self.get_mz()
+        return self._mz
 
-        self.start = int(start)
-        self.end = int(end)
+    @property
+    def area(self) -> float:
+        if self._area is None:
+            self._area = self.get_area()
+        return self._area
 
-    def __repr__(self):
-        str_repr = "{}(start={}, end={})"
-        name = self.__class__.__name__
-        str_repr = str_repr.format(name, self.start, self.end)
-        return str_repr
+    @property
+    def height(self) -> float:
+        if self._height is None:
+            self._height = self.get_height()
+        return self._height
 
-    def plot(
-        self,
-        roi: Roi,
-        figure: bokeh.plotting.figure,
-        color: str,
-        **varea_params
-    ):
-        _plot_bokeh.fill_area(
-            figure, roi.time, roi.spint, self.start, self.end, color,
-            **varea_params
-        )
+    def __lt__(self, other: Union["Feature", float]):
+        if isinstance(other, float):
+            return self.mz < other
+        elif isinstance(other, Feature):
+            return self.mz < other.mz
 
-    def get_descriptors(self, roi: Roi):
-        raise NotImplementedError
+    def __le__(self, other: Union["Feature", float]):
+        if isinstance(other, float):
+            return self.mz <= other
+        elif isinstance(other, Feature):
+            return self.mz <= other.mz
+
+    def __gt__(self, other: Union["Feature", float]):
+        if isinstance(other, float):
+            return self.mz > other
+        elif isinstance(other, Feature):
+            return self.mz > other.mz
+
+    def __ge__(self, other: Union["Feature", float]):
+        if isinstance(other, float):
+            return self.mz >= other
+        elif isinstance(other, Feature):
+            return self.mz >= other.mz
+
+    @abstractmethod
+    def get_mz(self) -> float:
+        ...
+
+    @abstractmethod
+    def get_area(self) -> float:
+        ...
+
+    @abstractmethod
+    def get_height(self) -> float:
+        ...
+
+    @abstractmethod
+    def describe(self) -> dict[str, float]:
+        ...
+
+    @abstractmethod
+    def compare(self, other: "Feature") -> float:
+        ...
+
+    @abstractmethod
+    def to_str(self) -> str:
+        ...
+
+    @classmethod
+    def from_str(cls, s: str, roi: Roi) -> "Feature":
+        d = cls._deserialize(s)
+        return cls(roi=roi, **d)
+
+    @staticmethod
+    @abstractmethod
+    def _deserialize(s: str) -> dict:
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def compute_isotopic_envelope(
+        feature: Sequence["Feature"],
+    ) -> Tuple[list[float], list[float]]:
+        ...
 
 
 class Peak(Feature):
@@ -636,83 +691,99 @@ class Peak(Feature):
     end: int
         index where the peak ends. Start and end used as slices defines the
         peak region.
+    roi: LCTrace
+        ROI associated with the Peak.
+    index: int
+        Unique index for features detected a ROI.
 
     """
 
-    def __init__(self, start: int, apex: int, end: int):
-        super(Peak, self).__init__(start, end)
+    roi: LCTrace
+
+    def __init__(self, start: int, apex: int, end: int, roi: LCTrace, index: int = 0):
         try:
-            assert self.start < apex
-            assert apex < self.end
+            assert start < end
+            assert start < apex
+            assert apex < end
         except AssertionError:
             msg = "start must be lower than loc and loc must be lower than end"
             raise InvalidPeakException(msg)
+        super().__init__(roi, index)
+        self.start = int(start)
+        self.end = int(end)
         self.apex = int(apex)
 
-    def __repr__(self):
-        str_repr = "{}(start={}, apex={}, end={})"
-        name = self.__class__.__name__
-        str_repr = str_repr.format(name, self.start, self.apex, self.end)
-        return str_repr
+    def to_str(self) -> str:
+        d = {
+            c.START: self.start,
+            c.APEX: self.apex,
+            c.END: self.end,
+            "index": self.index,
+        }
+        s = json.dumps(d)
+        return s
 
-    def get_rt_start(self, roi: LCRoi) -> float:
+    @staticmethod
+    def _deserialize(s: str) -> dict:
+        return json.loads(s)
+
+    def __repr__(self):
+        name = self.__class__.__name__
+        return f"{name}(start={self.start}, apex={self.apex}, end={self.end})"
+
+    def plot(self, figure: bokeh.plotting.figure, color: str, **varea_params):
+        _plot_bokeh.fill_area(
+            figure,
+            self.roi.time,
+            self.roi.spint,
+            self.start,
+            self.end,
+            color,
+            **varea_params,
+        )
+
+    def get_rt_start(self) -> float:
         """
         Computes the start of the peak, in time units
-        Parameters
-        ----------
-        roi : LCRoi
 
         Returns
         -------
         float
 
         """
-        return roi.time[self.start]
+        return self.roi.time[self.start]
 
-    def get_rt_end(self, roi: LCRoi) -> float:
+    def get_rt_end(self) -> float:
         """
         Computes the end of the peak, in time units
-        Parameters
-        ----------
-        roi : LCRoi
 
         Returns
         -------
         float
 
         """
-        return roi.time[self.end - 1]
+        return self.roi.time[self.end - 1]
 
-    def get_rt(self, roi: LCRoi) -> float:
+    def get_rt(self) -> float:
         """
         Finds the peak location in the ROI rt, using spint as weights.
 
-        Parameters
-        ----------
-        roi: Roi
-            ROI where the peak was detected
-
         Returns
         -------
-        loc : float
+        rt : float
 
         """
-        weights = roi.spint[self.start:self.end]
-        if roi.baseline is not None:
-            weights = weights - roi.baseline[self.start:self.end]
+        weights = self.roi.spint[self.start : self.end]
+        if self.roi.baseline is not None:
+            weights = weights - self.roi.baseline[self.start : self.end]
         weights = np.maximum(weights, 0)
-        loc = np.abs(np.average(roi.time[self.start:self.end], weights=weights))
+        loc = np.abs(np.average(self.roi.time[self.start : self.end], weights=weights))
         return loc
 
-    def get_height(self, roi: LCRoi) -> float:
+    def get_height(self) -> float:
         """
         Computes the height of the peak, defined as the difference between the
         value of intensity in the ROI and the baseline at the peak apex.
-
-        Parameters
-        ----------
-        roi : LCRoi
-            ROI where the peak was detected
 
         Returns
         -------
@@ -720,40 +791,34 @@ class Peak(Feature):
         than y, the height is set to zero.
 
         """
-        height = roi.spint[self.apex] - roi.baseline[self.apex]
+        height = self.roi.spint[self.apex]
+        if self.roi.baseline is not None:
+            height -= self.roi.baseline[self.apex]
         return max(0.0, height)
 
-    def get_area(self, roi: LCRoi) -> float:
+    def get_area(self) -> float:
         """
         Computes the area in the region defined by the peak.
 
         If the baseline area is greater than the peak area, the area is set
         to zero.
 
-        Parameters
-        ----------
-        roi : Roi
-            ROI where the peak was detected
-
         Returns
         -------
         area : positive number.
 
         """
-        baseline_corrected = (roi.spint[self.start:self.end] -
-                              roi.baseline[self.start:self.end])
-        area = trapz(baseline_corrected, roi.time[self.start:self.end])
+        peak_extension = self.roi.spint[self.start : self.end]
+        if self.roi.baseline is not None:
+            peak_extension = peak_extension - self.roi.baseline[self.start : self.end]
+
+        area = trapz(peak_extension, self.roi.time[self.start : self.end])
         return max(0.0, area)
 
-    def get_width(self, roi: LCRoi) -> float:
+    def get_width(self) -> float:
         """
         Computes the peak width, defined as the region where the 95 % of the
         total peak area is distributed.
-
-        Parameters
-        ----------
-        roi : Roi
-            ROI where the peak was detected
 
         Returns
         -------
@@ -761,44 +826,33 @@ class Peak(Feature):
 
         """
         height = (
-                roi.spint[self.start:self.end] -
-                roi.baseline[self.start:self.end]
+            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
         )
-        area = cumtrapz(height, roi.time[self.start:self.end])
+        area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
             relative_area = area / area[-1]
             percentile = [0.025, 0.975]
             start, end = self.start + np.searchsorted(relative_area, percentile)
-            width = roi.time[end] - roi.time[start]
+            width = float(self.roi.time[end] - self.roi.time[start])
         else:
             width = 0.0
         return max(0.0, width)
 
-    def get_extension(self, roi: LCRoi) -> float:
+    def get_extension(self) -> float:
         """
         Computes the peak extension, defined as the length of the peak region.
-
-        Parameters
-        ----------
-        roi : Roi
-            ROI where the peak was detected
 
         Returns
         -------
         extension : positive number
 
         """
-        return roi.time[self.end] - roi.time[self.start]
+        return self.roi.time[self.end] - self.roi.time[self.start]
 
-    def get_snr(self, roi: LCRoi) -> float:
+    def get_snr(self) -> float:
         """
         Computes the peak signal-to-noise ratio, defined as the quotient
         between the peak height and the noise level at the apex.
-
-        Parameters
-        ----------
-        roi : Roi
-            ROI where the peak was detected
 
         Returns
         -------
@@ -806,64 +860,50 @@ class Peak(Feature):
 
         """
 
-        peak_noise = roi.noise[self.apex]
+        peak_noise = self.roi.noise[self.apex]
         if np.isclose(peak_noise, 0):
             snr = np.inf
         else:
-            snr = self.get_height(roi) / peak_noise
+            snr = self.get_height() / peak_noise
         return snr
 
-    def get_mean_mz(self, roi: LCRoi) -> float:
+    def get_mz(self) -> float:
         """
         Computes the weighted average m/z of the peak.
-
-        Parameters
-        ----------
-        roi : Roi
-            ROI where the peak was detected
 
         Returns
         -------
         mz_mean : float
 
         """
-        if roi.mz is None:
-            mz_mean = None
+        if self.roi.mz is None:
+            msg = "mz not specified for ROI."
+            raise ValueError(msg)
         else:
-            weights = roi.spint[self.start:self.end]
-            weights[weights < 0] = 0
-            mz_mean = np.average(roi.mz[self.start:self.end], weights=weights)
-            mz_mean = max(0.0, mz_mean)
+            weights = self.roi.spint[self.start : self.end]
+            weights[weights < 0.0] = 0
+            mz_mean = np.average(self.roi.mz[self.start : self.end], weights=weights)
+            mz_mean = max(0.0, mz_mean.item())
         return mz_mean
 
-    def get_mz_std(self, roi: LCRoi) -> float:
+    def get_mz_std(self) -> Optional[float]:
         """
         Computes the standard deviation of the m/z in the peak
-
-        Parameters
-        ----------
-        roi : Roi
-            ROI where the peak was detected
 
         Returns
         -------
         mz_std : float
 
         """
-        if roi.mz is None:
+        if self.roi.mz is None:
             mz_std = None
         else:
-            mz_std = roi.mz[self.start:self.end].std()
+            mz_std = self.roi.mz[self.start : self.end].std()
         return mz_std
 
-    def get_descriptors(self, roi: LCRoi) -> Dict[str, float]:
+    def describe(self) -> dict[str, float]:
         """
         Computes peak height, area, location, width and SNR.
-
-        Parameters
-        ----------
-        roi : Roi
-            ROI where the peak was detected
 
         Returns
         -------
@@ -871,17 +911,73 @@ class Peak(Feature):
             A mapping of descriptor names to descriptor values.
         """
         descriptors = {
-            c.HEIGHT: self.get_height(roi),
-            c.AREA: self.get_area(roi),
-            c.RT: self.get_rt(roi),
-            c.WIDTH: self.get_width(roi),
-            c.SNR: self.get_snr(roi),
-            c.MZ: self.get_mean_mz(roi),
-            c.MZ_STD: self.get_mz_std(roi),
-            c.RT_START: self.get_rt_start(roi),
-            c.RT_END: self.get_rt_end(roi)
+            c.HEIGHT: self.get_height(),
+            c.AREA: self.get_area(),
+            c.RT: self.get_rt(),
+            c.WIDTH: self.get_width(),
+            c.SNR: self.get_snr(),
+            c.MZ: self.get_mz(),
+            c.MZ_STD: self.get_mz_std(),
+            c.RT_START: self.get_rt_start(),
+            c.RT_END: self.get_rt_end(),
         }
         return descriptors
+
+    def compare(self, other: "Peak") -> float:
+        return _compare_features_lc(self, other)
+
+    @staticmethod
+    def compute_isotopic_envelope(features: list["Peak"]) -> Tuple[list[float], list[float]]:
+        """
+        Computes a m/z and relative abundance for a list of features.
+
+        """
+        scan_start = 0
+        scan_end = 10000000000  # dummy value
+        for ft in features:
+            scan_start = max(scan_start, ft.roi.scan[ft.start])
+            scan_end = min(scan_end, ft.roi.scan[ft.end - 1])
+
+        p = list()
+        mz = list()
+        if scan_start < scan_end:
+            for ft in features:
+                start = bisect.bisect(ft.roi.scan, scan_start)
+                end = bisect.bisect(ft.roi.scan, scan_end)
+                apex = (start + end) // 2  # dummy value
+                tmp_peak = Peak(start, apex, end, ft.roi)
+                p_area = trapz(tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end])
+                p.append(p_area)
+                mz.append(tmp_peak.mz)
+        total_area = sum(p)
+        p = [x / total_area for x in p]
+        return mz, p
+
+
+@dataclass
+class Annotation:
+    """
+    Contains annotation information of features.
+
+    If an annotation is not available, ``-1`` is used.
+
+    Attributes
+    ----------
+    label : int
+        Correspondence label of features.
+    isotopologue_label : int
+        Groups features from the same isotopic envelope.
+    isotopologue_index : int
+        Position of the feature in an isotopic envelope.
+    charge : int
+        Charge state.
+
+    """
+
+    label: int
+    isotopologue_label: int
+    isotopologue_index: int
+    charge: int
 
 
 def get_find_centroid_params(instrument: str) -> dict:
@@ -897,56 +993,105 @@ def get_find_centroid_params(instrument: str) -> dict:
     params : dict
 
     """
-    params = {"min_snr": 10}
+    params = {"min_snr": 10.0}
     if instrument == c.QTOF:
         md = 0.01
-    else:   # orbitrap
+    else:  # orbitrap
         md = 0.005
     params["min_distance"] = md
     return params
 
 
-def _fill_filter_boundaries(filter_dict: Dict[str, Tuple]):
+def _compare_features_lc(ft1: Peak, ft2: Peak) -> float:
     """
-    Replaces None in the filter boundaries to perform comparisons.
-
-    aux function of get_peak_descriptors
+    Feature similarity function used in LC-MS data.
     """
-    for k in filter_dict:
-        lb, ub = filter_dict[k]
-        if lb is None:
-            lb = -np.inf
-        if ub is None:
-            ub = np.inf
-        filter_dict[k] = (lb, ub)
+    start1 = ft1.roi.scan[ft1.start]
+    start2 = ft2.roi.scan[ft2.start]
+    if start1 > start2:
+        ft1, ft2 = ft2, ft1
+    overlap_ratio = _overlap_ratio(ft1, ft2)
+    min_overlap = 0.5
+    if overlap_ratio > min_overlap:
+        os1, oe1, os2, oe2 = _get_overlap_index(ft1, ft2)
+        norm1 = np.linalg.norm(ft1.roi.spint[ft1.start : ft1.end])
+        norm2 = np.linalg.norm(ft2.roi.spint[ft2.start : ft2.end])
+        x1 = ft1.roi.spint[os1:oe1] / norm1
+        x2 = ft2.roi.spint[os2:oe2] / norm2
+        similarity = np.dot(x1, x2)
+    else:
+        similarity = 0.0
+    return similarity
 
 
-def _has_all_valid_descriptors(peak_descriptors: Dict[str, float],
-                               filters: Dict[str, Tuple[float, float]]) -> bool:
+def _overlap_ratio(ft1: Peak, ft2: Peak) -> float:
     """
-    Check that the descriptors of a peak are in a valid range.
+    Computes the overlap ratio, defined as the quotient between the overlap
+    region and the extension of the longest feature.
 
-    aux function of get_peak_descriptors.
+    `ft1` must start before `ft2`
 
     Parameters
     ----------
-    peak_descriptors : dict
-        mapping of descriptor names to descriptor values.
-    filters : dict
-        Dictionary from descriptors names to minimum and maximum acceptable
-        values.
+    roi1 : LCRoi
+    ft1 : Peak
+    roi2 : LCRoi
+    ft2 : Peak
 
     Returns
     -------
-    is_valid : bool
-        True if all descriptors are inside the valid ranges.
+    overlap_ratio : float
 
     """
-    res = True
-    for descriptor, (lb, ub) in filters.items():
-        d = peak_descriptors[descriptor]
-        is_valid = (d >= lb) and (d <= ub)
-        if not is_valid:
-            res = False
-            break
+    start2 = ft2.roi.scan[ft2.start]
+    end1 = ft1.roi.scan[ft1.end - 1]
+    end2 = ft2.roi.scan[ft2.end - 1]
+    # start1 <= start2. end1 > start2 is a sufficient condition for overlap
+    if end1 > start2:
+        # the overlap ratio is the quotient between the length overlapped region
+        # and the extension of the shortest feature.
+        if end1 <= end2:
+            start2_index_in1 = bisect.bisect_left(ft1.roi.scan, start2)
+            overlap_length = ft1.end - start2_index_in1
+        else:
+            overlap_length = ft2.end - ft2.start
+        min_length = min(ft1.end - ft1.start, ft2.end - ft2.start)
+        res = overlap_length / min_length
+    else:
+        res = 0.0
     return res
+
+
+def _get_overlap_index(ft1: Peak, ft2: Peak) -> Tuple[int, int, int, int]:
+    """
+    Computes the overlap indices for ft1 and ft2.
+
+    `ft1` must start before `ft2`
+
+    Parameters
+    ----------
+    ft1 : Peak
+    ft2 : Peak
+
+    Returns
+    -------
+    overlap_start1 : int
+    overlap_end1 : int
+    overlap_start2 : int
+    overlap_end2 : int
+
+    """
+    end1 = ft1.roi.scan[ft1.end - 1]
+    end2 = ft2.roi.scan[ft2.end - 1]
+    start2 = ft2.roi.scan[ft2.start]
+    if end1 >= end2:
+        overlap_start1 = bisect.bisect_left(ft1.roi.scan, start2)
+        overlap_end1 = bisect.bisect(ft1.roi.scan, end2)
+        overlap_start2 = ft2.start
+        overlap_end2 = ft2.end
+    else:
+        overlap_start1 = bisect.bisect_left(ft1.roi.scan, start2)
+        overlap_end1 = ft1.end
+        overlap_start2 = ft2.start
+        overlap_end2 = bisect.bisect(ft2.roi.scan, end1)
+    return overlap_start1, overlap_end1, overlap_start2, overlap_end2

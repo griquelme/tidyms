@@ -5,15 +5,17 @@ Functions to find isotopic envelopes candidates in a list of m/z values.
 
 
 import bisect
-import numpy as np
-from typing import List, Dict, Set, Tuple
-from .atoms import Element, PeriodicTable
-
+from typing import Tuple
+from ..chem.atoms import Element, PeriodicTable
+from ..lcms import Feature
+from .annotation_data import AnnotationData, SimilarityCache
+from collections.abc import Sequence
 
 # name conventions
 # M is used for Molecular mass
 # m for nominal mass
 # p for abundances
+
 
 class EnvelopeFinder(object):
     r"""
@@ -50,10 +52,11 @@ class EnvelopeFinder(object):
 
     def __init__(
         self,
-        elements: List[str],
+        elements: list[str],
         mz_tolerance: float,
         max_length: int = 5,
         min_p: float = 0.01,
+        min_similarity: float = 0.9,
     ):
         """
 
@@ -67,68 +70,105 @@ class EnvelopeFinder(object):
             Maximum envelope length to search.
         min_p : number between 0 and 1.
             The minimum abundance of the isotopes of each element to be used for m/z estimation.
+        min_similarity : float, default=0.9
+            Minimum similarity to create candidates.
+
         """
 
-        elements = [PeriodicTable().get_element(x) for x in elements]
+        el_list = [PeriodicTable().get_element(x) for x in elements]
         self.tolerance = mz_tolerance
         self.max_length = max_length
-        self.bounds = _make_exact_mass_difference_bounds(elements, min_p)
+        self.min_similarity = min_similarity
+        self.bounds = _make_exact_mass_difference_bounds(el_list, min_p)
 
     def find(
-        self, mz: np.ndarray, mmi_index: int, charge: int, valid_indices: Set[int]
-    ) -> List[List[int]]:
+        self,
+        data: AnnotationData,
+        mmi: Feature,
+        charge: int,
+    ) -> list[Sequence[Feature]]:
         """
         Finds isotopic envelope candidates starting from the minimum mass
         isotopologue (MMI).
 
         Parameters
         ----------
-        mz : array
-            sorted array of m/z values
-        mmi_index : int
-            index of the MMI
+        data : AnnotationData
+            List of features sorted by m/z.
+        mmi : Feature
+            Minimum Mass feature.
+        non_annotated : set[Feature]
+            Non annotated features
         charge : int
-            Absolute value of the charge state of the envelope
-        valid_indices : array
-            Indices of `mz` to search candidates.
+            Absolute value of the charge state of the isotopic envelope
 
         Returns
         -------
-        envelopes: List[List[int]]
-            List where each element is a list of indices in `mz` corresponding
-            to an envelope candidate.
+        envelopes: list[list[Feature]]
+            List of isotopic envelope candidates.
 
         """
-        return _find_envelopes(
-            mz, mmi_index, valid_indices, charge, self.max_length,
-            self.tolerance, self.bounds
+        envelopes = _find_envelopes(
+            data.features,
+            mmi,
+            data.non_annotated,
+            data.similarity_cache,
+            charge,
+            self.max_length,
+            self.tolerance,
+            self.min_similarity,
+            self.bounds,
         )
+        envelopes = _remove_sub_candidates(envelopes)
+        return envelopes
+
+
+def _remove_sub_candidates(
+    candidates: list[Sequence[Feature]],
+) -> list[Sequence[Feature]]:
+    """Remove candidates that are subsets of other candidates."""
+    validated = list()
+    while candidates:
+        last = candidates.pop()
+        last_set = set(last)
+        is_subset = False
+        for candidate in candidates:
+            is_subset = last_set <= set(candidate)
+        if not is_subset:
+            validated.append(last)
+    return validated
 
 
 def _find_envelopes(
-    mz: np.ndarray,
-    mmi_index: int,
-    valid_indices: Set,
+    features: Sequence[Feature],
+    mmi: Feature,
+    non_annotated: set[Feature],
+    cache: SimilarityCache,
     charge: int,
     max_length: int,
     mz_tolerance: float,
-    bounds: Dict[int, Tuple[float, float]],
-) -> List[List[int]]:
+    min_similarity: float,
+    bounds: dict[int, Tuple[float, float]],
+) -> list[Sequence[Feature]]:
     """
 
     Finds isotopic envelope candidates using multiple charge states.
 
     Parameters
     ----------
-    mz: array
-        array of sorted m/z values
-    mmi_index: int
-        index of the first isotope in the envelope
+    features: list[Feature]
+        List of features sorted by m/z.
+    mmi: Feature
+        Minimum Mass feature.
+    non_annotated: set[Feature]
+        Non annotated features
     charge: int
         Absolute value of the charge state of the isotopic envelope
     max_length: int
         maximum length ot the isotope candidates
     mz_tolerance: float
+    min_similarity : float, default=0.9
+            Minimum similarity to create candidates.
     bounds: dict
         bounds obtained with _make_m_bounds
 
@@ -140,17 +180,29 @@ def _find_envelopes(
 
     """
     completed_candidates = list()
-    candidates = [[mmi_index]]
+    candidates = [[mmi]]
     while candidates:
+        # remove and extend a candidate
         candidate = candidates.pop()
-        length = len(candidate)
+
+        # find features with compatible m/z and similarities
         min_mz, max_mz = _get_next_mz_search_interval(
-            mz[candidate], bounds, charge, mz_tolerance)
-        start = bisect.bisect(mz, min_mz)
-        end = bisect.bisect(mz, max_mz)
-        new_elements = [x for x in range(start, end) if x in valid_indices]
-        if new_elements and (length < max_length):
-            tmp = [candidate + [x] for x in new_elements]
+            candidate, bounds, charge, mz_tolerance
+        )
+        start = bisect.bisect(features, min_mz)
+        end = bisect.bisect(features, max_mz)
+        new_features = list()
+        for k in range(start, end):
+            k_ft = features[k]
+            is_similar = cache.get_similarity(mmi, k_ft) >= min_similarity
+            is_non_annotated = k_ft in non_annotated
+            if is_similar and is_non_annotated:
+                new_features.append(k_ft)
+
+        # extend candidates with compatible features
+        length = len(candidate)
+        if new_features and (length < max_length):
+            tmp = [candidate + [x] for x in new_features]
             candidates.extend(tmp)
         else:
             completed_candidates.append(candidate)
@@ -159,8 +211,8 @@ def _find_envelopes(
 
 
 def _get_next_mz_search_interval(
-    mz: np.ndarray,
-    elements_mass_difference: Dict[int, Tuple[float, float]],
+    envelope: Sequence[Feature],
+    elements_mass_difference: dict[int, Tuple[float, float]],
     charge: int,
     mz_tolerance: float,
 ) -> Tuple[float, float]:
@@ -188,22 +240,22 @@ def _get_next_mz_search_interval(
     # charge = 1. There is no difference between positive and negative
     # charges
     charge = max(1, abs(charge))
-    length = len(mz)
-    min_mz = mz[-1] + 2    # dummy values
-    max_mz = mz[-1] - 2
+    length = len(envelope)
+    min_mz = envelope[-1].mz + 2  # dummy values
+    max_mz = envelope[-1].mz - 2
     for dm, (min_dM, max_dM) in elements_mass_difference.items():
         i = length - dm
         if i >= 0:
-            min_mz = min(min_mz, mz[i] + min_dM / charge)
-            max_mz = max(max_mz, mz[i] + max_dM / charge)
+            min_mz = min(min_mz, envelope[i].mz + min_dM / charge)
+            max_mz = max(max_mz, envelope[i].mz + max_dM / charge)
     min_mz -= mz_tolerance
     max_mz += mz_tolerance
     return min_mz, max_mz
 
 
 def _make_exact_mass_difference_bounds(
-    elements: List[Element], min_p: float
-) -> Dict[int, Tuple[float, float]]:
+    elements: list[Element], min_p: float
+) -> dict[int, Tuple[float, float]]:
     """
     Computes possible mass differences obtaining from changing one isotope.
 

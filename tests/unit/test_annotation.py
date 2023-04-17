@@ -6,7 +6,7 @@ from tidyms import annotation
 from tidyms.raw_data_utils import make_roi
 from tidyms import _constants as c
 from tidyms.fileio import MSData
-from tidyms.lcms import Peak, LCRoi
+from tidyms.lcms import Peak, LCTrace
 from tidyms.chem import get_chnops_bounds, Formula
 from math import isclose
 
@@ -98,8 +98,7 @@ def test__feature_similarity_same_features():
     roi1 = LCRoi(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
     ft1 = Peak(10, 15, 20)
     min_overlap = 0.5
-    test_result = annotation._feature_similarity_lc(
-        roi1, ft1, roi1, ft1, min_overlap)
+    test_result = annotation._feature_similarity_lc(roi1, ft1, roi1, ft1, min_overlap)
     expected_result = 1.0
     assert isclose(expected_result, test_result)
 
@@ -113,8 +112,7 @@ def test__feature_similarity_non_overlapping_features():
     roi2 = LCRoi(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
     ft2 = Peak(10, 15, 20)
     min_overlap = 0.5
-    test_result = annotation._feature_similarity_lc(
-        roi1, ft1, roi2, ft2, min_overlap)
+    test_result = annotation._feature_similarity_lc(roi1, ft1, roi2, ft2, min_overlap)
     expected_result = 0.0
     assert isclose(expected_result, test_result)
 
@@ -128,8 +126,7 @@ def test__feature_similarity_non_overlapping_features_ft1_starts_after_ft2():
     roi2 = LCRoi(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
     ft2 = Peak(10, 15, 20)
     min_overlap = 0.5
-    test_result = annotation._feature_similarity_lc(
-        roi1, ft1, roi2, ft2, min_overlap)
+    test_result = annotation._feature_similarity_lc(roi1, ft1, roi2, ft2, min_overlap)
     expected_result = 0.0
     assert isclose(expected_result, test_result)
 
@@ -147,7 +144,7 @@ def annotator():
         "max_M_tol": 0.01,
         "p_tol": 0.05,
         "min_similarity": 0.9,
-        "min_p": 0.01
+        "min_p": 0.01,
     }
     return annotation.create_annotator(**params)
 
@@ -166,13 +163,7 @@ def test_annotate_empty_feature_table(annotator):
 
 @pytest.fixture
 def compound_data():
-    compounds = [
-        "[C10H20O2]-",
-        "[C10H20SO3]-",
-        "[C20H40SO5]2-",
-        "[C18H19N2O3]-",
-        "[C18H20N2O3Cl]-"
-    ]
+    compounds = ["[C10H20O2]-", "[C10H20SO3]-", "[C20H40SO5]2-", "[C18H19N2O3]-", "[C18H20N2O3Cl]-"]
     rt_list = [50, 75, 150, 200, 200]
     amp_list = [1000, 2000, 3000, 2500, 2500]
     return compounds, rt_list, amp_list
@@ -195,12 +186,9 @@ def simulated_data(compound_data):
         mz_params.append(cmz)
     mz_params = np.vstack(mz_params)
     rt_params = np.vstack(rt_params)
-    ms_data = MSData.create_MSData_instance(mz_values = mz_grid, 
-                                            rt_values = rt_grid, 
-                                            mz_params = mz_params, 
-                                            rt_params = rt_params, 
-                                            data_import_mode = "simulated",                                             
-                                            noise=0.025)
+    ms_data = MSData.create_MSData_instance(
+        mz_values=mz_grid, rt_values=rt_grid, mz_params=mz_params, rt_params=rt_params, data_import_mode="simulated", noise=0.025
+    )
 
     roi_list = make_roi(ms_data, tolerance=0.01)
     ft_list = list()

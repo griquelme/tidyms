@@ -15,7 +15,7 @@ __tidyMSdartmsVersion__ = "0.8.0"
 
 from . import fileio, _constants
 from . import assay as Assay
-from .chem import Formula
+from .chem._formula_generator import FormulaGenerator
 
 import numpy as np
 

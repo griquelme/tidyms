@@ -13,11 +13,7 @@ def test_get_fill_area_no_peaks_detected(monkeypatch):
     def mock_extract_features(self, **kwargs):
         self.features = list()
 
-    monkeypatch.setattr(
-        ms.Chromatogram,
-        "extract_features",
-        mock_extract_features
-    )
+    monkeypatch.setattr(ms.Chromatogram, "extract_features", mock_extract_features)
 
     area = ms.fill_missing._get_fill_area(chromatogram, rt, rt_std, n_dev)
     assert area is None
@@ -32,13 +28,9 @@ def test_get_fill_area_peak_detected_outside_valid_range(monkeypatch):
     n_dev = 1
 
     def mock_extract_features(self, **kwargs):
-        self.features = [ms.lcms.Peak(70, 75, 80)]
+        self.features = [ms.lcms.Peak(70, 75, 80, self)]
 
-    monkeypatch.setattr(
-        ms.Chromatogram,
-        "extract_features",
-        mock_extract_features
-    )
+    monkeypatch.setattr(ms.Chromatogram, "extract_features", mock_extract_features)
 
     area = ms.fill_missing._get_fill_area(chromatogram, rt, rt_std, n_dev)
     assert area is None
@@ -52,17 +44,13 @@ def test_get_fill_area_peak_detected_inside_valid_range(monkeypatch):
     rt = 50
     rt_std = 10
     n_dev = 1
-    test_peak = ms.lcms.Peak(50, 55, 60)
-    expected_area = test_peak.get_area(chromatogram)
+    test_peak = ms.lcms.Peak(50, 55, 60, chromatogram)
+    expected_area = test_peak.get_area()
 
     def mock_extract_features(self, **kwargs):
         self.features = [test_peak]
 
-    monkeypatch.setattr(
-        ms.Chromatogram,
-        "extract_features",
-        mock_extract_features
-    )
+    monkeypatch.setattr(ms.Chromatogram, "extract_features", mock_extract_features)
 
     area = ms.fill_missing._get_fill_area(chromatogram, rt, rt_std, n_dev)
     assert np.isclose(area, expected_area)
@@ -76,18 +64,14 @@ def test_get_fill_area_multiple_valid_peaks_choose_closest(monkeypatch):
     rt = 50
     rt_std = 10
     n_dev = 1
-    valid_peak = ms.lcms.Peak(45, 50, 52)
-    detected_peaks = [valid_peak, ms.lcms.Peak(55, 60, 65)]
-    expected_area = valid_peak.get_area(chromatogram)
+    valid_peak = ms.lcms.Peak(45, 50, 52, chromatogram)
+    detected_peaks = [valid_peak, ms.lcms.Peak(55, 60, 65, chromatogram)]
+    expected_area = valid_peak.get_area()
 
     def mock_extract_features(self, **kwargs):
         self.features = detected_peaks
 
-    monkeypatch.setattr(
-        ms.Chromatogram,
-        "extract_features",
-        mock_extract_features
-    )
+    monkeypatch.setattr(ms.Chromatogram, "extract_features", mock_extract_features)
 
     area = ms.fill_missing._get_fill_area(chromatogram, rt, rt_std, n_dev)
     assert np.isclose(area, expected_area)
