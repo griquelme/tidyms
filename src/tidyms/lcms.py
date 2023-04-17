@@ -96,9 +96,7 @@ class MSSpectrum:
             msg = "{} is not a valid instrument. Valid values are: {}."
             raise ValueError(msg.format(value, c.MS_INSTRUMENTS))
 
-    def find_centroids(
-        self, min_snr: float = 10.0, min_distance: Optional[float] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def find_centroids(self, min_snr: float = 10.0, min_distance: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray]:
         r"""
         Find centroids in the spectrum.
 
@@ -137,27 +135,19 @@ class MSSpectrum:
             area = area[ord]
         return centroid, area
 
-    def get_closest_mz(
-        self, 
-        mz: float = 100.,
-        max_offset_absolute = 0.001
-    ) -> Tuple[int, float, float, float, float]:
+    def get_closest_mz(self, mz: float = 100.0, max_offset_absolute=0.001) -> Tuple[int, float, float, float, float]:
         ind = np.argmin(np.abs(self.mz - mz))
         if abs(self.mz[ind] - mz) <= max_offset_absolute:
-            return ind, self.mz[ind], self.mz[ind] - mz, (self.mz[ind] - mz) / mz * 1E6, self.spint[ind]
+            return ind, self.mz[ind], self.mz[ind] - mz, (self.mz[ind] - mz) / mz * 1e6, self.spint[ind]
         return None, None, None, None, None
 
-    def get_most_abundant_signal_in_range(
-        self, 
-        mz: float = 100.,
-        max_offset_absolute = 0.001
-    ) -> Tuple[int, float, float, float, float]:
+    def get_most_abundant_signal_in_range(self, mz: float = 100.0, max_offset_absolute=0.001) -> Tuple[int, float, float, float, float]:
         inds = np.abs(self.mz - mz) <= max_offset_absolute
         if np.sum(inds) > 0:
-            inds = np.argwhere(inds)[:,0]
+            inds = np.argwhere(inds)[:, 0]
             maxIntInd = np.argmax(self.spint[inds])
             ind = inds[maxIntInd]
-            return ind, self.mz[ind], self.mz[ind] - mz, (self.mz[ind] - mz) / mz * 1E6, self.spint[ind]
+            return ind, self.mz[ind], self.mz[ind] - mz, (self.mz[ind] - mz) / mz * 1e6, self.spint[ind]
         return None, None, None, None, None
 
     def plot(
@@ -363,9 +353,7 @@ class MZTrace(Roi):
 
         missing = np.isnan(self.spint)
         if missing.any():
-            interpolator = interp1d(
-                self.time[~missing], self.spint[~missing], assume_sorted=True, **kwargs
-            )
+            interpolator = interp1d(self.time[~missing], self.spint[~missing], assume_sorted=True, **kwargs)
             sp_max = np.nanmax(self.spint)
             sp_min = np.nanmin(self.spint)
             self.spint[missing] = interpolator(self.time[missing])
@@ -481,18 +469,14 @@ class LCTrace(MZTrace):
         baseline = peaks.estimate_baseline(x, noise)
         start, apex, end = peaks.detect_peaks(x, noise, baseline, **kwargs)
         n_peaks = start.size
-        features = [
-            Peak(s, a, e, self, i) for s, a, e, i in zip(start, apex, end, range(n_peaks))
-        ]
+        features = [Peak(s, a, e, self, i) for s, a, e, i in zip(start, apex, end, range(n_peaks))]
 
         self.features = features
         self.baseline = baseline
         self.noise = noise
         return features
 
-    def plot(
-        self, figure: Optional[bokeh.plotting.figure] = None, show: bool = True
-    ) -> bokeh.plotting.figure:  # pragma: no cover
+    def plot(self, figure: Optional[bokeh.plotting.figure] = None, show: bool = True) -> bokeh.plotting.figure:  # pragma: no cover
         """
         Plot the ROI.
 
@@ -556,9 +540,7 @@ class Chromatogram(LCTrace):
     mz: Optional[np.ndarray]
     scan: Optional[np.ndarray]
 
-    def __init__(
-        self, time: np.ndarray, spint: np.ndarray, index: int = 0, mode: str = c.UPLC
-    ):
+    def __init__(self, time: np.ndarray, spint: np.ndarray, index: int = 0, mode: str = c.UPLC):
         super(Chromatogram, self).__init__(time, spint, spint, spint, index, mode)
         self.mz = None
         self.scan = None
@@ -825,9 +807,7 @@ class Peak(Feature):
         width : positive number.
 
         """
-        height = (
-            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
-        )
+        height = self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
         area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
             relative_area = area / area[-1]
