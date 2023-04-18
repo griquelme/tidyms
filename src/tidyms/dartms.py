@@ -4542,6 +4542,15 @@ class DartMSAssay:
     #
 
     def get_summary_of_results(self, reference_features=None, reference_features_allowed_deviationPPM=20.0):
+        """Show a summary of the results.
+
+        Args:
+            reference_features (list of float, optional): reference mz values to be used. Defaults to None.
+            reference_features_allowed_deviationPPM (float, optional): allowed mz deviation. Defaults to 20.0.
+
+        Returns:
+            _type_: _description_
+        """        
         if reference_features is None:
             reference_features = []
 
@@ -4587,7 +4596,11 @@ class DartMSAssay:
 
     @staticmethod
     def generate_database_template(to_tsv_file):
-        with open(to_tsv_file, "w") as fout:
+        """Generates a template for the database search
+
+        Args:
+            to_tsv_file (str): file to which the template shall be written
+        """        with open(to_tsv_file, "w") as fout:
             fout.write("\t".join(["_ID", "CompoundName", "InChi", "SMILES", "ChemicalFormula", "Adducts", "MZ", "IonMode"]))
             fout.write("\n")
             fout.write("# Lines starting with the hash (#) symbol are comments")
@@ -4619,6 +4632,16 @@ class DartMSAssay:
             fout.write("\n")
 
     def annotate_with_compounds(self, tsv_file, max_ppm_dev=15.0, adducts=None, delimiter="\t", quote_character="", comment_character="#"):
+        """Annotation of detected features with compounds from a database.
+
+        Args:
+            tsv_file (str): Path to a tab-separated file containing the database.
+            max_ppm_dev (float, optional): Maximum allowed mz difference in ppm relative to the theoretical value. Defaults to 15.0.
+            adducts (dict, optional): key: stri, value: tuple of (charge number, mz increment). Defaults to None.
+            delimiter (str, optional): delimter character of the database. Defaults to "\t".
+            quote_character (str, optional): quote character of the database. Defaults to "".
+            comment_character (str, optional): comment character of the database (not allowed in first row/header). Defaults to "#".
+        """        
         tempAdducts = {
             "[M+H]+": (1, 1.007276),
             "[M+Na]+": (1, 22.989218),
