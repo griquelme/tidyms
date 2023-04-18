@@ -14,6 +14,26 @@ import json
 
 @dataclass
 class Sample:
+    """
+    Sample class to manage iteration over MSData objects.
+
+    Attributes
+    -------
+    path : Path or str
+        Path to a raw data file.
+    id : str
+        Sample name.
+    ms_level : int, default=1
+        MS level of data to use.
+    start: float or None, default=None
+        Minimum acquisition time of MS scans to include. If ``None``, start from the first scan.
+    end: float or None, default=None
+        Maximum acquisition time of MS scans to include. If ``None``, end at the last scan.
+    group : str, default=""
+        Sample group.
+
+    """
+
     path: Union[Path, str]
     id: str
     ms_level: int = 1
@@ -38,12 +58,22 @@ Base = declarative_base()
 
 
 class ProcessParameterModel(Base):
+    """
+    Model for the Table with processing parameters of the Assay.
+
+    """
+
     __tablename__ = "parameters"
     step: Mapped[str] = mapped_column(String, primary_key=True)
     parameters: Mapped[str] = mapped_column(String)
 
 
 class SampleModel(Base):
+    """
+    Model for Sample objects included in the Assay.
+
+    """
+
     __tablename__ = "samples"
     id: Mapped[str] = mapped_column(String, primary_key=True)
     path: Mapped[str] = mapped_column(String, nullable=False)
@@ -56,6 +86,11 @@ class SampleModel(Base):
 
 
 class ProcessedSampleModel(Base):
+    """
+    Model to record Samples processed in the different preprocessing stages.
+
+    """
+
     __tablename__ = "processed_samples"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sample_id: Mapped[str] = mapped_column(String, ForeignKey("samples.id"))
@@ -63,6 +98,11 @@ class ProcessedSampleModel(Base):
 
 
 class RoiModel(Base):
+    """
+    Model for ROI extracted in each Sample.
+
+    """
+
     __tablename__ = "rois"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
@@ -77,6 +117,11 @@ class RoiModel(Base):
 
 
 class FeatureModel(Base):
+    """
+    Model for Features extracted in each ROI.
+
+    """
+
     __tablename__ = "features"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
@@ -88,6 +133,11 @@ class FeatureModel(Base):
 
 
 class AnnotationModel(Base):
+    """
+    Model for annotations of each Feature.
+
+    """
+
     __tablename__ = "annotations"
     id: Mapped[int] = mapped_column(
         ForeignKey("features.id"), primary_key=True, autoincrement=True
@@ -111,6 +161,23 @@ class AnnotationModel(Base):
 
 
 def _create_descriptor_table(feature_type: Type[Feature], metadata: MetaData):
+    """
+    Creates a Model for descriptors of features.
+
+    The table is created using available descriptors from the Feature class.
+
+    Parameters
+    ----------
+    feature_type : Type[Feature]
+        The Feature class used in the Assay.
+    metadata : MetaData
+        DB Metadata.
+
+    Returns
+    -------
+    DescriptorModel: Base
+
+    """
     table_name = "descriptors"
 
     columns = [
@@ -128,6 +195,10 @@ def _create_descriptor_table(feature_type: Type[Feature], metadata: MetaData):
 
 
 class AssayData:
+    """
+    Manages Sample, Roi and Feature persistence in an Assay.
+
+    """
 
     DescriptorModel: Type
 
