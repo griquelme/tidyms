@@ -41,6 +41,32 @@ AnyRoi = TypeVar("AnyRoi", bound="Roi")
 AnyFeature = TypeVar("AnyFeature", bound="Feature")
 
 
+@dataclass
+class Annotation:
+    """
+    Contains annotation information of features.
+
+    If an annotation is not available, ``-1`` is used.
+
+    Attributes
+    ----------
+    label : int
+        Correspondence label of features.
+    isotopologue_label : int
+        Groups features from the same isotopic envelope.
+    isotopologue_index : int
+        Position of the feature in an isotopic envelope.
+    charge : int
+        Charge state.
+
+    """
+
+    label: int = -1
+    isotopologue_label: int = -1
+    isotopologue_index: int = -1
+    charge: int = -1
+
+
 class MSSpectrum:
     """
     Representation of a Mass Spectrum. Manages conversion to
@@ -183,8 +209,8 @@ class Roi(ABC):
 
     """
 
-    def __init__(self, index: int):
-        self.index = index
+    def __init__(self):
+        self.id = -1
         self.features: Optional[list[Feature]] = None
 
     def plot(self) -> bokeh.plotting.figure:
@@ -264,12 +290,11 @@ class MZTrace(Roi):
         spint: np.ndarray[Any, np.dtype[np.floating]],
         mz: np.ndarray[Any, np.dtype[np.floating]],
         scan: np.ndarray[Any, np.dtype[np.integer]],
-        index: int = 0,
         mode: Optional[str] = None,
         noise: Optional[np.ndarray] = None,
         baseline: Optional[np.ndarray] = None,
     ):
-        super().__init__(index)
+        super().__init__()
         self.mode = mode
         self.time = time
         self.spint = spint
@@ -300,7 +325,6 @@ class MZTrace(Roi):
 
         """
         d = dict()
-        d["index"] = self.index
         d[c.MODE] = self.mode
         d[c.TIME] = array1d_to_str(self.time)
         d[c.SPINT] = array1d_to_str(self.spint)
@@ -381,12 +405,11 @@ class LCTrace(MZTrace):
         spint: np.ndarray[Any, np.dtype[np.floating]],
         mz: np.ndarray[Any, np.dtype[np.floating]],
         scan: np.ndarray[Any, np.dtype[np.integer]],
-        index: int = 0,
         mode: Optional[str] = c.UPLC,
         noise: Optional[np.ndarray] = None,
         baseline: Optional[np.ndarray] = None,
     ):
-        super().__init__(time, spint, mz, scan, index, mode, noise, baseline)
+        super().__init__(time, spint, mz, scan, mode, noise, baseline)
 
     @property
     def mode(self):
@@ -456,8 +479,7 @@ class LCTrace(MZTrace):
         start, apex, end = peaks.detect_peaks(x, noise, baseline, **kwargs)
         n_peaks = start.size
         features = [
-            Peak(s, a, e, self, i)
-            for s, a, e, i in zip(start, apex, end, range(n_peaks))
+            Peak(s, a, e, self, i) for s, a, e, i in zip(start, apex, end, range(n_peaks))
         ]
 
         self.features = features
@@ -543,7 +565,7 @@ class Chromatogram(LCTrace):
     def __init__(
         self, time: np.ndarray, spint: np.ndarray, index: int = 0, mode: str = c.UPLC
     ):
-        super(Chromatogram, self).__init__(time, spint, spint, spint, index, mode)
+        super(Chromatogram, self).__init__(time, spint, spint, spint, mode)
         self.mz = None
         self.scan = None
 
@@ -570,15 +592,15 @@ class Feature(ABC):
 
     """
 
-    _descriptors = None
-
-    def __init__(self, roi: Roi, index: int = 0):
+    def __init__(self, roi: Roi, annotation: Optional[Annotation] = None):
         self.roi = roi
         self._mz = None
         self._area = None
         self._height = None
-        self.annotation = Annotation(-1, -1, -1, -1)
-        self.index = index
+        if annotation is None:
+            annotation = Annotation()
+        self.annotation = annotation
+        self.index = -1
 
     @property
     def mz(self) -> float:
@@ -649,9 +671,9 @@ class Feature(ABC):
         ...
 
     @classmethod
-    def from_str(cls, s: str, roi: Roi) -> "Feature":
+    def from_str(cls, s: str, roi: Roi, annotation: Optional[Annotation]) -> "Feature":
         d = cls._deserialize(s)
-        return cls(roi=roi, **d)
+        return cls(roi=roi, annotation=annotation, **d)
 
     @staticmethod
     @abstractmethod
@@ -670,14 +692,7 @@ class Feature(ABC):
 
     @classmethod
     def descriptor_names(cls) -> list[str]:
-        if cls._descriptors is None:
-            descriptors = [
-                x.split("_", 1)[-1] for x in cls.__dict__ if x.startswith("get_")
-            ]
-            cls._descriptors = descriptors
-        else:
-            descriptors = cls._descriptors
-        return descriptors
+        return [x.split("_", 1)[-1] for x in dir(cls) if x.startswith("get_")]
 
 
 class Peak(Feature):
@@ -702,7 +717,14 @@ class Peak(Feature):
 
     roi: LCTrace
 
-    def __init__(self, start: int, apex: int, end: int, roi: LCTrace, index: int = 0):
+    def __init__(
+        self,
+        start: int,
+        apex: int,
+        end: int,
+        roi: LCTrace,
+        annotation: Optional[Annotation] = None,
+    ):
         try:
             assert start < end
             assert start < apex
@@ -710,18 +732,13 @@ class Peak(Feature):
         except AssertionError:
             msg = "start must be lower than loc and loc must be lower than end"
             raise InvalidPeakException(msg)
-        super().__init__(roi, index)
+        super().__init__(roi, annotation)
         self.start = int(start)
         self.end = int(end)
         self.apex = int(apex)
 
     def to_str(self) -> str:
-        d = {
-            c.START: self.start,
-            c.APEX: self.apex,
-            c.END: self.end,
-            "index": self.index,
-        }
+        d = {c.START: self.start, c.APEX: self.apex, c.END: self.end}
         s = json.dumps(d)
         return s
 
@@ -828,8 +845,7 @@ class Peak(Feature):
 
         """
         height = (
-            self.roi.spint[self.start : self.end]
-            - self.roi.baseline[self.start : self.end]
+            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
         )
         area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
@@ -929,40 +945,12 @@ class Peak(Feature):
                 end = bisect.bisect(ft.roi.scan, scan_end)
                 apex = (start + end) // 2  # dummy value
                 tmp_peak = Peak(start, apex, end, ft.roi)
-                p_area = trapz(
-                    tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end]
-                )
+                p_area = trapz(tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end])
                 p.append(p_area)
                 mz.append(tmp_peak.mz)
         total_area = sum(p)
         p = [x / total_area for x in p]
         return mz, p
-
-
-@dataclass
-class Annotation:
-    """
-    Contains annotation information of features.
-
-    If an annotation is not available, ``-1`` is used.
-
-    Attributes
-    ----------
-    label : int
-        Correspondence label of features.
-    isotopologue_label : int
-        Groups features from the same isotopic envelope.
-    isotopologue_index : int
-        Position of the feature in an isotopic envelope.
-    charge : int
-        Charge state.
-
-    """
-
-    label: int
-    isotopologue_label: int
-    isotopologue_index: int
-    charge: int
 
 
 def get_find_centroid_params(instrument: str) -> dict:

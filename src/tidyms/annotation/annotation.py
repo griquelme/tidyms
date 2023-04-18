@@ -24,7 +24,7 @@ def create_annotation_table(feature_list: list[Feature]) -> pd.DataFrame:
         d[c.CHARGE].append(annotation.charge)
         d[c.ENVELOPE_INDEX].append(annotation.isotopologue_index)
         d[c.ENVELOPE_LABEL].append(annotation.isotopologue_label)
-        d[c.ROI_INDEX].append(ft.roi.index)
+        d[c.ROI_INDEX].append(ft.roi.id)
         d[c.FT_INDEX].append(ft.index)
 
     return pd.DataFrame(d)

@@ -76,7 +76,7 @@ def feature_list(compound_data) -> list[Peak]:
     ft_list = list()
     for k, r in enumerate(roi_list):
         r.extract_features()
-        r.index = k
+        r.id = k
         if r.features:
             for j, ft in enumerate(r.features):
                 ft.index = j
