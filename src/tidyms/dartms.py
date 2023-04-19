@@ -31,7 +31,7 @@ import os
 from pathlib import Path
 import datetime
 import functools
-import bs4
+import bs4  ## beautifulsoup4 for writing mzML files
 import random
 import dill
 from copy import deepcopy

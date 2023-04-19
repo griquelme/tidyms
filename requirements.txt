@@ -14,3 +14,9 @@ seaborn>=0.12
 statsmodels>=0.13
 tqdm>=4.0
 xlrd>=2.0
+
+plotnine>=0.10.1
+natsort>=8.2.0
+beautifulsoup>=4.11.2
+dill>=0.3.6
+umap-learn>=0.5.3

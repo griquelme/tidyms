@@ -1,6 +1,6 @@
 PACKAGE_NAME = "tidyms"
 VERSION = "0.6.2"
-LICENSE = 'BSD (3-clause)'
+LICENSE = "BSD (3-clause)"
 AUTHOR = "Bioanalytical Mass Spectrometry Group at CIBION-CONICET"
 AUTHOR_EMAIL = "griquelme.chm@gmail.com"
 MAINTAINER = "Gabriel Riquelme"
@@ -16,7 +16,7 @@ CLASSIFIERS = [
     "License :: OSI Approved :: BSD License",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Chemistry",
-    "Topic :: Scientific/Engineering :: Medical Science Apps."
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
 
 PYTHON_REQUIRES = ">=3.9"
@@ -37,12 +37,18 @@ INSTALL_REQUIRES = [
     "seaborn>=0.11",
     "statsmodels>=0.13",
     "tqdm>=4.0",
-    "xlrd>=2.0"
+    "xlrd>=2.0",
+    "plotnine>=0.10.1",
+    "natsort>=8.2.0",
+    "beautifulsoup>=4.11.2",
+    "dill>=0.3.6",
+    "umap-learn>=0.5.3",
 ]
 
 if __name__ == "__main__":
     from setuptools import setup, find_packages
     from sys import version_info
+
     # from Cython.Build import cythonize
 
     if version_info[:2] < (3, 9):
@@ -52,21 +58,22 @@ if __name__ == "__main__":
     # ext_modules = cythonize(["tidyms/chem/*.pyx"],
     #                         compiler_directives={'language_level': "3"})
 
-    setup(name=PACKAGE_NAME,
-          version=VERSION,
-          author=AUTHOR,
-          author_email=AUTHOR_EMAIL,
-          maintainer=MAINTAINER,
-          maintainer_email=MAINTAINER_EMAIL,
-          license=LICENSE,
-          description=DESCRIPTION,
-          long_description=LONG_DESCRIPTION,
-          long_description_content_type=LONG_DESCRIPTION_CONTENT_TYPE,
-          url=URL,
-          classifiers=CLASSIFIERS,
-          packages=find_packages(),
-          python_requires=PYTHON_REQUIRES,
-          install_requires=INSTALL_REQUIRES,
-          include_package_data=True,
-          # ext_modules=ext_modules
+    setup(
+        name=PACKAGE_NAME,
+        version=VERSION,
+        author=AUTHOR,
+        author_email=AUTHOR_EMAIL,
+        maintainer=MAINTAINER,
+        maintainer_email=MAINTAINER_EMAIL,
+        license=LICENSE,
+        description=DESCRIPTION,
+        long_description=LONG_DESCRIPTION,
+        long_description_content_type=LONG_DESCRIPTION_CONTENT_TYPE,
+        url=URL,
+        classifiers=CLASSIFIERS,
+        packages=find_packages(),
+        python_requires=PYTHON_REQUIRES,
+        install_requires=INSTALL_REQUIRES,
+        include_package_data=True,
+        # ext_modules=ext_modules
     )
