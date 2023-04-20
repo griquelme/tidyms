@@ -479,7 +479,7 @@ class LCTrace(MZTrace):
         start, apex, end = peaks.detect_peaks(x, noise, baseline, **kwargs)
         n_peaks = start.size
         features = [
-            Peak(s, a, e, self, i) for s, a, e, i in zip(start, apex, end, range(n_peaks))
+            Peak(s, a, e, self) for s, a, e, i in zip(start, apex, end, range(n_peaks))
         ]
 
         self.features = features
@@ -671,7 +671,9 @@ class Feature(ABC):
         ...
 
     @classmethod
-    def from_str(cls, s: str, roi: Roi, annotation: Optional[Annotation]) -> "Feature":
+    def from_str(
+        cls, s: str, roi: Roi, annotation: Optional[Annotation] = None
+    ) -> "Feature":
         d = cls._deserialize(s)
         return cls(roi=roi, annotation=annotation, **d)
 
@@ -845,7 +847,8 @@ class Peak(Feature):
 
         """
         height = (
-            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
+            self.roi.spint[self.start : self.end]
+            - self.roi.baseline[self.start : self.end]
         )
         area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
@@ -945,7 +948,9 @@ class Peak(Feature):
                 end = bisect.bisect(ft.roi.scan, scan_end)
                 apex = (start + end) // 2  # dummy value
                 tmp_peak = Peak(start, apex, end, ft.roi)
-                p_area = trapz(tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end])
+                p_area = trapz(
+                    tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end]
+                )
                 p.append(p_area)
                 mz.append(tmp_peak.mz)
         total_area = sum(p)
