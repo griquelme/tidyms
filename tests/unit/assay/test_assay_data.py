@@ -6,9 +6,9 @@ import pytest
 from typing import cast
 
 
-def create_dummy_sample(path: Path, suffix: int) -> Sample:
+def create_dummy_sample(path: Path, suffix: int, group: str = "") -> Sample:
     file = path / f"sample-{suffix}.mzML"
-    sample = Sample(path=str(file), id=file.stem)
+    sample = Sample(path=str(file), id=file.stem, group=group)
     return sample
 
 
@@ -22,13 +22,16 @@ def create_dummy_lc_trace():
     return LCTrace(time, spint, mz, scans, noise=noise, baseline=baseline)
 
 
-def add_dummy_peaks(lc_trace: LCTrace, n: int):
-    features = list()
-    for k in range(n):
-        annotation = Annotation(label=k)
-        ft = Peak(0, 1, 2, lc_trace, annotation)
-        features.append(ft)
-    lc_trace.features = features
+def add_dummy_peaks(lc_trace_list: list[LCTrace], n: int):
+    label_counter = 0
+    for lc_trace in lc_trace_list:
+        features = list()
+        for _ in range(n):
+            annotation = Annotation(label=label_counter)
+            ft = Peak(0, 1, 2, lc_trace, annotation)
+            features.append(ft)
+            label_counter += 1
+        lc_trace.features = features
 
 
 def test_create_AssayData():
@@ -250,8 +253,7 @@ def test_AssayData_add_features(tmp_path: Path):
     assay_data.add_roi_list(roi_list, sample)
 
     # add features
-    for roi in roi_list:
-        add_dummy_peaks(roi, 2)
+    add_dummy_peaks(roi_list, 2)
     assay_data.add_features(roi_list, sample)
 
 
@@ -270,15 +272,14 @@ def test_AssayData_get_features_by_sample(tmp_path: Path):
     roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample))
 
     # add features
-    for roi in roi_list:
-        add_dummy_peaks(roi, 2)
+    add_dummy_peaks(roi_list, 2)
     assay_data.add_features(roi_list, sample)
 
     expected_feature_list: list[Peak] = list()
     for roi in roi_list:
         expected_feature_list.extend(roi.features)
 
-    test_feature_list = cast(list[Peak], assay_data.get_features(sample))
+    test_feature_list = cast(list[Peak], assay_data.get_features_by_sample(sample))
 
     assert len(test_feature_list) == len(expected_feature_list)
     for eft, tft in zip(expected_feature_list, test_feature_list):
@@ -294,25 +295,62 @@ def test_AssayData_get_features_by_label(tmp_path: Path):
     # add roi and features for sample 1
     sample1 = create_dummy_sample(tmp_path, 1)
     assay_data.add_samples([sample1])
-    roi_list = [create_dummy_lc_trace() for _ in range(0)]
+    roi_list = [create_dummy_lc_trace() for _ in range(10)]
     assay_data.add_roi_list(roi_list, sample1)
-    for roi in roi_list:
-        add_dummy_peaks(roi, 2)
+
+    # use roi list with indices
+    roi_list = assay_data.get_roi_list(sample1)
+
+    add_dummy_peaks(cast(list[LCTrace], roi_list), 2)
     assay_data.add_features(roi_list, sample1)
 
     # add roi and features for sample 1
     sample2 = create_dummy_sample(tmp_path, 2)
     assay_data.add_samples([sample2])
-    roi_list = [create_dummy_lc_trace() for _ in range(0)]
+    roi_list = [create_dummy_lc_trace() for _ in range(10)]
     assay_data.add_roi_list(roi_list, sample2)
-    for roi in roi_list:
-        add_dummy_peaks(roi, 2)
+    roi_list = assay_data.get_roi_list(sample2)
+    add_dummy_peaks(cast(list[LCTrace], roi_list), 2)
     assay_data.add_features(roi_list, sample2)
 
     test_label = 1
-    test_feature_list = cast(list[Peak], assay_data.get_features(label=test_label))
+    test_feature_list = cast(list[Peak], assay_data.get_features_by_label(test_label))
 
     assert len(test_feature_list) == 2
+    for ft in test_feature_list:
+        assert ft.annotation.label == test_label
+
+
+def test_AssayData_get_features_by_label_specify_group(tmp_path: Path):
+    assay_data = AssayData("", LCTrace, Peak)
+
+    # add roi and features for sample 1
+    sample1 = create_dummy_sample(tmp_path, 1, group="group-1")
+    assay_data.add_samples([sample1])
+    roi_list = [create_dummy_lc_trace() for _ in range(10)]
+    assay_data.add_roi_list(roi_list, sample1)
+
+    # use roi list with indices
+    roi_list = assay_data.get_roi_list(sample1)
+
+    add_dummy_peaks(cast(list[LCTrace], roi_list), 2)
+    assay_data.add_features(roi_list, sample1)
+
+    # add roi and features for sample 1
+    sample2 = create_dummy_sample(tmp_path, 2, group="group-2")
+    assay_data.add_samples([sample2])
+    roi_list = [create_dummy_lc_trace() for _ in range(10)]
+    assay_data.add_roi_list(roi_list, sample2)
+    roi_list = assay_data.get_roi_list(sample2)
+    add_dummy_peaks(cast(list[LCTrace], roi_list), 2)
+    assay_data.add_features(roi_list, sample2)
+
+    test_label = 1
+    test_feature_list = cast(
+        list[Peak], assay_data.get_features_by_label(test_label, groups=["group-1"])
+    )
+
+    assert len(test_feature_list) == 1
     for ft in test_feature_list:
         assert ft.annotation.label == test_label
 
@@ -346,11 +384,11 @@ def test_AssayData_get_features_by_sample_no_features(tmp_path: Path):
     # rois do not have features
     assay_data.add_features(roi_list, sample)
 
-    test_features = assay_data.get_features(sample)
+    test_features = assay_data.get_features_by_sample(sample)
     assert len(test_features) == 0
 
 
-def test_AssayData_get_descriptors_one_samples(tmp_path: Path):
+def test_AssayData_get_descriptors_one_sample(tmp_path: Path):
     assay_data = AssayData("", LCTrace, Peak)
 
     # add samples
@@ -367,8 +405,7 @@ def test_AssayData_get_descriptors_one_samples(tmp_path: Path):
     roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample1))
 
     # add features
-    for roi in roi_list:
-        add_dummy_peaks(roi, 2)
+    add_dummy_peaks(roi_list, 2)
 
     assay_data.add_features(roi_list, sample1)
 
@@ -376,8 +413,7 @@ def test_AssayData_get_descriptors_one_samples(tmp_path: Path):
     roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample2))
 
     # add features
-    for roi in roi_list:
-        add_dummy_peaks(roi, 2)
+    add_dummy_peaks(roi_list, 2)
     assay_data.add_features(roi_list, sample2)
 
     descriptors = assay_data.get_descriptors(sample1)
@@ -402,8 +438,7 @@ def test_AssayData_get_descriptors_all_samples(tmp_path: Path):
     roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample1))
 
     # add features
-    for roi in roi_list:
-        add_dummy_peaks(roi, 2)
+    add_dummy_peaks(roi_list, 2)
 
     assay_data.add_features(roi_list, sample1)
 
@@ -411,10 +446,113 @@ def test_AssayData_get_descriptors_all_samples(tmp_path: Path):
     roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample2))
 
     # add features
-    for roi in roi_list:
-        add_dummy_peaks(roi, 2)
+    add_dummy_peaks(roi_list, 2)
     assay_data.add_features(roi_list, sample2)
 
     descriptors = assay_data.get_descriptors()
     for v in descriptors.values():
         assert len(v) == 40
+
+
+def test_AssayData_get_descriptors_invalid_descriptors(tmp_path: Path):
+    assay_data = AssayData("", LCTrace, Peak)
+
+    # add samples
+    sample1 = create_dummy_sample(tmp_path, 1)
+    sample2 = create_dummy_sample(tmp_path, 2)
+    assay_data.add_samples([sample1, sample2])
+
+    # add roi
+    roi_list = [create_dummy_lc_trace() for _ in range(10)]
+    assay_data.add_roi_list(roi_list, sample1)
+    assay_data.add_roi_list(roi_list, sample2)
+
+    # roi_list with roi.id values
+    roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample1))
+
+    # add features
+    add_dummy_peaks(roi_list, 2)
+
+    assay_data.add_features(roi_list, sample1)
+
+    # roi_list with roi.id values
+    roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample2))
+
+    # add features
+    add_dummy_peaks(roi_list, 2)
+    assay_data.add_features(roi_list, sample2)
+
+    requested_descriptors = ["mz", "invalid_descriptor"]
+    with pytest.raises(ValueError):
+        assay_data.get_descriptors(sample1, descriptors=requested_descriptors)
+
+
+def test_AssayData_get_descriptors_descriptors_subset(tmp_path: Path):
+    assay_data = AssayData("", LCTrace, Peak)
+
+    # add samples
+    sample1 = create_dummy_sample(tmp_path, 1)
+    sample2 = create_dummy_sample(tmp_path, 2)
+    assay_data.add_samples([sample1, sample2])
+
+    # add roi
+    roi_list = [create_dummy_lc_trace() for _ in range(10)]
+    assay_data.add_roi_list(roi_list, sample1)
+    assay_data.add_roi_list(roi_list, sample2)
+
+    # roi_list with roi.id values
+    roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample1))
+
+    # add features
+    add_dummy_peaks(roi_list, 2)
+
+    assay_data.add_features(roi_list, sample1)
+
+    # roi_list with roi.id values
+    roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample2))
+
+    # add features
+    add_dummy_peaks(roi_list, 2)
+    assay_data.add_features(roi_list, sample2)
+
+    requested_descriptors = ["mz", "rt"]
+    descriptors = assay_data.get_descriptors(sample1, descriptors=requested_descriptors)
+    assert len(descriptors) == len(requested_descriptors)
+    for v in descriptors.values():
+        assert len(v) == 20
+
+
+def test_AssayData_load_existing_db(tmp_path: Path):
+    db_path = tmp_path / "my_db.db"
+    assay_data = AssayData(db_path, LCTrace, Peak)
+
+    # add roi and features for sample 1
+    sample1 = create_dummy_sample(tmp_path, 1)
+    assay_data.add_samples([sample1])
+    roi_list = [create_dummy_lc_trace() for _ in range(10)]
+    assay_data.add_roi_list(roi_list, sample1)
+
+    # use roi list with indices
+    roi_list = assay_data.get_roi_list(sample1)
+
+    add_dummy_peaks(cast(list[LCTrace], roi_list), 2)
+    assay_data.add_features(roi_list, sample1)
+
+    # add roi and features for sample 1
+    sample2 = create_dummy_sample(tmp_path, 2)
+    assay_data.add_samples([sample2])
+    roi_list = [create_dummy_lc_trace() for _ in range(10)]
+    assay_data.add_roi_list(roi_list, sample2)
+    roi_list = assay_data.get_roi_list(sample2)
+    add_dummy_peaks(cast(list[LCTrace], roi_list), 2)
+    assay_data.add_features(roi_list, sample2)
+
+    del assay_data
+
+    assay_data = AssayData(db_path, LCTrace, Peak)
+    test_label = 1
+    test_feature_list = cast(list[Peak], assay_data.get_features_by_label(test_label))
+
+    assert len(test_feature_list) == 2
+    for ft in test_feature_list:
+        assert ft.annotation.label == test_label

@@ -1,22 +1,20 @@
-from dataclasses import dataclass, asdict
-from typing import Optional, Sequence, Type, Union
-from pathlib import Path
-from sqlalchemy import Column, Float, ForeignKey, Integer, String, Table, MetaData
-from sqlalchemy import create_engine, delete, select
-from sqlalchemy.orm import (
-    declarative_base,
-    sessionmaker,
-    Mapped,
-    mapped_column,
-    relationship,
-)
+"""
+Storage tools for the Assay class.
+
+"""
+
+
+import json
+import sqlalchemy as sa
+import sqlalchemy.orm as orm
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import delete, select, Column, Float, ForeignKey, Integer, String
 from sqlalchemy.exc import IntegrityError
 from ..lcms import Annotation, Feature, Roi
 from .. import _constants as c
-import json
-
-
-# TODO: Idea: Assays are created using create_assay and load_assay functions.
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Optional, Sequence, Type, Union
 
 
 @dataclass
@@ -58,7 +56,7 @@ class Sample:
         return d
 
 
-Base = declarative_base()
+Base = orm.declarative_base()
 
 
 class ProcessParameterModel(Base):
@@ -68,8 +66,8 @@ class ProcessParameterModel(Base):
     """
 
     __tablename__ = "parameters"
-    step: Mapped[str] = mapped_column(String, primary_key=True)
-    parameters: Mapped[str] = mapped_column(String)
+    step: Mapped[str] = mapped_column(sa.String, primary_key=True)
+    parameters: Mapped[str] = mapped_column(sa.String)
 
 
 class SampleModel(Base):
@@ -89,9 +87,7 @@ class SampleModel(Base):
     features: Mapped[list["FeatureModel"]] = relationship(back_populates="samples")
 
     def to_sample(self) -> Sample:
-        return Sample(
-            str(self.path), self.id, self.ms_level, self.start, self.end, self.group
-        )
+        return Sample(str(self.path), self.id, self.ms_level, self.start, self.end, self.group)
 
 
 class ProcessedSampleModel(Base):
@@ -141,9 +137,16 @@ class FeatureModel(Base):
     sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
     roi_id: Mapped[int] = mapped_column(ForeignKey("rois.id"))
     data: Mapped[str] = mapped_column(String)
-    roi: Mapped["RoiModel"] = relationship(back_populates="features")
-    samples: Mapped["SampleModel"] = relationship(back_populates="features")
-    annotation: Mapped["AnnotationModel"] = relationship(back_populates="feature")
+    roi: Mapped["RoiModel"] = relationship(back_populates="features", lazy="immediate")
+    samples: Mapped["SampleModel"] = relationship(back_populates="features", lazy="immediate")
+    annotation: Mapped["AnnotationModel"] = relationship(
+        back_populates="feature", lazy="immediate"
+    )
+
+    def to_feature(
+        self, feature_type: Type[Feature], roi: Roi, annotation: Annotation
+    ) -> Feature:
+        return feature_type.from_str(self.data, roi, annotation)
 
 
 class AnnotationModel(Base):
@@ -174,7 +177,7 @@ class AnnotationModel(Base):
         )
 
 
-def _create_descriptor_table(feature_type: Type[Feature], metadata: MetaData):
+def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData):
     """
     Creates a Model for descriptors of features.
 
@@ -211,7 +214,7 @@ def _create_descriptor_table(feature_type: Type[Feature], metadata: MetaData):
     columns.extend(descriptors)
     attrs = {
         "__tablename__": table_name,
-        "__table__": Table(table_name, metadata, *columns),
+        "__table__": sa.Table(table_name, metadata, *columns),
     }
 
     return type("DescriptorModel", (Base,), attrs)
@@ -231,15 +234,18 @@ class AssayData:
 
         # Create a database engine and session factory
         if name:
-            db_address = f"sqlite:///{name}.db"
+            db_address = f"sqlite:///{name}"
         else:
             db_address = "sqlite:///:memory:"
-        self.engine = create_engine(db_address)
-        self.SessionFactory = sessionmaker(bind=self.engine)
+        self.engine = sa.create_engine(db_address)
+        self.SessionFactory = orm.sessionmaker(bind=self.engine)
         self._create_descriptor_model(feature)
 
         # Create the table in the database
         Base.metadata.create_all(self.engine)
+
+    def __del__(self):
+        self.engine.dispose()
 
     @classmethod
     def _create_descriptor_model(cls, feature_type: Type):
@@ -324,14 +330,9 @@ class AssayData:
         """
         _check_preprocessing_step(step)
         with self.SessionFactory() as session:
-            if step is None:
-                stmt = select(SampleModel)
-            else:
-                stmt = (
-                    select(SampleModel)
-                    .join(ProcessedSampleModel)
-                    .where(ProcessedSampleModel.step == step)
-                )
+            stmt = select(SampleModel)
+            if step is not None:
+                stmt = stmt.join(ProcessedSampleModel).where(ProcessedSampleModel.step == step)
             result = session.execute(stmt)
             samples = list()
             for row in result:
@@ -401,9 +402,7 @@ class AssayData:
         """
         _check_preprocessing_step(step)
         with self.SessionFactory() as session:
-            stmt = select(ProcessParameterModel).where(
-                ProcessParameterModel.step == step
-            )
+            stmt = select(ProcessParameterModel).where(ProcessParameterModel.step == step)
             results = session.execute(stmt)
             param_model = results.first()
             if param_model is None:
@@ -453,15 +452,33 @@ class AssayData:
         return roi_list
 
     def delete_roi_list(self, sample: Sample):
+        """
+        Delete ROIs from a sample.
+
+        Parameters
+        ----------
+        sample : Sample
+
+        """
         with self.SessionFactory() as session:
             stmt = delete(RoiModel).where(RoiModel.sample_id == sample.id)
             session.execute(stmt)
             session.commit()
 
     def add_features(self, roi_list: Sequence[Roi], sample: Sample):
+        """
+        Stores a list of features in the DB.
+
+        Parameters
+        ----------
+        roi_list : Sequence[Roi]
+        sample : Sample
+
+        """
         feature_model_list = list()
         annotation_model_list = list()
         descriptor_model_list = list()
+        descriptor_names = self.feature.descriptor_names()
         for roi in roi_list:
             if roi.features is not None:
                 for ft in roi.features:
@@ -477,12 +494,13 @@ class AssayData:
                         isotopologue_label=ann.isotopologue_label,
                         isotopologue_index=ann.isotopologue_index,
                     )
+                    ft_descriptors = {x: ft.get(x) for x in descriptor_names}
 
                     descriptor_model = self.DescriptorModel(
                         sample_id=sample.id,
                         roi_id=roi.id,
                         label=ann.label,
-                        **ft.describe(),
+                        **ft_descriptors,
                     )
 
                     feature_model_list.append(ft_model)
@@ -494,25 +512,21 @@ class AssayData:
             session.add_all(descriptor_model_list)
             session.commit()
 
-    def get_features(
-        self,
-        sample: Optional[Sample] = None,
-        label: Optional[int] = None,
-        groups: Optional[list[str]] = None,
-    ) -> list[Feature]:
-        with self.SessionFactory() as session:
-            if sample is None:
-                if label is None:
-                    msg = "`sample` or `label` must be specified to select features"
-                    raise (ValueError(msg))
-                cond = AnnotationModel.label == label
-                if groups is not None:
-                    cond = cond and (SampleModel.group.in_(groups))
-                stmt = select(RoiModel).join(FeatureModel).where(cond)
-            else:
-                cond = RoiModel.sample_id == sample.id
-                stmt = select(RoiModel).where(cond)
+    def get_features_by_sample(self, sample: Sample) -> list[Feature]:
+        """
+        Retrieves all features detected in a sample.
 
+        Parameters
+        ----------
+        sample : Sample
+
+        Returns
+        -------
+        list[Feature]
+
+        """
+        with self.SessionFactory() as session:
+            stmt = select(RoiModel).where(RoiModel.sample_id == sample.id)
             result = session.execute(stmt)
             feature_list = list()
             for row in result:
@@ -524,9 +538,69 @@ class AssayData:
                     feature_list.append(ft)
         return feature_list
 
+    def get_features_by_label(
+        self, label: int, groups: Optional[list[str]] = None
+    ) -> list[Feature]:
+        """
+        Retrieves all samples with an specific feature label.
+
+        Parameters
+        ----------
+        label : int
+            Feature label obtained from feature correspondence.
+        groups : list[str] or None, default=None
+            Sample group. If provided, only features detected in that group
+            are included.
+
+        Returns
+        -------
+        list[Feature]
+
+        """
+        with self.SessionFactory() as session:
+            cond = AnnotationModel.label == label
+            stmt = select(FeatureModel).join(AnnotationModel)
+            if groups is not None:
+                cond = cond & (SampleModel.group.in_(groups))
+                stmt = stmt.join(SampleModel)
+            stmt = stmt.where(cond)
+
+            result = session.execute(stmt)
+            feature_list = list()
+            for row in result:
+                annotation = row.FeatureModel.annotation.to_annotation()
+                roi = row.FeatureModel.roi.to_roi(self.roi)
+                feature = row.FeatureModel.to_feature(self.feature, roi, annotation)
+                feature_list.append(feature)
+        return feature_list
+
     def get_descriptors(
         self, sample: Optional[Sample] = None, descriptors: Optional[list[str]] = None
     ):
+        """
+        Retrieves the descriptors associated with each feature.
+
+        Parameters
+        ----------
+        sample : Sample or None, default=None
+            If provided, retrieves descriptors for features detected in this sample.
+            If ``None``, retrieves the descriptors for all samples.
+
+        descriptors : list[str] or None, default=None
+            A list of descriptors to retrieve. If ``None``, retrieves all stored
+            descriptors.
+
+        Returns
+        -------
+        dict[str, list[float]]
+            A dictionary that maps descriptor names to a list of values for each feature.
+
+        Raises
+        ------
+        ValueError
+            If an invalid descriptor name is provided.
+
+        """
         if descriptors is None:
             descriptors = self.feature.descriptor_names()
         else:
@@ -538,7 +612,7 @@ class AssayData:
                     raise ValueError(msg)
 
         descriptors.extend(["label", "sample_id", "id"])
-        descriptor_list = {x: list() for x in descriptors}
+        descriptor_dict = {x: list() for x in descriptors}
 
         with self.SessionFactory() as session:
             if sample is None:
@@ -550,14 +624,12 @@ class AssayData:
             result = session.execute(stmt)
             for row in result:
                 for d in descriptors:
-                    descriptor_list[d].append(row.DescriptorModel.__dict__[d])
-        return descriptor_list
+                    descriptor_dict[d].append(row.DescriptorModel.__dict__[d])
+        return descriptor_dict
 
 
 def _check_preprocessing_step(step: Optional[str]):
     if (step is not None) and (step not in c.PREPROCESSING_STEPS):
         valid_steps = ", ".join(c.PREPROCESSING_STEPS)
-        msg = (
-            f"{step} is not a valid preprocessing step. valid values are {valid_steps}."
-        )
+        msg = f"{step} is not a valid preprocessing step. valid values are {valid_steps}."
         raise ValueError(msg)
