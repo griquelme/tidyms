@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tidyms"
-version = "0.6.3"
+version = "0.7.0"
 description = "Tools for working with MS data in metabolomics"
 authors = [
     { name = "Gabriel Riquelme" },
