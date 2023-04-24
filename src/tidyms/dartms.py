@@ -1,3 +1,68 @@
+"""
+Functionality to process DART-MS datasets
+
+Objects
+-------
+
+* DartMSAssay: Stores raw and processed DART-MS data.
+
+
+Usage
+-----
+
+Predefined workflow:
+
+* prefab_DARTMS_dataProcessing_pipeline
+
+Semi-automated parameter optimization:
+
+* compare_parameters_for_function
+
+Spot detection: 
+
+* create_assay_from_chronogramFiles
+
+Data import: 
+
+* create_assay_from_chronogramFiles
+
+Data manipulation:
+
+* select_top_n_spectra
+* correct_MZ_shift_across_samples
+* calculate_consensus_spectra_for_samples
+* bracket_consensus_spectrum_samples
+* build_data_matrix
+* batch_correction
+* blank_subtraction
+
+Annotation
+
+* annotate_features
+* annotate_with_compounds
+
+Import/Export
+
+* save_self_to_dill_file
+* read_from_dill_file
+* export_data_matrix
+* export_for_R
+* write_bracketing_results_to_featureML
+* generate_feature_raw_plot
+
+Statistics
+
+* restrict_to_high_quality_features__found_in_replicates
+* restrict_to_high_quality_features__minimum_intensity_filter
+* print_results_overview
+* plot_RSDs_per_group
+* calc_volcano_plots
+* calc_2D_Embedding
+* generate_feature_abundance_plot
+
+"""
+
+
 #####################################################################################################
 ####################################################################################################
 ##
