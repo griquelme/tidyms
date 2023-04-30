@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import Optional, Sequence, Type, Union
 
 
+# TODO: test delete all ROI.
+# TODO : test get_unprocessed_samples.
+
+
 @dataclass
 class Sample:
     """
@@ -30,9 +34,9 @@ class Sample:
         Sample name.
     ms_level : int, default=1
         MS level of data to use.
-    start: float or None, default=None
+    start_time: float, default=0.0
         Minimum acquisition time of MS scans to include. If ``None``, start from the first scan.
-    end: float or None, default=None
+    end_time: float or None, default=None
         Maximum acquisition time of MS scans to include. If ``None``, end at the last scan.
     group : str, default=""
         Sample group.
@@ -42,8 +46,8 @@ class Sample:
     path: Union[Path, str]
     id: str
     ms_level: int = 1
-    start: Optional[float] = None
-    end: Optional[float] = None
+    start_time: float = 0.0
+    end_time: Optional[float] = None
     group: str = ""
 
     def __post_init__(self):
@@ -80,14 +84,16 @@ class SampleModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     path: Mapped[str] = mapped_column(String, nullable=False)
     ms_level: Mapped[int] = mapped_column(Integer)
-    start: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    end: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    start_time: Mapped[float] = mapped_column(Float)
+    end_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     group: Mapped[str] = mapped_column(String, nullable=True)
-    rois: Mapped[list["RoiModel"]] = relationship(back_populates="samples")
-    features: Mapped[list["FeatureModel"]] = relationship(back_populates="samples")
+    # rois: Mapped[list["RoiModel"]] = relationship(back_populates="samples")
+    # features: Mapped[list["FeatureModel"]] = relationship(back_populates="samples")
 
     def to_sample(self) -> Sample:
-        return Sample(str(self.path), self.id, self.ms_level, self.start, self.end, self.group)
+        return Sample(
+            str(self.path), self.id, self.ms_level, self.start_time, self.end_time, self.group
+        )
 
 
 class ProcessedSampleModel(Base):
@@ -110,9 +116,9 @@ class RoiModel(Base):
 
     __tablename__ = "rois"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
+    sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"), index=True)
     data: Mapped[str] = mapped_column(String)
-    samples: Mapped["SampleModel"] = relationship(back_populates="rois")
+    # samples: Mapped["SampleModel"] = relationship(back_populates="rois")
     features: Mapped[list["FeatureModel"]] = relationship(
         back_populates="roi", lazy="immediate"
     )
@@ -134,11 +140,11 @@ class FeatureModel(Base):
 
     __tablename__ = "features"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
+    # sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
     roi_id: Mapped[int] = mapped_column(ForeignKey("rois.id"))
     data: Mapped[str] = mapped_column(String)
     roi: Mapped["RoiModel"] = relationship(back_populates="features", lazy="immediate")
-    samples: Mapped["SampleModel"] = relationship(back_populates="features", lazy="immediate")
+    # samples: Mapped["SampleModel"] = relationship(back_populates="features", lazy="immediate")
     annotation: Mapped["AnnotationModel"] = relationship(
         back_populates="feature", lazy="immediate"
     )
@@ -197,7 +203,7 @@ def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData)
     """
     table_name = "descriptors"
 
-    columns = [
+    columns: list[Column] = [
         Column(
             "id",
             Integer,
@@ -228,7 +234,13 @@ class AssayData:
 
     DescriptorModel: Type
 
-    def __init__(self, name: Union[Path, str], roi: Type[Roi], feature: Type[Feature]):
+    def __init__(
+        self,
+        name: Union[Path, str],
+        roi: Type[Roi],
+        feature: Type[Feature],
+        echo: bool = False,
+    ):
         self.roi = roi
         self.feature = feature
 
@@ -237,15 +249,12 @@ class AssayData:
             db_address = f"sqlite:///{name}"
         else:
             db_address = "sqlite:///:memory:"
-        self.engine = sa.create_engine(db_address)
+        self.engine = sa.create_engine(db_address, echo=echo)
         self.SessionFactory = orm.sessionmaker(bind=self.engine)
         self._create_descriptor_model(feature)
 
         # Create the table in the database
         Base.metadata.create_all(self.engine)
-
-    def __del__(self):
-        self.engine.dispose()
 
     @classmethod
     def _create_descriptor_model(cls, feature_type: Type):
@@ -275,10 +284,9 @@ class AssayData:
             If a sample with the same id already exists in the DB.
 
         """
-        samples = [SampleModel(**x.to_dict()) for x in samples]
         with self.SessionFactory() as session:
             try:
-                session.add_all(samples)
+                session.add_all([SampleModel(**x.to_dict()) for x in samples])
                 session.commit()
             except IntegrityError:
                 msg = "Trying to insert a sample with an existing ID"
@@ -302,9 +310,9 @@ class AssayData:
 
         """
         _check_preprocessing_step(step)
-        samples = [ProcessedSampleModel(sample_id=x.id, step=step) for x in samples]
+        processed = [ProcessedSampleModel(sample_id=x.id, step=step) for x in samples]
         with self.SessionFactory() as session:
-            session.add_all(samples)
+            session.add_all(processed)
             session.commit()
 
     def get_samples(self, step: Optional[str] = None) -> list[Sample]:
@@ -338,6 +346,14 @@ class AssayData:
             for row in result:
                 samples.append(row.SampleModel.to_sample())
         return samples
+
+    def get_unprocessed_samples(self, step: str) -> list[Sample]:
+        all_samples_dict = {x.id: x for x in self.get_samples()}
+        processed_samples = self.get_samples(step)
+        for sample in processed_samples:
+            all_samples_dict.pop(sample.id)
+        unprocessed_samples = list(all_samples_dict.values())
+        return list(unprocessed_samples)
 
     def delete_samples(self, sample_ids: list[str]) -> None:
         """
@@ -379,7 +395,7 @@ class AssayData:
             session.add(params_model)
             session.commit()
 
-    def get_processing_parameters(self, step: str) -> dict:
+    def get_processing_parameters(self, step: str) -> Optional[dict]:
         """
         Retrieves preprocessing parameters of a step from the DB.
 
@@ -406,7 +422,7 @@ class AssayData:
             results = session.execute(stmt)
             param_model = results.first()
             if param_model is None:
-                params = dict()
+                params = param_model
             else:
                 params = json.loads(param_model.ProcessParameterModel.parameters)
         return params
@@ -451,7 +467,7 @@ class AssayData:
                 roi_list.append(roi)
         return roi_list
 
-    def delete_roi_list(self, sample: Sample):
+    def delete_roi(self, sample: Optional[Sample] = None):
         """
         Delete ROIs from a sample.
 
@@ -461,7 +477,9 @@ class AssayData:
 
         """
         with self.SessionFactory() as session:
-            stmt = delete(RoiModel).where(RoiModel.sample_id == sample.id)
+            stmt = delete(RoiModel)
+            if sample is not None:
+                stmt = stmt.where(RoiModel.sample_id == sample.id)
             session.execute(stmt)
             session.commit()
 
@@ -482,9 +500,10 @@ class AssayData:
         for roi in roi_list:
             if roi.features is not None:
                 for ft in roi.features:
-                    ft_model = FeatureModel(
-                        sample_id=sample.id, roi_id=roi.id, data=ft.to_str()
-                    )
+                    # ft_model = FeatureModel(
+                    #     sample_id=sample.id, roi_id=roi.id, data=ft.to_str()
+                    # )
+                    ft_model = FeatureModel(roi_id=roi.id, data=ft.to_str())
                     ann = ft.annotation
                     annotation_model = AnnotationModel(
                         sample_id=sample.id,
@@ -573,6 +592,20 @@ class AssayData:
                 feature = row.FeatureModel.to_feature(self.feature, roi, annotation)
                 feature_list.append(feature)
         return feature_list
+
+    def delete_features(self):
+        """
+        Delete Features stored in the DB.
+
+        Parameters
+        ----------
+        sample : Sample
+
+        """
+        with self.SessionFactory() as session:
+            stmt = delete(FeatureModel)
+            session.execute(stmt)
+            session.commit()
 
     def get_descriptors(
         self, sample: Optional[Sample] = None, descriptors: Optional[list[str]] = None
