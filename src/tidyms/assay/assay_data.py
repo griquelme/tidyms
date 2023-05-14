@@ -60,6 +60,33 @@ class Sample:
         return d
 
 
+class SampleData:
+    """
+    Container class for the associated with a sample.
+
+    Attributes
+    ----------
+    sample : Sample
+    roi : list[Roi]
+
+    """
+
+    def __init__(self, sample: Sample, roi: Sequence[Roi]) -> None:
+        self.sample = sample
+        self.roi = roi
+
+    def get_feature_list(self) -> Sequence[Feature]:
+        feature_list = list()
+        for roi in self.roi:
+            if roi.features is not None:
+                feature_list.extend(roi.features)
+        return feature_list
+
+    def store(self, data: "AssayData"):
+        # TODO: Complete
+        pass
+
+
 Base = orm.declarative_base()
 
 
@@ -659,6 +686,18 @@ class AssayData:
                 for d in descriptors:
                     descriptor_dict[d].append(row.DescriptorModel.__dict__[d])
         return descriptor_dict
+
+    def get_sample_data(self, sample_id: str) -> SampleData:
+        with self.SessionFactory() as session:
+            stmt = select(SampleModel).where(SampleModel.id == sample_id)
+            sample = session.execute(stmt).scalar()
+
+        if sample is None:
+            msg = f"No sample with id={sample_id} was found."
+            raise ValueError(msg)
+        sample = sample.to_sample()
+        roi_list = self.get_roi_list(sample)
+        return SampleData(sample, roi_list)
 
 
 def _check_preprocessing_step(step: Optional[str]):
