@@ -1,5 +1,5 @@
 from .assay import Assay
 from .assay_data import AssayData, Sample
-from .lcms_assay import RoiExtractor
+from . import lcms_assay
 
-__all__ = [Assay, AssayData, Sample, RoiExtractor]
+__all__ = ["Assay", "AssayData", "Sample", "lcms_assay"]
