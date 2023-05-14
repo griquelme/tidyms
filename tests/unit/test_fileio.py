@@ -68,7 +68,7 @@ def test_read_uncompressed_indexed_mzml():
     cache_path = get_tidyms_path()
     filename = "centroid-data-indexed-uncompressed.mzML"
     data_path = os.path.join(cache_path, "test-raw-data", filename)
-    ms_data = fileio.MSData(data_path)
+    ms_data = fileio.MSData.create_MSData_instance(data_path)
     n_spectra = ms_data.get_n_spectra()
     n_chromatogram = ms_data.get_n_chromatograms()
 
@@ -87,7 +87,7 @@ def test_read_compressed_no_index_mzml():
     cache_path = get_tidyms_path()
     filename = "centroid-data-zlib-no-index-compressed.mzML"
     data_path = os.path.join(cache_path, "test-raw-data", filename)
-    ms_data = fileio.MSData(data_path)
+    ms_data = fileio.MSData.create_MSData_instance(data_path)
     n_spectra = ms_data.get_n_spectra()
     n_chromatogram = ms_data.get_n_chromatograms()
 

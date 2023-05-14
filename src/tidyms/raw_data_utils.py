@@ -4,8 +4,10 @@ Functions used to extract information from raw data.
 """
 
 import numpy as np
+import os
+import pandas as pd
 from .lcms import Chromatogram, LCTrace, MSSpectrum, Roi
-from .fileio import MSData
+from .fileio import MSData, MSData_subset_spectra
 from .utils import find_closest
 from . import _constants as c
 from . import validation as val
@@ -61,9 +63,7 @@ def make_tic(
     # available in a given file without iterating over it. valid_index holds
     # the index related to the selected level and is used to remove scans
     # from other levels.
-    sp_iterator = ms_data.get_spectra_iterator(
-        ms_level=ms_level, start_time=start_time, end_time=end_time
-    )
+    sp_iterator = ms_data.get_spectra_iterator(ms_level=ms_level, start_time=start_time, end_time=end_time)
     for scan, sp in sp_iterator:
         valid_index.append(scan)
         rt[scan] = sp.time
@@ -131,9 +131,7 @@ def make_chromatograms(
 
     rt = np.zeros(n_sp)
     valid_index = list()
-    sp_iterator = ms_data.get_spectra_iterator(
-        ms_level=ms_level, start_time=start_time, end_time=end_time
-    )
+    sp_iterator = ms_data.get_spectra_iterator(ms_level=ms_level, start_time=start_time, end_time=end_time)
     for scan, sp in sp_iterator:
         valid_index.append(scan)
         rt[scan] = sp.time
@@ -298,9 +296,7 @@ def make_roi(
     )
 
     scans = list()
-    sp_iterator = ms_data.get_spectra_iterator(
-        ms_level=ms_level, start_time=start_time, end_time=end_time
-    )
+    sp_iterator = ms_data.get_spectra_iterator(ms_level=ms_level, start_time=start_time, end_time=end_time)
     for scan, spectrum in sp_iterator:
         rt[scan] = spectrum.time
         scans.append(scan)
@@ -452,9 +448,7 @@ def _accumulate_spectra_profile(
     accumulated_mz = None
     # m/z tol. A small value is used to prevent distortions in the results
     tol = 0.00005
-    sp_iter = ms_data.get_spectra_iterator(
-        ms_level, start_time=subtract_left_time, end_time=subtract_right_time
-    )
+    sp_iter = ms_data.get_spectra_iterator(ms_level, start_time=subtract_left_time, end_time=subtract_right_time)
     # first iteration. Builds a grid of m/z values for the accumulated
     # spectrum. The grid is extended using new m/z values that appear
     # in each new scan
@@ -466,9 +460,7 @@ def _accumulate_spectra_profile(
         accumulated_mz = np.sort(np.hstack((accumulated_mz, sp.mz[no_match])))
 
     accumulated_sp = np.zeros_like(accumulated_mz)
-    sp_iter = ms_data.get_spectra_iterator(
-        ms_level, start_time=subtract_left_time, end_time=subtract_right_time
-    )
+    sp_iter = ms_data.get_spectra_iterator(ms_level, start_time=subtract_left_time, end_time=subtract_right_time)
 
     for _, sp in sp_iter:
         interpolator = interp1d(sp.mz, sp.spint, fill_value=0.0)
@@ -632,9 +624,7 @@ class _RoiMaker:
         """
         self.tmp_roi_list.missing_count[:] = self.max_missing + 1
 
-    def tmp_roi_to_roi(
-        self, valid_scan: np.ndarray, time: np.ndarray, pad: int, separation: str
-    ) -> List[Roi]:
+    def tmp_roi_to_roi(self, valid_scan: np.ndarray, time: np.ndarray, pad: int, separation: str) -> List[Roi]:
         """
         Converts completed valid _TempRoi objects into Roi.
 
@@ -943,16 +933,12 @@ def _make_mz_filter(
     -------
 
     """
-    iterator = ms_data.get_spectra_iterator(
-        ms_level=ms_level, start_time=start_time, end_time=end_time
-    )
+    iterator = ms_data.get_spectra_iterator(ms_level=ms_level, start_time=start_time, end_time=end_time)
     mz_seed = [sp.mz[sp.spint > min_intensity] for _, sp in iterator]
     return np.unique(np.hstack(mz_seed))
 
 
-def _filter_invalid_mz(
-    valid_mz: np.ndarray, mz: np.ndarray, sp: np.ndarray, tolerance: float
-) -> Tuple[np.ndarray, np.ndarray]:
+def _filter_invalid_mz(valid_mz: np.ndarray, mz: np.ndarray, sp: np.ndarray, tolerance: float) -> Tuple[np.ndarray, np.ndarray]:
     """
     Find values in the spectrum that are within tolerance with the m/z values
     in the seed.
@@ -964,7 +950,7 @@ def _filter_invalid_mz(
     valid_mz : np.ndarray
         sorted array of m/z values.
     mz: array
-        m/z values to filter
+        m/z values to filter.
     sp : array
         intensity values associated to each m/z.
     tolerance : float
@@ -982,6 +968,56 @@ def _filter_invalid_mz(
     dmz = np.abs(valid_mz[closest_index] - mz)
     match_mask = dmz <= tolerance  # type: np.ndarray
     return mz[match_mask], sp[match_mask]
+
+
+def _filter_zero_intensity_signals(mz: np.ndarray, sp: np.ndarray, minimum_intensity: float = 0) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Removes any peak with an intensity below or equal to the set threshold (default 0).
+
+    Parameters
+    ----------
+    mz : np.ndarray
+        array of m/z values.
+    sp : array
+        intensity values associated to each m/z.
+    minimum_intensity : float
+        any peak with an intensity equal or below this value will be removed
+
+    Returns
+    -------
+    mz : np.ndarray
+        Filtered m/z values in the spectrum.
+    sp : np.ndarray
+        Filtered intensity values in the spectrum.
+    """
+
+    match_mask = sp > minimum_intensity
+    return mz[match_mask], sp[match_mask]
+
+
+def _get_profile_mode_mz_deltas(mz: np.ndarray, convert_to_ppm: bool = True) -> np.ndarray:
+    """_get_profile_mode_mz_deltas
+
+    Args:
+        mz (np.ndarray): sorted array of m/z values.
+
+    Returns:
+        np.ndarray:
+    """
+    diffs = np.diff(mz)
+    if convert_to_ppm:
+        diffs = diffs / mz[0 : (mz.shape[0] - 1)] * 1e6
+    return (
+        np.mean(diffs),
+        np.std(diffs),
+        np.quantile(diffs, 0.01),
+        np.quantile(diffs, 0.10),
+        np.quantile(diffs, 0.25),
+        np.quantile(diffs, 0.50),
+        np.quantile(diffs, 0.75),
+        np.quantile(diffs, 0.90),
+        np.quantile(diffs, 0.99),
+    )
 
 
 def _create_roi_list(mz: np.ndarray, sp: np.ndarray, scan: int) -> List[_TempRoi]:
@@ -1040,9 +1076,7 @@ def _match_mz(
     match_index = closest_index[match_mask]
 
     # check multiple_matches
-    match_unique, match_first, match_count = np.unique(
-        match_index, return_counts=True, return_index=True
-    )
+    match_unique, match_first, match_count = np.unique(match_index, return_counts=True, return_index=True)
 
     # set match values
     match_index = match_unique

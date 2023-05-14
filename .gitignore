@@ -132,3 +132,8 @@ dmypy.json
 
 # VS code
 .vscode/
+*.featureML
+*.dill
+docs/examples/exportedDataMatrix.tsv
+docs/examples/defined_spots_rtShifted.tsv
+docs/examples/defined_spots.tsv

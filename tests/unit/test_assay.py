@@ -48,6 +48,7 @@ def create_dummy_assay_manager(assay_path, data_path, metadata) -> assay._AssayM
         ms_mode=c.CENTROID,
         instrument=c.QTOF,
         separation=c.UPLC,
+        data_import_mode=c.SIMULATED,
     )
 
 
@@ -386,6 +387,9 @@ class DummyAssay(assay.Assay):
     n_roi = 5
     roi_length = 20
     n_ft = 5
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs, data_import_mode=c.SIMULATED)
 
     def get_ms_data(self, sample: str):
         return sample

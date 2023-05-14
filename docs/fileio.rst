@@ -32,7 +32,7 @@ object.
 
 .. code-block:: python
 
-    ms_data = ms.MSData(
+    ms_data = ms.MSData.create_MSData_instance(
         filename,
         ms_mode="centroid",
         instrument="qtof",

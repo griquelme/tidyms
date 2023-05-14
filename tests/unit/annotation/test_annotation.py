@@ -3,7 +3,7 @@ import pytest
 
 from tidyms.annotation import annotation
 from tidyms.raw_data_utils import make_roi
-from tidyms.fileio import SimulatedMSData
+from tidyms.fileio import MSData_simulated
 from tidyms.lcms import Peak
 from tidyms.chem import Formula
 
@@ -70,7 +70,7 @@ def feature_list(compound_data) -> list[Peak]:
         mz_params.append(cmz)
     mz_params = np.vstack(mz_params)
     rt_params = np.vstack(rt_params)
-    ms_data = SimulatedMSData(mz_grid, rt_grid, mz_params, rt_params, noise=0.025)
+    ms_data = MSData_simulated(mz_grid, rt_grid, mz_params, rt_params, noise=0.025)
 
     roi_list = make_roi(ms_data, tolerance=0.01)
     ft_list = list()

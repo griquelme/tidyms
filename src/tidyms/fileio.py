@@ -27,6 +27,8 @@ Roi
 import os
 import pickle
 import requests
+import abc
+import copy
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -256,6 +258,8 @@ def read_data_matrix(
         raise ValueError(msg)
 
 
+
+
 class MSData:
     """
     Reader object for raw MS data.
@@ -276,28 +280,45 @@ class MSData:
         parameters in the methods.
 
     """
+    @staticmethod
+    def create_MSData_instance(*args, **kwargs):
+        data_import_mode = c.DEFAULT_DATA_LOAD_MODE
+        if "data_import_mode" in kwargs:
+            data_import_mode = kwargs["data_import_mode"]
+            del kwargs["data_import_mode"]
+        
+        if data_import_mode.lower() == c.SIMULATED:
+                
+            mz_values = kwargs["mz_values"]; del kwargs["mz_values"]
+            rt_values = kwargs["rt_values"]; del kwargs["rt_values"]
+            mz_params = kwargs["mz_params"]; del kwargs["mz_params"]
+            rt_params = kwargs["rt_params"]; del kwargs["rt_params"]
+            return MSData_simulated(mz_values, rt_values, 
+                                    mz_params, rt_params,
+                                    **kwargs)
+        if data_import_mode.lower() == c.INFILE and "path" in kwargs:
+            path = Path(kwargs["path"])
+            suffix = path.suffix
+            if suffix == "":
+                return MSData_from_file(*args, **kwargs)
+        if data_import_mode.lower() == c.INFILE:
+            return MSData_from_file(*args, **kwargs)
+        elif data_import_mode.lower() == c.MEMORY:
+            return MSData_in_memory.generate_from_file(*args, **kwargs)
 
-    def __init__(
-        self,
-        path: Union[str, Path],
+        raise Exception("Unknown data_import_mode parameter '%s'. Must be either 'file', 'memory', 'simulated'"%(data_import_mode))
+
+    @abc.abstractmethod
+    def __init__(self, 
         ms_mode: str = "centroid",
         instrument: str = "qtof",
         separation: str = "uplc",
+        is_virtual_sample: bool = False
     ):
-        path = Path(path)
-        suffix = path.suffix
-        if suffix == ".mzML":
-            self._reader = MZMLReader(path)
-        elif suffix == "":
-            # used to instantiate SimulatedMSData
-            self._reader = None
-        else:
-            msg = "{} is not a valid format for MS data".format(suffix)
-            raise ValueError(msg)
-
         self.ms_mode = ms_mode
         self.instrument = instrument
         self.separation = separation
+        self._is_virtual_sample = is_virtual_sample
 
     @property
     def ms_mode(self) -> str:
@@ -333,9 +354,18 @@ class MSData:
         if value in c.LC_MODES:
             self._separation = value
         else:
-            msg = "`separation` must be any of {}".format(c.SEPARATION_MODES)
+            msg = "`separation` must be any of {}. Got `{}`".format(c.LC_MODES, value)
             raise ValueError(msg)
 
+    @property
+    def is_virtual_sample(self) -> bool:
+        return self._is_virtual_sample
+
+    @is_virtual_sample.setter
+    def is_virtual_sample(self, value: bool):
+        raise ValueError("Cannot change sample virtuallity after creation.")
+
+    @abc.abstractmethod
     def get_n_chromatograms(self) -> int:
         """
         Get the chromatogram count in the file
@@ -345,8 +375,9 @@ class MSData:
         n_chromatograms : int
 
         """
-        return self._reader.n_chromatograms
-
+        pass
+    
+    @abc.abstractmethod
     def get_n_spectra(self) -> int:
         """
         Get the spectra count in the file
@@ -356,8 +387,9 @@ class MSData:
         n_spectra : int
 
         """
-        return self._reader.n_spectra
-
+        pass
+    
+    @abc.abstractmethod
     def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
         """
         Get the nth chromatogram stored in the file.
@@ -372,13 +404,9 @@ class MSData:
         chromatogram : lcms.Chromatogram
 
         """
-        chrom_data = self._reader.get_chromatogram(n)
-        name = chrom_data["name"]
-        chromatogram = lcms.Chromatogram(
-            chrom_data["time"], chrom_data["spint"], mode=self.separation
-        )
-        return name, chromatogram
+        pass
 
+    @abc.abstractmethod
     def get_spectrum(self, n: int) -> lcms.MSSpectrum:
         """
         get the nth spectrum stored in the file.
@@ -393,10 +421,9 @@ class MSData:
         MSSpectrum
 
         """
-        sp_data = self._reader.get_spectrum(n)
-        sp_data["is_centroid"] = self.ms_mode == "centroid"
-        return lcms.MSSpectrum(**sp_data)
+        pass
 
+    @abc.abstractmethod
     def get_spectra_iterator(
         self,
         ms_level: int = 1,
@@ -428,6 +455,179 @@ class MSData:
         spectrum : lcms.MSSpectrum
 
         """
+        pass
+
+    def get_closest_spectrum_to_RT(
+        self, 
+        time: float = 0.0
+    ) -> lcms.MSSpectrum:
+        bestK = None
+        bestK_timeDiff = None
+        for k, sp in self.get_spectra_iterator():
+            if bestK is None or abs(sp.time - time) <= abs(bestK_timeDiff):
+                bestK = k
+                bestK_timeDiff = sp.time - time
+
+        return bestK, bestK_timeDiff
+
+class MSData_Proxy(MSData):
+    
+    def __init__(self, 
+        to_MSData_object
+    ):
+        self.to_MSData_object = to_MSData_object
+
+    @property
+    def to_MSData_object(self) -> MSData:
+        return self._to_MSData_object
+
+    @to_MSData_object.setter
+    def to_MSData_object(self, obj: MSData): 
+        self._to_MSData_object = obj
+
+    @property
+    def ms_mode(self) -> str:
+        return self._to_MSData_object.ms_mode
+
+    @ms_mode.setter
+    def ms_mode(self, value: Optional[str]):
+        self.self._to_MSData_object.ms_mode = value
+
+    @property
+    def instrument(self) -> str:
+        return self._to_MSData_object.instrument
+
+    @instrument.setter
+    def instrument(self, value: str):
+        self._to_MSData_object.instrument = value
+
+    @property
+    def separation(self) -> str:
+        return self._to_MSData_object.separation
+
+    @separation.setter
+    def separation(self, value: str):
+        self._to_MSData_object.separation = value
+
+    @property
+    def is_virtual_sample(self) -> bool:
+        return self._to_MSData_object.is_virtual_sample
+
+    @is_virtual_sample.setter
+    def is_virtual_sample(self, value: bool):
+        self._to_MSData_object.is_virtual_sample = value
+
+    def get_n_chromatograms(self) -> int:
+        return self._to_MSData_object.get_n_chromatograms()
+    
+    def get_n_spectra(self) -> int:
+        return self._to_MSData_object.get_n_spectra()
+    
+    def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
+        return self._to_MSData_object.get_chromatogram(n)
+
+    def get_spectrum(self, n: int) -> lcms.MSSpectrum:
+        return self._to_MSData_object.get_spectrum(n)
+
+    @abc.abstractmethod
+    def get_spectra_iterator(
+            self,
+            ms_level: int = 1,
+            start: int = 0,
+            end: Optional[int] = None,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None
+    ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
+        return self._to_MSData_object.get_spectra_iterator(
+            ms_level = ms_level,
+            start = start,
+            end = end,
+            start_time = start_time,
+            end_time = end_time
+        )
+
+
+
+class MSData_subset_spectra(MSData):
+    """
+    Subset of another MSData object.
+
+
+    Attributes
+    ----------
+    start_ind: integer (including)
+    end_ind: integer (including, must be greater or equal to start_ind)
+    from_MSData_object: MSData object
+
+    """
+    @abc.abstractmethod
+    def __init__(self, 
+        start_ind: int,
+        end_ind: int,
+        from_MSData_object: MSData
+    ):
+        if start_ind >= 0 and start_ind < from_MSData_object.get_n_spectra() and end_ind >= 0 and end_ind < from_MSData_object.get_n_spectra() and start_ind <= end_ind:
+            #super().__init__(is_virtual_sample = True)
+            self._is_virtual_sample = True
+            self.start_ind = start_ind
+            self.end_ind = end_ind
+            self._from_MSData_object = from_MSData_object
+
+        else:
+            raise ValueError("Incorrect attributes provided for MSData_subset_spectra object generation (start_ind = %s, end_ind = %s, from_MSData_object with %d spectra)"%(start_ind, end_ind, from_MSData_object.get_n_spectra()))
+
+    @property
+    def ms_mode(self) -> str:
+        return self._from_MSData_object.ms_mode
+
+    @ms_mode.setter
+    def ms_mode(self, value: Optional[str]):
+        msg = "Warning: ms_mode cannot be set on a subset object. No changes will be made."
+        print(msg.format(value))
+
+    @property
+    def instrument(self) -> str:
+        return self._from_MSData_object._instrument
+
+    @instrument.setter
+    def instrument(self, value: str):
+        msg = "Warning: instrument cannot be set on a subset object. No changes will be made."
+        print(msg.format(value))
+
+    @property
+    def separation(self) -> str:
+        return self._from_MSData_object._separation
+
+    @separation.setter
+    def separation(self, value: str):
+        msg = "Warning: separation cannot be set on a subset object. No changes will be made."
+        print(msg.format(value))
+
+    def get_n_chromatograms(self) -> int:
+        return self._from_MSData_object.get_n_chromatograms()
+    
+    def get_n_spectra(self) -> int:
+        return self.end_ind - self.start_ind + 1
+    
+    @abc.abstractmethod
+    def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
+        return self._from_MSData_object.get_chromatogram(n)
+
+    @abc.abstractmethod
+    def get_spectrum(self, n: int) -> lcms.MSSpectrum:
+        if n + self.start_ind >= self._from_MSData_object.get_n_spectra() or n + self.start_ind > self.end_ind:
+            raise ValueError("Spectrum index %d is invalid. There are only %d spectra in the MSData object"%(n, self.end_ind - self.start_ind + 1))
+        return self._from_MSData_object.get_spectrum(n + self.start_ind)
+
+    @abc.abstractmethod
+    def get_spectra_iterator(
+            self,
+            ms_level: int = 1,
+            start: int = 0,
+            end: Optional[int] = None,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None
+    ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
         if end is None:
             end = self.get_n_spectra()
         elif end > self.get_n_spectra():
@@ -444,7 +644,209 @@ class MSData:
                 yield k, sp
 
 
-class SimulatedMSData(MSData):  # pragma: no cover
+class MSData_from_file(MSData):
+    """
+    Class for reading data from files without storing too much data in the memory
+
+    """
+
+    def __init__(
+        self,
+        path: Union[str, Path],
+        ms_mode: str = "centroid",
+        instrument: str = "qtof",
+        separation: str = "uplc"
+    ):
+        super().__init__(ms_mode = ms_mode, instrument = instrument, separation = separation, is_virtual_sample = False)
+        path = Path(path)
+        suffix = path.suffix
+        if suffix == ".mzML":
+            self._reader = MZMLReader(path)
+        elif suffix == "":
+            # used to intantiate MSData_simulated
+            self._reader = None
+        else:
+            msg = "{} is not a valid format for MS data".format(suffix)
+            raise ValueError(msg)
+
+    def get_n_chromatograms(self) -> int:
+        return self._reader.n_chromatograms
+
+    def get_n_spectra(self) -> int:
+        return self._reader.n_spectra
+
+    def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
+        chrom_data = self._reader.get_chromatogram(n)
+        name = chrom_data["name"]
+        chromatogram = lcms.Chromatogram(
+            chrom_data["time"], chrom_data["spint"], mode=self.separation)
+        return name, chromatogram
+
+    def get_spectrum(self, n: int) -> lcms.MSSpectrum:
+        sp_data = self._reader.get_spectrum(n)
+        sp_data["is_centroid"] = self.ms_mode == "centroid"
+        return lcms.MSSpectrum(**sp_data)
+
+    def get_spectra_iterator(
+            self,
+            ms_level: int = 1,
+            start: int = 0,
+            end: Optional[int] = None,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None
+    ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
+        if end is None:
+            end = self.get_n_spectra()
+        elif end > self.get_n_spectra():
+            msg = "End must be lower than the number of spectra in the file."
+            raise ValueError(msg)
+
+        for k in range(start, end):
+            sp = self.get_spectrum(k)
+            is_valid_level = ms_level == sp.ms_level
+            is_valid_time = ((start_time <= sp.time) and
+                             ((end_time is None) or (end_time > sp.time)))
+            if is_valid_level and is_valid_time:
+                yield k, sp
+
+
+class MSData_in_memory(MSData):
+    """
+    Class for reading the entire file once to memory.
+
+    """
+
+    @abc.abstractmethod
+    def generate_from_MSData_object(msDataObj):
+        mz_perScan = []
+        spint_perScan = []
+        time_perScan = []
+        ms_level_perScan = []
+        polarity_perScan = []
+        instrument_perScan = []
+        is_centroid_perScan = []
+
+        for k, spectrum in msDataObj.get_spectra_iterator():
+            mz_perScan.append(spectrum.mz)
+            spint_perScan.append(spectrum.spint)
+            time_perScan.append(spectrum.time)
+            ms_level_perScan.append(spectrum.ms_level)
+            polarity_perScan.append(spectrum.polarity)
+            instrument_perScan.append(spectrum.instrument)
+            is_centroid_perScan.append(spectrum.is_centroid)
+        
+        temp = MSData_in_memory(
+            ms_mode = msDataObj.ms_mode,
+            instrument = msDataObj.instrument,
+            separation = msDataObj.separation
+        )
+
+        for i in range(len(mz_perScan)):
+            spectrum = lcms.MSSpectrum(
+                mz_perScan[i],
+                spint_perScan[i],
+                time_perScan[i],
+                ms_level_perScan[i],
+                polarity_perScan[i],
+                instrument_perScan[i],
+                is_centroid_perScan[i]
+            )
+            temp._spectra.append(spectrum)
+        
+        return temp
+
+    @abc.abstractmethod
+    def generate_from_file(path, ms_mode: str = "centroid", instrument: str = "qtof", separation: str = "uplc"):
+        temp = MSData_in_memory(
+            ms_mode = ms_mode, 
+            instrument = instrument, 
+            separation = separation
+        )
+        
+        path = Path(path)
+        suffix = path.suffix
+        if suffix == ".mzML":
+            reader = MZMLReader(path)
+            for i in range(reader.n_spectra):
+                sp_data = reader.get_spectrum(i)
+                sp_data["is_centroid"] = ms_mode == "centroid"
+                temp._spectra.append(lcms.MSSpectrum(**sp_data))
+        else:
+            msg = "{} is not a valid format for MS data".format(suffix)
+            raise ValueError(msg)
+
+        return temp
+
+    def __init__(
+        self,
+        ms_mode: str = "centroid",
+        instrument: str = "qtof",
+        separation: str = "uplc"
+    ):
+        super().__init__(ms_mode = ms_mode, instrument = instrument, separation = separation, is_virtual_sample = False)
+        
+        self._ms_mode = ms_mode
+        self._instrument = instrument
+        self._separation = separation
+
+        self._spectra = []
+
+    def get_n_chromatograms(self) -> int:
+        return self._reader.n_chromatograms
+
+    def get_n_spectra(self) -> int:
+        return len(self._spectra)
+
+    def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
+        chrom_data = self._reader.get_chromatogram(n)
+        name = chrom_data["name"]
+        chromatogram = lcms.Chromatogram(
+            chrom_data["time"], chrom_data["spint"], mode=self.separation)
+        return name, chromatogram
+
+    def get_spectrum(self, n: int) -> lcms.MSSpectrum:
+        return self._spectra[n]
+
+    def get_spectra_iterator(
+            self,
+            ms_level: int = 1,
+            start: int = 0,
+            end: Optional[int] = None,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None
+    ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
+        if end is None:
+            end = self.get_n_spectra()
+        elif end > self.get_n_spectra():
+            msg = "End must be lower than the number of spectra in the file."
+            raise ValueError(msg)
+
+        for k in range(start, end):
+            sp = self.get_spectrum(k)
+            is_valid_level = ms_level == sp.ms_level
+            is_valid_time = ((start_time <= sp.time) and
+                             ((end_time is None) or (end_time > sp.time)))
+            if is_valid_level and is_valid_time:
+                yield k, sp
+
+    def duplicate_object(self):
+        return copy.deepcopy(self)
+
+    def delete_spectrum(self, n):
+        if n >= 0 and n < len(self._spectra):
+            del self._spectra[n]
+    
+    def delete_spectra(self, ns):
+        ns = sorted(ns)[::-1]
+        if len(ns) < len(set(ns)):
+            raise Exception("Error: array contains non-unique indices")
+
+        for n in ns:
+            self.delete_spectrum(n)
+
+
+
+class MSData_simulated(MSData):  # pragma: no cover
     """
     Emulates a MSData using simulated data. Used for tests.
 
@@ -462,41 +864,55 @@ class SimulatedMSData(MSData):  # pragma: no cover
         separation: str = "uplc",
         instrument: str = "qtof",
     ):
-        """
-        Constructor function
-
-        Parameters
-        ----------
-        mz_values : array
-            sorted mz values for each mz scan, used to build spectra in profile
-            mode.
-        rt_values : array
-            sorted rt values, used to set scan time.
-        mz_params : array with shape (n, 3)
-             Used to build m/z peaks. Each row is the mean, standard deviation
-             and amplitude in the m/z dimension.
-        rt_params : array with shape (n, 3)
-             Used to build rt peaks. Each row is the mean, standard deviation
-             and amplitude in the rt dimension
-        ft_noise : array_with shape (n, 2), optional
-            adds noise to mz and rt values
-        noise : positive number, optional
-            noise level to add to each scan. the noise is modeled as gaussian
-            iid noise in each scan with standard deviation equal to the value
-            used. An offset value is added to make the noise contribution
-            non-negative. To make the noise values reproducible, each scan has
-            a seed value associated to generate always the same noise value in
-            a given scan. seed values are generated randomly each time a new
-            object is instantiated.
-
-        """
+        super().__init__(ms_mode = ms_mode, instrument = instrument, separation = separation, is_virtual_sample = True)
         # MSData params
-        super(SimulatedMSData, self).__init__(
-            "", ms_mode=ms_mode, instrument=instrument, separation=separation
-        )
+        self._ms_mode = ms_mode
+        self._instrument = instrument
+        self._separation = separation
+
         self._reader = _SimulatedReader(
             mz_values, rt_values, mz_params, rt_params, ms_mode, instrument, ft_noise, noise
         )
+
+    def get_n_chromatograms(self) -> int:
+        return self._reader.n_chromatograms
+
+    def get_n_spectra(self) -> int:
+        return self._reader.n_spectra
+
+    def get_chromatogram(self, n: int) -> Tuple[str, lcms.Chromatogram]:
+        chrom_data = self._reader.get_chromatogram(n)
+        name = chrom_data["name"]
+        chromatogram = lcms.Chromatogram(
+            chrom_data["time"], chrom_data["spint"], mode=self.separation)
+        return name, chromatogram
+
+    def get_spectrum(self, n: int) -> lcms.MSSpectrum:
+        sp_data = self._reader.get_spectrum(n)
+        sp_data["is_centroid"] = self.ms_mode == "centroid"
+        return lcms.MSSpectrum(**sp_data)
+
+    def get_spectra_iterator(
+            self,
+            ms_level: int = 1,
+            start: int = 0,
+            end: Optional[int] = None,
+            start_time: float = 0.0,
+            end_time: Optional[float] = None
+    ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
+        if end is None:
+            end = self.get_n_spectra()
+        elif end > self.get_n_spectra():
+            msg = "End must be lower than the number of spectra in the file."
+            raise ValueError(msg)
+
+        for k in range(start, end):
+            sp = self.get_spectrum(k)
+            is_valid_level = ms_level == sp.ms_level
+            is_valid_time = ((start_time <= sp.time) and
+                             ((end_time is None) or (end_time > sp.time)))
+            if is_valid_level and is_valid_time:
+                yield k, sp
 
 
 class _SimulatedReader:

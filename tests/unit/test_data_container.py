@@ -37,7 +37,7 @@ def test_batch_getter_no_batch_information(data_container_without_order):
 def test_batch_setter(data_container_with_order: DataContainer):
     data = data_container_with_order
     b = np.arange(data.data_matrix.shape[0])
-    batch_series = pd.Series(data=b, index=data.batch.index)
+    batch_series = pd.Series(data=b, index=data.batch.index, dtype=data.batch.dtype)
     data.batch = batch_series
     assert data.batch.equals(batch_series)
 

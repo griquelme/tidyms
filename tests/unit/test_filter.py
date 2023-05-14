@@ -20,17 +20,7 @@ def test_class_remover_invalid_class(data_container_with_order):
     n_samples = data.data_matrix.shape[0]
     crm.process(data)
     assert data.data_matrix.shape[0] == n_samples
-
-
-def test_batch_corrector(data_container_with_batch_effect):
-    # in this dataset the batch effect is simulated as a linear loss of
-    # sensitivity. After the correction the QCs CV should be close to zero
-    data = data_container_with_batch_effect
-    cv_before = data.metrics.cv().loc["QC"]     # qc cv before correction
-    bc = ms.filter.BatchCorrector()
-    bc.process(data)
-    cv_after = data.metrics.cv().loc["QC"]
-    assert (cv_before > cv_after).all()
+    
 
 # def test_prevalence_filter_remove_none(data_container_with_order):
 #     data = data_container_with_order

@@ -68,3 +68,4 @@ Module reference
     tidyms.chem.envelope_tools
     tidyms.chem.formula
 
+    tidyms.dartms

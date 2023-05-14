@@ -158,7 +158,41 @@ class MSSpectrum:
                 params["min_snr"] = min_snr
 
             centroid, area = peaks.find_centroids(self.mz, self.spint, **params)
+            ord = np.argsort(centroid)
+            centroid = centroid[ord]
+            area = area[ord]
         return centroid, area
+
+    def get_closest_mz(
+        self, mz: float = 100.0, max_offset_absolute=0.001
+    ) -> Tuple[int, float, float, float, float]:
+        ind = np.argmin(np.abs(self.mz - mz))
+        if abs(self.mz[ind] - mz) <= max_offset_absolute:
+            return (
+                ind,
+                self.mz[ind],
+                self.mz[ind] - mz,
+                (self.mz[ind] - mz) / mz * 1e6,
+                self.spint[ind],
+            )
+        return None, None, None, None, None
+
+    def get_most_abundant_signal_in_range(
+        self, mz: float = 100.0, max_offset_absolute=0.001
+    ) -> Tuple[int, float, float, float, float]:
+        inds = np.abs(self.mz - mz) <= max_offset_absolute
+        if np.sum(inds) > 0:
+            inds = np.argwhere(inds)[:, 0]
+            maxIntInd = np.argmax(self.spint[inds])
+            ind = inds[maxIntInd]
+            return (
+                ind,
+                self.mz[ind],
+                self.mz[ind] - mz,
+                (self.mz[ind] - mz) / mz * 1e6,
+                self.spint[ind],
+            )
+        return None, None, None, None, None
 
     def plot(
         self,
@@ -671,9 +705,7 @@ class Feature(ABC):
         ...
 
     @classmethod
-    def from_str(
-        cls, s: str, roi: Roi, annotation: Optional[Annotation] = None
-    ) -> "Feature":
+    def from_str(cls, s: str, roi: Roi, annotation: Optional[Annotation] = None) -> "Feature":
         d = cls._deserialize(s)
         return cls(roi=roi, annotation=annotation, **d)
 
@@ -847,8 +879,7 @@ class Peak(Feature):
 
         """
         height = (
-            self.roi.spint[self.start : self.end]
-            - self.roi.baseline[self.start : self.end]
+            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
         )
         area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
@@ -948,9 +979,7 @@ class Peak(Feature):
                 end = bisect.bisect(ft.roi.scan, scan_end)
                 apex = (start + end) // 2  # dummy value
                 tmp_peak = Peak(start, apex, end, ft.roi)
-                p_area = trapz(
-                    tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end]
-                )
+                p_area = trapz(tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end])
                 p.append(p_area)
                 mz.append(tmp_peak.mz)
         total_area = sum(p)
