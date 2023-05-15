@@ -23,6 +23,8 @@ def is_all_positive(field, value, error):
         if not cond:
             msg = "All of the values must be positive"
             error(field, msg)
+
+
 # -----------------------------
 
 
@@ -117,8 +119,9 @@ def validate_data_matrix(df):
         raise ValueError("Data matrix has negative elements")
     # check nan
     if (df.isna()).sum().sum():
-        warnings.warn("Data matrix has NANs. These values should be imputed "
-                      "before further analysis")
+        warnings.warn(
+            "Data matrix has NANs. These values should be imputed " "before further analysis"
+        )
 
 
 def validate_feature_metadata(df):
@@ -157,8 +160,7 @@ def validate_sample_metadata(df):
         raise KeyError("class information are required for all samples")
 
 
-def validate_data_container(data_matrix, feature_definitions,
-                            sample_info):
+def validate_data_container(data_matrix, feature_definitions, sample_info):
     validate_data_matrix(data_matrix)
     validate_feature_metadata(feature_definitions)
     validate_sample_metadata(sample_info)
@@ -166,26 +168,25 @@ def validate_data_container(data_matrix, feature_definitions,
     if different_samples.size > 0:
         msg = "Samples names should be equal in data matrix and sample info."
         raise ValueError(msg)
-    different_features = data_matrix.columns.difference(
-        feature_definitions.index)
+    different_features = data_matrix.columns.difference(feature_definitions.index)
     if different_features.size > 0:
-        msg = "feature names should be equal in data matrix and feature " \
-              "definitions."
+        msg = "feature names should be equal in data matrix and feature " "definitions."
         raise ValueError(msg)
 
 
 def validate_blank_corrector_params(params):
     schema = {
-        "corrector_classes": {"type": "list", "nullable": True,
-                              "schema": {"type": "string"}},
-        "process_classes": {"type": "list", "nullable": True,
-                            "schema": {"type": "string"}},
-        "mode": {"anyof": [{"type": "string",
-                            "allowed": ["lod", "loq", "mean", "max"]},
-                           {"check_with": is_callable}]},
+        "corrector_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "process_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "mode": {
+            "anyof": [
+                {"type": "string", "allowed": ["lod", "loq", "mean", "max"]},
+                {"check_with": is_callable},
+            ]
+        },
         "factor": {"type": "number", "is_positive": True},
         "robust": {"type": "boolean"},
-        "process_blanks": {"type": "boolean"}
+        "process_blanks": {"type": "boolean"},
     }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
@@ -197,8 +198,7 @@ def validate_prevalence_filter_params(params):
         "ub": {"type": "number", "min": 0, "max": 1},
         "threshold": {"type": "number", "min": 0},
         "intraclass": {"type": "boolean"},
-        "process_classes": {"type": "list", "nullable": True,
-                            "schema": {"type": "string"}}
+        "process_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
     }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
@@ -208,7 +208,7 @@ def validate_dratio_filter_params(params):
     schema = {
         "robust": {"type": "boolean"},
         "lb": {"type": "number", "min": 0, "max": 1, "lower_or_equal": "ub"},
-        "ub": {"type": "number", "min": 0, "max": 1}
+        "ub": {"type": "number", "min": 0, "max": 1},
     }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
@@ -218,7 +218,7 @@ def validate_dilution_filter_params(params):
     schema = {
         "min_corr": {"type": "number", "min": -1, "max": 1},
         "plim": {"type": "number", "min": 0, "max": 1},
-        "mode": {"allowed": ["ols", "spearman", "pearson"]}
+        "mode": {"allowed": ["ols", "spearman", "pearson"]},
     }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
@@ -230,8 +230,7 @@ def validate_variation_filter_params(params):
         "lb": {"type": "number", "min": 0, "max": 1, "lower_or_equal": "ub"},
         "ub": {"type": "number", "min": 0, "max": 1},
         "intraclass": {"type": "boolean"},
-        "process_classes": {"type": "list", "nullable": True,
-                            "schema": {"type": "string"}}
+        "process_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
     }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
@@ -240,62 +239,58 @@ def validate_variation_filter_params(params):
 def validate_batch_corrector_params(params):
     schema = {
         "min_qc_dr": {"type": "number", "is_positive": True, "max": 1},
-        "frac": {"type": "number", "is_positive": True, "max": 1,
-                 "nullable": True},
+        "frac": {"type": "number", "is_positive": True, "max": 1, "nullable": True},
         "n_qc": {"type": "integer", "nullable": True, "is_positive": True},
         "interpolator": {"type": "string", "allowed": ["splines", "linear"]},
         "process_qc": {"type": "boolean"},
         "threshold": {"type": "number", "min": 0},
-        "corrector_classes": {"type": "list", "nullable": True,
-                              "schema": {"type": "string"}},
-        "process_classes": {"type": "list", "nullable": True,
-                            "schema": {"type": "string"}},
-        "method": {"allowed": ["additive", "multiplicative"], "type": "string"}
+        "corrector_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "process_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "method": {"allowed": ["additive", "multiplicative"], "type": "string"},
     }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
 
 
 def validate_descriptors(params):
-    schema = {"type": "dict", "keysrules": {"type": "string"},
-              "valuesrules": {"check_with": is_callable}}
+    schema = {
+        "type": "dict",
+        "keysrules": {"type": "string"},
+        "valuesrules": {"check_with": is_callable},
+    }
     if params is not None:
         validator = ValidatorWithLowerThan(schema)
         validate(params, validator)
 
 
 def validate_filters(params):
-    schema = {"type": "dict", "keysrules": {"type": "string"},
-              "valuesrules": {"type": "list",
-                              "items": [{'type': 'number', "nullable": True},
-                                        {'type': 'number', "nullable": True}]
-                              }
-              }
+    schema = {
+        "type": "dict",
+        "keysrules": {"type": "string"},
+        "valuesrules": {
+            "type": "list",
+            "items": [
+                {"type": "number", "nullable": True},
+                {"type": "number", "nullable": True},
+            ],
+        },
+    }
     if params is not None:
         validator = ValidatorWithLowerThan(schema)
         validate(params, validator)
 
 
 def validate_detect_peaks_params(params):
-    noise_schema = {"min_slice_size": {"is_positive": True, "type": "integer"},
-                    "n_slices": {"is_positive": True, "type": "integer"}
-                    }
-    baseline_schema = {"min_proba": {"is_positive": True, "max": 1.0,
-                                     "type": "number"}
-                       }
-    schema = \
-        {"noise_params": {"type": "dict",
-                          "schema": noise_schema,
-                          "nullable": True
-                          },
-         "baseline_params": {"type": "dict",
-                             "schema": baseline_schema,
-                             "nullable": True
-                             },
-         "smoothing_strength": {"type": "number",
-                                "nullable": True,
-                                "is_positive": True}
-         }
+    noise_schema = {
+        "min_slice_size": {"is_positive": True, "type": "integer"},
+        "n_slices": {"is_positive": True, "type": "integer"},
+    }
+    baseline_schema = {"min_proba": {"is_positive": True, "max": 1.0, "type": "number"}}
+    schema = {
+        "noise_params": {"type": "dict", "schema": noise_schema, "nullable": True},
+        "baseline_params": {"type": "dict", "schema": baseline_schema, "nullable": True},
+        "smoothing_strength": {"type": "number", "nullable": True, "is_positive": True},
+    }
     if params is not None:
         validator = ValidatorWithLowerThan(schema)
         validate(params, validator)
@@ -313,11 +308,7 @@ def spectra_iterator_schema(ms_data):
             "min": 0,
             "lower_than": "end",
         },
-        "end": {
-            "type": "integer",
-            "max": n_spectra,
-            "default": n_spectra
-        },
+        "end": {"type": "integer", "max": n_spectra, "default": n_spectra},
         "start_time": {
             "type": "number",
             "min": 0.0,
@@ -326,7 +317,7 @@ def spectra_iterator_schema(ms_data):
         "end_time": {
             "type": "number",
             "nullable": True,
-        }
+        },
     }
 
     defaults = dict()
@@ -340,15 +331,8 @@ def make_chromatogram_schema(ms_data) -> dict:
             "empty": False,
             "coerce": np.array,
         },
-        "window": {
-            "type": "number",
-            "is_positive": True,
-            "nullable": True
-        },
-        "accumulator": {
-            "type": "string",
-            "allowed": ["mean", "sum"]
-        },
+        "window": {"type": "number", "is_positive": True, "nullable": True},
+        "accumulator": {"type": "string", "allowed": ["mean", "sum"]},
         "ms_level": {
             "type": "integer",
             "min": 1,
@@ -361,7 +345,7 @@ def make_chromatogram_schema(ms_data) -> dict:
         "end_time": {
             "type": "number",
             "nullable": True,
-        }
+        },
     }
 
     defaults = make_chromatogram_defaults(ms_data)
@@ -374,12 +358,10 @@ def make_chromatogram_defaults(ms_data):
 
     if instrument == c.QTOF:
         window = 0.05
-    else:   # orbitrap
+    else:  # orbitrap
         window = 0.01
 
-    defaults = {
-        "window": {"default": window}
-    }
+    defaults = {"window": {"default": window}}
     return defaults
 
 
@@ -393,30 +375,11 @@ def make_roi_schema(ms_data):
             "type": "integer",
             "min": 0,
         },
-        "targeted_mz": {
-            "nullable": True,
-            "check_with": is_all_positive
-        },
-        "multiple_match": {
-            "allowed": ["closest", "reduce"]
-        },
-        "mz_reduce": {
-            "anyof": [
-                {"allowed": ["mean"]},
-                {"check_with": is_callable}
-            ]
-        },
-        "sp_reduce": {
-            "anyof": [
-                {"allowed": ["mean", "sum"]},
-                {"check_with": is_callable}
-            ]
-        },
-        "min_intensity": {
-            "type": "number",
-            "min": 0.0,
-            "nullable": True
-        },
+        "targeted_mz": {"nullable": True, "check_with": is_all_positive},
+        "multiple_match": {"allowed": ["closest", "reduce"]},
+        "mz_reduce": {"anyof": [{"allowed": ["mean"]}, {"check_with": is_callable}]},
+        "sp_reduce": {"anyof": [{"allowed": ["mean", "sum"]}, {"check_with": is_callable}]},
+        "min_intensity": {"type": "number", "min": 0.0, "nullable": True},
         "min_length": {
             "type": "integer",
             "min": 1,
@@ -426,6 +389,11 @@ def make_roi_schema(ms_data):
             "type": "integer",
             "min": 0,
             "nullable": True,
+        },
+        "smoothing_strength": {
+            "type": "float",
+            "nullable": True,
+            "is_positive": True,
         },
         "ms_level": {
             "type": "integer",
@@ -447,7 +415,7 @@ def make_roi_schema(ms_data):
         "min_distance": {
             "type": "number",
             "is_positive": True,
-        }
+        },
     }
     defaults = make_roi_defaults(ms_data)
     set_defaults(schema, defaults)
@@ -460,63 +428,43 @@ def make_roi_defaults(ms_data):
 
     if instrument == c.QTOF:
         tolerance = 0.01
-    else:   # orbitrap
+    else:  # orbitrap
         tolerance = 0.005
 
     if separation == c.UPLC:
         min_length = 10
-    else:   # hplc
+    else:  # hplc
         min_length = 20
 
     defaults = {
-        "pad": {
-            "default": 2
-        },
-        "max_missing": {
-            "default": 1
-        },
-        "min_length": {
-            "default": min_length
-        },
-        "tolerance": {
-            "default": tolerance
-        },
+        "pad": {"default": 2},
+        "smoothing_strength": {"default": 1.0},
+        "max_missing": {"default": 1},
+        "min_length": {"default": min_length},
+        "tolerance": {"default": tolerance},
     }
 
     return defaults
 
 
 def accumulate_spectra_schema(ms_data):
-
     schema = {
-        "start_time": {
-            "type": "number",
-            "min": 0,
-            "lower_than": "end_time"
-        },
-        "end_time": {
-            "type": "number",
-            "lower_or_equal": "subtract_right_time"
-        },
+        "start_time": {"type": "number", "min": 0, "lower_than": "end_time"},
+        "end_time": {"type": "number", "lower_or_equal": "subtract_right_time"},
         "subtract_left_time": {
             "type": "number",
             "lower_or_equal": "start_time",
             "min": 0,
             "nullable": True,
-            "default_setter": lambda doc: doc["start_time"]
+            "default_setter": lambda doc: doc["start_time"],
         },
         "subtract_right_time": {
             "type": "number",
             "nullable": True,
-            "default_setter": lambda doc: doc["end_time"]
+            "default_setter": lambda doc: doc["end_time"],
         },
-        "kind": {
-            "type": "string"
-        },
-        "ms_level": {
-            "type": "integer",
-            "min": 1
-        }
+        "kind": {"type": "string"},
+        "ms_level": {"type": "integer", "min": 1},
     }
     # no default functions is necessary, defaults can be obtained from
     # start and end
@@ -552,18 +500,9 @@ def match_features_schema():
             "type": "number",
             "min": 0.0,
         },
-        "include_classes": {
-            "type": "list",
-            "nullable": True,
-            "schema": {"type": "string"}
-        },
-        "n_jobs": {
-            "nullable": True,
-            "type": "integer"
-        },
-        "verbose": {
-            "type": "boolean"
-        }
+        "include_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "n_jobs": {"nullable": True, "type": "integer"},
+        "verbose": {"type": "boolean"},
     }
     return schema
 
@@ -603,7 +542,7 @@ def match_features_defaults(separation: str, instrument: str):
         "max_deviation": 3.0,
         "include_classes": None,
         "n_jobs": None,
-        "verbose": False
+        "verbose": False,
     }
 
     return defaults
@@ -620,5 +559,7 @@ def validate_raw_data_utils(schema_getter: Callable):
             validator = ValidatorWithLowerThan(schema)
             validated = validate(kwargs, validator)
             return func(*args, **validated)
+
         return func_wrapper
+
     return validator_wrapper
