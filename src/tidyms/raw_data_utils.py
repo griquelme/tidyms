@@ -4,17 +4,15 @@ Functions used to extract information from raw data.
 """
 
 import numpy as np
-import os
-import pandas as pd
-from .lcms import Chromatogram, LCTrace, MSSpectrum, Roi
-from .fileio import MSData, MSData_subset_spectra
+from .lcms import Chromatogram, LCTrace, MSSpectrum
+from .fileio import MSData
 from .utils import find_closest
 from . import _constants as c
 from . import validation as val
 from collections import deque
 from copy import deepcopy
 from scipy.interpolate import interp1d
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Optional
 
 
 def make_tic(
@@ -63,7 +61,9 @@ def make_tic(
     # available in a given file without iterating over it. valid_index holds
     # the index related to the selected level and is used to remove scans
     # from other levels.
-    sp_iterator = ms_data.get_spectra_iterator(ms_level=ms_level, start_time=start_time, end_time=end_time)
+    sp_iterator = ms_data.get_spectra_iterator(
+        ms_level=ms_level, start_time=start_time, end_time=end_time
+    )
     for scan, sp in sp_iterator:
         valid_index.append(scan)
         rt[scan] = sp.time
@@ -73,7 +73,7 @@ def make_tic(
             tic[scan] = 0
     tic = tic[valid_index]
     rt = rt[valid_index]
-    return Chromatogram(rt, tic, ms_data.separation)
+    return Chromatogram(rt, tic)
 
 
 @val.validate_raw_data_utils(val.make_chromatogram_schema)
@@ -87,9 +87,9 @@ def make_chromatograms(
     ms_level: int = 1,
     start_time: float = 0.0,
     end_time: Optional[float] = None,
-) -> List[Chromatogram]:
+) -> list[Chromatogram]:
     """
-    Computes extracted ion chromatograms using a list of m/z values.
+    Computes Extracted Ion Chromatograms (EICs) using a list of m/z values.
 
     Parameters
     ----------
@@ -117,7 +117,7 @@ def make_chromatograms(
 
     Returns
     -------
-    chromatograms : List of Chromatograms
+    chromatograms : list of Chromatograms
 
     """
     n_sp = ms_data.get_n_spectra()
@@ -131,7 +131,9 @@ def make_chromatograms(
 
     rt = np.zeros(n_sp)
     valid_index = list()
-    sp_iterator = ms_data.get_spectra_iterator(ms_level=ms_level, start_time=start_time, end_time=end_time)
+    sp_iterator = ms_data.get_spectra_iterator(
+        ms_level=ms_level, start_time=start_time, end_time=end_time
+    )
     for scan, sp in sp_iterator:
         valid_index.append(scan)
         rt[scan] = sp.time
@@ -159,7 +161,7 @@ def make_chromatograms(
 
     chromatograms = list()
     for row in eic:
-        chromatogram = Chromatogram(rt.copy(), row, mode=ms_data.separation)
+        chromatogram = Chromatogram(rt.copy(), row)
         chromatograms.append(chromatogram)
     return chromatograms
 
@@ -168,21 +170,21 @@ def make_chromatograms(
 def make_roi(
     ms_data: MSData,
     *,
-    tolerance: Optional[float] = None,
-    max_missing: Optional[int] = None,
+    tolerance: float = 0.01,
+    max_missing: int = 1,
     min_length: Optional[int] = None,
     min_intensity: float = 0.0,
     multiple_match: str = "reduce",
-    mz_reduce: Union[str, Callable] = "mean",
-    sp_reduce: Union[str, Callable] = "sum",
+    sp_reduce: str = "sum",
     targeted_mz: Optional[np.ndarray] = None,
-    pad: Optional[int] = None,
+    pad: int = 0,
+    smoothing_strength: Optional[float] = None,
     ms_level: int = 1,
     start_time: float = 0.0,
     end_time: Optional[float] = None,
     min_snr: float = 10,
     min_distance: Optional[float] = None,
-) -> List[Roi]:
+) -> list[LCTrace]:
     """
     Builds regions of interest (ROI) from raw data.
 
@@ -212,30 +214,20 @@ def make_roi(
         Pad dummy values to the left and right of the ROI. This produces
         better peak picking results when searching low intensity peaks in a
         ROI. Using None set the value to ``2``.
+    smoothing_strength: float or None, default=1.0
+        Smooth the intensity of each trace using a Gaussian kernel. The smoothing
+        strength is the standard deviation of the gaussian. If ``None``, no smoothing
+        is applied.
     multiple_match : {"closest", "reduce"}, default="reduce"
         How peaks are matched when there is more than one valid match. If
         ``"closest"`` is used, the closest peak is assigned as a match and
         the others are used to create new ROIs. If ``"reduce"`` is used,
         unique m/z and intensity values are generated using the reduce
         function in `mz_reduce` and `sp_reduce` respectively.
-    mz_reduce : "mean" or Callable, default="mean"
-        Function used to reduce m/z values. If ``"mean"`` is used, the mean
-        value of all valid m/z is used. Any function that accepts numpy
-        arrays and return numbers can be used. Used only when
-        `multiple_match` is set to ``"reduce"``. See the following
-        prototype:
-
-        .. code-block:: python
-
-            def mz_reduce(mz_match: np.ndarray) -> float:
-                pass
-
-    sp_reduce : {"mean", "sum"} or Callable, default="sum"
+    sp_reduce : {"mean", "sum"} default="sum"
         Function used to reduce intensity values. ``"mean"`` computes the
-        mean intensity and ``"sum"`` computes the total intensity. Any
-        function that accepts numpy arrays and return numbers can be used.
-        Only used when `multiple_match` is set to ``"reduce"``. See the
-        prototype shown on `mz_reduce`.
+        mean intensity and ``"sum"`` computes the total intensity.
+        Only used when `multiple_match` is set to ``"reduce"``.
     targeted_mz : numpy.ndarray or None, default=None
         A list of m/z values to perform a targeted ROI creation. If this
         value is provided, only ROI with these m/z values will be created.
@@ -276,11 +268,10 @@ def make_roi(
         mz_filter = np.sort(targeted_mz)
         targeted = True
 
-    if mz_reduce == "mean":
-        mz_reduce = np.mean
-
     if sp_reduce == "sum":
-        sp_reduce = np.sum
+        sp_reduce_func = np.sum
+    else:
+        sp_reduce_func = np.mean
 
     rt = np.zeros(ms_data.get_n_spectra())
     processor = _RoiMaker(
@@ -290,13 +281,15 @@ def make_roi(
         min_intensity=min_intensity,
         tolerance=tolerance,
         multiple_match=multiple_match,
-        mz_reduce=mz_reduce,
-        sp_reduce=sp_reduce,
+        mz_reduce=np.mean,
+        sp_reduce=sp_reduce_func,
         targeted=targeted,
     )
 
     scans = list()
-    sp_iterator = ms_data.get_spectra_iterator(ms_level=ms_level, start_time=start_time, end_time=end_time)
+    sp_iterator = ms_data.get_spectra_iterator(
+        ms_level=ms_level, start_time=start_time, end_time=end_time
+    )
     for scan, spectrum in sp_iterator:
         rt[scan] = spectrum.time
         scans.append(scan)
@@ -308,11 +301,7 @@ def make_roi(
     processor.flag_as_completed()
     processor.clear_completed_roi()
     scans = np.array(scans)
-    roi_list = processor.tmp_roi_to_roi(scans, rt, pad, ms_data.separation)
-
-    # TODO: workaround, move code to _RoiMaker
-    for k, roi in enumerate(roi_list):
-        roi.id = k
+    roi_list = processor.tmp_roi_to_roi(scans, rt, pad, smoothing_strength, ms_data.separation)
 
     return roi_list
 
@@ -351,6 +340,12 @@ def accumulate_spectra(
     MSSpectrum
 
     """
+    if subtract_left_time is None:
+        subtract_left_time = start_time
+
+    if subtract_right_time is None:
+        subtract_right_time = end_time
+
     if ms_data.ms_mode == "centroid":
         sp = _accumulate_spectra_centroid(
             ms_data,
@@ -445,22 +440,15 @@ def _accumulate_spectra_profile(
     #  This process is done in two steps to avoid storing the intensity
     #  values from each scan until the grid is built.
 
-    accumulated_mz = None
-    # m/z tol. A small value is used to prevent distortions in the results
-    tol = 0.00005
-    sp_iter = ms_data.get_spectra_iterator(ms_level, start_time=subtract_left_time, end_time=subtract_right_time)
     # first iteration. Builds a grid of m/z values for the accumulated
     # spectrum. The grid is extended using new m/z values that appear
     # in each new scan
-    for scan, sp in sp_iter:
-        if accumulated_mz is None:
-            accumulated_mz = sp.mz
-        ind = find_closest(accumulated_mz, sp.mz)
-        no_match = np.abs(accumulated_mz[ind] - sp.mz) > tol
-        accumulated_mz = np.sort(np.hstack((accumulated_mz, sp.mz[no_match])))
+    accumulated_mz = _make_mz_filter(ms_data, 0, ms_level, start_time, end_time)
 
     accumulated_sp = np.zeros_like(accumulated_mz)
-    sp_iter = ms_data.get_spectra_iterator(ms_level, start_time=subtract_left_time, end_time=subtract_right_time)
+    sp_iter = ms_data.get_spectra_iterator(
+        ms_level, start_time=subtract_left_time, end_time=subtract_right_time
+    )
 
     for _, sp in sp_iter:
         interpolator = interp1d(sp.mz, sp.spint, fill_value=0.0)
@@ -494,7 +482,7 @@ class _RoiMaker:
     Attributes
     ----------
     tmp_roi_list : _TempRoiList
-    valid_roi : List
+    valid_roi : list
         Valid ROI.
     mz_filter : sorted array
         m/z values used as a first filter for the values of spectra provided.
@@ -516,7 +504,7 @@ class _RoiMaker:
         closer to any value in `mz_seed`, it is used to create a new ROI.
         The remaining values in the spectrum are discarded.
     multiple_match : {"reduce", "closest"}
-        Behaviour when more than one m/z value in a spectrum matches a given
+        Behavior when more than one m/z value in a spectrum matches a given
         ROI. If `closest` is used, then the closest peak is used to extend the
         ROI and the others are used to create new ROI as described above. If
         `reduce` is used, then a unique m/z and intensity value is computed
@@ -541,12 +529,12 @@ class _RoiMaker:
         min_intensity: Optional[float],
         tolerance: float,
         multiple_match: str,
-        mz_reduce: Optional[Callable],
-        sp_reduce: Optional[Callable],
+        mz_reduce: Callable,
+        sp_reduce: Callable,
         targeted: bool = False,
     ):
         self.tmp_roi_list = _TempRoiList(update_mean=not targeted)
-        self.valid_roi = deque()
+        self.valid_roi: deque["_TempRoi"] = deque()
         self.mz_filter = mz_filter
         self.max_missing = max_missing
         self.min_intensity = min_intensity
@@ -557,7 +545,7 @@ class _RoiMaker:
         self.sp_reduce = sp_reduce
         self.targeted = targeted
 
-        if targeted:
+        if mz_filter is not None:
             self.tmp_roi_list.initialize(mz_filter)
 
     def feed_spectrum(self, mz: np.ndarray, sp: np.ndarray, scan: int):
@@ -624,9 +612,16 @@ class _RoiMaker:
         """
         self.tmp_roi_list.missing_count[:] = self.max_missing + 1
 
-    def tmp_roi_to_roi(self, valid_scan: np.ndarray, time: np.ndarray, pad: int, separation: str) -> List[Roi]:
+    def tmp_roi_to_roi(
+        self,
+        valid_scan: np.ndarray,
+        time: np.ndarray,
+        pad: int,
+        smooth: Optional[float],
+        separation: str,
+    ) -> list[LCTrace]:
         """
-        Converts completed valid _TempRoi objects into Roi.
+        Converts completed valid _TempRoi objects into LCTraces.
 
         Parameters
         ----------
@@ -636,9 +631,6 @@ class _RoiMaker:
             acquisition time of each scan.
         pad : int
             Number of dummy values to pad each ROI.
-        separation : str
-            Separation method of the ms file. Used to create LCRoi objects or
-            Roi objects.
 
         Returns
         -------
@@ -649,6 +641,9 @@ class _RoiMaker:
             tmp = self.valid_roi.popleft()
             tmp.pad(pad, valid_scan)
             roi = tmp.convert_to_roi(time, valid_scan, separation)
+            if smooth is not None:
+                roi.smooth(smooth)
+            roi.fill_nan(fill_value="extrapolate")
             valid_roi.append(roi)
         return valid_roi
 
@@ -681,8 +676,8 @@ class _TempRoiList:
     """
 
     def __init__(self, update_mean: bool = True):
-        self.roi = list()  # type: List[_TempRoi]
-        self.mz_mean = np.array([])  # type: np.ndarray
+        self.roi: list["_TempRoi"] = list()
+        self.mz_mean = np.array([])
         self.mz_sum = np.array([])
         self.max_int = np.array([])
         self.missing_count = np.array([], dtype=int)
@@ -825,7 +820,7 @@ class _TempRoi:
         Parameters
         ----------
         n : int
-            Number of points to pad to the left and righ
+            Number of points to pad to the left and right
         valid_scan
 
         Examples
@@ -856,7 +851,7 @@ class _TempRoi:
         self.spint.extend([np.nan] * n_right)
         self.scan.extend(valid_scan[end:right_pad_index])
 
-    def convert_to_roi(self, rt: np.ndarray, scans: np.ndarray, separation: str) -> Roi:
+    def convert_to_roi(self, rt: np.ndarray, scans: np.ndarray, separation: str) -> LCTrace:
         """
         Converts a TemporaryRoi into a ROI object
 
@@ -897,7 +892,7 @@ class _TempRoi:
 
         # Create ROI objects
         if separation in c.LC_MODES:
-            roi = LCTrace(rt_tmp, spint_tmp, mz_tmp, scan_tmp, mode=separation)
+            roi = LCTrace(rt_tmp, spint_tmp, mz_tmp, scan_tmp)
         else:
             raise NotImplementedError
             # roi = Roi(spint_tmp, mz_tmp, rt_tmp, scan_tmp, mode=separation)
@@ -909,7 +904,7 @@ def _make_mz_filter(
     min_intensity: float,
     ms_level: int,
     start_time: float,
-    end_time: float,
+    end_time: Optional[float],
 ):
     """
     Creates a list of m/z values to initialize ROI for untargeted feature
@@ -933,12 +928,16 @@ def _make_mz_filter(
     -------
 
     """
-    iterator = ms_data.get_spectra_iterator(ms_level=ms_level, start_time=start_time, end_time=end_time)
+    iterator = ms_data.get_spectra_iterator(
+        ms_level=ms_level, start_time=start_time, end_time=end_time
+    )
     mz_seed = [sp.mz[sp.spint > min_intensity] for _, sp in iterator]
     return np.unique(np.hstack(mz_seed))
 
 
-def _filter_invalid_mz(valid_mz: np.ndarray, mz: np.ndarray, sp: np.ndarray, tolerance: float) -> Tuple[np.ndarray, np.ndarray]:
+def _filter_invalid_mz(
+    valid_mz: np.ndarray, mz: np.ndarray, sp: np.ndarray, tolerance: float
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Find values in the spectrum that are within tolerance with the m/z values
     in the seed.
@@ -970,7 +969,9 @@ def _filter_invalid_mz(valid_mz: np.ndarray, mz: np.ndarray, sp: np.ndarray, tol
     return mz[match_mask], sp[match_mask]
 
 
-def _filter_zero_intensity_signals(mz: np.ndarray, sp: np.ndarray, minimum_intensity: float = 0) -> Tuple[np.ndarray, np.ndarray]:
+def _filter_zero_intensity_signals(
+    mz: np.ndarray, sp: np.ndarray, minimum_intensity: float = 0
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Removes any peak with an intensity below or equal to the set threshold (default 0).
 
@@ -1004,6 +1005,7 @@ def _get_profile_mode_mz_deltas(mz: np.ndarray, convert_to_ppm: bool = True) -> 
     Returns:
         np.ndarray:
     """
+    # TODO: ASK CHRISTOPH IF IT IS OK TO DELETE THIS FUNCTION.
     diffs = np.diff(mz)
     if convert_to_ppm:
         diffs = diffs / mz[0 : (mz.shape[0] - 1)] * 1e6
@@ -1020,7 +1022,7 @@ def _get_profile_mode_mz_deltas(mz: np.ndarray, convert_to_ppm: bool = True) -> 
     )
 
 
-def _create_roi_list(mz: np.ndarray, sp: np.ndarray, scan: int) -> List[_TempRoi]:
+def _create_roi_list(mz: np.ndarray, sp: np.ndarray, scan: int) -> list[_TempRoi]:
     roi_list = list()
     for m, s in zip(mz, sp):
         roi = _TempRoi()
@@ -1037,7 +1039,7 @@ def _match_mz(
     mode: str,
     mz_reduce: Callable,
     sp_reduce: Callable,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     aux function to add method in _RoiProcessor. Find matched values.
 
@@ -1052,7 +1054,7 @@ def _match_mz(
     tolerance: float
         tolerance used to match values
     mode: {"closest", "reduce"}
-        Behaviour when more than one peak in mz2 matches with a given peak in
+        Behavior when more than one peak in mz2 matches with a given peak in
         mz1. If mode is `closest`, then the closest peak is assigned as a
         match and the others are assigned to no match. If mode is `merge`, then
         a unique mz and int value is generated using the average of the mz and
@@ -1076,7 +1078,9 @@ def _match_mz(
     match_index = closest_index[match_mask]
 
     # check multiple_matches
-    match_unique, match_first, match_count = np.unique(match_index, return_counts=True, return_index=True)
+    match_unique, match_first, match_count = np.unique(
+        match_index, return_counts=True, return_index=True
+    )
 
     # set match values
     match_index = match_unique

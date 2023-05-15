@@ -151,8 +151,9 @@ def create_peak_list(mz: list[float], sp: list[float]) -> Sequence[Peak]:
     time = np.linspace(0, size, size)
     scan = np.arange(size)
     spint = np.ones(size)
+    noise = np.zeros_like(time)
     for k_mz, k_sp in zip(mz, sp):
-        roi = LCTrace(time.copy(), spint * k_sp, spint * k_mz, scan)
+        roi = LCTrace(time.copy(), spint * k_sp, spint * k_mz, scan, noise, noise)
         peak = Peak(10, 15, 20, roi)
         peak_list.append(peak)
     return peak_list

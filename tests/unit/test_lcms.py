@@ -21,29 +21,13 @@ def chromatogram_data():
 def test_chromatogram_creation(chromatogram_data):
     # test building a chromatogram with default mode
     rt, spint = chromatogram_data
-    index = 0
-    chromatogram = lcms.Chromatogram(rt, spint, index)
-    assert chromatogram.mode == "uplc"
-
-
-def test_chromatogram_creation_with_mode(chromatogram_data):
-    rt, spint = chromatogram_data
-    index = 0
-    chromatogram = lcms.Chromatogram(rt, spint, index, mode="hplc")
-    assert chromatogram.mode == "hplc"
-
-
-def test_chromatogram_creation_invalid_mode(chromatogram_data):
-    rt, spint = chromatogram_data
-    index = 0
-    with pytest.raises(ValueError):
-        lcms.Chromatogram(rt, spint, index, mode="invalid-mode")
+    lcms.Chromatogram(rt, spint)
 
 
 def test_chromatogram_find_peaks(chromatogram_data):
     rt, spint = chromatogram_data
-    index = 0
-    chromatogram = lcms.Chromatogram(rt, spint, index)
+    chromatogram = lcms.Chromatogram(rt, spint)
+    chromatogram.smooth(1.0)
     chromatogram.extract_features()
     # chromatogram.describe_features()
     assert len(chromatogram.features) == 1
@@ -88,7 +72,7 @@ def test_find_centroids_qtof(centroid_mzml):
 
 
 @pytest.fixture
-def roi_data() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def roi_data() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     rt = np.arange(200)
     spint = utils.gauss(rt, 50, 2, 100)
     mz = np.random.normal(loc=150.0, scale=0.001, size=spint.size)
@@ -96,36 +80,34 @@ def roi_data() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     nan_index = [0, 50, 100, 199]
     spint[nan_index] = np.nan
     mz[nan_index] = np.nan
-    mode = "uplc"
-    return rt, mz, spint, mode
+    return rt, mz, spint
 
 
 @pytest.fixture
 def lc_roi_with_peak() -> tuple[lcms.LCTrace, lcms.Peak]:
     n = 200
-    # it is not necessary that the signal is an actual peak and make tests
-    # easier
+    # it is not necessary that the signal is an actual peak and make tests easier
     x = np.arange(n)
-    y = np.ones_like(x)
-    mode = "uplc"
-    lc_roi = ms.lcms.LCTrace(x, y, y, x, mode=mode)
+    y = np.ones_like(x).astype(float)
+    noise = np.zeros_like(y)
+    lc_roi = ms.lcms.LCTrace(x.astype(float), y, y, x, noise, noise)
+
     apex = n // 2
     peak = ms.lcms.Peak(apex - 10, apex, apex + 10, lc_roi)
     return lc_roi, peak
 
 
 def test_LCTrace_creation(roi_data):
-    rt, mz, spint, mode = roi_data
-    trace = lcms.LCTrace(rt, spint, mz, rt, mode)
+    rt, mz, spint = roi_data
+    trace = lcms.LCTrace(rt, spint, mz, rt)
     assert np.array_equal(rt, trace.time, equal_nan=True)
     assert np.array_equal(spint, trace.spint, equal_nan=True)
     assert np.array_equal(mz, trace.mz, equal_nan=True)
-    assert mode == trace.mode
 
 
 def test_fill_nan(roi_data):
-    rt, mz, spint, mode = roi_data
-    roi = lcms.LCTrace(rt, spint, mz, rt, mode)
+    rt, mz, spint = roi_data
+    roi = lcms.LCTrace(rt, spint, mz, rt)
     roi.fill_nan(fill_value="extrapolate")
     has_nan = np.any(np.isnan(roi.mz) & np.isnan(roi.spint))
     assert not has_nan
@@ -279,9 +261,11 @@ def test_LCRoi_serialization(lc_roi_with_peak):
 def test__overlap_ratio_overlapping_peaks():
     scans = np.arange(100)
     scans_roi1 = scans[20:40]
+    time_roi1 = scans_roi1.astype(float)
     scans_roi2 = scans[25:55]
-    roi1 = lcms.LCTrace(scans_roi1, scans_roi1, scans_roi1, scans_roi1)
-    roi2 = lcms.LCTrace(scans_roi2, scans_roi2, scans_roi2, scans_roi2)
+    time_roi2 = scans_roi2.astype(float)
+    roi1 = lcms.LCTrace(time_roi1, time_roi1, time_roi1, scans_roi1)
+    roi2 = lcms.LCTrace(time_roi2, time_roi2, time_roi2, scans_roi2)
     ft1 = lcms.Peak(5, 10, 15, roi1)
     ft2 = lcms.Peak(5, 10, 15, roi2)
     test_result = lcms._overlap_ratio(ft1, ft2)

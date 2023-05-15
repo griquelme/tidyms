@@ -26,7 +26,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from scipy.ndimage import gaussian_filter1d
-from typing import Any, cast, Optional, Sequence, Tuple, Type, TypeVar, Union
+from typing import Any, Optional, Sequence, Tuple, Type, TypeVar, Union
 from scipy.interpolate import interp1d
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
@@ -95,7 +95,7 @@ class MSSpectrum:
         self,
         mz: np.ndarray,
         spint: np.ndarray,
-        time: Optional[float] = None,
+        time: float = 0.0,
         ms_level: int = 1,
         polarity: Optional[int] = None,
         instrument: str = c.QTOF,
@@ -311,9 +311,6 @@ class MZTrace(Roi):
         m/z in each scan.
     scan : array
         scan numbers where the ROI is defined.
-    mode : {"uplc", "hplc"}
-        Analytical platform used separation. Sets default values for peak
-        detection.
     features : OptionalList[Feature]]
 
     """
@@ -324,19 +321,22 @@ class MZTrace(Roi):
         spint: np.ndarray[Any, np.dtype[np.floating]],
         mz: np.ndarray[Any, np.dtype[np.floating]],
         scan: np.ndarray[Any, np.dtype[np.integer]],
-        mode: Optional[str] = None,
         noise: Optional[np.ndarray] = None,
         baseline: Optional[np.ndarray] = None,
     ):
         super().__init__()
-        self.mode = mode
         self.time = time
         self.spint = spint
         self.mz = mz
         self.scan = scan
         self.features: Optional[list[Feature]] = None
-        self.baseline = baseline
+        if noise is None:
+            noise = peaks.estimate_noise(self.spint)
         self.noise = noise
+
+        if baseline is None:
+            baseline = peaks.estimate_baseline(self.spint, self.noise)
+        self.baseline = baseline
 
     @staticmethod
     def _deserialize(s: str) -> dict[str, Any]:
@@ -359,13 +359,13 @@ class MZTrace(Roi):
 
         """
         d = dict()
-        d[c.MODE] = self.mode
         d[c.TIME] = array1d_to_str(self.time)
         d[c.SPINT] = array1d_to_str(self.spint)
         d[c.SCAN] = None if self.scan is None else array1d_to_str(self.scan)
         d[c.MZ] = None if self.mz is None else array1d_to_str(self.mz)
         d[c.BASELINE] = None if self.baseline is None else array1d_to_str(self.baseline)
         d[c.NOISE] = None if self.noise is None else array1d_to_str(self.noise)
+        # TODO: DELETE THIS BLOCK
         if self.features is None:
             d[c.ROI_FEATURE_LIST] = None
         else:
@@ -407,6 +407,17 @@ class MZTrace(Roi):
         if isinstance(self.mz, np.ndarray):
             self.mz[missing] = np.nanmean(self.mz)
 
+    def smooth(self, smoothing_strength: float):
+        """
+        Smooths the intensity of the trace using a gaussian kernel.
+
+        Parameters
+        ----------
+        smoothing_strength : float
+            Standard deviation of the gaussian kernel.
+        """
+        self.spint = gaussian_filter1d(self.spint, smoothing_strength)
+
 
 class LCTrace(MZTrace):
     """
@@ -425,9 +436,6 @@ class LCTrace(MZTrace):
         m/z in each scan.
     scan : array
         scan numbers where the ROI is defined.
-    mode : {"uplc", "hplc"}
-        Analytical platform used separation. Sets default values for peak
-        detection.
 
     """
 
@@ -439,30 +447,12 @@ class LCTrace(MZTrace):
         spint: np.ndarray[Any, np.dtype[np.floating]],
         mz: np.ndarray[Any, np.dtype[np.floating]],
         scan: np.ndarray[Any, np.dtype[np.integer]],
-        mode: Optional[str] = c.UPLC,
         noise: Optional[np.ndarray] = None,
         baseline: Optional[np.ndarray] = None,
     ):
-        super().__init__(time, spint, mz, scan, mode, noise, baseline)
+        super().__init__(time, spint, mz, scan, noise, baseline)
 
-    @property
-    def mode(self):
-        return self._mode
-
-    @mode.setter
-    def mode(self, value):
-        if value in c.LC_MODES:
-            self._mode = value
-        else:
-            msg = "{} is not a valid mode. Valid values are: {}."
-            raise ValueError(msg.format(value, c.LC_MODES))
-
-    def extract_features(
-        self,
-        smoothing_strength: Optional[float] = 1.0,
-        store_smoothed: bool = False,
-        **kwargs,
-    ) -> list["Peak"]:
+    def extract_features(self, **kwargs):
         """
         Detect chromatographic peaks.
 
@@ -470,11 +460,6 @@ class LCTrace(MZTrace):
 
         Parameters
         ----------
-        smoothing_strength : float or None, default=1.0
-            Scale of a Gaussian function used to smooth the signal. If None,
-            no smoothing is applied.
-        store_smoothed : bool, default=True
-            If True, replaces the original data with the smoothed version.
         **kwargs :
             Parameters to pass to :py:func:`tidyms.peaks.detect_peaks`.
 
@@ -496,30 +481,14 @@ class LCTrace(MZTrace):
         tidyms.peaks.detect_peaks : peak detection of 1D signals.
 
         """
-        self.fill_nan(fill_value="extrapolate")
-        noise = peaks.estimate_noise(self.spint)
-        if smoothing_strength is None:
-            x = self.spint
-        else:
-            x = cast(
-                np.ndarray[Any, np.dtype[np.floating]],
-                gaussian_filter1d(self.spint, smoothing_strength),
-            )
+        if self.noise is None:
+            self.noise = peaks.estimate_noise(self.spint)
 
-        if store_smoothed:
-            self.spint = x
+        if self.baseline is None:
+            self.baseline = peaks.estimate_baseline(self.spint, self.noise)
 
-        baseline = peaks.estimate_baseline(x, noise)
-        start, apex, end = peaks.detect_peaks(x, noise, baseline, **kwargs)
-        n_peaks = start.size
-        features = [
-            Peak(s, a, e, self) for s, a, e, i in zip(start, apex, end, range(n_peaks))
-        ]
-
-        self.features = features
-        self.baseline = baseline
-        self.noise = noise
-        return features
+        start, apex, end = peaks.detect_peaks(self.spint, self.noise, self.baseline, **kwargs)
+        self.features = [Peak(s, a, e, self) for s, a, e in zip(start, apex, end)]
 
     def plot(
         self, figure: Optional[bokeh.plotting.figure] = None, show: bool = True
@@ -587,21 +556,11 @@ class Chromatogram(LCTrace):
         Retention time data.
     spint : array
         Intensity data.
-    mode : {"uplc", "hplc"}, default="uplc"
-        Analytical platform used for separation. Sets default values for peak
-        detection.
 
     """
 
-    mz: Optional[np.ndarray]
-    scan: Optional[np.ndarray]
-
-    def __init__(
-        self, time: np.ndarray, spint: np.ndarray, index: int = 0, mode: str = c.UPLC
-    ):
-        super(Chromatogram, self).__init__(time, spint, spint, spint, mode)
-        self.mz = None
-        self.scan = None
+    def __init__(self, time: np.ndarray, spint: np.ndarray):
+        super(Chromatogram, self).__init__(time, spint, spint, spint)
 
 
 class InvalidPeakException(ValueError):

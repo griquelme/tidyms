@@ -22,7 +22,10 @@ def test_get_fill_area_no_peaks_detected(monkeypatch):
 def test_get_fill_area_peak_detected_outside_valid_range(monkeypatch):
     time = np.arange(100)
     spint = np.ones_like(time)
+    noise = np.zeros_like(time)
     chromatogram = ms.Chromatogram(time, spint)
+    chromatogram.noise = noise
+    chromatogram.baseline = noise
     rt = 50
     rt_std = 10
     n_dev = 1

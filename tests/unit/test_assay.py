@@ -398,8 +398,9 @@ class DummyAssay(assay.Assay):
 def detect_features_dummy(ms_data: str, **kwargs):
     results = list()
     for k in range(DummyAssay.n_roi):
-        x = np.arange(DummyAssay.roi_length)
-        roi = LCTrace(x, x, x, x, "uplc")
+        scan = np.arange(DummyAssay.roi_length)
+        time = scan.astype(float)
+        roi = LCTrace(time, time, time, scan)
         results.append(roi)
     return results
 
