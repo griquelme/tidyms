@@ -31,7 +31,7 @@ class AnnotationData:
         """Gets the current non-annotated feature with the greatest area."""
         if self._monoisotopologues:
             mono = self._monoisotopologues[-1]
-            while mono not in self.non_annotated:
+            while self._monoisotopologues and (mono not in self.non_annotated):
                 self._monoisotopologues.pop()
                 if self._monoisotopologues:
                     mono = self._monoisotopologues[-1]
