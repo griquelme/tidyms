@@ -72,7 +72,7 @@ def feature_list(compound_data) -> list[Peak]:
     rt_params = np.vstack(rt_params)
     ms_data = MSData_simulated(mz_grid, rt_grid, mz_params, rt_params, noise=0.025)
 
-    roi_list = make_roi(ms_data, tolerance=0.01)
+    roi_list = make_roi(ms_data, tolerance=0.01, pad=2)
     ft_list = list()
     for k, r in enumerate(roi_list):
         r.extract_features()
@@ -93,7 +93,8 @@ def test_annotate(feature_list, annotation_tools_params):
     for ft in feature_list:
         group_list = annotation_check.setdefault(ft.annotation.isotopologue_label, list())
         group_list.append(ft)
-    annotation_check.pop(-1)
+    if -1 in annotation_check:
+        annotation_check.pop(-1)
     assert len(annotation_check) == 6
     for v in annotation_check.values():
         assert len(v) == 4  # features where generated with 4 isotopologues.
