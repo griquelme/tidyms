@@ -251,24 +251,12 @@ def test_TempRoi_convert_to_roi_lc_roi():
     temp_roi.append(1, 1, 5)
     scans = np.arange(6)
     time = np.arange(6)
-    roi = temp_roi.convert_to_roi(time, scans, "uplc")
+    roi = temp_roi.convert_to_roi(time, scans)
 
     assert np.array_equal(roi.scan, [2, 3, 4, 5])
     assert np.allclose(roi.time, [2, 3, 4, 5])
     assert np.allclose(roi.mz, [1, np.nan, 1, 1], equal_nan=True)
     assert np.allclose(roi.spint, [1, np.nan, 1, 1], equal_nan=True)
-
-
-def test_TempRoi_convert_to_roi_di_roi():
-    temp_roi = ms.raw_data_utils._TempRoi()
-    temp_roi.append(1, 1, 2)
-    temp_roi.append(1, 1, 4)
-    temp_roi.append(1, 1, 5)
-    scans = np.arange(6)
-    time = np.arange(6)
-    with pytest.raises(NotImplementedError):
-        # TODO: FIX after implementing DI ROI creation
-        temp_roi.convert_to_roi(time, scans, "di")
 
 
 def test_RoiList_creation():
@@ -759,11 +747,8 @@ def test_RoiProcessor_tmp_roi_to_roi(roi_processor: ms.raw_data_utils._RoiMaker)
     valid_scan = np.arange(n)
     time = np.arange(n)
     pad = 2
-    separation = "uplc"
     smoothing_strength = None
-    roi_list = roi_processor.tmp_roi_to_roi(
-        valid_scan, time, pad, smoothing_strength, separation
-    )
+    roi_list = roi_processor.tmp_roi_to_roi(valid_scan, time, pad, smoothing_strength)
     assert len(roi_list) == 5
     for r in roi_list:
         assert np.isnan(r.mz).sum() == 0
