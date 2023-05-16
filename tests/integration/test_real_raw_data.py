@@ -33,7 +33,7 @@ def test_ms_data_invalid_separation_setter(ms_data_centroid):
 
 
 def test_make_chromatogram_ms_level_1(ms_data_centroid):
-    mz = np.array([205.098, 524.37, 188.07])   # some m/z observed in the data
+    mz = np.array([205.098, 524.37, 188.07])  # some m/z observed in the data
     chromatograms = ms.make_chromatograms(ms_data_centroid, mz)
     rt = list()
     for _, sp in ms_data_centroid.get_spectra_iterator(ms_level=1):
@@ -60,10 +60,9 @@ def test_make_tic_ms_level_1(ms_data_centroid):
 
 
 def test_make_chromatogram_ms_level_2(ms_data_centroid):
-    mz = np.array([205.098, 524.37, 188.07])   # some m/z observed in the data
+    mz = np.array([205.098, 524.37, 188.07])  # some m/z observed in the data
     ms_level = 2
-    chromatograms = ms.make_chromatograms(
-        ms_data_centroid, mz, ms_level=ms_level)
+    chromatograms = ms.make_chromatograms(ms_data_centroid, mz, ms_level=ms_level)
     rt = list()
     for _, sp in ms_data_centroid.get_spectra_iterator(ms_level=ms_level):
         rt.append(sp.time)
@@ -74,7 +73,7 @@ def test_make_chromatogram_ms_level_2(ms_data_centroid):
 
 
 def test_make_roi(ms_data_centroid):
-    roi_list = ms.make_roi(ms_data_centroid)
+    roi_list = ms.make_roi(ms_data_centroid, min_length=2)
     for r in roi_list:
         # The three arrays must have the same size
         assert r.time.size == r.spint.size
