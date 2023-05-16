@@ -7,7 +7,6 @@ import numpy as np
 from .lcms import Chromatogram, LCTrace, MSSpectrum
 from .fileio import MSData
 from .utils import find_closest
-from . import _constants as c
 from . import validation as val
 from collections import deque
 from copy import deepcopy
@@ -301,7 +300,7 @@ def make_roi(
     processor.flag_as_completed()
     processor.clear_completed_roi()
     scans = np.array(scans)
-    roi_list = processor.tmp_roi_to_roi(scans, rt, pad, smoothing_strength, ms_data.separation)
+    roi_list = processor.tmp_roi_to_roi(scans, rt, pad, smoothing_strength)
 
     return roi_list
 
@@ -618,7 +617,6 @@ class _RoiMaker:
         time: np.ndarray,
         pad: int,
         smooth: Optional[float],
-        separation: str,
     ) -> list[LCTrace]:
         """
         Converts completed valid _TempRoi objects into LCTraces.
@@ -640,10 +638,10 @@ class _RoiMaker:
         while self.valid_roi:
             tmp = self.valid_roi.popleft()
             tmp.pad(pad, valid_scan)
-            roi = tmp.convert_to_roi(time, valid_scan, separation)
+            roi = tmp.convert_to_roi(time, valid_scan)
+            roi.fill_nan(fill_value="extrapolate")
             if smooth is not None:
                 roi.smooth(smooth)
-            roi.fill_nan(fill_value="extrapolate")
             valid_roi.append(roi)
         return valid_roi
 
@@ -851,7 +849,7 @@ class _TempRoi:
         self.spint.extend([np.nan] * n_right)
         self.scan.extend(valid_scan[end:right_pad_index])
 
-    def convert_to_roi(self, rt: np.ndarray, scans: np.ndarray, separation: str) -> LCTrace:
+    def convert_to_roi(self, rt: np.ndarray, scans: np.ndarray) -> LCTrace:
         """
         Converts a TemporaryRoi into a ROI object
 
@@ -861,7 +859,6 @@ class _TempRoi:
             Acquisition times of each scan
         scans : array
             Sorted scan numbers used to build the ROIs.
-        separation : mode to pass to ROI creation.
 
         Returns
         -------
@@ -890,13 +887,7 @@ class _TempRoi:
         spint_tmp = spint_tmp[valid_index]
         rt_tmp = rt[scan_tmp].copy()
 
-        # Create ROI objects
-        if separation in c.LC_MODES:
-            roi = LCTrace(rt_tmp, spint_tmp, mz_tmp, scan_tmp)
-        else:
-            raise NotImplementedError
-            # roi = Roi(spint_tmp, mz_tmp, rt_tmp, scan_tmp, mode=separation)
-        return roi
+        return LCTrace(rt_tmp, spint_tmp, mz_tmp, scan_tmp)
 
 
 def _make_mz_filter(
