@@ -1,11 +1,13 @@
-from .assay_processor import SingleSampleProcessor
-from .assay_data import SampleData
-from ..raw_data_utils import make_roi
-from ..fileio import MSData
-from typing import Any, Optional
 import numpy as np
-from ..validation import is_all_positive
+from typing import Any, Optional
+from .assay_processor import SingleSampleProcessor, FeatureExtractor
+from .assay_data import SampleData
 from .. import _constants as c
+from .. import peaks
+from ..fileio import MSData_from_file
+from ..lcms import LCTrace, Peak
+from ..raw_data_utils import make_roi
+from ..validation import is_all_positive, ValidatorWithLowerThan, validate
 
 
 class LCTraceExtractor(SingleSampleProcessor):
@@ -34,6 +36,10 @@ class LCTraceExtractor(SingleSampleProcessor):
     pad: int, default=0
         Pad dummy values at the beginning and at the end of a trace. This produces
         better peak picking results when searching low intensity peaks in a trace.
+    smoothing_strength: float or None, default=1.0
+        Smooth the intensity of each trace using a Gaussian kernel. The smoothing
+        strength is the standard deviation of the gaussian. If ``None``, no smoothing
+        is applied.
     targeted_mz : numpy.ndarray or None, default=None
         A list of m/z values to perform a targeted trace creation. If this
         value is provided, only traces with these m/z values will be created.
@@ -43,15 +49,6 @@ class LCTraceExtractor(SingleSampleProcessor):
     lcms.LCTrace : Representation of a ROI using m/z traces.
 
     """
-
-    _validation_schema = {
-        "tolerance": {"type": "number", "is_positive": True},
-        "max_missing": {"type": "integer", "min": 0},
-        "targeted_mz": {"nullable": True, "check_with": is_all_positive},
-        "min_intensity": {"type": "number", "min": 0.0},
-        "min_length": {"type": "integer", "min": 2},
-        "pad": {"type": "integer", "min": 0},
-    }
 
     def __init__(
         self,
@@ -76,7 +73,8 @@ class LCTraceExtractor(SingleSampleProcessor):
 
     def _func(self, sample_data: SampleData):
         sample = sample_data.sample
-        ms_data = MSData(sample.path)
+        # TODO: fix this after refactoring MSData
+        ms_data = MSData_from_file(sample.path)
         params = self.get_parameters()
         sample_data.roi = make_roi(
             ms_data,
@@ -94,22 +92,64 @@ class LCTraceExtractor(SingleSampleProcessor):
         defaults.update(separation_parameters[separation])
         self.set_parameters(defaults)
 
+    @staticmethod
+    def _validate_parameters(parameters: dict):
+        schema = {
+            "tolerance": {"type": "number", "is_positive": True},
+            "max_missing": {"type": "integer", "min": 0},
+            "targeted_mz": {"nullable": True, "check_with": is_all_positive},
+            "min_intensity": {"type": "number", "min": 0.0},
+            "min_length": {"type": "integer", "min": 2},
+            "pad": {"type": "integer", "min": 0},
+            "smoothing_strength": {"type": "number", "nullable": True, "is_positive": True},
+        }
+        validator = ValidatorWithLowerThan(schema)
+        validate(parameters, validator)
 
-class LCFeatureExtractor(SingleSampleProcessor):
-    _validation_schema = {}
 
-    def __init__(self):
-        pass
+class LCFeatureExtractor(FeatureExtractor):
+    """
+    Detect peaks in LC m/z traces.
+
+    Peaks are stored in the `features` attribute of each LCTrace.
+
+    A complete description can be found :ref:`here <feature-extraction>`.
+
+    """
+
+    def __init__(
+        self, filters: Optional[dict[str, tuple[Optional[float], Optional[float]]]] = None
+    ):
+        super().__init__(filters)
 
     @staticmethod
     def _check_data(sample_data: SampleData):
         pass
 
-    def _func(self, sample_data: SampleData):
-        # TODO: remove this after fixing ROIProcessor
-        for roi in sample_data.roi:
-            roi.extract_features(store_smoothed=True)
-
     def set_default_parameters(self, instrument: str, separation: str):
-        defaults = {}
+        if separation == c.HPLC:
+            filters = {"width": (10, 90), "snr": (5, None)}
+        else:  # mode = "uplc"
+            filters = {"width": (4, 60), "snr": (5, None)}
+        defaults = {"filters": filters}
         self.set_parameters(defaults)
+
+    @staticmethod
+    def _extract_features_func(roi: LCTrace, **params):
+        if roi.noise is None:
+            roi.noise = peaks.estimate_noise(roi.spint)
+
+        if roi.baseline is None:
+            roi.baseline = peaks.estimate_baseline(roi.spint, roi.noise)
+
+        start, apex, end = peaks.detect_peaks(roi.spint, roi.noise, roi.baseline, **params)
+        roi.features = [Peak(s, a, e, roi) for s, a, e in zip(start, apex, end)]
+
+    @staticmethod
+    def _validate_parameters(parameters: dict):
+        filters = parameters["filters"]
+        valid_descriptors = Peak.descriptor_names()
+        for descriptor in filters:
+            if descriptor not in valid_descriptors:
+                msg = f"{descriptor} is not a valid descriptor name."
+                raise ValueError(msg)
