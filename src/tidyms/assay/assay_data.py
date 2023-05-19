@@ -67,12 +67,14 @@ class SampleData:
     Attributes
     ----------
     sample : Sample
-    roi : list[Roi]
+    roi : Optional[list[Roi]]
 
     """
 
-    def __init__(self, sample: Sample, roi: Sequence[Roi]) -> None:
+    def __init__(self, sample: Sample, roi: Optional[Sequence[Roi]] = None) -> None:
         self.sample = sample
+        if roi is None:
+            roi = list()
         self.roi = roi
 
     def get_feature_list(self) -> Sequence[Feature]:
