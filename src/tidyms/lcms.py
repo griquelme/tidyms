@@ -330,6 +330,7 @@ class MZTrace(Roi):
         self.mz = mz
         self.scan = scan
         self.features: Optional[list[Feature]] = None
+        self.fill_nan(fill_value="extrapolate")
         if noise is None:
             noise = peaks.estimate_noise(self.spint)
         self.noise = noise

@@ -639,7 +639,6 @@ class _RoiMaker:
             tmp = self.valid_roi.popleft()
             tmp.pad(pad, valid_scan)
             roi = tmp.convert_to_roi(time, valid_scan)
-            roi.fill_nan(fill_value="extrapolate")
             if smooth is not None:
                 roi.smooth(smooth)
             valid_roi.append(roi)
