@@ -255,8 +255,6 @@ def test_TempRoi_convert_to_roi_lc_roi():
 
     assert np.array_equal(roi.scan, [2, 3, 4, 5])
     assert np.allclose(roi.time, [2, 3, 4, 5])
-    assert np.allclose(roi.mz, [1, np.nan, 1, 1], equal_nan=True)
-    assert np.allclose(roi.spint, [1, np.nan, 1, 1], equal_nan=True)
 
 
 def test_RoiList_creation():

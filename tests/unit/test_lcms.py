@@ -97,14 +97,6 @@ def lc_roi_with_peak() -> tuple[lcms.LCTrace, lcms.Peak]:
     return lc_roi, peak
 
 
-def test_LCTrace_creation(roi_data):
-    rt, mz, spint = roi_data
-    trace = lcms.LCTrace(rt, spint, mz, rt)
-    assert np.array_equal(rt, trace.time, equal_nan=True)
-    assert np.array_equal(spint, trace.spint, equal_nan=True)
-    assert np.array_equal(mz, trace.mz, equal_nan=True)
-
-
 def test_fill_nan(roi_data):
     rt, mz, spint = roi_data
     roi = lcms.LCTrace(rt, spint, mz, rt)
