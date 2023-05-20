@@ -1,25 +1,17 @@
 """
 Base classes to create processors for assay data.
 
-- SingleSampleProcessor: Base class to process data from a single sample.
-- FeatureExtractor: Base class to extract feature from ROI.
+- SingleSampleProcessor : Base class to process data from a single sample.
+- FeatureExtractor : Base class to extract feature from ROI.
+- MultipleSampleProcessor : Base class to process multiple samples.
 
 """
 import inspect
 from abc import ABC, abstractmethod
-from .assay_data import SampleData
+from .assay_data import SampleData, AssayData
 from ..lcms import Feature
 from typing import Optional, Sequence
 from math import inf
-
-
-class PreprocessingOrderError(ValueError):
-    """
-    Exception raised when the preprocessing methods are called in the wrong order.
-
-    """
-
-    pass
 
 
 class Processor(ABC):
@@ -48,20 +40,20 @@ class Processor(ABC):
 
         init_signature = inspect.signature(cls.__init__)
 
-        parameters = [
-            p
-            for p in init_signature.parameters.values()
-            if p.name != "self" and p.kind != p.VAR_KEYWORD
-        ]
-
-        for p in parameters:
+        parameters = list()
+        for p in init_signature.parameters.values():
             if p.kind == p.VAR_POSITIONAL:
                 raise RuntimeError(
                     "Processors should always specify their parameters in the signature"
                     " of their __init__ (no varargs)."
                 )
-        # Extract and sort argument names excluding 'self'
-        return sorted([p.name for p in parameters])
+            if (
+                (not p.name.startswith("_"))
+                and (p.kind != p.VAR_KEYWORD)
+                and (p.name != "self")
+            ):
+                parameters.append(p.name)
+        return sorted([p for p in parameters])
 
     def get_parameters(self) -> dict:
         """
@@ -84,6 +76,7 @@ class Processor(ABC):
         parameters : dict
 
         """
+        self._validate_parameters(parameters)
         valid_parameters = self._get_param_names()
         for k, v in parameters.items():
             if k not in valid_parameters:
@@ -201,7 +194,14 @@ class FeatureExtractor(SingleSampleProcessor):
 
 
 class MultipleSampleProcessor(Processor):
-    pass
+    """
+    Base class for multiple class process. Data is managed through the AssayData class.
+
+    """
+
+    @abstractmethod
+    def process(self, data: AssayData):
+        ...
 
 
 class ProcessingPipeline:
@@ -220,7 +220,11 @@ class ProcessingPipeline:
         self._name_to_processor = {x: y for x, y in steps}
         if len(self.processors) > len(self._name_to_processor):
             msg = "Processor names must be unique."
-            ValueError(msg)
+            raise ValueError(msg)
+
+    def get_processor(self, name: str) -> Processor:
+        processor = self._name_to_processor[name]
+        return processor
 
     def get_parameters(self) -> list[tuple[str, dict]]:
         """
