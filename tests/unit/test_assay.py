@@ -1,4 +1,4 @@
-from tidyms.assay import assay
+from tidyms.assay import legacy_assay
 from tidyms.lcms import LCTrace, Peak
 from tidyms import _constants as c
 import pytest
@@ -40,8 +40,8 @@ def create_assay_dir(
     return assay_path, data_path
 
 
-def create_dummy_assay_manager(assay_path, data_path, metadata) -> assay._AssayManager:
-    return assay._AssayManager(
+def create_dummy_assay_manager(assay_path, data_path, metadata) -> legacy_assay._AssayManager:
+    return legacy_assay._AssayManager(
         assay_path=assay_path,
         data_path=data_path,
         sample_metadata=metadata,
@@ -73,7 +73,7 @@ def test_get_path_list_single_file_str(tmpdir):
     file_path = str(tmpdir) + os.path.sep + "sample.mzML"
     path = Path(file_path)
     path.touch()
-    path_list = assay._get_path_list(file_path)
+    path_list = legacy_assay._get_path_list(file_path)
     assert len(path_list) == 1
 
 
@@ -82,13 +82,13 @@ def test_get_path_list_single_file_invalid_extension(tmpdir):
     path = Path(file_path)
     path.touch()
     with pytest.raises(ValueError):
-        assay._get_path_list(file_path)
+        legacy_assay._get_path_list(file_path)
 
 
 def test_get_path_list_single_file_file_not_exists(tmpdir):
     file_path = str(tmpdir) + os.path.sep + "sample.mzML"
     with pytest.raises(ValueError):
-        assay._get_path_list(file_path)
+        legacy_assay._get_path_list(file_path)
 
 
 def test_get_path_list_list_str(tmpdir):
@@ -97,7 +97,7 @@ def test_get_path_list_list_str(tmpdir):
     for file in file_list:
         path = Path(file)
         path.touch()
-    path_list = assay._get_path_list(file_list)
+    path_list = legacy_assay._get_path_list(file_list)
     assert len(path_list) == len(file_list)
 
 
@@ -108,7 +108,7 @@ def test_get_path_list_list_str_bad_extension(tmpdir):
         path = Path(file)
         path.touch()
     with pytest.raises(ValueError):
-        assay._get_path_list(file_list)
+        legacy_assay._get_path_list(file_list)
 
 
 def test_get_path_list_list_str_not_exists(tmpdir):
@@ -120,14 +120,14 @@ def test_get_path_list_list_str_not_exists(tmpdir):
             path = Path(file)
             path.touch()
     with pytest.raises(ValueError):
-        assay._get_path_list(file_list)
+        legacy_assay._get_path_list(file_list)
 
 
 def test_get_path_path(tmpdir):
     file_path = str(tmpdir) + os.path.sep + "sample.mzML"
     path = Path(file_path)
     path.touch()
-    path_list = assay._get_path_list(path)
+    path_list = legacy_assay._get_path_list(path)
     assert len(path_list) == 1
 
 
@@ -136,14 +136,14 @@ def test_get_path_path_invalid_extension(tmpdir):
     path = Path(file_path)
     path.touch()
     with pytest.raises(ValueError):
-        assay._get_path_list(path)
+        legacy_assay._get_path_list(path)
 
 
 def test_get_path_path_not_exist(tmpdir):
     file_path = str(tmpdir) + os.path.sep + "sample.mzML"
     path = Path(file_path)
     with pytest.raises(ValueError):
-        assay._get_path_list(path)
+        legacy_assay._get_path_list(path)
 
 
 def test_assay_manager_invalid_sample_metadata_missing_samples(tmpdir):
@@ -316,7 +316,7 @@ def test_assay_manager_check_invalid_order(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     metadata = create_dummy_assay_manager(assay_path, data_path, None)
     step = c.EXTRACT_FEATURES
-    with pytest.raises(assay.PreprocessingOrderError):
+    with pytest.raises(legacy_assay.PreprocessingOrderError):
         metadata.check_step(step)
 
 
@@ -383,7 +383,7 @@ def test_assay_manager_add_samples(tmpdir):
 # create a subclass with dummy methods
 
 
-class DummyAssay(assay.Assay):
+class DummyAssay(legacy_assay.LegacyAssay):
     n_roi = 5
     roi_length = 20
     n_ft = 5
@@ -546,7 +546,7 @@ def test_assay_extract_features_saved_features(tmpdir):
 def test_assay_extract_features_before_detect_features(tmpdir):
     assay_path, data_path = create_assay_dir(tmpdir, 20)
     test_assay = DummyAssay(assay_path, data_path)
-    with pytest.raises(assay.PreprocessingOrderError):
+    with pytest.raises(legacy_assay.PreprocessingOrderError):
         test_assay.extract_features()
 
 
@@ -607,23 +607,23 @@ def test_assay_build_feature_table(tmpdir):
 
 def test_fill_filter_boundaries_fill_upper_bound():
     filters = {"loc": (50, None), "snr": (5, 10)}
-    assay._fill_filter_boundaries(filters)
+    legacy_assay._fill_filter_boundaries(filters)
     assert np.isclose(filters["loc"][1], np.inf)
 
 
 def test_fill_filter_boundaries_fill_lower_bound():
     filters = {"loc": (None, 50), "snr": (5, 10)}
-    assay._fill_filter_boundaries(filters)
+    legacy_assay._fill_filter_boundaries(filters)
     assert np.isclose(filters["loc"][0], -np.inf)
 
 
 def test_has_all_valid_descriptors():
     descriptors = {"loc": 50, "height": 10, "snr": 5}
     filters = {"snr": (3, 10)}
-    assert assay._all_valid_descriptors(descriptors, filters)
+    assert legacy_assay._all_valid_descriptors(descriptors, filters)
 
 
 def test_has_all_valid_descriptors_descriptors_outside_valid_ranges():
     descriptors = {"loc": 50, "height": 10, "snr": 5}
     filters = {"snr": (10, 20)}
-    assert not assay._all_valid_descriptors(descriptors, filters)
+    assert not legacy_assay._all_valid_descriptors(descriptors, filters)

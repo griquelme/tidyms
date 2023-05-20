@@ -8,7 +8,6 @@ seed = 1234
 
 
 def create_chromatogram() -> ms.Chromatogram:
-
     filename = "NZ_20200227_039.mzML"
     dataset = "test-nist-raw-data"
     ms.fileio.download_tidyms_data(dataset, [filename])
@@ -16,10 +15,7 @@ def create_chromatogram() -> ms.Chromatogram:
     path = path.joinpath(dataset, filename)
 
     ms_data = ms.MSData.create_MSData_instance(
-        path,
-        ms_mode="centroid",
-        instrument="qtof",
-        separation="uplc"
+        path, ms_mode="centroid", instrument="qtof", separation="uplc"
     )
     mz_list = np.array([189.0734])
     return ms.make_chromatograms(ms_data, mz_list)[0]
@@ -60,14 +56,13 @@ def pca_plot():
 
     data = ms.fileio.load_dataset("reference-materials")
     ignore = ["Z", "SV", "B", "SSS", "SCQC"]
-    f = data.plot.pca_scores(fig_params={"height": 250},
-                             ignore_classes=ignore,
-                             scaling="autoscaling",
-                             draw=False)
+    f = data.plot.pca_scores(
+        fig_params={"height": 250}, ignore_classes=ignore, scaling="autoscaling", draw=False
+    )
     plotting.save(f)
 
 
-def create_assay(assay_path) -> ms.Assay:
+def create_assay(assay_path) -> ms.LegacyAssay:
     plotting.output_file("_static/pca-scores.html")
     ms.fileio.download_dataset("test-nist-raw-data")
     ms.fileio.download_dataset("reference-materials")
@@ -75,24 +70,24 @@ def create_assay(assay_path) -> ms.Assay:
     data_path = tidyms_dir.joinpath("test-nist-raw-data")
     sample_metadata_path = data_path.joinpath("sample_list.csv")
 
-    assay = ms.Assay(
+    assay = ms.LegacyAssay(
         data_path=data_path,
         assay_path=assay_path,
         sample_metadata=sample_metadata_path,
         separation="uplc",
-        instrument="qtof"
+        instrument="qtof",
     )
     return assay
 
 
-def plot_roi_assay(assay: ms.Assay, save_path: str):
+def plot_roi_assay(assay: ms.LegacyAssay, save_path: str):
     plotting.output_file(save_path)
     sample_name = "NZ_20200227_039"
     p = assay.plot.roi(sample_name, show=False)
     plotting.save(p)
 
 
-def plot_stacked_chromatogram(assay: ms.Assay):
+def plot_stacked_chromatogram(assay: ms.LegacyAssay):
     plotting.output_file("_static/stacked-chromatograms.html")
     p = assay.plot.stacked_chromatogram(6, show=False)
     plotting.save(p)
@@ -102,8 +97,7 @@ def create_assay_plots():
     assay_path = "_build/test-assay"
     assay = create_assay(assay_path)
     mz_list = np.array(
-        [118.0654, 144.0810, 146.0605, 181.0720, 188.0706, 189.0738,
-         195.0875, 205.0969]
+        [118.0654, 144.0810, 146.0605, 181.0720, 188.0706, 189.0738, 195.0875, 205.0969]
     )
     make_roi_params = {
         "tolerance": 0.015,

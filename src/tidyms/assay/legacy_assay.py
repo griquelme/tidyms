@@ -47,7 +47,7 @@ def _manage_preprocessing_step(func):
         func_arg_names = func_arg_spec.args[1:]  # exclude self
         params = dict(zip(func_arg_names, args[1:]))
         params.update(kwargs)
-        assay = args[0]  # type: Assay
+        assay = args[0]  # type: LegacyAssay
 
         step = func.__name__
         assay.manager.manage_step_before(step, params)
@@ -58,7 +58,7 @@ def _manage_preprocessing_step(func):
     return wrapper
 
 
-class Assay:
+class LegacyAssay:
     """
     Manages data preprocessing workflows from raw data to data matrix.
 
@@ -129,7 +129,15 @@ class Assay:
         if assay_path is None:
             assay_path = tempfile.mkdtemp()
 
-        self._manager = _create_assay_manager(assay_path, data_path, sample_metadata, ms_mode, instrument, separation, data_import_mode)
+        self._manager = _create_assay_manager(
+            assay_path,
+            data_path,
+            sample_metadata,
+            ms_mode,
+            instrument,
+            separation,
+            data_import_mode,
+        )
         self.ms_mode = ms_mode
         self.separation = separation
         self.instrument = instrument
@@ -202,13 +210,22 @@ class Assay:
             msg = "n_jobs must be set to a positive, non-zero integer value to use a specific number of parallel workers. -1 indicates all processors. Provided value is {}."
             raise ValueError(msg.format(value))
 
-    def add_samples(self, data_path: Optional[Union[str, List[str], Path]], sample_metadata: Optional[Union[str, pd.DataFrame]]):
+    def add_samples(
+        self,
+        data_path: Optional[Union[str, List[str], Path]],
+        sample_metadata: Optional[Union[str, pd.DataFrame]],
+    ):
         self._manager.add_samples(
             data_path=data_path,
             sample_metadata=sample_metadata,
         )
 
-    def add_virtual_sample(self, MSData_object: MSData, virtual_name: str, sample_metadata: Optional[Union[str, pd.DataFrame]]):
+    def add_virtual_sample(
+        self,
+        MSData_object: MSData,
+        virtual_name: str,
+        sample_metadata: Optional[Union[str, pd.DataFrame]],
+    ):
         self._manager.add_virtual_sample(
             MSData_object=MSData_object,
             virtual_name=virtual_name,
@@ -218,7 +235,9 @@ class Assay:
         self._virtual_samples.add(virtual_name)
 
     @staticmethod
-    def _get_feature_detection_strategy(strategy: Union[str, Callable] = "default") -> Callable:
+    def _get_feature_detection_strategy(
+        strategy: Union[str, Callable] = "default"
+    ) -> Callable:
         """
         Returns the function used for feature detection.
         """
@@ -232,7 +251,9 @@ class Assay:
         return func
 
     @staticmethod
-    def _get_feature_extraction_strategy(strategy: Union[str, Callable] = "default") -> Callable:
+    def _get_feature_extraction_strategy(
+        strategy: Union[str, Callable] = "default"
+    ) -> Callable:
         """
         Returns the function used for feature extraction.
 
@@ -290,16 +311,24 @@ class Assay:
             if "data_import_mode" in temp:
                 temp.pop("data_import_mode")
             if self.data_import_mode.lower() == c.MEMORY:
-                ms_data = MSData.create_MSData_instance(data_import_mode=c.MEMORY, path=sample_path, **temp)
+                ms_data = MSData.create_MSData_instance(
+                    data_import_mode=c.MEMORY, path=sample_path, **temp
+                )
             elif self.data_import_mode.lower() == c.INFILE:
                 path = Path(sample_path)
                 suffix = path.suffix
                 if suffix == "":
-                    ms_data = MSData.create_MSData_instance(data_import_mode=c.SIMULATED, path=sample_path, **temp)
+                    ms_data = MSData.create_MSData_instance(
+                        data_import_mode=c.SIMULATED, path=sample_path, **temp
+                    )
                 else:
-                    ms_data = MSData.create_MSData_instance(data_import_mode=c.INFILE, path=sample_path, **temp)
+                    ms_data = MSData.create_MSData_instance(
+                        data_import_mode=c.INFILE, path=sample_path, **temp
+                    )
             elif self.data_import_mode.lower() == c.SIMULATED:
-                ms_data = MSData.create_MSData_instance(data_import_mode=c.SIMULATED, path=sample_path, **temp)
+                ms_data = MSData.create_MSData_instance(
+                    data_import_mode=c.SIMULATED, path=sample_path, **temp
+                )
 
             if ms_data is None:
                 raise RuntimeError("Error: file '%s' not found" % (sample_path))
@@ -462,7 +491,7 @@ class Assay:
         n_jobs: Optional[int] = None,
         verbose: bool = True,
         **kwargs,
-    ) -> "Assay":
+    ) -> "LegacyAssay":
         """
         Builds Regions Of Interest (ROI) from raw data for each sample.
 
@@ -540,7 +569,7 @@ class Assay:
         n_jobs: Optional[int] = None,
         verbose: bool = True,
         **kwargs,
-    ) -> "Assay":
+    ) -> "LegacyAssay":
         """
         Extract features from the ROIs detected on each sample.
 
@@ -622,7 +651,7 @@ class Assay:
         filters: Optional[dict[str, Tuple]] = None,
         n_jobs: Optional[int] = 1,
         verbose: bool = True,
-    ) -> "Assay":
+    ) -> "LegacyAssay":
         """
         Compute feature descriptors for the features extracted from the data.
 
@@ -849,7 +878,9 @@ class Assay:
         return self.data_matrix
 
     @_manage_preprocessing_step
-    def annotate_isotopologues(self, n_jobs: Optional[int] = 1, verbose: bool = True, **kwargs):
+    def annotate_isotopologues(
+        self, n_jobs: Optional[int] = 1, verbose: bool = True, **kwargs
+    ):
         """
         Labels isotopic envelopes in each sample.
 
@@ -1068,7 +1099,9 @@ class _AssayManager:
         self.data_import_mode = c.DEFAULT_DATA_LOAD_MODE
         if data_import_mode is not None:
             self.data_import_mode = data_import_mode
-        self.params = _build_params_dict(ms_mode, separation, instrument, self.data_import_mode)
+        self.params = _build_params_dict(
+            ms_mode, separation, instrument, self.data_import_mode
+        )
 
         self._virtual_MSData_objects = {}
 
@@ -1119,9 +1152,16 @@ class _AssayManager:
             self.sample_metadata = pd.concat((self.sample_metadata, sm))
             self.clear_data(c.BUILD_FEATURE_TABLE, new_sample_names)
 
-    def add_virtual_sample(self, MSData_object: MSData, virtual_name: str, sample_metadata: Optional[Union[str, pd.DataFrame]]):
+    def add_virtual_sample(
+        self,
+        MSData_object: MSData,
+        virtual_name: str,
+        sample_metadata: Optional[Union[str, pd.DataFrame]],
+    ):
         if virtual_name not in self._sample_to_path:
-            virtual_sample_path = os.path.join(self.assay_path, "%s.mzML" % ((str(uuid4()) + str(uuid4())).replace("-", "")))
+            virtual_sample_path = os.path.join(
+                self.assay_path, "%s.mzML" % ((str(uuid4()) + str(uuid4())).replace("-", ""))
+            )
             self._sample_to_path[virtual_name] = Path(virtual_sample_path)
             self._virtual_MSData_objects[virtual_name] = MSData_object
             new_sample_name = [virtual_name]
@@ -1255,7 +1295,9 @@ class _AssayManager:
         # TODO: remove this method after refactoring DataContainer
         sm = self.sample_metadata.copy()
         sm.index.name = "sample"
-        sm = sm.rename(columns={c.CLASS: "class", "id_": "id", c.ORDER: "order", c.BATCH: "batch"})
+        sm = sm.rename(
+            columns={c.CLASS: "class", "id_": "id", c.ORDER: "order", c.BATCH: "batch"}
+        )
         return sm
 
     def send_samples_to_queue(self, step: str, kwargs: dict):
@@ -1398,7 +1440,9 @@ def _process_feature(
     return descriptors
 
 
-def _all_valid_descriptors(descriptors: dict[str, float], filters: dict[str, Tuple[float, float]]) -> bool:
+def _all_valid_descriptors(
+    descriptors: dict[str, float], filters: dict[str, Tuple[float, float]]
+) -> bool:
     """
     Check that the descriptors of a peak are in a valid range.
 
@@ -1510,7 +1554,7 @@ def _get_default_filters(mode: str) -> dict:
     return filters
 
 
-def _match_features_default(assay: Assay, **kwargs):
+def _match_features_default(assay: LegacyAssay, **kwargs):
     # set defaults and validate input
     params = val.match_features_defaults(assay.separation, assay.instrument)
     params.update(kwargs)
@@ -1522,7 +1566,9 @@ def _match_features_default(assay: Assay, **kwargs):
     return results
 
 
-def _create_assay_manager(assay_path, data_path, sample_metadata, ms_mode, instrument, separation, data_import_mode) -> _AssayManager:
+def _create_assay_manager(
+    assay_path, data_path, sample_metadata, ms_mode, instrument, separation, data_import_mode
+) -> _AssayManager:
     assay_path = _normalize_assay_path(assay_path)
 
     status = _is_assay_dir(assay_path)
@@ -1549,7 +1595,7 @@ def _create_assay_manager(assay_path, data_path, sample_metadata, ms_mode, instr
     return manager
 
 
-def _create_assay_plotter(assay: Assay):
+def _create_assay_plotter(assay: LegacyAssay):
     separation = assay.separation
     if separation in c.LC_MODES:
         plotter = _LCAssayPlotter(assay)
@@ -1559,7 +1605,9 @@ def _create_assay_plotter(assay: Assay):
     return plotter
 
 
-def _create_sample_metadata(sample_metadata: Optional[Union[str, pd.DataFrame]], sample_names: List[str]) -> pd.DataFrame:
+def _create_sample_metadata(
+    sample_metadata: Optional[Union[str, pd.DataFrame]], sample_names: List[str]
+) -> pd.DataFrame:
     # sample metadata df
     if isinstance(sample_metadata, str) or isinstance(sample_metadata, Path):
         df = pd.read_csv(sample_metadata)
@@ -1661,7 +1709,10 @@ def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
             msg = "{} doesn't exist".format(path)
             raise ValueError(msg)
     else:
-        msg = "Path must be a string, a Path object pointing to a directory with " "mzML files or a list of strings with the path to mzML files."
+        msg = (
+            "Path must be a string, a Path object pointing to a directory with "
+            "mzML files or a list of strings with the path to mzML files."
+        )
         raise ValueError(msg)
 
     for p in path_list:
@@ -1724,7 +1775,12 @@ def compare_dict(d1: Optional[dict], d2: Optional[dict]) -> bool:
 
 def _build_params_dict(ms_mode: str, separation: str, instrument: str, data_import_mode: str):
     params_dict = {
-        "MSData": {"ms_mode": ms_mode, "separation": separation, "instrument": instrument, "data_import_mode": data_import_mode},
+        "MSData": {
+            "ms_mode": ms_mode,
+            "separation": separation,
+            "instrument": instrument,
+            "data_import_mode": data_import_mode,
+        },
         "processed_samples": {x: set() for x in c.PREPROCESSING_STEPS},
         "preprocess_steps": {x: False for x in c.PREPROCESSING_STEPS},
     }

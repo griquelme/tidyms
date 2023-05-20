@@ -375,7 +375,9 @@ def import_filter_artifact_removal(msData, artifacts):
         use = spectrum.mz >= 0
 
         for artifact in artifacts:
-            use = np.logical_and(use, np.logical_and(spectrum.mz >= artifact[0], spectrum.mz <= artifact[1]))
+            use = np.logical_and(
+                use, np.logical_and(spectrum.mz >= artifact[0], spectrum.mz <= artifact[1])
+            )
 
         spectrum.mz = spectrum.mz[use]
         spectrum.spint = spectrum.spint[use]
@@ -415,7 +417,16 @@ def import_filter_remove_signals_below_intensity(msData, minimum_signal_intensit
 #
 
 
-def cluster_quality_check_function__peak_form(sample, msDataObj, spectrumIDs, time, mz, intensity, cluster, min_correlation_for_cutoff=0.5):
+def cluster_quality_check_function__peak_form(
+    sample,
+    msDataObj,
+    spectrumIDs,
+    time,
+    mz,
+    intensity,
+    cluster,
+    min_correlation_for_cutoff=0.5,
+):
     """
     A function to check the detected feature clusters for certain attributes.
     This particular function checks if the distribution form somehow resembles a spot (approximated by a normal distribution).
@@ -448,7 +459,9 @@ def cluster_quality_check_function__peak_form(sample, msDataObj, spectrumIDs, ti
     removed = 0
     clustInds = np.unique(cluster)
     refTimes = np.array([spectrum.time for k, spectrum in msDataObj.get_spectra_iterator()])
-    refEIC = scipy.stats.norm.pdf(refTimes, loc=np.mean(refTimes), scale=(np.max(refTimes) - np.min(refTimes)) / 6)
+    refEIC = scipy.stats.norm.pdf(
+        refTimes, loc=np.mean(refTimes), scale=(np.max(refTimes) - np.min(refTimes)) / 6
+    )
     corrs = []
 
     for clusti, clustID in enumerate(clustInds):
@@ -475,14 +488,19 @@ def cluster_quality_check_function__peak_form(sample, msDataObj, spectrumIDs, ti
             p9.ggplot(data=temp, mapping=p9.aes(x="correlations"))
             + p9.geom_histogram(binwidth=0.1)
             + p9.geom_vline(xintercept=min_correlation_for_cutoff)
-            + p9.ggtitle("correlations in sample '%s' removed %d corrs %d" % (sample, removed, len(corrs)))
+            + p9.ggtitle(
+                "correlations in sample '%s' removed %d corrs %d"
+                % (sample, removed, len(corrs))
+            )
         )
         print(p)
 
     return cluster
 
 
-def cluster_quality_check_function__ppmDeviationCheck(sample, msDataObj, spectrumIDs, time, mz, intensity, cluster, max_weighted_ppm_deviation=15):
+def cluster_quality_check_function__ppmDeviationCheck(
+    sample, msDataObj, spectrumIDs, time, mz, intensity, cluster, max_weighted_ppm_deviation=15
+):
     """
     A function to check the detected feature clusters for certain attributes.
     This particular function checks if the clusters are within a certain ppm devaition. Any cluster exceeding this deviation will be removed in a subsequent step (by setting the cluster ids to -1)
@@ -629,36 +647,81 @@ def _refine_clustering_for_mz_list(
                         print("     - closing cluster without extension to left/right")
                     closeCluster = True
 
-                elif (left and right and abs(curMean - mzs_[start - 1]) <= abs(mzs_[end + 1] - curMean)) or (left and not right):
+                elif (
+                    left
+                    and right
+                    and abs(curMean - mzs_[start - 1]) <= abs(mzs_[end + 1] - curMean)
+                ) or (left and not right):
                     newStart = start - 1
                     addedPPMDev = abs(mzs_[start] - mzs_[newStart]) / curMean * 1e6
                     newTotalPPMDev = abs(mzs_[end] - mzs_[newStart]) / curMean * 1e6
                     if debugPrint_:
-                        print("     - extending cluster to the left with new values", addedPPMDev, newTotalPPMDev)
+                        print(
+                            "     - extending cluster to the left with new values",
+                            addedPPMDev,
+                            newTotalPPMDev,
+                        )
 
-                elif (left and right and abs(mzs_[end + 1] - curMean) < abs(curMean - mzs_[start - 1])) or (not left and right):
+                elif (
+                    left
+                    and right
+                    and abs(mzs_[end + 1] - curMean) < abs(curMean - mzs_[start - 1])
+                ) or (not left and right):
                     newEnd = end + 1
                     addedPPMDev = abs(mzs_[newEnd] - mzs_[end]) / curMean * 1e6
                     newTotalPPMDev = abs(mzs_[newEnd] - mzs_[start]) / curMean * 1e6
                     if debugPrint_:
-                        print("     - extending cluster to the right with new values", addedPPMDev, newTotalPPMDev)
+                        print(
+                            "     - extending cluster to the right with new values",
+                            addedPPMDev,
+                            newTotalPPMDev,
+                        )
 
                 else:
                     raise NotImplementedError("Unknwon branch, aborting")
 
                 if max_ppm_std_deviation_in_cluster is not None:
-                    newMean, newStd = _average_and_std(mzs_[newStart : newEnd + 1], weights=intensities_[newStart : newEnd + 1])
+                    newMean, newStd = _average_and_std(
+                        mzs_[newStart : newEnd + 1],
+                        weights=intensities_[newStart : newEnd + 1],
+                    )
                 if debugPrint_:
-                    print("     - new mean is", newMean, newStd, newStd / newMean * 1e6, "old was", curMean, curStd, curStd / curMean * 1e6)
+                    print(
+                        "     - new mean is",
+                        newMean,
+                        newStd,
+                        newStd / newMean * 1e6,
+                        "old was",
+                        curMean,
+                        curStd,
+                        curStd / curMean * 1e6,
+                    )
 
                 if (
                     closeCluster
-                    or (closest_signal_max_deviation_ppm is not None and addedPPMDev > closest_signal_max_deviation_ppm)
-                    or (max_mz_deviation_ppm is not None and newTotalPPMDev > max_mz_deviation_ppm)
-                    or (max_ppm_std_deviation_in_cluster is not None and newStd / newMean * 1e6 > max_ppm_std_deviation_in_cluster)
+                    or (
+                        closest_signal_max_deviation_ppm is not None
+                        and addedPPMDev > closest_signal_max_deviation_ppm
+                    )
+                    or (
+                        max_mz_deviation_ppm is not None
+                        and newTotalPPMDev > max_mz_deviation_ppm
+                    )
+                    or (
+                        max_ppm_std_deviation_in_cluster is not None
+                        and newStd / newMean * 1e6 > max_ppm_std_deviation_in_cluster
+                    )
                 ):
                     if debugPrint_:
-                        print("    --> closing cluster as ", nextClust, "using", start, end, "which are", mzs_[start : end + 1])
+                        print(
+                            "    --> closing cluster as ",
+                            nextClust,
+                            "using",
+                            start,
+                            end,
+                            "which are",
+                            mzs_[start : end + 1],
+                        )
 
                     for i in range(start, end + 1):
                         newClusts[pos[ord_[i]]] = nextClust
@@ -752,11 +815,14 @@ def compare_parameters_for_function(
         print("Comment: %s" % (param.comment))
 
         try:
-            dartMSAssay = function_to_optimize(*param.args, **(param.kwargs | {"spotFile": spotFile, "files": dartMSFiles}))
+            dartMSAssay = function_to_optimize(
+                *param.args, **(param.kwargs | {"spotFile": spotFile, "files": dartMSFiles})
+            )
             result = None
             if qualityTestFunction is None:
                 result = dartMSAssay.get_summary_of_results(
-                    reference_features=referenceFeatures, reference_features_allowed_deviationPPM=referenceFeatures_allowedPPMDev
+                    reference_features=referenceFeatures,
+                    reference_features_allowed_deviationPPM=referenceFeatures_allowedPPMDev,
                 )
             else:
                 result = qualityTestFunction(dartMSAssay)
@@ -915,7 +981,9 @@ def prefab_DARTMS_dataProcessing_pipeline(
 
     ## Account for and correct mz values of individual spots by reference mz values
     with RecordExecutionTime():
-        logging.info("Correcting for mz shifts between samples (not chronograms) with reference mz values")
+        logging.info(
+            "Correcting for mz shifts between samples (not chronograms) with reference mz values"
+        )
         dartMSAssay.correct_MZ_shift_across_samples(
             correct_mz_shift__referenceMZs,
             max_mz_deviation_absolute=correct_mz_shift__max_mz_deviation_absolute,
@@ -929,7 +997,9 @@ def prefab_DARTMS_dataProcessing_pipeline(
 
     ## Calculate consensus spectra for each spot file to reduce following processing time
     with RecordExecutionTime():
-        logging.info("Collapsing multiple spectra of samples to consensus spectra for each sample")
+        logging.info(
+            "Collapsing multiple spectra of samples to consensus spectra for each sample"
+        )
         dartMSAssay.calculate_consensus_spectra_for_samples(
             min_difference_ppm=calculate_consensus_spectra_for_samples__min_difference_ppm,
             min_signals_per_cluster=calculate_consensus_spectra_for_samples__min_signals_per_cluster,
@@ -955,7 +1025,8 @@ def prefab_DARTMS_dataProcessing_pipeline(
     with RecordExecutionTime():
         logging.info("Bracketing features across samples")
         dartMSAssay.bracket_consensus_spectrum_samples(
-            max_ppm_deviation=bracket_consensus_spectrum_samples__max_ppm_deviation, show_diagnostic_plots=False
+            max_ppm_deviation=bracket_consensus_spectrum_samples__max_ppm_deviation,
+            show_diagnostic_plots=False,
         )
         logging.info("   .. bracketed to %d features" % (len(dartMSAssay.features)))
     logging.info("")
@@ -968,7 +1039,11 @@ def prefab_DARTMS_dataProcessing_pipeline(
             originalData_mz_deviation_multiplier_PPM=build_data_matrix__originalData_mz_deviation_multiplier_PPM,
             aggregation_fun=build_data_matrix__aggregation_fun,
         )
-        dartMSAssay.annotate_features(useGroups=annotate_features__useGroups, remove_other_ions=annotate_features_remove_other_ions, plot=False)
+        dartMSAssay.annotate_features(
+            useGroups=annotate_features__useGroups,
+            remove_other_ions=annotate_features_remove_other_ions,
+            plot=False,
+        )
     logging.info("")
 
     ## Save results to file for another user-check
@@ -976,7 +1051,9 @@ def prefab_DARTMS_dataProcessing_pipeline(
         if dill_file is not None:
             dartMSAssay.save_self_to_dill_file(dill_file)
         if results_file is not None:
-            dartMSAssay.write_bracketing_results_to_featureML(featureMLlocation=results_file, featureMLStartRT=0, featureMLEndRT=1400)
+            dartMSAssay.write_bracketing_results_to_featureML(
+                featureMLlocation=results_file, featureMLStartRT=0, featureMLEndRT=1400
+            )
 
     return dartMSAssay
 
@@ -1192,7 +1269,14 @@ class DartMSAssay:
 
             return _dat, _features, _featureAnnotations, _samples, _groups, _batches
 
-        return self.dat, self.features, self.featureAnnotations, self.samples, self.groups, self.batches
+        return (
+            self.dat,
+            self.features,
+            self.featureAnnotations,
+            self.samples,
+            self.groups,
+            self.batches,
+        )
 
     def export_data_matrix(self, to_file, separator="\t", quotechar='"'):
         """
@@ -1204,13 +1288,20 @@ class DartMSAssay:
              the file to save the results to
         """
         with open(to_file, "w") as fout:
-            tsvWriter = csv.writer(fout, delimiter=separator, quotechar=quotechar, quoting=csv.QUOTE_MINIMAL)
+            tsvWriter = csv.writer(
+                fout, delimiter=separator, quotechar=quotechar, quoting=csv.QUOTE_MINIMAL
+            )
             headers = ["mzmean", "mzmin", "mzmax", "annotations"] + self.samples
             headers = [h.replace(separator, "--SEP--") for h in headers]
             tsvWriter.writerow(headers)
 
             for rowi in range(self.dat.shape[1]):
-                row = [str(self.features[rowi][1]), str(self.features[rowi][0]), str(self.features[rowi][2]), str(self.featureAnnotations[rowi])]
+                row = [
+                    str(self.features[rowi][1]),
+                    str(self.features[rowi][0]),
+                    str(self.features[rowi][2]),
+                    str(self.featureAnnotations[rowi]),
+                ]
                 row.extend((str(f) if not np.isnan(f) else "" for f in self.dat[:, rowi]))
                 row = [r.replace(separator, "--SEP--") for r in row]
                 tsvWriter.writerow(row)
@@ -1254,35 +1345,57 @@ class DartMSAssay:
             fout.write("\n")
             fout.write("## The following code imports the generated data matrix.")
             fout.write("\n")
-            fout.write("## Please note that when the file is moved or R is executed in a different")
+            fout.write(
+                "## Please note that when the file is moved or R is executed in a different"
+            )
             fout.write("\n")
-            fout.write("##      working directory, the path to the tsv file needs to be adapted accordingly")
+            fout.write(
+                "##      working directory, the path to the tsv file needs to be adapted accordingly"
+            )
             fout.write("\n")
             fout.write("##")
             fout.write("\n")
-            fout.write("data = read.table('%s', header = TRUE, sep = '\\t', stringsAsFactors = FALSE)" % (to_file + ".tsv"))
+            fout.write(
+                "data = read.table('%s', header = TRUE, sep = '\\t', stringsAsFactors = FALSE)"
+                % (to_file + ".tsv")
+            )
             fout.write("\n")
-            fout.write("annotations = fromJSON(paste(readLines('%s'), collapse=''))" % (to_file + ".json"))
+            fout.write(
+                "annotations = fromJSON(paste(readLines('%s'), collapse=''))"
+                % (to_file + ".json")
+            )
             fout.write("\n")
             fout.write("metaData = data[, 1:4]")
             fout.write("\n")
             fout.write("data = data[,-(1:4)]")
             fout.write("\n")
-            fout.write("samples = c(%s)" % (", ".join("'%s'" % sample for sample in self.samples)))
+            fout.write(
+                "samples = c(%s)" % (", ".join("'%s'" % sample for sample in self.samples))
+            )
             fout.write("\n")
             fout.write("groups = c(%s)" % (", ".join("'%s'" % group for group in self.groups)))
             fout.write("\n")
-            fout.write("batches = c(%s)" % (", ".join("%s" % batche for batche in self.batches)))
+            fout.write(
+                "batches = c(%s)" % (", ".join("%s" % batche for batche in self.batches))
+            )
             fout.write("\n")
             fout.write("")
             fout.write("\n")
-            fout.write("print(sprintf('Data imported, there are %d features and %d samples in the data matrix', nrow(data), ncol(data)))")
+            fout.write(
+                "print(sprintf('Data imported, there are %d features and %d samples in the data matrix', nrow(data), ncol(data)))"
+            )
             fout.write("\n")
             fout.write("")
             fout.write("\n")
 
-            print("load the data into R with the command 'source('%s')'" % (to_file + "_import.R").replace("\\", "/"))
-            print("## absolute path version: 'source('%s')'" % str(Path(to_file + "_import.R").absolute()).replace("\\", "/"))
+            print(
+                "load the data into R with the command 'source('%s')'"
+                % (to_file + "_import.R").replace("\\", "/")
+            )
+            print(
+                "## absolute path version: 'source('%s')'"
+                % str(Path(to_file + "_import.R").absolute()).replace("\\", "/")
+            )
 
     #####################################################################################################
     # Processing history
@@ -1302,7 +1415,12 @@ class DartMSAssay:
             further inforamtion (e.g., parameters) of the data processing step. Defaults to None.
         """
         self.processingHistory.append(
-            {"step_identifier": step_identifier_text, "log_text": log_text, "processing_data": processing_data, "at": str(datetime.datetime.now())}
+            {
+                "step_identifier": step_identifier_text,
+                "log_text": log_text,
+                "processing_data": processing_data,
+                "at": str(datetime.datetime.now()),
+            }
         )
 
     #####################################################################################################
@@ -1318,7 +1436,9 @@ class DartMSAssay:
         dill_file : string
             the *.dill file to save the DartMSAssay to
         """
-        self.add_data_processing_step("export", "exported assay to dill file", {"file": dill_file})
+        self.add_data_processing_step(
+            "export", "exported assay to dill file", {"file": dill_file}
+        )
         with open(dill_file, "wb") as fout:
             dill.dump(
                 {
@@ -1365,7 +1485,9 @@ class DartMSAssay:
 
             dartMSAssay.processingHistory = di["processingHistory"]
 
-            dartMSAssay.add_data_processing_step("imported", "imported from dill file", {"file": dill_file})
+            dartMSAssay.add_data_processing_step(
+                "imported", "imported from dill file", {"file": dill_file}
+            )
 
             return dartMSAssay
 
@@ -1373,7 +1495,9 @@ class DartMSAssay:
     # Subset results
     #
 
-    def subset_features(self, keep_features_with_indices=None, remove_features_with_indices=None):
+    def subset_features(
+        self, keep_features_with_indices=None, remove_features_with_indices=None
+    ):
         """
         Subset the detected features and include or exclude them
 
@@ -1390,29 +1514,46 @@ class DartMSAssay:
             if no features have been detected, this exception will be raised
         """
         if self.dat is None:
-            raise RuntimeError("Cannot subset DartMSAssay until a data matrix has been generated")
+            raise RuntimeError(
+                "Cannot subset DartMSAssay until a data matrix has been generated"
+            )
 
         self.add_data_processing_step(
             "subset features",
             "subsetting features",
-            {"keep_features_with_indices": keep_features_with_indices, "remove_features_with_indices": remove_features_with_indices},
+            {
+                "keep_features_with_indices": keep_features_with_indices,
+                "remove_features_with_indices": remove_features_with_indices,
+            },
         )
         if keep_features_with_indices is not None:
             self.dat = self.dat[:, keep_features_with_indices]
             if self.features is not None:
                 self.features = [self.features[i] for i in keep_features_with_indices]
             if self.featureAnnotations is not None:
-                self.featureAnnotations = [self.featureAnnotations[i] for i in keep_features_with_indices]
+                self.featureAnnotations = [
+                    self.featureAnnotations[i] for i in keep_features_with_indices
+                ]
 
         if remove_features_with_indices is not None:
-            keeps = [i for i in range(self.dat.shape[1]) if i not in remove_features_with_indices]
+            keeps = [
+                i for i in range(self.dat.shape[1]) if i not in remove_features_with_indices
+            ]
             self.dat = self.dat[:, keeps]
             if self.features is not None:
                 self.features = [self.features[i] for i in keeps]
             if self.featureAnnotations is not None:
                 self.featureAnnotations = [self.featureAnnotations[i] for i in keeps]
 
-    def subset_samples(self, keep_samples=None, keep_groups=None, keep_batches=None, remove_samples=None, remove_groups=None, remove_batches=None):
+    def subset_samples(
+        self,
+        keep_samples=None,
+        keep_groups=None,
+        keep_batches=None,
+        remove_samples=None,
+        remove_groups=None,
+        remove_batches=None,
+    ):
         """
         Subset certain samples, groups or batches in the DartMSAssay object
 
@@ -1476,7 +1617,9 @@ class DartMSAssay:
             self.batches = [self.batches[i] for i in keeps]
 
         if remove_samples is not None:
-            keeps = [i for i in range(len(self.samples)) if self.samples[i] not in remove_samples]
+            keeps = [
+                i for i in range(len(self.samples)) if self.samples[i] not in remove_samples
+            ]
 
             self.dat = self.dat[keeps, :]
             self.samples = [self.samples[i] for i in keeps]
@@ -1492,7 +1635,9 @@ class DartMSAssay:
             self.batches = [self.batches[i] for i in keeps]
 
         if remove_batches is not None:
-            keeps = [i for i in range(len(self.batches)) if self.batches[i] not in remove_batches]
+            keeps = [
+                i for i in range(len(self.batches)) if self.batches[i] not in remove_batches
+            ]
 
             self.dat = self.dat[keeps, :]
             self.samples = [self.samples[i] for i in keeps]
@@ -1503,7 +1648,9 @@ class DartMSAssay:
     # FeatureML functions
     #
 
-    def write_bracketing_results_to_featureML(self, featureMLlocation="./results.featureML", featureMLStartRT=0, featureMLEndRT=1400):
+    def write_bracketing_results_to_featureML(
+        self, featureMLlocation="./results.featureML", featureMLStartRT=0, featureMLEndRT=1400
+    ):
         """
         export the bracketed results to a featureML file for easy visualization in TOPPView
 
@@ -1516,7 +1663,11 @@ class DartMSAssay:
         featureMLEndRT : int, optional
             the latest chronogram time. Defaults to 1400.
         """
-        self.add_data_processing_step("export bracketed results to featureML", "export bracketed results to featureML", {"file": featureMLlocation})
+        self.add_data_processing_step(
+            "export bracketed results to featureML",
+            "export bracketed results to featureML",
+            {"file": featureMLlocation},
+        )
         with open(featureMLlocation, "w") as fout:
             bracRes = [b[3] for b in self.features]
             ns = len(bracRes)
@@ -1524,34 +1675,95 @@ class DartMSAssay:
             fout.write(
                 '  <featureMap version="1.4" id="fm_16311276685788915066" xsi:noNamespaceSchemaLocation="http://open-ms.sourceforge.net/schemas/FeatureXML_1_4.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
             )
-            fout.write('    <dataProcessing completion_time="%s">\n' % datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
-            fout.write('      <software name="tidyms" version="%s" />\n' % (__tidyMSdartmsVersion__))
-            fout.write('      <software name="tidyms.write_bracketing_results_to_featureML" version="%s" />\n' % (__tidyMSdartmsVersion__))
+            fout.write(
+                '    <dataProcessing completion_time="%s">\n'
+                % datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
+            )
+            fout.write(
+                '      <software name="tidyms" version="%s" />\n' % (__tidyMSdartmsVersion__)
+            )
+            fout.write(
+                '      <software name="tidyms.write_bracketing_results_to_featureML" version="%s" />\n'
+                % (__tidyMSdartmsVersion__)
+            )
             fout.write("    </dataProcessing>\n")
             fout.write('    <featureList count="%d">\n' % (ns))
 
             for j in tqdm.tqdm(range(ns), desc="exporting featureML"):
                 fout.write('<feature id="%s">\n' % j)
-                fout.write('  <position dim="0">%f</position>\n' % ((featureMLStartRT + featureMLEndRT) / 2))
+                fout.write(
+                    '  <position dim="0">%f</position>\n'
+                    % ((featureMLStartRT + featureMLEndRT) / 2)
+                )
                 fout.write('  <position dim="1">%f</position>\n' % (bracRes[j]["meanMZ"]))
                 fout.write("  <intensity>1</intensity>\n")
                 fout.write('  <quality dim="0">0</quality>\n')
                 fout.write('  <quality dim="1">0</quality>\n')
-                fout.write("  <overallquality>%d</overallquality>\n" % (bracRes[j]["overallquality"]))
+                fout.write(
+                    "  <overallquality>%d</overallquality>\n" % (bracRes[j]["overallquality"])
+                )
                 fout.write("  <charge>1</charge>\n")
                 fout.write('  <convexhull nr="0">\n')
-                fout.write('    <pt x="%f" y="%f" />\n' % (featureMLStartRT, bracRes[j]["meanMZ"] * (1.0 - bracRes[j]["mzDevPPM"] / 1e6)))
-                fout.write('    <pt x="%f" y="%f" />\n' % (featureMLStartRT, bracRes[j]["meanMZ"] * (1.0 + bracRes[j]["mzDevPPM"] / 1e6)))
-                fout.write('    <pt x="%f" y="%f" />\n' % (featureMLEndRT, bracRes[j]["meanMZ"] * (1.0 + bracRes[j]["mzDevPPM"] / 1e6)))
-                fout.write('    <pt x="%f" y="%f" />\n' % (featureMLEndRT, bracRes[j]["meanMZ"] * (1.0 - bracRes[j]["mzDevPPM"] / 1e6)))
+                fout.write(
+                    '    <pt x="%f" y="%f" />\n'
+                    % (
+                        featureMLStartRT,
+                        bracRes[j]["meanMZ"] * (1.0 - bracRes[j]["mzDevPPM"] / 1e6),
+                    )
+                )
+                fout.write(
+                    '    <pt x="%f" y="%f" />\n'
+                    % (
+                        featureMLStartRT,
+                        bracRes[j]["meanMZ"] * (1.0 + bracRes[j]["mzDevPPM"] / 1e6),
+                    )
+                )
+                fout.write(
+                    '    <pt x="%f" y="%f" />\n'
+                    % (
+                        featureMLEndRT,
+                        bracRes[j]["meanMZ"] * (1.0 + bracRes[j]["mzDevPPM"] / 1e6),
+                    )
+                )
+                fout.write(
+                    '    <pt x="%f" y="%f" />\n'
+                    % (
+                        featureMLEndRT,
+                        bracRes[j]["meanMZ"] * (1.0 - bracRes[j]["mzDevPPM"] / 1e6),
+                    )
+                )
                 fout.write("  </convexhull>\n")
 
                 for samplei, sample in enumerate(bracRes[j]["sampleHulls"]):
                     fout.write('  <convexhull nr="%d">\n' % (samplei + 1))
-                    fout.write('    <pt x="%f" y="%f" />\n' % (bracRes[j]["sampleHulls"][sample][0][0], bracRes[j]["sampleHulls"][sample][0][1]))
-                    fout.write('    <pt x="%f" y="%f" />\n' % (bracRes[j]["sampleHulls"][sample][1][0], bracRes[j]["sampleHulls"][sample][1][1]))
-                    fout.write('    <pt x="%f" y="%f" />\n' % (bracRes[j]["sampleHulls"][sample][2][0], bracRes[j]["sampleHulls"][sample][2][1]))
-                    fout.write('    <pt x="%f" y="%f" />\n' % (bracRes[j]["sampleHulls"][sample][3][0], bracRes[j]["sampleHulls"][sample][3][1]))
+                    fout.write(
+                        '    <pt x="%f" y="%f" />\n'
+                        % (
+                            bracRes[j]["sampleHulls"][sample][0][0],
+                            bracRes[j]["sampleHulls"][sample][0][1],
+                        )
+                    )
+                    fout.write(
+                        '    <pt x="%f" y="%f" />\n'
+                        % (
+                            bracRes[j]["sampleHulls"][sample][1][0],
+                            bracRes[j]["sampleHulls"][sample][1][1],
+                        )
+                    )
+                    fout.write(
+                        '    <pt x="%f" y="%f" />\n'
+                        % (
+                            bracRes[j]["sampleHulls"][sample][2][0],
+                            bracRes[j]["sampleHulls"][sample][2][1],
+                        )
+                    )
+                    fout.write(
+                        '    <pt x="%f" y="%f" />\n'
+                        % (
+                            bracRes[j]["sampleHulls"][sample][3][0],
+                            bracRes[j]["sampleHulls"][sample][3][1],
+                        )
+                    )
                     fout.write("  </convexhull>\n")
 
                 fout.write("</feature>\n")
@@ -1569,9 +1781,18 @@ class DartMSAssay:
         widthRT : int, optional
             the with of the chronogram spots. Defaults to 40.
         """
-        self.add_data_processing_step("exporting consensus spectra to featureML files", "exporting consensus spectra to featureML files")
-        for samplei, sample in tqdm.tqdm(enumerate(self.get_sample_names()), total=len(self.get_sample_names()), desc="exporting to featureML"):
-            with open(os.path.join(".", "%s.featureML" % (sample)).replace(":", "_"), "w") as fout:
+        self.add_data_processing_step(
+            "exporting consensus spectra to featureML files",
+            "exporting consensus spectra to featureML files",
+        )
+        for samplei, sample in tqdm.tqdm(
+            enumerate(self.get_sample_names()),
+            total=len(self.get_sample_names()),
+            desc="exporting to featureML",
+        ):
+            with open(
+                os.path.join(".", "%s.featureML" % (sample)).replace(":", "_"), "w"
+            ) as fout:
                 msDataObj = self.get_msDataObj_for_sample(sample)
                 spectra = [spectrum for k, spectrum in msDataObj.get_spectra_iterator()]
                 assert len(spectra) == 1
@@ -1582,14 +1803,22 @@ class DartMSAssay:
                 fout.write(
                     '  <featureMap version="1.4" id="fm_16311276685788915066" xsi:noNamespaceSchemaLocation="http://open-ms.sourceforge.net/schemas/FeatureXML_1_4.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
                 )
-                fout.write('    <dataProcessing completion_time="%s">\n' % datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
-                fout.write('      <software name="tidyMS.dartMS module" version="%s" />\n' % (__tidyMSdartmsVersion__))
+                fout.write(
+                    '    <dataProcessing completion_time="%s">\n'
+                    % datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
+                )
+                fout.write(
+                    '      <software name="tidyMS.dartMS module" version="%s" />\n'
+                    % (__tidyMSdartmsVersion__)
+                )
                 fout.write("    </dataProcessing>\n")
                 fout.write('    <featureList count="%d">\n' % (spectrum.mz.shape[0]))
 
                 for j in range(spectrum.mz.shape[0]):
                     fout.write('<feature id="%s">\n' % j)
-                    fout.write('  <position dim="0">%f</position>\n' % (spectrum.time + widthRT / 2))
+                    fout.write(
+                        '  <position dim="0">%f</position>\n' % (spectrum.time + widthRT / 2)
+                    )
                     fout.write('  <position dim="1">%f</position>\n' % spectrum.mz[j])
                     fout.write("  <intensity>%f</intensity>\n" % spectrum.spint[j])
                     fout.write('  <quality dim="0">0</quality>\n')
@@ -1598,7 +1827,10 @@ class DartMSAssay:
                     fout.write("  <charge>1</charge>\n")
                     fout.write('  <convexhull nr="0">\n')
                     fout.write('    <pt x="%f" y="%f" />\n' % (spectrum.time, spectrum.mz[j]))
-                    fout.write('    <pt x="%f" y="%f" />\n' % (spectrum.time + widthRT, spectrum.mz[j]))
+                    fout.write(
+                        '    <pt x="%f" y="%f" />\n'
+                        % (spectrum.time + widthRT, spectrum.mz[j])
+                    )
                     fout.write("  </convexhull>\n")
                     fout.write("</feature>\n")
 
@@ -1634,7 +1866,9 @@ class DartMSAssay:
                 temp,
                 sample=sample,
                 spectra=msDataObj.get_n_spectra(),
-                mzs=sum((spectrum.mz.shape[0] for k, spectrum in msDataObj.get_spectra_iterator())),
+                mzs=sum(
+                    (spectrum.mz.shape[0] for k, spectrum in msDataObj.get_spectra_iterator())
+                ),
             )
 
         temp = pd.DataFrame(temp)
@@ -1670,28 +1904,68 @@ class DartMSAssay:
 
         temp = pd.DataFrame(temp)
         if separate:
-            temp["file"] = pd.Categorical(temp["file"], ordered=True, categories=natsort.natsorted(set(temp["file"])))
+            temp["file"] = pd.Categorical(
+                temp["file"], ordered=True, categories=natsort.natsorted(set(temp["file"]))
+            )
             p = (
-                p9.ggplot(data=temp, mapping=p9.aes(x="time", y="totalIntensity", colour="group", group="sample"))
+                p9.ggplot(
+                    data=temp,
+                    mapping=p9.aes(
+                        x="time", y="totalIntensity", colour="group", group="sample"
+                    ),
+                )
                 + p9.geom_line(alpha=0.8)
-                + p9.geom_point(data=temp.loc[temp.groupby("sample").time.idxmin()], colour="black", size=2)
-                + p9.geom_point(data=temp.loc[temp.groupby("sample").time.idxmax()], colour="black", size=2)
+                + p9.geom_point(
+                    data=temp.loc[temp.groupby("sample").time.idxmin()], colour="black", size=2
+                )
+                + p9.geom_point(
+                    data=temp.loc[temp.groupby("sample").time.idxmax()], colour="black", size=2
+                )
                 + p9.facet_wrap(separate_by)
                 + p9.theme_minimal()
                 + p9.theme(legend_position="bottom")
-                + p9.theme(subplots_adjust={"wspace": 0.15, "hspace": 0.25, "top": 0.93, "right": 0.99, "bottom": 0.15, "left": 0.15})
+                + p9.theme(
+                    subplots_adjust={
+                        "wspace": 0.15,
+                        "hspace": 0.25,
+                        "top": 0.93,
+                        "right": 0.99,
+                        "bottom": 0.15,
+                        "left": 0.15,
+                    }
+                )
                 + p9.ggtitle("TIC of chronogram samples")
             )
         else:
-            temp["sample"] = pd.Categorical(temp["sample"], ordered=True, categories=natsort.natsorted(set(temp["sample"])))
+            temp["sample"] = pd.Categorical(
+                temp["sample"], ordered=True, categories=natsort.natsorted(set(temp["sample"]))
+            )
             p = (
-                p9.ggplot(data=temp, mapping=p9.aes(x="time", y="totalIntensity", colour="group", group="sample"))
+                p9.ggplot(
+                    data=temp,
+                    mapping=p9.aes(
+                        x="time", y="totalIntensity", colour="group", group="sample"
+                    ),
+                )
                 + p9.geom_line(alpha=0.8)
-                + p9.geom_point(data=temp.loc[temp.groupby("sample").time.idxmin()], colour="black", size=2)
-                + p9.geom_point(data=temp.loc[temp.groupby("sample").time.idxmax()], colour="black", size=2)
+                + p9.geom_point(
+                    data=temp.loc[temp.groupby("sample").time.idxmin()], colour="black", size=2
+                )
+                + p9.geom_point(
+                    data=temp.loc[temp.groupby("sample").time.idxmax()], colour="black", size=2
+                )
                 + p9.theme_minimal()
                 + p9.theme(legend_position="bottom")
-                + p9.theme(subplots_adjust={"wspace": 0.15, "hspace": 0.25, "top": 0.93, "right": 0.99, "bottom": 0.15, "left": 0.15})
+                + p9.theme(
+                    subplots_adjust={
+                        "wspace": 0.15,
+                        "hspace": 0.25,
+                        "top": 0.93,
+                        "right": 0.99,
+                        "bottom": 0.15,
+                        "left": 0.15,
+                    }
+                )
                 + p9.ggtitle("TIC of chronogram samples")
             )
 
@@ -1720,11 +1994,19 @@ class DartMSAssay:
         MSData
             The new MSData subset object
         """
-        return fileio.MSData_subset_spectra(start_ind=startInd, end_ind=endInd, from_MSData_object=msData)
+        return fileio.MSData_subset_spectra(
+            start_ind=startInd, end_ind=endInd, from_MSData_object=msData
+        )
 
     @staticmethod
     def _get_separate_chronogram_indices(
-        msData, msData_ID, spotsFile, intensityThreshold=0.00001, startTime_seconds=0, endTime_seconds=1e6, addNewSeparationIndices=False
+        msData,
+        msData_ID,
+        spotsFile,
+        intensityThreshold=0.00001,
+        startTime_seconds=0,
+        endTime_seconds=1e6,
+        addNewSeparationIndices=False,
     ):
         """
         Function separats a chronogram MSData object into spots that are defined as being continuously above the set threshold.
@@ -1759,7 +2041,9 @@ class DartMSAssay:
             Detected of user-guided spots.
         """
         if spotsFile is None:
-            raise ValueError("Parameter spotsFile must be specified either to save extracted spots to or to read from there. ")
+            raise ValueError(
+                "Parameter spotsFile must be specified either to save extracted spots to or to read from there. "
+            )
 
         spots = None
         if type(spotsFile) is str:
@@ -1790,12 +2074,18 @@ class DartMSAssay:
                 "       .. no spots defined for file. Spots will be detected automatically, but not used for now. Please modify the spots file '%s' to include or modify them"
                 % (spotsFile)
             )
-            ticInts = [sum(msData.get_spectrum(i).spint) for i in range(msData.get_n_spectra())]
+            ticInts = [
+                sum(msData.get_spectrum(i).spint) for i in range(msData.get_n_spectra())
+            ]
             startInd = None
             endInd = None
             for i, inte in enumerate(ticInts):
                 time = msData.get_spectrum(i).time
-                if inte >= intensityThreshold and time >= startTime_seconds and time <= endTime_seconds:
+                if (
+                    inte >= intensityThreshold
+                    and time >= startTime_seconds
+                    and time <= endTime_seconds
+                ):
                     if startInd is None:
                         startInd = i
                     endInd = i
@@ -1805,9 +2095,21 @@ class DartMSAssay:
                         # spots are not automatically added
                         logging.info(
                             "       .. found new automatically detected spot from %.2f to %.2f seconds"
-                            % (msData.get_spectrum(startInd).time, msData.get_spectrum(endInd).time)
+                            % (
+                                msData.get_spectrum(startInd).time,
+                                msData.get_spectrum(endInd).time,
+                            )
                         )
-                        separationInds.append((startInd, endInd, "Spot_%d" % len(separationInds), "unknown", "unknown", 1))
+                        separationInds.append(
+                            (
+                                startInd,
+                                endInd,
+                                "Spot_%d" % len(separationInds),
+                                "unknown",
+                                "unknown",
+                                1,
+                            )
+                        )
                         startInd = None
                         endInd = None
 
@@ -1818,7 +2120,16 @@ class DartMSAssay:
                     "       .. found new automatically detected spot from %.2f to %.2f seconds"
                     % (msData.get_spectrum(startInd).time, msData.get_spectrum(endInd).time)
                 )
-                separationInds.append((startInd, endInd, "Spot_%d" % len(separationInds), "unknown", "unknown", 1))
+                separationInds.append(
+                    (
+                        startInd,
+                        endInd,
+                        "Spot_%d" % len(separationInds),
+                        "unknown",
+                        "unknown",
+                        1,
+                    )
+                )
 
             for spotInd, spot in enumerate(separationInds):
                 temp = pd.DataFrame(
@@ -1834,12 +2145,19 @@ class DartMSAssay:
                         "endRT_seconds": [msData.get_spectrum(spot[1]).time],
                         "comment": [
                             "spot automatically extracted by _get_separate_chronogram_indices(msData, '%s', intensityThreshold = %f, startTime_seconds = %f, endTime_seconds = %f)"
-                            % (msData_ID, intensityThreshold, startTime_seconds, endTime_seconds)
+                            % (
+                                msData_ID,
+                                intensityThreshold,
+                                startTime_seconds,
+                                endTime_seconds,
+                            )
                         ],
                     }
                 )
                 spotsCur = pd.concat([spotsCur, temp], axis=0)
-            spots = pd.concat([spots, spotsCur], axis=0, ignore_index=True).reset_index(drop=True)
+            spots = pd.concat([spots, spotsCur], axis=0, ignore_index=True).reset_index(
+                drop=True
+            )
             spots["include"] = spots["include"].astype("bool")
             spots.to_csv(spotsFile, sep="\t", index=False)
             if not addNewSeparationIndices:
@@ -1848,13 +2166,28 @@ class DartMSAssay:
         else:
             for index, row in spotsCur.iterrows():
                 if row["include"]:
-                    startInd, timeDiff_start = msData.get_closest_spectrum_to_RT(row["startRT_seconds"])
-                    endInd, timeDiff_end = msData.get_closest_spectrum_to_RT(row["endRT_seconds"])
-                    separationInds.append((startInd, endInd, row["name"], row["group"], row["class"], row["batch"]))
+                    startInd, timeDiff_start = msData.get_closest_spectrum_to_RT(
+                        row["startRT_seconds"]
+                    )
+                    endInd, timeDiff_end = msData.get_closest_spectrum_to_RT(
+                        row["endRT_seconds"]
+                    )
+                    separationInds.append(
+                        (
+                            startInd,
+                            endInd,
+                            row["name"],
+                            row["group"],
+                            row["class"],
+                            row["batch"],
+                        )
+                    )
 
         return separationInds
 
-    def _add_chronograms_samples_to_assay(self, sepInds, msData, filename, fileNameChangeFunction=None):
+    def _add_chronograms_samples_to_assay(
+        self, sepInds, msData, filename, fileNameChangeFunction=None
+    ):
         """
         Function adds spots from a chronogram file to an existing assay
 
@@ -1875,7 +2208,10 @@ class DartMSAssay:
                 return x
 
         for subseti, _ in enumerate(sepInds):
-            subset_name = fileNameChangeFunction("VIRTUAL(%s::%s)" % (os.path.splitext(os.path.basename(filename))[0], sepInds[subseti][2]))
+            subset_name = fileNameChangeFunction(
+                "VIRTUAL(%s::%s)"
+                % (os.path.splitext(os.path.basename(filename))[0], sepInds[subseti][2])
+            )
             logging.info(
                 "       .. adding subset %4d with name '%35s' (group '%s', class '%s'), width %6.1f sec, RTs %6.1f - %6.1f"
                 % (
@@ -1883,12 +2219,17 @@ class DartMSAssay:
                     subset_name,
                     sepInds[subseti][3],
                     sepInds[subseti][4],
-                    msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time,
+                    msData.get_spectrum(sepInds[subseti][1]).time
+                    - msData.get_spectrum(sepInds[subseti][0]).time,
                     msData.get_spectrum(sepInds[subseti][0]).time,
                     msData.get_spectrum(sepInds[subseti][1]).time,
                 )
             )
-            subset = fileio.MSData_Proxy(DartMSAssay._subset_MSData_chronogram(msData, sepInds[subseti][0], sepInds[subseti][1]))
+            subset = fileio.MSData_Proxy(
+                DartMSAssay._subset_MSData_chronogram(
+                    msData, sepInds[subseti][0], sepInds[subseti][1]
+                )
+            )
             self.assay.add_virtual_sample(
                 MSData_object=subset,
                 virtual_name=subset_name,
@@ -1901,9 +2242,16 @@ class DartMSAssay:
                         "batch": sepInds[subseti][5],
                         "basefile": [os.path.splitext(os.path.basename(filename))[0]],
                         "extracted_spectra_indices": [
-                            "%.2f - %.2f seconds" % (msData.get_spectrum(sepInds[subseti][0]).time, msData.get_spectrum(sepInds[subseti][1]).time)
+                            "%.2f - %.2f seconds"
+                            % (
+                                msData.get_spectrum(sepInds[subseti][0]).time,
+                                msData.get_spectrum(sepInds[subseti][1]).time,
+                            )
                         ],
-                        "spotwidth_seconds": [msData.get_spectrum(sepInds[subseti][1]).time - msData.get_spectrum(sepInds[subseti][0]).time],
+                        "spotwidth_seconds": [
+                            msData.get_spectrum(sepInds[subseti][1]).time
+                            - msData.get_spectrum(sepInds[subseti][0]).time
+                        ],
                     }
                 ),
             )
@@ -1934,11 +2282,15 @@ class DartMSAssay:
             for spectrumi, spectrum in msData.get_spectra_iterator():
                 inte = np.sum(spectrum.spint)
                 maxInt = max(maxInt, inte)
-                tic = _add_row_to_pandas_creation_dictionary(tic, intensity=inte, time=spectrum.time)
+                tic = _add_row_to_pandas_creation_dictionary(
+                    tic, intensity=inte, time=spectrum.time
+                )
 
             tmpName = None
             while tmpName is None:
-                tmpName = os.path.join(tempfile.gettempdir(), next(tempfile._get_candidate_names()))
+                tmpName = os.path.join(
+                    tempfile.gettempdir(), next(tempfile._get_candidate_names())
+                )
                 if Path(tmpName).exists():
                     tmpName = None
 
@@ -1958,14 +2310,31 @@ class DartMSAssay:
                 for spectrumi, spectrum in msData.get_spectra_iterator():
                     if startInd <= spectrumi <= endInd:
                         t = _add_row_to_pandas_creation_dictionary(
-                            t, intensity=tic["intensity"][spectrumi], time=tic["time"][spectrumi], spotNumber=spotInd
+                            t,
+                            intensity=tic["intensity"][spectrumi],
+                            time=tic["time"][spectrumi],
+                            spotNumber=spotInd,
                         )
                         min_ = min(min_, spectrumi)
                         max_ = max(max_, spectrumi)
-                t = _add_row_to_pandas_creation_dictionary(t, intensity=tic["intensity"][min_], time=tic["time"][min_], spotNumber=spotInd)
-                t = _add_row_to_pandas_creation_dictionary(t, intensity=tic["intensity"][max_], time=tic["time"][max_], spotNumber=spotInd)
+                t = _add_row_to_pandas_creation_dictionary(
+                    t,
+                    intensity=tic["intensity"][min_],
+                    time=tic["time"][min_],
+                    spotNumber=spotInd,
+                )
+                t = _add_row_to_pandas_creation_dictionary(
+                    t,
+                    intensity=tic["intensity"][max_],
+                    time=tic["time"][max_],
+                    spotNumber=spotInd,
+                )
                 t2 = _add_row_to_pandas_creation_dictionary(
-                    t2, label=spotInd, spotNumber=spotInd, atTime=(tic["time"][min_] + tic["time"][max_]) / 2.0, atIntensity=maxInt * 0.9
+                    t2,
+                    label=spotInd,
+                    spotNumber=spotInd,
+                    atTime=(tic["time"][min_] + tic["time"][max_]) / 2.0,
+                    atIntensity=maxInt * 0.9,
                 )
 
             temp = pd.DataFrame(tic)
@@ -1974,8 +2343,23 @@ class DartMSAssay:
             p = (
                 p9.ggplot()
                 + p9.geom_line(data=temp, mapping=p9.aes(x="time", y="intensity"))
-                + p9.geom_area(data=t, mapping=p9.aes(x="time", y="intensity", group="spotNumber", colour="spotNumber", fill="spotNumber", alpha=0.2))
-                + p9.geom_text(data=t2, mapping=p9.aes(x="atTime", y="atIntensity", group="spotNumber", label="label"))
+                + p9.geom_area(
+                    data=t,
+                    mapping=p9.aes(
+                        x="time",
+                        y="intensity",
+                        group="spotNumber",
+                        colour="spotNumber",
+                        fill="spotNumber",
+                        alpha=0.2,
+                    ),
+                )
+                + p9.geom_text(
+                    data=t2,
+                    mapping=p9.aes(
+                        x="atTime", y="atIntensity", group="spotNumber", label="label"
+                    ),
+                )
                 + p9.theme_minimal()
                 + p9.ggtitle("TIC of '%s'" % (filename))
             )
@@ -1994,14 +2378,20 @@ class DartMSAssay:
                 prevMZPPM = np.concatenate(
                     (
                         [250],
-                        (spectrum.mz[1 : spectrum.mz.shape[0]] - spectrum.mz[0 : (spectrum.mz.shape[0] - 1)])
+                        (
+                            spectrum.mz[1 : spectrum.mz.shape[0]]
+                            - spectrum.mz[0 : (spectrum.mz.shape[0] - 1)]
+                        )
                         / spectrum.mz[0 : (spectrum.mz.shape[0] - 1)]
                         * 1e6,
                     )
                 )
                 nextMZPPM = np.concatenate(
                     (
-                        (spectrum.mz[1 : spectrum.mz.shape[0]] - spectrum.mz[0 : (spectrum.mz.shape[0] - 1)])
+                        (
+                            spectrum.mz[1 : spectrum.mz.shape[0]]
+                            - spectrum.mz[0 : (spectrum.mz.shape[0] - 1)]
+                        )
                         / spectrum.mz[1 : spectrum.mz.shape[0]]
                         * 1e6,
                         [250],
@@ -2010,12 +2400,14 @@ class DartMSAssay:
                 prevMZPPMInt = np.concatenate(
                     (
                         [0],
-                        spectrum.spint[1 : spectrum.spint.shape[0]] / spectrum.spint[0 : (spectrum.spint.shape[0] - 1)],
+                        spectrum.spint[1 : spectrum.spint.shape[0]]
+                        / spectrum.spint[0 : (spectrum.spint.shape[0] - 1)],
                     )
                 )
                 nextMZPPMInt = np.concatenate(
                     (
-                        spectrum.spint[1 : spectrum.spint.shape[0]] / spectrum.mz[0 : (spectrum.mz.shape[0] - 1)],
+                        spectrum.spint[1 : spectrum.spint.shape[0]]
+                        / spectrum.mz[0 : (spectrum.mz.shape[0] - 1)],
                         [0],
                     )
                 )
@@ -2047,8 +2439,12 @@ class DartMSAssay:
                         intensity=spectrum.spint[i],
                         scan_prev_signal_devPPM=prevMZPPM[i],
                         scan_next_signal_devPPM=nextMZPPM[i],
-                        scan_prev_signal_intRatio=prevMZPPMInt[i] if prevMZPPMInt[i] < 1 else 1 / prevMZPPMInt[i],
-                        scan_next_signal_intRatio=nextMZPPMInt[i] if nextMZPPMInt[i] < 1 else 1 / nextMZPPMInt[i],
+                        scan_prev_signal_intRatio=prevMZPPMInt[i]
+                        if prevMZPPMInt[i] < 1
+                        else 1 / prevMZPPMInt[i],
+                        scan_next_signal_intRatio=nextMZPPMInt[i]
+                        if nextMZPPMInt[i] < 1
+                        else 1 / nextMZPPMInt[i],
                         spectrum_prev_signal_devPPM=prevSpectrumMZPPM[i],
                         spectrum_next_signal_devPPM=nextSpectrumMZPPM[i],
                     )
@@ -2059,11 +2455,15 @@ class DartMSAssay:
             p9.ggplot()
             + p9.geom_point(
                 data=temp[temp["scan_next_signal_devPPM"] <= 250],
-                mapping=p9.aes(y="mz", x="scan_next_signal_devPPM", alpha="scan_next_signal_intRatio"),
+                mapping=p9.aes(
+                    y="mz", x="scan_next_signal_devPPM", alpha="scan_next_signal_intRatio"
+                ),
             )
             + p9.geom_point(
                 data=temp[temp["scan_prev_signal_devPPM"] <= 250],
-                mapping=p9.aes(y="mz", x="-scan_prev_signal_devPPM", alpha="scan_prev_signal_intRatio"),
+                mapping=p9.aes(
+                    y="mz", x="-scan_prev_signal_devPPM", alpha="scan_prev_signal_intRatio"
+                ),
             )
             + p9.scale_alpha(range=(0, 0.01))
             + p9.xlab("Distance previous/next feature in the same scan (ppm)")
@@ -2075,10 +2475,14 @@ class DartMSAssay:
         p = (
             p9.ggplot()
             + p9.geom_point(
-                data=temp[abs(temp["spectrum_next_signal_devPPM"]) <= 250], mapping=p9.aes(y="mz", x="spectrum_next_signal_devPPM"), alpha=0.002
+                data=temp[abs(temp["spectrum_next_signal_devPPM"]) <= 250],
+                mapping=p9.aes(y="mz", x="spectrum_next_signal_devPPM"),
+                alpha=0.002,
             )
             + p9.geom_point(
-                data=temp[abs(temp["spectrum_prev_signal_devPPM"]) <= 250], mapping=p9.aes(y="mz", x="-spectrum_prev_signal_devPPM"), alpha=0.002
+                data=temp[abs(temp["spectrum_prev_signal_devPPM"]) <= 250],
+                mapping=p9.aes(y="mz", x="-spectrum_prev_signal_devPPM"),
+                alpha=0.002,
             )
             + p9.xlab("Distance of the 'same' signal in the previous/next scan (ppm)")
             + p9.ggtitle("Similar features in neighboring scans")
@@ -2121,7 +2525,7 @@ class DartMSAssay:
         if import_filters is None:
             import_filters = []
 
-        assay = Assay.Assay(
+        assay = Assay.LegacyAssay(
             data_path=None,
             sample_metadata=None,
             ms_mode="centroid",
@@ -2182,20 +2586,29 @@ class DartMSAssay:
                         earliestRT = 1e9
 
                         for rowi, row in spots.iterrows():
-                            if spots.at[rowi, "msData_ID"] == os.path.basename(filename).replace(".mzML", "") and spots.at[rowi, "include"]:
+                            if (
+                                spots.at[rowi, "msData_ID"]
+                                == os.path.basename(filename).replace(".mzML", "")
+                                and spots.at[rowi, "include"]
+                            ):
                                 lastRT = max(lastRT, spots.at[rowi, "endRT_seconds"])
                                 earliestRT = min(earliestRT, spots.at[rowi, "startRT_seconds"])
 
                         if lastRT > earliestRT:
                             lastRT += 5
                             earliestRT = max(0, earliestRT - 5)
-                            logging.info("       .. using only scans from RTs %.1f - %.1f seconds" % (earliestRT, lastRT))
+                            logging.info(
+                                "       .. using only scans from RTs %.1f - %.1f seconds"
+                                % (earliestRT, lastRT)
+                            )
                         else:
                             logging.info("       .. no spots to be used in sample, skipping")
                             continue
 
                     else:
-                        raise ValueError("Can only delete unused scans if the spots file has been created before and manually checked.")
+                        raise ValueError(
+                            "Can only delete unused scans if the spots file has been created before and manually checked."
+                        )
 
                 rtShiftToApply = rtShiftToApply - earliestRT + 10
                 logging.info("       .. shifting RT by %.1f seconds" % (rtShiftToApply))
@@ -2214,7 +2627,11 @@ class DartMSAssay:
                     if scanlist is not None:
                         scan = scanlist.find("scan")
                         if scan is not None:
-                            cvParam = scan.find("cvParam", {"accession": "MS:1000016", "name": "scan start time"}, recursive=True)
+                            cvParam = scan.find(
+                                "cvParam",
+                                {"accession": "MS:1000016", "name": "scan start time"},
+                                recursive=True,
+                            )
                             if cvParam is not None:
                                 rt = float(cvParam["value"])
                                 if rt < earliestRT / 60.0 or rt > lastRT / 60.0:
@@ -2223,27 +2640,41 @@ class DartMSAssay:
                                 else:
                                     tagU = True
                     if tagU:
-                        tag["id"] = tag["id"].replace("scan=%d" % (int(tag["index"]) + 1), "scan=%d" % (tagInd + 1))
+                        tag["id"] = tag["id"].replace(
+                            "scan=%d" % (int(tag["index"]) + 1), "scan=%d" % (tagInd + 1)
+                        )
                         tag["index"] = tagInd
                         tagInd += 1
                 spectrumList = bs_data.find("spectrumList")
                 spectrumList["count"] = tagInd
                 for delTag in toDel:
                     delTag.extract()
-                for tag in bs_data.find_all("cvParam", {"accession": "MS:1000016", "name": "scan start time"}):
+                for tag in bs_data.find_all(
+                    "cvParam", {"accession": "MS:1000016", "name": "scan start time"}
+                ):
                     tag["value"] = float(tag["value"]) + rtShiftToApply / 60.0
 
-                with open(filename.replace(".mzML", "_rtShifted.mzML"), "w", newline="\n") as fout:
+                with open(
+                    filename.replace(".mzML", "_rtShifted.mzML"), "w", newline="\n"
+                ) as fout:
                     fout.write(bs_data.prettify().replace("\r", ""))
 
                 if Path(spot_file).exists() and os.path.isfile(spot_file):
                     spots = pd.read_csv(spot_file, sep="\t")
 
                     for rowi, row in spots.iterrows():
-                        if spots.at[rowi, "msData_ID"] == os.path.basename(filename).replace(".mzML", ""):
-                            spots.at[rowi, "msData_ID"] = spots.at[rowi, "msData_ID"] + "_rtShifted"
-                            spots.at[rowi, "startRT_seconds"] = spots.at[rowi, "startRT_seconds"] + rtShiftToApply
-                            spots.at[rowi, "endRT_seconds"] = spots.at[rowi, "endRT_seconds"] + rtShiftToApply
+                        if spots.at[rowi, "msData_ID"] == os.path.basename(filename).replace(
+                            ".mzML", ""
+                        ):
+                            spots.at[rowi, "msData_ID"] = (
+                                spots.at[rowi, "msData_ID"] + "_rtShifted"
+                            )
+                            spots.at[rowi, "startRT_seconds"] = (
+                                spots.at[rowi, "startRT_seconds"] + rtShiftToApply
+                            )
+                            spots.at[rowi, "endRT_seconds"] = (
+                                spots.at[rowi, "endRT_seconds"] + rtShiftToApply
+                            )
 
                     spots.to_csv(spot_file, sep="\t", index=False)
 
@@ -2274,14 +2705,17 @@ class DartMSAssay:
 
             sepInds = DartMSAssay._get_separate_chronogram_indices(
                 msData,
-                os.path.basename(filename).replace(".mzML", "") + ("" if not rewriteRTinFiles else "_rtShifted"),
+                os.path.basename(filename).replace(".mzML", "")
+                + ("" if not rewriteRTinFiles else "_rtShifted"),
                 spot_file,
                 intensityThreshold=intensity_threshold_spot_extraction,
             )
             if len(sepInds) == 0:
                 logging.warning("       .. no spots to extract")
             else:
-                dartMSAssay._add_chronograms_samples_to_assay(sepInds, msData, filename, fileNameChangeFunction=fileNameChangeFunction)
+                dartMSAssay._add_chronograms_samples_to_assay(
+                    sepInds, msData, filename, fileNameChangeFunction=fileNameChangeFunction
+                )
 
         return dartMSAssay
 
@@ -2300,7 +2734,9 @@ class DartMSAssay:
         drop_rate : float
             the ratio of the highest-abundant spectra to be used.
         """
-        self.add_data_processing_step("drop lower spectra", "drop lower spectra", {"drop_rate": drop_rate})
+        self.add_data_processing_step(
+            "drop lower spectra", "drop lower spectra", {"drop_rate": drop_rate}
+        )
         for samplei, sample in enumerate(self.get_sample_names()):
             totalInt = []
             msDataObj = self.get_msDataObj_for_sample(sample)
@@ -2363,7 +2799,11 @@ class DartMSAssay:
         multiplication_factor : int, optional
             a factor that is applied on top of the normalization (i.e., shifts the maximum abundance to this value). Defaults to 1.
         """
-        self.add_data_processing_step("normalize to sample TICs", "normalize to sample TICs", {"muliplication_factor": multiplication_factor})
+        self.add_data_processing_step(
+            "normalize to sample TICs",
+            "normalize to sample TICs",
+            {"muliplication_factor": multiplication_factor},
+        )
         for samplei, sample in enumerate(self.get_sample_names()):
             totalInt = []
             msDataObj = self.get_msDataObj_for_sample(sample)
@@ -2378,7 +2818,10 @@ class DartMSAssay:
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     spectrum.spint = spectrum.spint / totalInt * multiplication_factor
             else:
-                logging.error("   .. Error: cannot normalize sample '%35s' to TIC as it is zero" % (sample))
+                logging.error(
+                    "   .. Error: cannot normalize sample '%35s' to TIC as it is zero"
+                    % (sample)
+                )
 
     def normalize_to_internal_standard(self, std, multiplication_factor=1, plot=False):
         """
@@ -2394,7 +2837,9 @@ class DartMSAssay:
             Defaults to False.
         """
         self.add_data_processing_step(
-            "normalize to internal standard", "normalize to internal standard", {"std": std, "multiplication_factor": multiplication_factor}
+            "normalize to internal standard",
+            "normalize to internal standard",
+            {"std": std, "multiplication_factor": multiplication_factor},
         )
         stdMZmin, stdMZmax = std
 
@@ -2409,24 +2854,50 @@ class DartMSAssay:
                     totalSTDInt = totalSTDInt + np.sum(spectrum.spint[use])
 
             if totalSTDInt > 0:
-                logging.info("    .. sample '%35s' STD intensity (sum) %12.1f * %12.1f" % (sample, totalSTDInt, multiplication_factor))
+                logging.info(
+                    "    .. sample '%35s' STD intensity (sum) %12.1f * %12.1f"
+                    % (sample, totalSTDInt, multiplication_factor)
+                )
                 for k, spectrum in msDataObj.get_spectra_iterator():
                     spectrum.spint = spectrum.spint / totalSTDInt * multiplication_factor
-                temp = _add_row_to_pandas_creation_dictionary(temp, sample=sample, group=sampleType, istdAbundance=totalSTDInt)
+                temp = _add_row_to_pandas_creation_dictionary(
+                    temp, sample=sample, group=sampleType, istdAbundance=totalSTDInt
+                )
             else:
-                logging.error("   .. Error: cannot normalize sample '%35s' to internal standard as no signals for it have been found" % (sample))
+                logging.error(
+                    "   .. Error: cannot normalize sample '%35s' to internal standard as no signals for it have been found"
+                    % (sample)
+                )
 
         if plot:
             temp = pd.DataFrame(temp)
-            temp["sample"] = pd.Categorical(temp["sample"], ordered=True, categories=natsort.natsorted(set(temp["sample"])))
+            temp["sample"] = pd.Categorical(
+                temp["sample"], ordered=True, categories=natsort.natsorted(set(temp["sample"]))
+            )
             p = (
-                p9.ggplot(data=temp, mapping=p9.aes(x="sample", y="istdAbundance", group="group", colour="group"))
+                p9.ggplot(
+                    data=temp,
+                    mapping=p9.aes(
+                        x="sample", y="istdAbundance", group="group", colour="group"
+                    ),
+                )
                 + p9.geom_point()
                 + p9.theme_minimal()
                 + p9.theme(legend_position="bottom")
-                + p9.theme(subplots_adjust={"wspace": 0.15, "hspace": 0.25, "top": 0.93, "right": 0.99, "bottom": 0.05, "left": 0.05})
+                + p9.theme(
+                    subplots_adjust={
+                        "wspace": 0.15,
+                        "hspace": 0.25,
+                        "top": 0.93,
+                        "right": 0.99,
+                        "bottom": 0.05,
+                        "left": 0.05,
+                    }
+                )
                 + p9.guides(alpha=False, colour=False)
-                + p9.ggtitle("Abundance of internal standard (mz %.5f - %.5f)" % (std[0], std[1]))
+                + p9.ggtitle(
+                    "Abundance of internal standard (mz %.5f - %.5f)" % (std[0], std[1])
+                )
             )
             print(p)
 
@@ -2446,13 +2917,20 @@ class DartMSAssay:
         plot : bool, optional
             show the correction results as plots. Defaults to True.
         """
-        self.add_data_processing_step("batch correction", "batch correction", {"by_group": by_group})
+        self.add_data_processing_step(
+            "batch correction", "batch correction", {"by_group": by_group}
+        )
         datCorr = np.copy(self.dat)
 
         correctedFeatures = 0
         correctedBatches = 0
 
-        batchCorrectionValues = {"batch": [], "featurei": [], "correctionValue": [], "meanValue": []}
+        batchCorrectionValues = {
+            "batch": [],
+            "featurei": [],
+            "correctionValue": [],
+            "meanValue": [],
+        }
 
         qcInds = [i for i in range(len(self.groups)) if self.groups[i] == by_group]
         for featurei in range(datCorr.shape[1]):
@@ -2464,7 +2942,9 @@ class DartMSAssay:
                     correctedFeatures += 1
 
                     for batch in set(self.batches):
-                        batchInds = [i for i in range(len(self.batches)) if self.batches[i] == batch]
+                        batchInds = [
+                            i for i in range(len(self.batches)) if self.batches[i] == batch
+                        ]
                         cInds = list(set(batchInds).intersection(set(qcInds)))
 
                         vals = datCorr[cInds, featurei]
@@ -2474,29 +2954,49 @@ class DartMSAssay:
                             if not np.isnan(qcCurMean) and qcCurMean > 0:
                                 batchCorrectionValues["batch"].append(batch)
                                 batchCorrectionValues["featurei"].append(featurei)
-                                batchCorrectionValues["correctionValue"].append(qcMean / qcCurMean)
+                                batchCorrectionValues["correctionValue"].append(
+                                    qcMean / qcCurMean
+                                )
                                 batchCorrectionValues["meanValue"].append(qcCurMean)
                                 correctedBatches += 1
 
         batchCorrectionValues = pd.DataFrame(batchCorrectionValues)
-        batchCorrectionValuesGrouped = batchCorrectionValues.groupby(["batch"]).aggregate("median").reset_index()
+        batchCorrectionValuesGrouped = (
+            batchCorrectionValues.groupby(["batch"]).aggregate("median").reset_index()
+        )
 
         if plot:
             p = (
-                p9.ggplot(data=batchCorrectionValues, mapping=p9.aes(x="batch", y="np.log2(correctionValue)", group="featurei"))
+                p9.ggplot(
+                    data=batchCorrectionValues,
+                    mapping=p9.aes(x="batch", y="np.log2(correctionValue)", group="featurei"),
+                )
                 + p9.geom_jitter(width=0.4, height=0, alpha=0.15, colour="slategrey")
                 + p9.geom_point(data=batchCorrectionValuesGrouped, colour="Firebrick", size=3)
                 + p9.theme_minimal()
                 + p9.theme(legend_position="bottom")
-                + p9.theme(subplots_adjust={"wspace": 0.15, "hspace": 0.25, "top": 0.93, "right": 0.99, "bottom": 0.15, "left": 0.15})
+                + p9.theme(
+                    subplots_adjust={
+                        "wspace": 0.15,
+                        "hspace": 0.25,
+                        "top": 0.93,
+                        "right": 0.99,
+                        "bottom": 0.15,
+                        "left": 0.15,
+                    }
+                )
                 + p9.ylim(-2, 2)
-                + p9.ggtitle("Before batch correction. Note: some large differences have been clipped in this illustration")
+                + p9.ggtitle(
+                    "Before batch correction. Note: some large differences have been clipped in this illustration"
+                )
             )
             print(p)
 
         for batch in set(self.batches):
             if batch in list(batchCorrectionValuesGrouped["batch"]):
-                corrVal = batchCorrectionValuesGrouped["correctionValue"][batchCorrectionValuesGrouped["batch"] == batch].iloc[0]
+                corrVal = batchCorrectionValuesGrouped["correctionValue"][
+                    batchCorrectionValuesGrouped["batch"] == batch
+                ].iloc[0]
                 batchInds = [i for i in range(len(self.batches)) if self.batches[i] == batch]
 
                 for featurei in range(datCorr.shape[1]):
@@ -2504,7 +3004,12 @@ class DartMSAssay:
 
         logging.info(
             " Batch effect correction carried out. %d / %d features were eligible for correction and %d / %d batches have been corrected. "
-            % (correctedFeatures, self.dat.shape[1], correctedBatches, self.dat.shape[1] * len(set(self.batches)))
+            % (
+                correctedFeatures,
+                self.dat.shape[1],
+                correctedBatches,
+                self.dat.shape[1] * len(set(self.batches)),
+            )
         )
         logging.info(" Batch correction values are")
         logging.info(batchCorrectionValuesGrouped.to_markdown())
@@ -2515,7 +3020,12 @@ class DartMSAssay:
     # MZ shift correction
     #
 
-    def _calculate_mz_offsets(self, referenceMZs=[165.078978594 + 1.007276], max_mz_deviation_absolute=0.1, selection_criteria="mostAbundant"):
+    def _calculate_mz_offsets(
+        self,
+        referenceMZs=[165.078978594 + 1.007276],
+        max_mz_deviation_absolute=0.1,
+        selection_criteria="mostAbundant",
+    ):
         """
         Function to calculate the mz offsets of several reference features in the dataset.
         A signal for a feature on the referenceMZs list is said to be found, if it is within the max_mz_deviation_absolute parameter. The feature with the closest mz difference will be used in cases where several features are present in the search window
@@ -2540,7 +3050,9 @@ class DartMSAssay:
         """
 
         if selection_criteria.lower() not in ("closestMZ".lower(), "mostAbundant".lower()):
-            raise ValueError("Unknown parameter selection_criteria, must be either of ['mostAbundant', 'closestMZ]")
+            raise ValueError(
+                "Unknown parameter selection_criteria, must be either of ['mostAbundant', 'closestMZ]"
+            )
 
         temp = None
 
@@ -2569,10 +3081,18 @@ class DartMSAssay:
                     for spectrumi, spectrum in msDataObj.get_spectra_iterator():
                         ind = None
                         if selection_criteria.lower() == "closestMZ".lower():
-                            ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_closest_mz(observedMZ, max_offset_absolute=max_mz_deviation_absolute)
+                            ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_closest_mz(
+                                observedMZ, max_offset_absolute=max_mz_deviation_absolute
+                            )
 
                         elif selection_criteria.lower() == "mostAbundant".lower():
-                            ind, curMZ, deltaMZ, deltaMZPPM, inte = spectrum.get_most_abundant_signal_in_range(
+                            (
+                                ind,
+                                curMZ,
+                                deltaMZ,
+                                deltaMZPPM,
+                                inte,
+                            ) = spectrum.get_most_abundant_signal_in_range(
                                 observedMZ, max_offset_absolute=max_mz_deviation_absolute
                             )
 
@@ -2621,7 +3141,10 @@ class DartMSAssay:
             transformFactor = kwargs["transformFactor"]
             return mz + transformFactor
         else:
-            raise ValueError("Unknown correctby option '%s' specified. Must be either of ['mzDeviationPPM', 'mzDeviation']" % (correctby))
+            raise ValueError(
+                "Unknown correctby option '%s' specified. Must be either of ['mzDeviationPPM', 'mzDeviation']"
+                % (correctby)
+            )
 
     def correct_MZ_shift_across_samples(
         self,
@@ -2671,10 +3194,15 @@ class DartMSAssay:
         )
 
         if not correct_on_level.lower() in ("file", "sample"):
-            raise ValueError("Parameter correct_on_level has an unknown value '%s', must be either of ['file', 'sample']" % (correct_on_level))
+            raise ValueError(
+                "Parameter correct_on_level has an unknown value '%s', must be either of ['file', 'sample']"
+                % (correct_on_level)
+            )
 
         temp = self._calculate_mz_offsets(
-            referenceMZs=referenceMZs, max_mz_deviation_absolute=max_mz_deviation_absolute, selection_criteria=selection_criteria
+            referenceMZs=referenceMZs,
+            max_mz_deviation_absolute=max_mz_deviation_absolute,
+            selection_criteria=selection_criteria,
         )
         temp["mode"] = "original MZs"
 
@@ -2683,13 +3211,23 @@ class DartMSAssay:
         transformFactors = None
         if correctby.lower() == "mzDeviationPPM".lower():
             transformFactors = (
-                tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)]
+                tempMod[
+                    (
+                        np.abs(tempMod["mzDeviationPPM"])
+                        <= max_deviationPPM_to_use_for_correction
+                    )
+                ]
                 .groupby(correct_on_level)["mzDeviationPPM"]
                 .median()
             )
             tempMod["mz"] = tempMod["mz"] * (
                 1
-                - tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)]
+                - tempMod[
+                    (
+                        np.abs(tempMod["mzDeviationPPM"])
+                        <= max_deviationPPM_to_use_for_correction
+                    )
+                ]
                 .groupby(correct_on_level)["mzDeviationPPM"]
                 .transform("median")
                 / 1e6
@@ -2697,18 +3235,27 @@ class DartMSAssay:
 
         elif correctby.lower() == "mzDeviation".lower():
             transformFactors = (
-                tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)]
+                tempMod[
+                    (
+                        np.abs(tempMod["mzDeviationPPM"])
+                        <= max_deviationPPM_to_use_for_correction
+                    )
+                ]
                 .groupby(correct_on_level)["mzDeviation"]
                 .median()
             )
-            tempMod["mz"] = tempMod["mz"] - tempMod[(np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)].groupby(
-                correct_on_level
-            )["mzDeviation"].transform("median")
+            tempMod["mz"] = tempMod["mz"] - tempMod[
+                (np.abs(tempMod["mzDeviationPPM"]) <= max_deviationPPM_to_use_for_correction)
+            ].groupby(correct_on_level)["mzDeviation"].transform("median")
 
         else:
-            raise ValueError("Unknown option for correctby parameter. Must be 'mzDeviation' or 'mzDeviationPPM'")
+            raise ValueError(
+                "Unknown option for correctby parameter. Must be 'mzDeviation' or 'mzDeviationPPM'"
+            )
 
-        tempMod["mzDeviationPPM"] = (tempMod["mz"] - tempMod["referenceMZ"]) / tempMod["referenceMZ"] * 1e6
+        tempMod["mzDeviationPPM"] = (
+            (tempMod["mz"] - tempMod["referenceMZ"]) / tempMod["referenceMZ"] * 1e6
+        )
         tempMod["mzDeviation"] = tempMod["mz"] - tempMod["referenceMZ"]
 
         for samplei, sample in enumerate(self.get_sample_names()):
@@ -2721,7 +3268,10 @@ class DartMSAssay:
             transformFactor = None
             if correct_on_level.lower() == "sample" and sample in transformFactors.index:
                 transformFactor = transformFactors.loc[sample]
-            elif correct_on_level.lower() == "file" and sample.split("::")[0] in transformFactors.index:
+            elif (
+                correct_on_level.lower() == "file"
+                and sample.split("::")[0] in transformFactors.index
+            ):
                 transformFactor = transformFactors.loc[sample.split("::")[0]]
 
             if transformFactor is None:
@@ -2742,17 +3292,33 @@ class DartMSAssay:
                     refFunDesc = None
                     if correctby.lower() == "mzDeviationPPM".lower():
                         spectrum.mz = spectrum.mz * (1.0 - transformFactor / 1e6)
-                        refFun = functools.partial(self._reverse_applied_mz_offset, correctby="mzDeviationPPM", transformFactor=transformFactor)
-                        refFunDesc = "mzDeviationPPM by %.5f (%s)" % (transformFactor, spectrum.reverseMZ)
+                        refFun = functools.partial(
+                            self._reverse_applied_mz_offset,
+                            correctby="mzDeviationPPM",
+                            transformFactor=transformFactor,
+                        )
+                        refFunDesc = "mzDeviationPPM by %.5f (%s)" % (
+                            transformFactor,
+                            spectrum.reverseMZ,
+                        )
 
                     elif correctby.lower() == "mzDeviation".lower():
                         spectrum.mz = spectrum.mz - transformFactor
-                        refFun = functools.partial(self._reverse_applied_mz_offset, correctby="mzDeviation", transformFactor=transformFactor)
-                        refFunDesc = "mzDeviation by %.5f (%s)" % (transformFactor, spectrum.reverseMZ)
+                        refFun = functools.partial(
+                            self._reverse_applied_mz_offset,
+                            correctby="mzDeviation",
+                            transformFactor=transformFactor,
+                        )
+                        refFunDesc = "mzDeviation by %.5f (%s)" % (
+                            transformFactor,
+                            spectrum.reverseMZ,
+                        )
 
                     ## chain reverse mz functions if needed
                     if spectrum.reverseMZ is not None:
-                        spectrum.reverseMZ = functools.partial(functools.reduce, lambda p, f: f(p), (refFun, spectrum.reverseMZ))
+                        spectrum.reverseMZ = functools.partial(
+                            functools.reduce, lambda p, f: f(p), (refFun, spectrum.reverseMZ)
+                        )
                         spectrum.reverseMZDesc = refFunDesc + ";" + spectrum.reverseMZDesc
                     else:
                         spectrum.reverseMZ = refFun
@@ -2760,7 +3326,13 @@ class DartMSAssay:
 
                 logging.info(
                     "     .. Sample %3d / %3d (%45s) correcting by %.1f (%s)"
-                    % (samplei + 1, len(self.get_sample_names()), sample, transformFactor, correctby)
+                    % (
+                        samplei + 1,
+                        len(self.get_sample_names()),
+                        sample,
+                        transformFactor,
+                        correctby,
+                    )
                 )
 
         tempMod["mode"] = "corrected MZs (by %s)" % (correctby)
@@ -2768,11 +3340,22 @@ class DartMSAssay:
 
         p = None
         if plot:
-            temp_["file"] = pd.Categorical(temp_["file"], ordered=True, categories=natsort.natsorted(set(temp_["file"])))
+            temp_["file"] = pd.Categorical(
+                temp_["file"], ordered=True, categories=natsort.natsorted(set(temp_["file"]))
+            )
             p = (
                 p9.ggplot(
-                    data=temp_[(~(temp_["intensity"].isna())) & (np.abs(temp_["mzDeviationPPM"]) <= 100)],
-                    mapping=p9.aes(x="referenceMZ", y="mzDeviationPPM", group="chromID", colour="sample", alpha="intensity"),
+                    data=temp_[
+                        (~(temp_["intensity"].isna()))
+                        & (np.abs(temp_["mzDeviationPPM"]) <= 100)
+                    ],
+                    mapping=p9.aes(
+                        x="referenceMZ",
+                        y="mzDeviationPPM",
+                        group="chromID",
+                        colour="sample",
+                        alpha="intensity",
+                    ),
                 )
                 + p9.geom_hline(yintercept=0, size=1, colour="Black", alpha=0.25)
                 + p9.geom_line()
@@ -2780,9 +3363,20 @@ class DartMSAssay:
                 + p9.facet_wrap("~ mode + file", ncol=12)
                 + p9.theme_minimal()
                 + p9.theme(legend_position="bottom")
-                + p9.theme(subplots_adjust={"wspace": 0.15, "hspace": 0.25, "top": 0.93, "right": 0.99, "bottom": 0.05, "left": 0.05})
+                + p9.theme(
+                    subplots_adjust={
+                        "wspace": 0.15,
+                        "hspace": 0.25,
+                        "top": 0.93,
+                        "right": 0.99,
+                        "bottom": 0.05,
+                        "left": 0.05,
+                    }
+                )
                 + p9.guides(alpha=False, colour=False)
-                + p9.ggtitle("MZ deviation before and after correction for each sample/chronogram file")
+                + p9.ggtitle(
+                    "MZ deviation before and after correction for each sample/chronogram file"
+                )
             )
             print(p)
 
@@ -2898,7 +3492,9 @@ class DartMSAssay:
         mzDesc[:, 5] = (mzDesc[:, 4] - mzDesc[:, 2]) / mzDesc[:, 3] * 1e6
         return mzDesc
 
-    def _collapse_mz_cluster(self, mz, original_mz, intensity, time, cluster, intensity_collapse_method="average"):
+    def _collapse_mz_cluster(
+        self, mz, original_mz, intensity, time, cluster, intensity_collapse_method="average"
+    ):
         """
         Function to collapse several spectra (provided as different lists) into a consensus spectrum
 
@@ -2965,7 +3561,9 @@ class DartMSAssay:
         elif intensity_collapse_method.lower() == "max".lower():
             intensity_ = np.max(intensity_)
         else:
-            raise ValueError("Unknown option for parameter intensity_collapse_method, must be either of ['average', 'sum', 'max']")
+            raise ValueError(
+                "Unknown option for parameter intensity_collapse_method, must be either of ['average', 'sum', 'max']"
+            )
 
         ord = np.argsort(mz_)
         return mz_[ord], intensity_[ord], [usedFeatures[i] for i in ord]
@@ -3010,7 +3608,14 @@ class DartMSAssay:
             cluster_quality_check_functions = []
 
         for samplei, sample in enumerate(self.get_sample_names()):
-            temp = {"sample": [], "spectrumInd": [], "time": [], "mz": [], "original_mz": [], "intensity": []}
+            temp = {
+                "sample": [],
+                "spectrumInd": [],
+                "time": [],
+                "mz": [],
+                "original_mz": [],
+                "intensity": [],
+            }
             msDataObj = self.get_msDataObj_for_sample(sample)
             summary_totalSpectra = 0
             for k, spectrum in msDataObj.get_spectra_iterator():
@@ -3030,7 +3635,9 @@ class DartMSAssay:
             temp["intensity"] = np.concatenate(temp["intensity"], axis=0, dtype=np.float64)
             summary_totalSignals = len(temp["mz"])
 
-            temp["cluster"] = self._crude_clustering_for_mz_list(sample, temp["mz"], temp["intensity"], min_difference_ppm=min_difference_ppm)
+            temp["cluster"] = self._crude_clustering_for_mz_list(
+                sample, temp["mz"], temp["intensity"], min_difference_ppm=min_difference_ppm
+            )
             summary_clusterAfterCrude = np.unique(temp["cluster"]).shape[0]
 
             # remove any cluster with less than min_signals_per_cluster signals
@@ -3067,7 +3674,13 @@ class DartMSAssay:
             temp["cluster"][clustNs < min_signals_per_cluster] = -1
             for cluster_quality_check_function in cluster_quality_check_functions:
                 temp["cluster"] = cluster_quality_check_function(
-                    sample, msDataObj, temp["spectrumInd"], temp["time"], temp["mz"], temp["intensity"], temp["cluster"]
+                    sample,
+                    msDataObj,
+                    temp["spectrumInd"],
+                    temp["time"],
+                    temp["mz"],
+                    temp["intensity"],
+                    temp["cluster"],
                 )
             summary_clusterAfterQualityFunctions = np.unique(temp["cluster"]).shape[0]
 
@@ -3081,11 +3694,18 @@ class DartMSAssay:
             temp["cluster"] = self._reindex_cluster(temp["cluster"][keep])
 
             if len(temp["cluster"]) == 0:
-                logging.error("   .. Error: no signals to be used for sample '%35s'" % (sample))
+                logging.error(
+                    "   .. Error: no signals to be used for sample '%35s'" % (sample)
+                )
                 next
 
             if exportAsFeatureML:
-                with open(os.path.join(featureMLlocation, "%s.featureML" % (sample)).replace(":", "_"), "w") as fout:
+                with open(
+                    os.path.join(featureMLlocation, "%s.featureML" % (sample)).replace(
+                        ":", "_"
+                    ),
+                    "w",
+                ) as fout:
                     minRT = np.min(temp["time"])
                     maxRT = np.max(temp["time"])
 
@@ -3095,9 +3715,18 @@ class DartMSAssay:
                     fout.write(
                         '  <featureMap version="1.4" id="fm_16311276685788915066" xsi:noNamespaceSchemaLocation="http://open-ms.sourceforge.net/schemas/FeatureXML_1_4.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
                     )
-                    fout.write('    <dataProcessing completion_time="%s">\n' % datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
-                    fout.write('      <software name="tidyms" version="%s" />\n' % (__tidyMSdartmsVersion__))
-                    fout.write('      <software name="tidycalculate_consensus_spectra_for_samples" version="%s" />\n' % (__tidyMSdartmsVersion__))
+                    fout.write(
+                        '    <dataProcessing completion_time="%s">\n'
+                        % datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
+                    )
+                    fout.write(
+                        '      <software name="tidyms" version="%s" />\n'
+                        % (__tidyMSdartmsVersion__)
+                    )
+                    fout.write(
+                        '      <software name="tidycalculate_consensus_spectra_for_samples" version="%s" />\n'
+                        % (__tidyMSdartmsVersion__)
+                    )
                     fout.write("    </dataProcessing>\n")
                     fout.write('    <featureList count="%d">\n' % (ns.shape[0]))
 
@@ -3107,18 +3736,34 @@ class DartMSAssay:
                         original_mzs = np.copy(temp["original_mz"][temp["cluster"] == clust])
                         ints = np.copy(temp["intensity"][temp["cluster"] == clust])
                         fout.write('<feature id="%s">\n' % j)
-                        fout.write('  <position dim="0">%f</position>\n' % ((maxRT + minRT) / 2))
-                        fout.write('  <position dim="1">%f</position>\n' % np.average(mzs, weights=ints))
-                        fout.write("  <intensity>%f</intensity>\n" % np.sum(temp["intensity"][temp["cluster"] == clust]))
+                        fout.write(
+                            '  <position dim="0">%f</position>\n' % ((maxRT + minRT) / 2)
+                        )
+                        fout.write(
+                            '  <position dim="1">%f</position>\n'
+                            % np.average(mzs, weights=ints)
+                        )
+                        fout.write(
+                            "  <intensity>%f</intensity>\n"
+                            % np.sum(temp["intensity"][temp["cluster"] == clust])
+                        )
                         fout.write('  <quality dim="0">0</quality>\n')
                         fout.write('  <quality dim="1">0</quality>\n')
                         fout.write("  <overallquality>0</overallquality>\n")
                         fout.write("  <charge>1</charge>\n")
                         fout.write('  <convexhull nr="0">\n')
-                        fout.write('    <pt x="%f" y="%f" />\n' % (minRT, np.min(original_mzs)))
-                        fout.write('    <pt x="%f" y="%f" />\n' % (minRT, np.max(original_mzs)))
-                        fout.write('    <pt x="%f" y="%f" />\n' % (maxRT, np.max(original_mzs)))
-                        fout.write('    <pt x="%f" y="%f" />\n' % (maxRT, np.min(original_mzs)))
+                        fout.write(
+                            '    <pt x="%f" y="%f" />\n' % (minRT, np.min(original_mzs))
+                        )
+                        fout.write(
+                            '    <pt x="%f" y="%f" />\n' % (minRT, np.max(original_mzs))
+                        )
+                        fout.write(
+                            '    <pt x="%f" y="%f" />\n' % (maxRT, np.max(original_mzs))
+                        )
+                        fout.write(
+                            '    <pt x="%f" y="%f" />\n' % (maxRT, np.min(original_mzs))
+                        )
                         fout.write("  </convexhull>\n")
                         fout.write("</feature>\n")
 
@@ -3141,7 +3786,12 @@ class DartMSAssay:
             )
 
             mzs, intensities, usedFeatures = self._collapse_mz_cluster(
-                temp["mz"], temp["original_mz"], temp["intensity"], temp["time"], temp["cluster"], intensity_collapse_method=aggregation_function
+                temp["mz"],
+                temp["original_mz"],
+                temp["intensity"],
+                temp["time"],
+                temp["cluster"],
+                intensity_collapse_method=aggregation_function,
             )
 
             sampleObjNew = fileio.MSData_in_memory.generate_from_MSData_object(msDataObj)
@@ -3162,7 +3812,12 @@ class DartMSAssay:
     # Bracketing of several samples
     #
 
-    def bracket_consensus_spectrum_samples(self, closest_signal_max_deviation_ppm=20, max_ppm_deviation=25, show_diagnostic_plots=False):
+    def bracket_consensus_spectrum_samples(
+        self,
+        closest_signal_max_deviation_ppm=20,
+        max_ppm_deviation=25,
+        show_diagnostic_plots=False,
+    ):
         """
         Function to bracket consensus spectra across different samples
 
@@ -3174,7 +3829,9 @@ class DartMSAssay:
             indicator if a diagnostic plot shall be shown. Defaults to False.
         """
         self.add_data_processing_step(
-            "bracket consensus spectrum per sample", "bracket consensus spectrum per sample", {"max_ppm_deviation": max_ppm_deviation}
+            "bracket consensus spectrum per sample",
+            "bracket consensus spectrum per sample",
+            {"max_ppm_deviation": max_ppm_deviation},
         )
         temp = {
             "sample": [],
@@ -3188,7 +3845,11 @@ class DartMSAssay:
             "cluster": [],
         }
 
-        for samplei, sample in tqdm.tqdm(enumerate(self.get_sample_names()), total=len(self.get_sample_names()), desc="bracketing: fetching data"):
+        for samplei, sample in tqdm.tqdm(
+            enumerate(self.get_sample_names()),
+            total=len(self.get_sample_names()),
+            desc="bracketing: fetching data",
+        ):
             msDataObj = self.get_msDataObj_for_sample(sample)
             for k, spectrum in msDataObj.get_spectra_iterator():
                 temp["sample"].extend((sample for i in range(spectrum.mz.shape[0])))
@@ -3196,7 +3857,9 @@ class DartMSAssay:
                 temp["time"].extend((spectrum.time for i in range(spectrum.mz.shape[0])))
                 temp["mz"].extend((mz for mz in spectrum.mz))
                 temp["intensity"].extend((np.log10(inte) for inte in spectrum.spint))
-                temp["original_usedFeatures"].extend((spectrum.usedFeatures[i] for i in range(len(spectrum.usedFeatures))))
+                temp["original_usedFeatures"].extend(
+                    (spectrum.usedFeatures[i] for i in range(len(spectrum.usedFeatures)))
+                )
                 temp["startRT"].extend((spectrum.startRT for mz in spectrum.mz))
                 temp["endRT"].extend((spectrum.endRT for mz in spectrum.mz))
                 temp["cluster"].extend((0 for inte in spectrum.spint))
@@ -3234,7 +3897,9 @@ class DartMSAssay:
             logging.info("    .. clustering with method 2")
             min_difference_ppm = 100
             min_signals_per_cluster = 2
-            temp["cluster"] = self._crude_clustering_for_mz_list(sample, temp["mz"], temp["intensity"], min_difference_ppm=min_difference_ppm)
+            temp["cluster"] = self._crude_clustering_for_mz_list(
+                sample, temp["mz"], temp["intensity"], min_difference_ppm=min_difference_ppm
+            )
 
             # remove any cluster with less than min_signals_per_cluster signals
             clustInds, ns = np.unique(temp["cluster"], return_counts=True)
@@ -3247,7 +3912,11 @@ class DartMSAssay:
             temp["time"] = temp["time"][keep]
             temp["mz"] = temp["mz"][keep]
             temp["intensity"] = temp["intensity"][keep]
-            temp["original_usedFeatures"] = [temp["original_usedFeatures"][i] for i in range(temp["cluster"].shape[0]) if keep[i]]
+            temp["original_usedFeatures"] = [
+                temp["original_usedFeatures"][i]
+                for i in range(temp["cluster"].shape[0])
+                if keep[i]
+            ]
             temp["startRT"] = temp["startRT"][keep]
             temp["endRT"] = temp["endRT"][keep]
             temp["cluster"] = self._reindex_cluster(temp["cluster"][keep])
@@ -3271,7 +3940,11 @@ class DartMSAssay:
             temp["time"] = temp["time"][keep]
             temp["mz"] = temp["mz"][keep]
             temp["intensity"] = temp["intensity"][keep]
-            temp["original_usedFeatures"] = [temp["original_usedFeatures"][i] for i in range(temp["cluster"].shape[0]) if keep[i]]
+            temp["original_usedFeatures"] = [
+                temp["original_usedFeatures"][i]
+                for i in range(temp["cluster"].shape[0])
+                if keep[i]
+            ]
             temp["startRT"] = temp["startRT"][keep]
             temp["endRT"] = temp["endRT"][keep]
             temp["cluster"] = self._reindex_cluster(temp["cluster"][keep])
@@ -3285,12 +3958,22 @@ class DartMSAssay:
                 c = np.argmax(temp["intensity"] * (temp["cluster"] == 0))
                 cmz = temp["mz"][c]
 
-                assign = np.where(np.abs(temp["mz"] - cmz) / temp["mz"] * 1e6 <= max_ppm_deviation)
+                assign = np.where(
+                    np.abs(temp["mz"] - cmz) / temp["mz"] * 1e6 <= max_ppm_deviation
+                )
                 temp["cluster"][assign] = cclust
 
                 cclust = cclust + 1
 
-        tempClusterInfo = {"cluster": [], "meanMZ": [], "minMZ": [], "maxMZ": [], "mzDevPPM": [], "uniqueSamples": [], "featureMLInfo": []}
+        tempClusterInfo = {
+            "cluster": [],
+            "meanMZ": [],
+            "minMZ": [],
+            "maxMZ": [],
+            "mzDevPPM": [],
+            "uniqueSamples": [],
+            "featureMLInfo": [],
+        }
 
         temp["cluster"] = self._reindex_cluster(temp["cluster"])
         clusts = np.unique(temp["cluster"])
@@ -3302,15 +3985,27 @@ class DartMSAssay:
             tempClusterInfo["meanMZ"].append(np.mean(mzs))
             tempClusterInfo["minMZ"].append(np.min(mzs))
             tempClusterInfo["maxMZ"].append(np.max(mzs))
-            tempClusterInfo["mzDevPPM"].append((np.max(mzs) - np.min(mzs)) / np.mean(mzs) * 1e6)
+            tempClusterInfo["mzDevPPM"].append(
+                (np.max(mzs) - np.min(mzs)) / np.mean(mzs) * 1e6
+            )
             tempClusterInfo["uniqueSamples"].append(np.unique(temp["sample"][assign]).shape[0])
             tempClusterInfo["featureMLInfo"].append({})
 
-            tempClusterInfo["featureMLInfo"][clust]["overallquality"] = tempClusterInfo["uniqueSamples"][clust]
-            tempClusterInfo["featureMLInfo"][clust]["meanMZ"] = tempClusterInfo["meanMZ"][clust]
-            tempClusterInfo["featureMLInfo"][clust]["mzDevPPM"] = tempClusterInfo["mzDevPPM"][clust]
+            tempClusterInfo["featureMLInfo"][clust]["overallquality"] = tempClusterInfo[
+                "uniqueSamples"
+            ][clust]
+            tempClusterInfo["featureMLInfo"][clust]["meanMZ"] = tempClusterInfo["meanMZ"][
+                clust
+            ]
+            tempClusterInfo["featureMLInfo"][clust]["mzDevPPM"] = tempClusterInfo["mzDevPPM"][
+                clust
+            ]
 
-            fs = [temp["original_usedFeatures"][i] for i in range(len(temp["original_usedFeatures"])) if temp["cluster"][i] == clust]
+            fs = [
+                temp["original_usedFeatures"][i]
+                for i in range(len(temp["original_usedFeatures"]))
+                if temp["cluster"][i] == clust
+            ]
             startRTs = temp["startRT"][temp["cluster"] == clust]
             endRTs = temp["endRT"][temp["cluster"] == clust]
             samples = temp["sample"][temp["cluster"] == clust]
@@ -3319,7 +4014,11 @@ class DartMSAssay:
             for samplei, sample in enumerate(self.get_sample_names()):
                 use = samples == sample
                 if np.sum(use) > 0:
-                    domzs = np.ndarray.flatten(np.concatenate([np.array(fs[i][:, 3]) for i in range(len(fs)) if use[i]]))
+                    domzs = np.ndarray.flatten(
+                        np.concatenate(
+                            [np.array(fs[i][:, 3]) for i in range(len(fs)) if use[i]]
+                        )
+                    )
                     startRT = startRTs[use][0]
                     endRT = endRTs[use][0]
                     tempClusterInfo["featureMLInfo"][clust]["sampleHulls"][sample] = [
@@ -3331,12 +4030,17 @@ class DartMSAssay:
 
         if show_diagnostic_plots:
             temp = None
-            for featurei in tqdm.tqdm(range(len(tempClusterInfo["minMZ"])), desc="bracketing: generating plots"):
+            for featurei in tqdm.tqdm(
+                range(len(tempClusterInfo["minMZ"])), desc="bracketing: generating plots"
+            ):
                 for samplei, sample in enumerate(self.get_sample_names()):
                     msDataObj = self.get_msDataObj_for_sample(sample)
                     for k, spectrum in msDataObj.get_spectra_iterator():
                         usei = np.where(
-                            np.logical_and(spectrum.mz >= tempClusterInfo["minMZ"][featurei], spectrum.mz <= tempClusterInfo["maxMZ"][featurei])
+                            np.logical_and(
+                                spectrum.mz >= tempClusterInfo["minMZ"][featurei],
+                                spectrum.mz <= tempClusterInfo["maxMZ"][featurei],
+                            )
                         )[0]
                         if usei.size > 0:
                             for i in usei:
@@ -3381,8 +4085,10 @@ class DartMSAssay:
                     for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
                         usei = np.where(
                             np.logical_and(
-                                spectrum.original_mz >= spectrum.reverseMZ(self.features[featurei][0]),
-                                spectrum.original_mz <= spectrum.reverseMZ(self.features[featurei][2]),
+                                spectrum.original_mz
+                                >= spectrum.reverseMZ(self.features[featurei][0]),
+                                spectrum.original_mz
+                                <= spectrum.reverseMZ(self.features[featurei][2]),
                             )
                         )[0]
                         if usei.size > 0:
@@ -3411,7 +4117,11 @@ class DartMSAssay:
                 ],
                 axis=1,
             )
-            dat.set_axis(["Count", "mzMin", "mzMean", "mzMax", "intMean", "intStd"], axis=1, inplace=True)
+            dat.set_axis(
+                ["Count", "mzMin", "mzMean", "mzMax", "intMean", "intStd"],
+                axis=1,
+                inplace=True,
+            )
             dat = dat.reset_index()
             dat["mzDevPPM"] = (dat["mzMax"] - dat["mzMin"]) / dat["mzMean"] * 1e6
             dat["intMean"] = np.log2(dat["intMean"])
@@ -3442,7 +4152,10 @@ class DartMSAssay:
             # print(p)
 
             p = (
-                p9.ggplot(data=dat, mapping=p9.aes(x="mzMean", y="mzDevPPM", group="type", colour="type"))
+                p9.ggplot(
+                    data=dat,
+                    mapping=p9.aes(x="mzMean", y="mzDevPPM", group="type", colour="type"),
+                )
                 + p9.geom_point(alpha=0.15)
                 + p9.facet_wrap("~ type")
                 # + p9.theme(subplots_adjust={'wspace':0.15, 'hspace':0.25, 'top':0.93, 'right':0.99, 'bottom':0.05, 'left':0.15})
@@ -3454,7 +4167,13 @@ class DartMSAssay:
             # print(p)
 
         self.features = [
-            e for e in zip(tempClusterInfo["minMZ"], tempClusterInfo["meanMZ"], tempClusterInfo["maxMZ"], tempClusterInfo["featureMLInfo"])
+            e
+            for e in zip(
+                tempClusterInfo["minMZ"],
+                tempClusterInfo["meanMZ"],
+                tempClusterInfo["maxMZ"],
+                tempClusterInfo["featureMLInfo"],
+            )
         ]
 
     #####################################################################################################
@@ -3462,7 +4181,12 @@ class DartMSAssay:
     # This setp also automatically re-integrates the results
     #
 
-    def build_data_matrix(self, on="originalData", originalData_mz_deviation_multiplier_PPM=0, aggregation_fun="average"):
+    def build_data_matrix(
+        self,
+        on="originalData",
+        originalData_mz_deviation_multiplier_PPM=0,
+        aggregation_fun="average",
+    ):
         """
         generates a data matrix from corrected, consensus spectra and bracketed features
 
@@ -3481,19 +4205,34 @@ class DartMSAssay:
             raised if parameters on and aggregation_fun have invalid values
         """
         self.add_data_processing_step(
-            "build data matrix", "build data matrix", {"on": on, "originalData_mz_deviation_multiplier_PPM": originalData_mz_deviation_multiplier_PPM}
+            "build data matrix",
+            "build data matrix",
+            {
+                "on": on,
+                "originalData_mz_deviation_multiplier_PPM": originalData_mz_deviation_multiplier_PPM,
+            },
         )
 
         if on.lower() not in ("processedData".lower(), "originalData".lower()):
-            raise ValueError("Unknown option for parameter on. Must be either of ['processedData', 'originalData']")
-        if on.lower() == "originalData".lower() and aggregation_fun.lower() not in ("average".lower(), "sum".lower(), "max".lower()):
-            raise ValueError("Unknown aggregation method provided, must be either of ['average', 'sum', 'max']")
+            raise ValueError(
+                "Unknown option for parameter on. Must be either of ['processedData', 'originalData']"
+            )
+        if on.lower() == "originalData".lower() and aggregation_fun.lower() not in (
+            "average".lower(),
+            "sum".lower(),
+            "max".lower(),
+        ):
+            raise ValueError(
+                "Unknown aggregation method provided, must be either of ['average', 'sum', 'max']"
+            )
 
         sampleNames = self.get_sample_names()
         sampleNamesToRowI = dict(((sample, i) for i, sample in enumerate(sampleNames)))
 
         dataMatrix = np.zeros((len(sampleNames), len(self.features)))
-        for samplei, sample in tqdm.tqdm(enumerate(sampleNames), total=len(sampleNames), desc="data matrix: gathering data"):
+        for samplei, sample in tqdm.tqdm(
+            enumerate(sampleNames), total=len(sampleNames), desc="data matrix: gathering data"
+        ):
             msDataObj = self.get_msDataObj_for_sample(sample)
             spectrum = msDataObj.get_spectrum(0)
 
@@ -3501,19 +4240,30 @@ class DartMSAssay:
                 if on.lower() == "processedData".lower():
                     use = np.logical_and(spectrum.mz >= mzmin, spectrum.mz <= mzmax)
                     if np.sum(use) > 0:
-                        dataMatrix[sampleNamesToRowI[sample], braci] = np.sum(spectrum.spint[use])
+                        dataMatrix[sampleNamesToRowI[sample], braci] = np.sum(
+                            spectrum.spint[use]
+                        )
                     else:
                         dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
 
                 elif on.lower() == "originalData".lower():
                     s = np.array(())
-                    for oSpectrumi, oSpectrum in msDataObj.original_MSData_object.get_spectra_iterator():
-                        _mzmin, _mzmean, _mzmax = oSpectrum.reverseMZ(mzmin), oSpectrum.reverseMZ(mzmean), oSpectrum.reverseMZ(mzmax)
-                        _mzmin, _mzmax = _mzmin * (1.0 - originalData_mz_deviation_multiplier_PPM / 1e6), _mzmax * (
-                            1.0 + originalData_mz_deviation_multiplier_PPM / 1e6
+                    for (
+                        oSpectrumi,
+                        oSpectrum,
+                    ) in msDataObj.original_MSData_object.get_spectra_iterator():
+                        _mzmin, _mzmean, _mzmax = (
+                            oSpectrum.reverseMZ(mzmin),
+                            oSpectrum.reverseMZ(mzmean),
+                            oSpectrum.reverseMZ(mzmax),
                         )
+                        _mzmin, _mzmax = _mzmin * (
+                            1.0 - originalData_mz_deviation_multiplier_PPM / 1e6
+                        ), _mzmax * (1.0 + originalData_mz_deviation_multiplier_PPM / 1e6)
 
-                        use = np.logical_and(oSpectrum.original_mz >= _mzmin, oSpectrum.original_mz <= _mzmax)
+                        use = np.logical_and(
+                            oSpectrum.original_mz >= _mzmin, oSpectrum.original_mz <= _mzmax
+                        )
                         if np.sum(use) > 0:
                             s = np.concatenate((s, oSpectrum.spint[use]))
 
@@ -3530,15 +4280,27 @@ class DartMSAssay:
                         dataMatrix[sampleNamesToRowI[sample], braci] = np.nan
 
         self.samples = sampleNames
-        self.groups = [self.get_metaData_for_sample(sample, "group") for sample in self.samples]
-        self.batches = [self.get_metaData_for_sample(sample, "batch") for sample in self.samples]
+        self.groups = [
+            self.get_metaData_for_sample(sample, "group") for sample in self.samples
+        ]
+        self.batches = [
+            self.get_metaData_for_sample(sample, "batch") for sample in self.samples
+        ]
         self.dat = dataMatrix
 
     #####################################################################################################
     # Blank subtraction
     #
 
-    def blank_subtraction(self, blankGroup, toTestGroups, foldCutoff=2, pvalueCutoff=0.05, minDetected=2, plot=False):
+    def blank_subtraction(
+        self,
+        blankGroup,
+        toTestGroups,
+        foldCutoff=2,
+        pvalueCutoff=0.05,
+        minDetected=2,
+        plot=False,
+    ):
         """
         Method to remove background features from the datamatrix. Repeated calls with different blank groups are possible.
         Inspired by the background-subtraction module of MZmine3
@@ -3604,17 +4366,31 @@ class DartMSAssay:
                     keeps[featurei] -= 1
 
                     temp = _add_row_to_pandas_creation_dictionary(
-                        temp, pvalues=-np.inf, folds=np.inf, sigIndicators="only in group", comparisons="'%s' vs '%s'" % (toTestGroup, blankGroup)
+                        temp,
+                        pvalues=-np.inf,
+                        folds=np.inf,
+                        sigIndicators="only in group",
+                        comparisons="'%s' vs '%s'" % (toTestGroup, blankGroup),
                     )
 
                 else:
                     valsGroup = valsGroup[~np.isnan(valsGroup)]
                     if valsBlanks.shape[0] > 1:
-                        pval = scipy.stats.ttest_ind(valsGroup, valsBlanks, equal_var=False, alternative="greater", trim=0)[1]
+                        pval = scipy.stats.ttest_ind(
+                            valsGroup,
+                            valsBlanks,
+                            equal_var=False,
+                            alternative="greater",
+                            trim=0,
+                        )[1]
                     elif valsBlanks.shape[0] == 1:
-                        pval = scipy.stats.ttest_1samp(valsGroup, valsBlanks[0], alternative="greater")[1]
+                        pval = scipy.stats.ttest_1samp(
+                            valsGroup, valsBlanks[0], alternative="greater"
+                        )[1]
                     else:
-                        raise NotImplementedError("No blank values available, implementation is incorrect")
+                        raise NotImplementedError(
+                            "No blank values available, implementation is incorrect"
+                        )
                     fold = np.mean(valsGroup) / np.mean(valsBlanks)
                     sigInd = pval <= pvalueCutoff and fold >= foldCutoff
 
@@ -3633,7 +4409,9 @@ class DartMSAssay:
         if plot:
             temp = pd.DataFrame(temp)
             p = (
-                p9.ggplot(data=temp, mapping=p9.aes(x="folds", y="pvalues", colour="sigIndicators"))
+                p9.ggplot(
+                    data=temp, mapping=p9.aes(x="folds", y="pvalues", colour="sigIndicators")
+                )
                 + p9.geom_point(alpha=0.3)
                 + p9.geom_hline(yintercept=-np.log10(0.05), alpha=0.3, colour="black")
                 + p9.geom_vline(xintercept=[np.log2(foldCutoff)], alpha=0.3, colour="black")
@@ -3678,7 +4456,14 @@ class DartMSAssay:
     # Feature annotation
     #
 
-    def annotate_features(self, useGroups=None, max_deviation_ppm=100, search_ions=None, remove_other_ions=True, plot=False):
+    def annotate_features(
+        self,
+        useGroups=None,
+        max_deviation_ppm=100,
+        search_ions=None,
+        remove_other_ions=True,
+        plot=False,
+    ):
         """
         Function to annotate the bracketed features with different sister ions (adducts, isotopologs, etc.) relative to parent ions (mostly [M+H]+ or [M-H]-)
 
@@ -3696,12 +4481,22 @@ class DartMSAssay:
             indicator if annotation results should be plotted. Defaults to False.
         """
         self.add_data_processing_step(
-            "annotate features", "annotate features", {"useGroups": useGroups, "max_deviation_ppm": max_deviation_ppm, "search_ions": search_ions}
+            "annotate features",
+            "annotate features",
+            {
+                "useGroups": useGroups,
+                "max_deviation_ppm": max_deviation_ppm,
+                "search_ions": search_ions,
+            },
         )
 
         if search_ions is None:
             # , "arbi1": 0.5, "arbi2": 0.75, "arbi3": 0.9, "arbi4": 1.04, "arbi5": 1.1}
-            searchIons = {"+Na": 22.989218 - 1.007276, "+NH4": 18.033823 - 1.007276, "+CH3OH+H": 33.033489 - 1.007276}
+            searchIons = {
+                "+Na": 22.989218 - 1.007276,
+                "+NH4": 18.033823 - 1.007276,
+                "+CH3OH+H": 33.033489 - 1.007276,
+            }
             for cn in range(1, 5):
                 searchIons["[13C%d]" % cn] = 1.00335484 * cn
 
@@ -3719,13 +4514,21 @@ class DartMSAssay:
             mz = features_[featurei, 1]
             iAmParent = False
 
-            intensities = np.array([dat_[samplei, featurei] for samplei, sample in enumerate(self.samples) if not np.isnan(dat_[samplei, featurei])])
+            intensities = np.array(
+                [
+                    dat_[samplei, featurei]
+                    for samplei, sample in enumerate(self.samples)
+                    if not np.isnan(dat_[samplei, featurei])
+                ]
+            )
 
             if len(annotations[featurei]) == 0:
                 for searchIon in searchIons:
                     searchMZ = mz + searchIons[searchIon]
 
-                    ind, deviationPPM = _find_feature_by_mz(features_, searchMZ, max_deviation_ppm=max_deviation_ppm)
+                    ind, deviationPPM = _find_feature_by_mz(
+                        features_, searchMZ, max_deviation_ppm=max_deviation_ppm
+                    )
                     if ind is not None:
                         ratios = []
                         for samplei, sample in enumerate(self.samples):
@@ -3735,7 +4538,12 @@ class DartMSAssay:
                                     ratios.append(ratio)
                         ratios = np.array(ratios)
 
-                        if ratios.shape[0] > 10 and np.mean(ratios) > 2.0 and np.mean(ratios) < 200.0 and np.std(ratios) < 50.0:
+                        if (
+                            ratios.shape[0] > 10
+                            and np.mean(ratios) > 2.0
+                            and np.mean(ratios) < 200.0
+                            and np.std(ratios) < 50.0
+                        ):
                             annotations[ind].append(
                                 {
                                     "i_am": searchIon,
@@ -3759,43 +4567,80 @@ class DartMSAssay:
                             searchIon="%s (%.4f)" % (searchIon, searchIons[searchIon]),
                             cns="%s (%.4f)" % (searchIon, searchIons[searchIon]),
                             MZs=mz,
-                            intensityMeans=np.mean(intensities) if intensities.shape[0] > 0 else 0,
+                            intensityMeans=np.mean(intensities)
+                            if intensities.shape[0] > 0
+                            else 0,
                             deviations=_mz_deviationPPM_between(features_[ind, 1], searchMZ),
                             ratiosMean=np.mean(ratios) if ratios.shape[0] > 0 else 0,
                             ratiosSTD=np.std(ratios) if ratios.shape[0] > 1 else 0,
-                            ratiosRSTD=np.std(ratios) / np.mean(ratios) * 100.0 if ratios.shape[0] > 1 else 0,
+                            ratiosRSTD=np.std(ratios) / np.mean(ratios) * 100.0
+                            if ratios.shape[0] > 1
+                            else 0,
                             ratiosCount=ratios.shape[0],
                         )
         if plot:
             temp = pd.DataFrame(temp)
             temp["searchIon"] = temp["searchIon"].astype(object)
             p = (
-                p9.ggplot(data=temp, mapping=p9.aes(x="MZs", y="deviations", colour="searchIon"))
+                p9.ggplot(
+                    data=temp, mapping=p9.aes(x="MZs", y="deviations", colour="searchIon")
+                )
                 + p9.geom_point(alpha=0.05)
                 + p9.facet_wrap("~searchIon")
                 + p9.theme_minimal()
                 + p9.theme(legend_position="bottom")
-                + p9.theme(subplots_adjust={"wspace": 0.15, "hspace": 0.25, "top": 0.93, "right": 0.99, "bottom": 0.15, "left": 0.15})
+                + p9.theme(
+                    subplots_adjust={
+                        "wspace": 0.15,
+                        "hspace": 0.25,
+                        "top": 0.93,
+                        "right": 0.99,
+                        "bottom": 0.15,
+                        "left": 0.15,
+                    }
+                )
                 + p9.ggtitle("Distribution of mz deviation of sister ions")
             )
             print(p)
             p = (
-                p9.ggplot(data=temp, mapping=p9.aes(x="np.log10(intensityMeans)", y="ratiosRSTD", colour="ratiosCount"))
+                p9.ggplot(
+                    data=temp,
+                    mapping=p9.aes(
+                        x="np.log10(intensityMeans)", y="ratiosRSTD", colour="ratiosCount"
+                    ),
+                )
                 + p9.geom_point(alpha=0.1)
                 + p9.geom_hline(yintercept=50, colour="firebrick")
                 # + p9.facet_wrap("~ratiosCount")
                 + p9.theme_minimal()
                 + p9.ylim(0, 300)
                 + p9.theme(legend_position="bottom")
-                + p9.theme(subplots_adjust={"wspace": 0.15, "hspace": 0.25, "top": 0.93, "right": 0.99, "bottom": 0.15, "left": 0.15})
+                + p9.theme(
+                    subplots_adjust={
+                        "wspace": 0.15,
+                        "hspace": 0.25,
+                        "top": 0.93,
+                        "right": 0.99,
+                        "bottom": 0.15,
+                        "left": 0.15,
+                    }
+                )
                 + p9.ggtitle("Distribution of ratio deviation of sister ions")
             )
             print(p)
 
             temp["intensityMeansCUT"] = pd.cut(np.log10(temp["intensityMeans"]), 10)
-            logging.info(temp[temp["searchIon"] == "[13C1] (1.0034)"].groupby(["intensityMeansCUT"])[["ratiosRSTD"]].describe().to_markdown())
+            logging.info(
+                temp[temp["searchIon"] == "[13C1] (1.0034)"]
+                .groupby(["intensityMeansCUT"])[["ratiosRSTD"]]
+                .describe()
+                .to_markdown()
+            )
 
-        annotations = [{"Adducts": annotations[i]} if len(annotations[i]) > 0 else {} for i in np.argsort(order)]
+        annotations = [
+            {"Adducts": annotations[i]} if len(annotations[i]) > 0 else {}
+            for i in np.argsort(order)
+        ]
         if self.featureAnnotations is None:
             self.featureAnnotations = annotations
         else:
@@ -3803,7 +4648,10 @@ class DartMSAssay:
                 if len(annotations[featurei]) > 0:
                     x = annotations[featurei]
                     if "Adducts" in self.featureAnnotations[featurei]:
-                        x = self.featureAnnotations[featurei]["Adducts"] | annotations[featurei]["Adducts"]
+                        x = (
+                            self.featureAnnotations[featurei]["Adducts"]
+                            | annotations[featurei]["Adducts"]
+                        )
                     if len(x) > 0:
                         self.featureAnnotations[featurei]["Adducts"] = x
 
@@ -3817,7 +4665,10 @@ class DartMSAssay:
 
             print(
                 "   .. removing %d (%.1f%%) features annotated as sister-ions of a parent"
-                % (self.dat.shape[1] - len(keeps_indices), (self.dat.shape[1] - len(keeps_indices)) / self.dat.shape[1] * 100)
+                % (
+                    self.dat.shape[1] - len(keeps_indices),
+                    (self.dat.shape[1] - len(keeps_indices)) / self.dat.shape[1] * 100,
+                )
             )
             self.subset_features(keep_features_with_indices=keeps_indices)
 
@@ -3835,8 +4686,14 @@ class DartMSAssay:
         n_features : integer
             the number of features to select
         """
-        self.add_data_processing_step("restricting to n most abundant features", "restricting to most abundant features", {"n_features": n_features})
-        logging.info(" Restricting data matrix to a %d of the most abundant features" % (n_features))
+        self.add_data_processing_step(
+            "restricting to n most abundant features",
+            "restricting to most abundant features",
+            {"n_features": n_features},
+        )
+        logging.info(
+            " Restricting data matrix to a %d of the most abundant features" % (n_features)
+        )
 
         abundances = [-1 for i in range(self.dat.shape[1])]
         for featurei in range(self.dat.shape[1]):
@@ -3852,7 +4709,9 @@ class DartMSAssay:
         self.subset_features(keep_features_with_indices=keeps)
         logging.info("    .. using %d features" % (self.dat.shape[1]))
 
-    def restrict_to_high_quality_features__found_in_replicates(self, test_groups, minimum_ratio_found, found_in_type="anyGroup"):
+    def restrict_to_high_quality_features__found_in_replicates(
+        self, test_groups, minimum_ratio_found, found_in_type="anyGroup"
+    ):
         """
         Function to select high-quality features (after bracketing)
         This function selects only features that are found in at least % of replicates
@@ -3869,15 +4728,24 @@ class DartMSAssay:
         self.add_data_processing_step(
             "restricting to found in replicates features",
             "restricting to found in replicates features",
-            {"test_groups": test_groups, "minimum_ratio_found": minimum_ratio_found, "found_in_type": found_in_type},
+            {
+                "test_groups": test_groups,
+                "minimum_ratio_found": minimum_ratio_found,
+                "found_in_type": found_in_type,
+            },
         )
         logging.info(
             " Using only features that are present in more than %.1f%% replicates of %s to test"
-            % (minimum_ratio_found * 100, "all groups" if found_in_type.lower() == "allGroups".lower() else "any group")
+            % (
+                minimum_ratio_found * 100,
+                "all groups" if found_in_type.lower() == "allGroups".lower() else "any group",
+            )
         )
 
         if found_in_type.lower() not in ("allGroups".lower(), "anyGroup".lower()):
-            raise ValueError("Unknown option for parameter found_in_type, must be either of ['anyGroup', 'allGroups']")
+            raise ValueError(
+                "Unknown option for parameter found_in_type, must be either of ['anyGroup', 'allGroups']"
+            )
 
         foundIn = [0 for i in range(self.dat.shape[1])]
         for featurei in range(self.dat.shape[1]):
@@ -3889,7 +4757,9 @@ class DartMSAssay:
                 if np.sum(~np.isnan(vals)) / vals.shape[0] >= minimum_ratio_found:
                     foundIn[featurei] += 1
 
-            if found_in_type.lower() == "allGroups".lower() and foundIn[featurei] < len(test_groups):
+            if found_in_type.lower() == "allGroups".lower() and foundIn[featurei] < len(
+                test_groups
+            ):
                 foundIn[featurei] = 0
 
         keeps = np.where(np.array(foundIn) > 0)[0]
@@ -3897,7 +4767,9 @@ class DartMSAssay:
         self.subset_features(keep_features_with_indices=keeps)
         logging.info("    .. using %d features" % (self.dat.shape[1]))
 
-    def restrict_to_high_quality_features__minimum_intensity_filter(self, test_groups, minimum_intensity):
+    def restrict_to_high_quality_features__minimum_intensity_filter(
+        self, test_groups, minimum_intensity
+    ):
         """
         Function to select high-quality features (after bracketing)
         This function selects only features that have a minimum intensity in at least one samples of a group
@@ -3914,7 +4786,10 @@ class DartMSAssay:
             "restricting to minimum intensity filter",
             {"test_groups": test_groups, "minimum_intensity": minimum_intensity},
         )
-        logging.info(" Using only features that have a minimum intensity of %.1f in at least one test-group" % (minimum_intensity))
+        logging.info(
+            " Using only features that have a minimum intensity of %.1f in at least one test-group"
+            % (minimum_intensity)
+        )
 
         use = [False for i in range(self.dat.shape[1])]
         for featurei in range(self.dat.shape[1]):
@@ -3923,7 +4798,10 @@ class DartMSAssay:
 
                 vals = self.dat[groupInd, featurei]
 
-                if np.sum(~np.isnan(vals)) > 0 and np.mean(vals[~np.isnan(vals)]) > minimum_intensity:
+                if (
+                    np.sum(~np.isnan(vals)) > 0
+                    and np.mean(vals[~np.isnan(vals)]) > minimum_intensity
+                ):
                     use[featurei] = True
 
         keeps = np.where(np.array(use))[0]
@@ -3944,9 +4822,14 @@ class DartMSAssay:
             the maximum allowed rsd for a feature to be used, must be lower in all groups
         """
         self.add_data_processing_step(
-            "restricting to maximum rsd ", "restricting to maximum rsd", {"test_groups": test_groups, "maximum_RSD": maximum_RSD}
+            "restricting to maximum rsd ",
+            "restricting to maximum rsd",
+            {"test_groups": test_groups, "maximum_RSD": maximum_RSD},
         )
-        logging.info(" Using only features that have a maximum RSD of %.1f in all test-group" % (maximum_RSD))
+        logging.info(
+            " Using only features that have a maximum RSD of %.1f in all test-group"
+            % (maximum_RSD)
+        )
 
         use = [True for i in range(self.dat.shape[1])]
         for featurei in range(self.dat.shape[1]):
@@ -3972,13 +4855,21 @@ class DartMSAssay:
         """
         prints an overview of the bracketed results to the console
         """
-        print("There are %d features (columns) and %d samples (rows) in the dataset" % (self.dat.shape[1], self.dat.shape[0]))
+        print(
+            "There are %d features (columns) and %d samples (rows) in the dataset"
+            % (self.dat.shape[1], self.dat.shape[0])
+        )
         print(
             "   .. %d (%.1f%%) features have at least one missing value (np.nan)"
-            % (np.sum(np.isnan(self.dat).any(axis=0)), np.sum(np.isnan(self.dat).any(axis=0)) / self.dat.shape[1] * 100)
+            % (
+                np.sum(np.isnan(self.dat).any(axis=0)),
+                np.sum(np.isnan(self.dat).any(axis=0)) / self.dat.shape[1] * 100,
+            )
         )
 
-        maxGroupSize = max((sum((grp == group for grp in self.groups)) for group in set(self.groups)))
+        maxGroupSize = max(
+            (sum((grp == group for grp in self.groups)) for group in set(self.groups))
+        )
         maxGroupLabelSize = max((len(group) for group in self.groups))
         a = {}
         for grp in set(self.groups):
@@ -4004,11 +4895,21 @@ class DartMSAssay:
         for det in range(0, maxGroupSize + 1):
             print("%%%dd   " % (maxGroupLabelSize) % (det), end="")
             for group in sorted(list(set(self.groups))):
-                print("%%%ds  " % (maxGroupLabelSize) % (a[group][det] if a[group][det] > 0 else ""), end="")
+                print(
+                    "%%%ds  "
+                    % (maxGroupLabelSize)
+                    % (a[group][det] if a[group][det] > 0 else ""),
+                    end="",
+                )
             print()
         print("%%%ds   " % (maxGroupLabelSize) % ("total"), end="")
         for group in sorted(list(set(self.groups))):
-            print("%%%ds  " % (maxGroupLabelSize) % (a[group]["total"] if a[group]["total"] > 0 else ""), end="")
+            print(
+                "%%%ds  "
+                % (maxGroupLabelSize)
+                % (a[group]["total"] if a[group]["total"] > 0 else ""),
+                end="",
+            )
         print()
 
     def plot_sample_abundances(self):
@@ -4028,13 +4929,21 @@ class DartMSAssay:
             for featureInd in range(self.dat.shape[1]):
                 if not np.isnan(self.dat[samplei, featureInd]):
                     dat = _add_row_to_pandas_creation_dictionary(
-                        dat, sample=sample, group=group, batch=batch, feature=featureInd, abundance=self.dat[samplei, featureInd]
+                        dat,
+                        sample=sample,
+                        group=group,
+                        batch=batch,
+                        feature=featureInd,
+                        abundance=self.dat[samplei, featureInd],
                     )
 
         dat = pd.DataFrame(dat)
 
         p = (
-            p9.ggplot(data=dat, mapping=p9.aes(x="np.log2(abundance)", colour="group", group="sample"))
+            p9.ggplot(
+                data=dat,
+                mapping=p9.aes(x="np.log2(abundance)", colour="group", group="sample"),
+            )
             + p9.geom_freqpoly(bins=24)
             + p9.facet_wrap("~ group")
             + p9.ggtitle("Overview of feature abundances per sample")
@@ -4062,8 +4971,12 @@ class DartMSAssay:
             show = ["consensus", "non-consensus", "raw"]
         elif type(show) == str:
             show = [show]
-        if type(show) == list and not ("consensus" in show or "non-consensus" in show or "raw" in show):
-            raise ValueError("Unknown option(s) for show parameter. Must be a list with entries ['consensus', 'non-consensus', 'raw']")
+        if type(show) == list and not (
+            "consensus" in show or "non-consensus" in show or "raw" in show
+        ):
+            raise ValueError(
+                "Unknown option(s) for show parameter. Must be a list with entries ['consensus', 'non-consensus', 'raw']"
+            )
 
         dat = None
         useFeatures = list(range(self.dat.shape[1]))
@@ -4075,7 +4988,12 @@ class DartMSAssay:
             for samplei, sample in enumerate(self.get_sample_names()):
                 msDataObj = self.get_msDataObj_for_sample(sample)
                 for k, spectrum in msDataObj.get_spectra_iterator():
-                    usei = np.where(np.logical_and(spectrum.mz >= self.features[featureInd][0], spectrum.mz <= self.features[featureInd][2]))[0]
+                    usei = np.where(
+                        np.logical_and(
+                            spectrum.mz >= self.features[featureInd][0],
+                            spectrum.mz <= self.features[featureInd][2],
+                        )
+                    )[0]
                     if usei.size > 0:
                         for i in usei:
                             if "consensus" in show:
@@ -4215,7 +5133,12 @@ class DartMSAssay:
             ):
                 msDataObj = self.get_msDataObj_for_sample(sample)
                 for k, spectrum in msDataObj.get_spectra_iterator():
-                    usei = np.where(np.logical_and(spectrum.mz >= self.features[featureInd][0], spectrum.mz <= self.features[featureInd][2]))[0]
+                    usei = np.where(
+                        np.logical_and(
+                            spectrum.mz >= self.features[featureInd][0],
+                            spectrum.mz <= self.features[featureInd][2],
+                        )
+                    )[0]
                     if usei.size > 0:
                         for i in usei:
                             if "consensus" in types:
@@ -4249,8 +5172,10 @@ class DartMSAssay:
                     for k, spectrum in msDataObj.original_MSData_object.get_spectra_iterator():
                         usei = np.where(
                             np.logical_and(
-                                spectrum.original_mz >= spectrum.reverseMZ(self.features[featureInd][0]),
-                                spectrum.original_mz <= spectrum.reverseMZ(self.features[featureInd][2]),
+                                spectrum.original_mz
+                                >= spectrum.reverseMZ(self.features[featureInd][0]),
+                                spectrum.original_mz
+                                <= spectrum.reverseMZ(self.features[featureInd][2]),
                             )
                         )[0]
                         if usei.size > 0:
@@ -4271,13 +5196,25 @@ class DartMSAssay:
         p = (
             p9.ggplot(data=temp, mapping=p9.aes(x="rt", y="mz", colour="group"))
             + p9.geom_hline(
-                data=temp.groupby(["type"]).mean("mz").reset_index(), mapping=p9.aes(yintercept="mz"), size=1.5, alpha=0.5, colour="slategrey"
+                data=temp.groupby(["type"]).mean("mz").reset_index(),
+                mapping=p9.aes(yintercept="mz"),
+                size=1.5,
+                alpha=0.5,
+                colour="slategrey",
             )
             + p9.geom_hline(
-                data=temp.groupby(["type"]).min("mz").reset_index(), mapping=p9.aes(yintercept="mz"), size=1.25, alpha=0.5, colour="lightgrey"
+                data=temp.groupby(["type"]).min("mz").reset_index(),
+                mapping=p9.aes(yintercept="mz"),
+                size=1.25,
+                alpha=0.5,
+                colour="lightgrey",
             )
             + p9.geom_hline(
-                data=temp.groupby(["type"]).max("mz").reset_index(), mapping=p9.aes(yintercept="mz"), size=1.25, alpha=0.5, colour="lightgrey"
+                data=temp.groupby(["type"]).max("mz").reset_index(),
+                mapping=p9.aes(yintercept="mz"),
+                size=1.25,
+                alpha=0.5,
+                colour="lightgrey",
             )
             + p9.geom_hline(yintercept=refMZ, size=1.5, alpha=0.5, colour="firebrick")
             + p9.geom_point()
@@ -4289,10 +5226,16 @@ class DartMSAssay:
                     self.features[featureInd][1],
                     self.features[featureInd][0],
                     self.features[featureInd][2],
-                    (temp[temp["type"] == "non-consensus"]["mz"].max() - temp[temp["type"] == "non-consensus"]["mz"].min())
+                    (
+                        temp[temp["type"] == "non-consensus"]["mz"].max()
+                        - temp[temp["type"] == "non-consensus"]["mz"].min()
+                    )
                     / temp[temp["type"] == "non-consensus"]["mz"].mean()
                     * 1e6,
-                    (temp[temp["type"] == "consensus"]["mz"].max() - temp[temp["type"] == "consensus"]["mz"].min())
+                    (
+                        temp[temp["type"] == "consensus"]["mz"].max()
+                        - temp[temp["type"] == "consensus"]["mz"].min()
+                    )
                     / temp[temp["type"] == "consensus"]["mz"].mean()
                     * 1e6,
                     (self.features[featureInd][1] - refMZ) / refMZ * 1e6,
@@ -4307,7 +5250,9 @@ class DartMSAssay:
     # RSD overview
     #
 
-    def plot_RSDs_per_group(self, uGroups=None, include=None, plotType="points", scales="free_y"):
+    def plot_RSDs_per_group(
+        self, uGroups=None, include=None, plotType="points", scales="free_y"
+    ):
         """
         Plots an rsd distribution per group
 
@@ -4335,10 +5280,17 @@ class DartMSAssay:
         temp = {"rsd": [], "mean": [], "sd": [], "featurei": [], "group": [], "type": []}
 
         for grp in uGroups:
-            if type(grp) == list and len(grp) == 2 and type(grp[0]) == type(grp[1]) == str and grp[1] == "Batch":
+            if (
+                type(grp) == list
+                and len(grp) == 2
+                and type(grp[0]) == type(grp[1]) == str
+                and grp[1] == "Batch"
+            ):
                 for batch in list(set(self.batches)):
                     groupInd = list(
-                        set([i for i, group in enumerate(self.groups) if group == grp[0]]).intersection(
+                        set(
+                            [i for i, group in enumerate(self.groups) if group == grp[0]]
+                        ).intersection(
                             set([i for i, b in enumerate(self.batches) if b == batch])
                         )
                     )
@@ -4482,7 +5434,14 @@ class DartMSAssay:
             the data matrix for the volcano plot
         """
         # get data
-        dat, features, featureAnnotations, samples, groups, batches = self.get_data_matrix_and_meta(
+        (
+            dat,
+            features,
+            featureAnnotations,
+            samples,
+            groups,
+            batches,
+        ) = self.get_data_matrix_and_meta(
             keep_features=keep_features, remove_features=remove_features, copy=True
         )
 
@@ -4509,15 +5468,19 @@ class DartMSAssay:
                 if (
                     (
                         sum(valsGrp1 != 0) / valsGrp1.shape[0] >= min_ratio_samples_for_found
-                        and sum(valsGrp2 != 0) / valsGrp2.shape[0] >= min_ratio_samples_for_found
+                        and sum(valsGrp2 != 0) / valsGrp2.shape[0]
+                        >= min_ratio_samples_for_found
                     )
                     or (
                         sum(valsGrp1 != 0) / valsGrp1.shape[0] >= min_ratio_samples_for_found
-                        and sum(valsGrp2 != 0) / valsGrp2.shape[0] <= min_ratio_samples_for_not_found
+                        and sum(valsGrp2 != 0) / valsGrp2.shape[0]
+                        <= min_ratio_samples_for_not_found
                     )
                     or (
-                        sum(valsGrp1 != 0) / valsGrp1.shape[0] <= min_ratio_samples_for_not_found
-                        and sum(valsGrp2 != 0) / valsGrp2.shape[0] >= min_ratio_samples_for_found
+                        sum(valsGrp1 != 0) / valsGrp1.shape[0]
+                        <= min_ratio_samples_for_not_found
+                        and sum(valsGrp2 != 0) / valsGrp2.shape[0]
+                        >= min_ratio_samples_for_found
                     )
                 ):
                     if np.all(valsGrp1 == 0) and not np.all(valsGrp2 == 0):
@@ -4527,7 +5490,9 @@ class DartMSAssay:
                     else:
                         fold = np.mean(valsGrp1) / np.mean(valsGrp2)
 
-                    pval = scipy.stats.ttest_ind(valsGrp1, valsGrp2, equal_var=False, alternative="two-sided", trim=0)[1]
+                    pval = scipy.stats.ttest_ind(
+                        valsGrp1, valsGrp2, equal_var=False, alternative="two-sided", trim=0
+                    )[1]
                     pvalWRST = scipy.stats.ranksums(
                         valsGrp1,
                         valsGrp2,
@@ -4536,7 +5501,10 @@ class DartMSAssay:
                     cohensD = cohen_d(valsGrp1, valsGrp2)
                     meanAbundance = np.mean(np.concatenate((valsGrp1, valsGrp2), axis=0))
                     sigInd = (
-                        "sig. diff." if pval <= alpha_critical and (fold >= minimum_fold_change or fold <= 1.0 / minimum_fold_change) else "not diff."
+                        "sig. diff."
+                        if pval <= alpha_critical
+                        and (fold >= minimum_fold_change or fold <= 1.0 / minimum_fold_change)
+                        else "not diff."
                     )
 
                     temp = _add_row_to_pandas_creation_dictionary(
@@ -4572,22 +5540,41 @@ class DartMSAssay:
             p9.ggplot(
                 data=temp,
                 mapping=p9.aes(
-                    x="trans_folds", y="trans_pvalues", fill="sigIndicators", colour="sigIndicators", size="np.log2(meanFeatureAbundance)"
+                    x="trans_folds",
+                    y="trans_pvalues",
+                    fill="sigIndicators",
+                    colour="sigIndicators",
+                    size="np.log2(meanFeatureAbundance)",
                 ),
             )
             + p9.geom_hline(yintercept=-np.log10(alpha_critical), alpha=0.3, colour="darkgrey")
-            + p9.geom_vline(xintercept=[np.log2(minimum_fold_change), np.log2(1 / minimum_fold_change)], alpha=0.3, colour="darkgrey")
+            + p9.geom_vline(
+                xintercept=[np.log2(minimum_fold_change), np.log2(1 / minimum_fold_change)],
+                alpha=0.3,
+                colour="darkgrey",
+            )
             + p9.geom_point(alpha=0.15, colour="ghostwhite")
             + p9.geom_point(data=temp[temp["highlightFeature"]], colour="slategrey")
             + p9.facet_wrap("~tests")
-            + p9.scale_fill_manual(values={"sig. diff.": sig_color, "not diff.": not_different_color})
-            + p9.ggtitle("Volcano plots (%d comparisons, %d not tested)" % (len(temp.index), notTested))
+            + p9.scale_fill_manual(
+                values={"sig. diff.": sig_color, "not diff.": not_different_color}
+            )
+            + p9.ggtitle(
+                "Volcano plots (%d comparisons, %d not tested)" % (len(temp.index), notTested)
+            )
         )
 
         return p, temp
 
     def generate_feature_abundance_plot(
-        self, feature_index, keep_samples=None, remove_samples=None, keep_groups=None, remove_groups=None, keep_batches=None, remove_batches=None
+        self,
+        feature_index,
+        keep_samples=None,
+        remove_samples=None,
+        keep_groups=None,
+        remove_groups=None,
+        keep_batches=None,
+        remove_batches=None,
     ):
         """
         Shows a single feature
@@ -4602,7 +5589,14 @@ class DartMSAssay:
         Pandas DataFrame
             the data matrix for the plot
         """
-        temp = pd.DataFrame({"abundance": self.dat[:, feature_index], "sample": self.samples, "group": self.groups, "batch": self.batches})
+        temp = pd.DataFrame(
+            {
+                "abundance": self.dat[:, feature_index],
+                "sample": self.samples,
+                "group": self.groups,
+                "batch": self.batches,
+            }
+        )
         if keep_samples:
             temp = temp[temp["sample"].isin(keep_samples)]
         if remove_samples:
@@ -4620,7 +5614,9 @@ class DartMSAssay:
             p9.ggplot(data=temp, mapping=p9.aes(x="group", y="abundance", colour="group"))
             + p9.geom_boxplot()
             + p9.geom_jitter()
-            + p9.ggtitle("Feature %d (meanmz: %.5f)" % (feature_index, self.features[feature_index][1]))
+            + p9.ggtitle(
+                "Feature %d (meanmz: %.5f)" % (feature_index, self.features[feature_index][1])
+            )
         )
 
         return p, temp
@@ -4669,11 +5665,20 @@ class DartMSAssay:
                 and (remove_batches is None or sbatch not in remove_batches)
             ):
                 msDataObj = self.get_msDataObj_for_sample(sample)
-                for oSpectrumi, oSpectrum in msDataObj.original_MSData_object.get_spectra_iterator():
+                for (
+                    oSpectrumi,
+                    oSpectrum,
+                ) in msDataObj.original_MSData_object.get_spectra_iterator():
                     _refMZ = oSpectrum.reverseMZ(refMZ) if reverseCorrectMZ else refMZ
-                    _mzmin, _mzmax = _refMZ * (1.0 - ppmDev / 1e6), _refMZ * (1.0 + ppmDev / 1e6)
+                    _mzmin, _mzmax = _refMZ * (1.0 - ppmDev / 1e6), _refMZ * (
+                        1.0 + ppmDev / 1e6
+                    )
 
-                    use = np.argwhere(np.logical_and(oSpectrum.original_mz >= _mzmin, oSpectrum.original_mz <= _mzmax))[:, 0]
+                    use = np.argwhere(
+                        np.logical_and(
+                            oSpectrum.original_mz >= _mzmin, oSpectrum.original_mz <= _mzmax
+                        )
+                    )[:, 0]
                     if len(use) > 0:
                         for mzi in use:
                             temp = _add_row_to_pandas_creation_dictionary(
@@ -4693,7 +5698,9 @@ class DartMSAssay:
             p1 = (
                 p9.ggplot(
                     data=temp,
-                    mapping=p9.aes(x="chronogramTime", y="mz", colour="group", alpha="intensity"),
+                    mapping=p9.aes(
+                        x="chronogramTime", y="mz", colour="group", alpha="intensity"
+                    ),
                 )
                 + p9.geom_hline(yintercept=refMZ, alpha=0.3, colour="slategrey")
                 + p9.geom_point()
@@ -4707,9 +5714,23 @@ class DartMSAssay:
                 + p9.geom_point()
                 + p9.ggtitle("raw data plot of %.4f (+- %f ppm)" % (refMZ, ppmDev))
             )
-            temph = temp.groupby(["sample"]).agg({"intensity": "sum", "chronogramTime": "mean", "group": "first", "batch": "first"})
+            temph = temp.groupby(["sample"]).agg(
+                {
+                    "intensity": "sum",
+                    "chronogramTime": "mean",
+                    "group": "first",
+                    "batch": "first",
+                }
+            )
             temph["type"] = "sum of intensity"
-            tempj = temp.groupby(["sample"]).agg({"intensity": "mean", "chronogramTime": "mean", "group": "first", "batch": "first"})
+            tempj = temp.groupby(["sample"]).agg(
+                {
+                    "intensity": "mean",
+                    "chronogramTime": "mean",
+                    "group": "first",
+                    "batch": "first",
+                }
+            )
             tempj["type"] = "average intensity"
             temph = pd.concat([temph, tempj])
             p3 = (
@@ -4719,7 +5740,10 @@ class DartMSAssay:
                 )
                 + p9.geom_point()
                 + p9.facet_wrap("~ type", scales="free_y")
-                + p9.ggtitle("raw data plot of %.4f (+- %f ppm), all signals have been aggregated (sum and average)" % (refMZ, ppmDev))
+                + p9.ggtitle(
+                    "raw data plot of %.4f (+- %f ppm), all signals have been aggregated (sum and average)"
+                    % (refMZ, ppmDev)
+                )
             )
             pa = (
                 p9.ggplot(
@@ -4729,7 +5753,10 @@ class DartMSAssay:
                 + p9.geom_boxplot()
                 + p9.geom_jitter(height=0, width=0.5)
                 + p9.facet_wrap("~ type", scales="free_y")
-                + p9.ggtitle("raw data plot of %.4f (+- %f ppm), all signals have been aggregated (sum and average)" % (refMZ, ppmDev))
+                + p9.ggtitle(
+                    "raw data plot of %.4f (+- %f ppm), all signals have been aggregated (sum and average)"
+                    % (refMZ, ppmDev)
+                )
             )
 
             return p1, p2, p3, pa, temp
@@ -4789,7 +5816,14 @@ class DartMSAssay:
             the plot
         """
         # get data
-        dat, features, featureAnnotations, samples, groups, batches = self.get_data_matrix_and_meta(
+        (
+            dat,
+            features,
+            featureAnnotations,
+            samples,
+            groups,
+            batches,
+        ) = self.get_data_matrix_and_meta(
             keep_features=keep_features,
             remove_features=remove_features,
             keep_samples=keep_samples,
@@ -4810,7 +5844,9 @@ class DartMSAssay:
             datImp = dat[:, keep]
 
         else:
-            raise ValueError("Unknown imputation method specified, must be either of ['zero', 'omitNA']")
+            raise ValueError(
+                "Unknown imputation method specified, must be either of ['zero', 'omitNA']"
+            )
 
         # scaling
         if scaling is None or scaling == "" or scaling.lower() == "None".lower():
@@ -4821,7 +5857,9 @@ class DartMSAssay:
             datImpSca = scaler.fit_transform(datImp)
 
         else:
-            raise ValueError("Unknown scaling method specified, must be either of [None, 'standard']")
+            raise ValueError(
+                "Unknown scaling method specified, must be either of [None, 'standard']"
+            )
 
         # embedding
         if embedding.lower() == "pca".lower():
@@ -4830,8 +5868,12 @@ class DartMSAssay:
             scores = pca.transform(datImpSca)
             comp1 = scores[:, 0]
             comp2 = scores[:, 1]
-            comp1_title = "PC1 (%.1f %% covered variance)" % (pca.explained_variance_ratio_[0] * 100.0)
-            comp2_title = "PC2 (%.1f %% covered variance)" % (pca.explained_variance_ratio_[1] * 100.0)
+            comp1_title = "PC1 (%.1f %% covered variance)" % (
+                pca.explained_variance_ratio_[0] * 100.0
+            )
+            comp2_title = "PC2 (%.1f %% covered variance)" % (
+                pca.explained_variance_ratio_[1] * 100.0
+            )
 
         elif embedding.lower() == "lda".lower():
             lda = LinearDiscriminantAnalysis(n_components=2)
@@ -4850,19 +5892,26 @@ class DartMSAssay:
             comp2_title = "Component 2"
 
         else:
-            raise ValueError("Unknown embedding method specified, must be either of ['pca', 'lda', 'umap']")
+            raise ValueError(
+                "Unknown embedding method specified, must be either of ['pca', 'lda', 'umap']"
+            )
 
         # plot
         temp = {"pc1": comp1, "pc2": comp2, "file": samples, "group": groups, "batch": batches}
         temp = pd.DataFrame(temp)
         temp["batch"] = temp["batch"].astype(object)
         p = (
-            p9.ggplot(data=temp, mapping=p9.aes(x="pc1", y="pc2", colour="group", group="group", label="file"))
+            p9.ggplot(
+                data=temp,
+                mapping=p9.aes(x="pc1", y="pc2", colour="group", group="group", label="file"),
+            )
             + p9.stat_ellipse(data=temp, alpha=0.5, level=0.95)
             + p9.geom_point(alpha=0.8)
             + p9.xlab(comp2_title)
             + p9.ylab(comp2_title)
-            + p9.ggtitle("%s with %s imputation and %s scaling" % (embedding, imputation, scaling))
+            + p9.ggtitle(
+                "%s with %s imputation and %s scaling" % (embedding, imputation, scaling)
+            )
         )
         return p, temp
 
@@ -4915,7 +5964,14 @@ class DartMSAssay:
         plot
             the heatmap
         """
-        dat, features, featureAnnotations, samples, groups, batches = self.get_data_matrix_and_meta(
+        (
+            dat,
+            features,
+            featureAnnotations,
+            samples,
+            groups,
+            batches,
+        ) = self.get_data_matrix_and_meta(
             keep_features=keep_features,
             remove_features=remove_features,
             keep_samples=keep_samples,
@@ -4935,7 +5991,9 @@ class DartMSAssay:
         temp = datImpSca
         temp = np.transpose(temp)
         temp = scaler.fit_transform(temp)
-        linkage_data = dendrogram(linkage(temp, method=linkage_method, metric=distance_metric), no_plot=True)
+        linkage_data = dendrogram(
+            linkage(temp, method=linkage_method, metric=distance_metric), no_plot=True
+        )
 
         temp = {}
         for samplei in range(datImpSca.shape[0]):
@@ -4945,7 +6003,13 @@ class DartMSAssay:
                 val = datImpSca[samplei, featurei]
 
                 temp = _add_row_to_pandas_creation_dictionary(
-                    temp, sample=sample, group=group, batch=batch, feature=featurei, leave=leavei, value=val
+                    temp,
+                    sample=sample,
+                    group=group,
+                    batch=batch,
+                    feature=featurei,
+                    leave=leavei,
+                    value=val,
                 )
 
         temp = pd.DataFrame(temp)
@@ -4954,7 +6018,11 @@ class DartMSAssay:
             p9.ggplot(temp, p9.aes(x="leave", y="sample", fill="value"))
             + p9.theme_minimal()
             + p9.geom_tile(color="white", size=0.1)
-            + p9.theme(legend_position="bottom", plot_title=p9.element_text(size=14), axis_text_y=p9.element_text(size=6))
+            + p9.theme(
+                legend_position="bottom",
+                plot_title=p9.element_text(size=14),
+                axis_text_y=p9.element_text(size=6),
+            )
         )
         print(p)
 
@@ -4962,7 +6030,9 @@ class DartMSAssay:
     # Convenience function for semi-automated parameter optimization
     #
 
-    def get_summary_of_results(self, reference_features=None, reference_features_allowed_deviationPPM=20.0):
+    def get_summary_of_results(
+        self, reference_features=None, reference_features_allowed_deviationPPM=20.0
+    ):
         """Show a summary of the results.
 
         Parameters
@@ -4986,14 +6056,21 @@ class DartMSAssay:
         results["n(feats)"] = self.dat.shape[1]
 
         ## ppm deviation of features
-        mzDevs = np.array([(self.features[i][2] - self.features[i][0]) / self.features[i][1] * 1e6 for i in range(len(self.features))])
+        mzDevs = np.array(
+            [
+                (self.features[i][2] - self.features[i][0]) / self.features[i][1] * 1e6
+                for i in range(len(self.features))
+            ]
+        )
         avg, std = _average_and_std(mzDevs)
         results["avg(feats.MZDevPPM)"] = avg
         results["std(feats.MZDevPPM)"] = std
 
         ## number of missing values in data matrix
         results["n(nan)"] = np.sum(np.isnan(self.dat))
-        results["r(nan)"] = np.sum(np.isnan(self.dat) / (self.dat.shape[0] * self.dat.shape[1]))
+        results["r(nan)"] = np.sum(
+            np.isnan(self.dat) / (self.dat.shape[0] * self.dat.shape[1])
+        )
 
         ## number of detected reference features
         found = 0
@@ -5001,11 +6078,18 @@ class DartMSAssay:
         mzs_ = np.array([self.features[i][1] for i in range(len(self.features))])
         for refi in range(len(reference_features)):
             referenceMZmin, referenceMZ, referenceMZmax = (
-                reference_features[refi] * (1.0 - reference_features_allowed_deviationPPM / 1.0e6),
+                reference_features[refi]
+                * (1.0 - reference_features_allowed_deviationPPM / 1.0e6),
                 reference_features[refi],
-                reference_features[refi] * (1.0 + reference_features_allowed_deviationPPM / 1.0e6),
+                reference_features[refi]
+                * (1.0 + reference_features_allowed_deviationPPM / 1.0e6),
             )
-            if any((referenceMZmin <= self.features[i][1] <= referenceMZmax for i in range(len(self.features)))):
+            if any(
+                (
+                    referenceMZmin <= self.features[i][1] <= referenceMZmax
+                    for i in range(len(self.features))
+                )
+            ):
                 ind = np.argmin(np.abs(mzs_ - referenceMZ))
                 mzDevPPM = (mzs_[ind] - referenceMZ) / referenceMZ * 1e6
                 ppmDeviations.append(mzDevPPM)
@@ -5030,13 +6114,28 @@ class DartMSAssay:
             file to which the template shall be written
         """
         with open(to_tsv_file, "w") as fout:
-            fout.write("\t".join(["_ID", "CompoundName", "InChi", "SMILES", "ChemicalFormula", "Adducts", "MZ", "IonMode"]))
+            fout.write(
+                "\t".join(
+                    [
+                        "_ID",
+                        "CompoundName",
+                        "InChi",
+                        "SMILES",
+                        "ChemicalFormula",
+                        "Adducts",
+                        "MZ",
+                        "IonMode",
+                    ]
+                )
+            )
             fout.write("\n")
             fout.write("# Lines starting with the hash (#) symbol are comments")
             fout.write("\n")
             fout.write("# Provide either ")
             fout.write("\n")
-            fout.write("#  - a compound's sum formula and adducts to be searched for (no MZ or IonMode required)")
+            fout.write(
+                "#  - a compound's sum formula and adducts to be searched for (no MZ or IonMode required)"
+            )
             fout.write("\n")
             fout.write("#  - a compound's MZ value and the IonMode (+ or -)")
             fout.write("\n")
@@ -5060,7 +6159,15 @@ class DartMSAssay:
             fout.write("\t".join(["2", "Unknown 2", "", "", "", "", "557.4069", "-"]))
             fout.write("\n")
 
-    def annotate_with_compounds(self, tsv_file, max_ppm_dev=15.0, adducts=None, delimiter="\t", quote_character="", comment_character="#"):
+    def annotate_with_compounds(
+        self,
+        tsv_file,
+        max_ppm_dev=15.0,
+        adducts=None,
+        delimiter="\t",
+        quote_character="",
+        comment_character="#",
+    ):
         """Annotation of detected features with compounds from a database.
 
         Parameters
@@ -5127,7 +6234,9 @@ class DartMSAssay:
 
                     else:
                         mzs.append(float(mz))
-                        types.append("%s as direct mz match" % (row[headersDict["CompoundName"]]))
+                        types.append(
+                            "%s as direct mz match" % (row[headersDict["CompoundName"]])
+                        )
 
                     for typei in range(len(types)):
                         refMZ = mzs[typei]
