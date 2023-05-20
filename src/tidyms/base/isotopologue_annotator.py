@@ -1,4 +1,4 @@
-from tidyms.assay.assay_data import SampleData
+from tidyms.base.assay_data import SampleData
 from typing import Optional
 from .assay_processor import SingleSampleProcessor
 from ..annotation import create_annotation_tools, annotate

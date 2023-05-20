@@ -1,4 +1,4 @@
-from tidyms.assay import legacy_assay
+from tidyms.base import legacy_assay
 from tidyms.lcms import LCTrace, Peak
 from tidyms import _constants as c
 import pytest

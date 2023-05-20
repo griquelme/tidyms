@@ -1,5 +1,5 @@
-from tidyms.assay.assay_data import AssayData, SampleData, Sample
-from tidyms.assay import assay_processor
+from tidyms.base.assay_data import AssayData, SampleData, Sample
+from tidyms.base import assay_processor
 from tidyms.lcms import LCTrace, Peak
 import pytest
 import numpy as np

@@ -1,5 +1,5 @@
 import numpy as np
-from tidyms.assay.assay_data import AssayData, Sample
+from tidyms.base.assay_data import AssayData, Sample
 from tidyms.lcms import LCTrace, Peak, Annotation
 from pathlib import Path
 import pytest

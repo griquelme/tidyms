@@ -136,12 +136,6 @@ class LCFeatureExtractor(FeatureExtractor):
 
     @staticmethod
     def _extract_features_func(roi: LCTrace, **params):
-        if roi.noise is None:
-            roi.noise = peaks.estimate_noise(roi.spint)
-
-        if roi.baseline is None:
-            roi.baseline = peaks.estimate_baseline(roi.spint, roi.noise)
-
         start, apex, end = peaks.detect_peaks(roi.spint, roi.noise, roi.baseline, **params)
         roi.features = [Peak(s, a, e, roi) for s, a, e in zip(start, apex, end)]
 
