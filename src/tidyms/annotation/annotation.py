@@ -101,7 +101,7 @@ def create_annotation_tools(
 
 
 def annotate(
-    feature_list: list[Feature],
+    feature_list: Sequence[Feature],
     mmi_finder: MMIFinder,
     envelope_finder: EnvelopeFinder,
     envelope_validator: EnvelopeValidator,
