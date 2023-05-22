@@ -190,7 +190,7 @@ def test_peak_width_bad_width():
 def test_peak_extension(lc_roi_with_peak):
     lc_roi, peak = lc_roi_with_peak
     test_extension = peak.get_extension()
-    expected_extension = lc_roi.time[peak.end] - lc_roi.time[peak.start]
+    expected_extension = lc_roi.time[peak.end - 1] - lc_roi.time[peak.start]
     assert expected_extension == test_extension
 
 

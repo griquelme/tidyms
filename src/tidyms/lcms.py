@@ -860,7 +860,7 @@ class Peak(Feature):
         extension : positive number
 
         """
-        return self.roi.time[self.end] - self.roi.time[self.start]
+        return self.roi.time[self.end - 1] - self.roi.time[self.start]
 
     def get_snr(self) -> float:
         """
