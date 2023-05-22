@@ -11,14 +11,17 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import delete, select, Column, Float, ForeignKey, Integer, String
 from sqlalchemy.exc import IntegrityError
 from ..lcms import Annotation, Feature, Roi
-from .. import _constants as c
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional, Sequence, Type, Union
 
 
-# TODO: test delete all ROI.
-# TODO : test get_unprocessed_samples.
+# TODO: test all code
+# TODO: Remove sample data.
+# TODO: make add_roi and similar functions private.
+# TODO: add update_feature_label
+# TODO: add remove empty ROI
+# TODO: add remove non-matched.
 
 
 @dataclass
@@ -67,7 +70,7 @@ class SampleData:
     Attributes
     ----------
     sample : Sample
-    roi : Optional[list[Roi]]
+    roi : Optional[Sequence[Roi]]
 
     """
 
@@ -84,10 +87,6 @@ class SampleData:
                 feature_list.extend(roi.features)
         return feature_list
 
-    def store(self, data: "AssayData"):
-        # TODO: Complete
-        pass
-
 
 Base = orm.declarative_base()
 
@@ -101,6 +100,7 @@ class ProcessParameterModel(Base):
     __tablename__ = "parameters"
     step: Mapped[str] = mapped_column(sa.String, primary_key=True)
     parameters: Mapped[str] = mapped_column(sa.String)
+    pipeline: Mapped[str] = mapped_column(sa.String)
 
 
 class SampleModel(Base):
@@ -134,7 +134,7 @@ class ProcessedSampleModel(Base):
     __tablename__ = "processed_samples"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sample_id: Mapped[str] = mapped_column(String, ForeignKey("samples.id"))
-    step: Mapped[str] = mapped_column(String, ForeignKey("parameters.step"))
+    pipeline: Mapped[str] = mapped_column(String, ForeignKey("parameters.pipeline"))
 
 
 class RoiModel(Base):
@@ -144,7 +144,7 @@ class RoiModel(Base):
     """
 
     __tablename__ = "rois"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"), index=True)
     data: Mapped[str] = mapped_column(String)
     # samples: Mapped["SampleModel"] = relationship(back_populates="rois")
@@ -168,7 +168,7 @@ class FeatureModel(Base):
     """
 
     __tablename__ = "features"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
     roi_id: Mapped[int] = mapped_column(ForeignKey("rois.id"))
     data: Mapped[str] = mapped_column(String)
@@ -191,9 +191,7 @@ class AnnotationModel(Base):
     """
 
     __tablename__ = "annotations"
-    id: Mapped[int] = mapped_column(
-        ForeignKey("features.id"), primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(ForeignKey("features.id"), primary_key=True)
     sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
     roi_id: Mapped[int] = mapped_column(ForeignKey("rois.id"))
     label: Mapped[int] = mapped_column(Integer)
@@ -233,13 +231,7 @@ def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData)
     table_name = "descriptors"
 
     columns: list[Column] = [
-        Column(
-            "id",
-            Integer,
-            ForeignKey("features.id"),
-            primary_key=True,
-            autoincrement=True,
-        ),
+        Column("id", Integer, ForeignKey("features.id"), primary_key=True),
         Column("sample_id", String, ForeignKey("samples.id")),
         Column("roi_id", Integer, ForeignKey("rois.id")),
         Column("label", Integer, ForeignKey("annotations.label")),
@@ -285,6 +277,21 @@ class AssayData:
         # Create the table in the database
         Base.metadata.create_all(self.engine)
 
+        # set values for ROI id and Feature id
+        with self.SessionFactory() as session:
+            roi_id = session.query(sa.sql.func.max(RoiModel.id)).scalar()
+            if roi_id is None:
+                roi_id = 0
+            else:
+                roi_id += 1
+            self._roi_id = roi_id
+            feature_id = session.query(sa.sql.func.max(FeatureModel.id)).scalar()
+            if feature_id is None:
+                feature_id = 0
+            else:
+                feature_id += 1
+            self._feature_id = feature_id
+
     @classmethod
     def _create_descriptor_model(cls, feature_type: Type):
         """
@@ -321,15 +328,15 @@ class AssayData:
                 msg = "Trying to insert a sample with an existing ID"
                 raise ValueError(msg)
 
-    def flag_processed_samples(self, samples: list[Sample], step: str):
+    def flag_processed(self, samples: list[Sample], pipeline: str):
         """
         Flags samples as processed in a preprocessing step.
 
         Parameters
         ----------
         samples : list[Sample]
-        step : str
-            Name of a preprocessing step.
+        pipeline : str
+            Name of processing pipeline.
 
         Raises
         ------
@@ -338,51 +345,57 @@ class AssayData:
             are defined by `PREPROCESSING_STEPS` in the `_constants` module.
 
         """
-        _check_preprocessing_step(step)
-        processed = [ProcessedSampleModel(sample_id=x.id, step=step) for x in samples]
+        processed = [ProcessedSampleModel(sample_id=x.id, pipeline=pipeline) for x in samples]
         with self.SessionFactory() as session:
             session.add_all(processed)
             session.commit()
 
-    def get_samples(self, step: Optional[str] = None) -> list[Sample]:
+    def flag_unprocessed(self, pipeline: str):
         """
-        Load the samples stored in the DB.
+        Flags a list of samples as unprocessed.
 
         Parameters
         ----------
-        step : str or None, default=None
-            Name of a preprocessing step. If provided, returns all samples processed
-            by that processing step. If ``None``, return all samples in the DB.
+        samples : list[Sample]
+        pipeline : str
+
+        """
+        with self.SessionFactory() as session:
+            stmt = delete(ProcessedSampleModel).where(
+                ProcessedSampleModel.pipeline == pipeline
+            )
+            session.execute(stmt)
+            session.commit()
+
+    def get_samples(self) -> list[Sample]:
+        """
+        Retrieves samples stored in the DB.
 
         Returns
         -------
         list[Sample]
 
-        Raises
-        ------
-        ValueError
-            If the preprocessing step name is not a valid name. Valid names
-            are defined by `PREPROCESSING_STEPS` in the `_constants` module.
-
         """
-        _check_preprocessing_step(step)
         with self.SessionFactory() as session:
             stmt = select(SampleModel)
-            if step is not None:
-                stmt = stmt.join(ProcessedSampleModel).where(ProcessedSampleModel.step == step)
             result = session.execute(stmt)
             samples = list()
             for row in result:
                 samples.append(row.SampleModel.to_sample())
         return samples
 
-    def get_unprocessed_samples(self, step: str) -> list[Sample]:
-        all_samples_dict = {x.id: x for x in self.get_samples()}
-        processed_samples = self.get_samples(step)
-        for sample in processed_samples:
-            all_samples_dict.pop(sample.id)
-        unprocessed_samples = list(all_samples_dict.values())
-        return list(unprocessed_samples)
+    def get_processed_samples(self, pipeline: str) -> list[Sample]:
+        with self.SessionFactory() as session:
+            stmt = (
+                select(SampleModel)
+                .join(ProcessedSampleModel)
+                .where(ProcessedSampleModel.pipeline == pipeline)
+            )
+            processed_samples = list()
+            for row in session.execute(stmt):
+                sample = row.SampleModel.to_sample()
+                processed_samples.append(sample)
+        return processed_samples
 
     def delete_samples(self, sample_ids: list[str]) -> None:
         """
@@ -399,7 +412,7 @@ class AssayData:
             session.execute(stmt)
             session.commit()
 
-    def set_processing_parameters(self, step: str, parameters: dict):
+    def set_processing_parameters(self, step: str, pipeline: str, parameters: dict):
         """
         Stores preprocessing parameters of a step in the DB.
 
@@ -407,6 +420,8 @@ class AssayData:
         ----------
         step : str
             Preprocessing step name.
+        pipeline : str
+            Name of the pipeline that the preprocessing step is part of.
         parameters : dict
             Parameters used in the preprocessing step.
 
@@ -417,14 +432,15 @@ class AssayData:
             are defined by `PREPROCESSING_STEPS` in the `_constants` module.
 
         """
-        _check_preprocessing_step(step)
+        param_str = json.dumps(parameters)
         with self.SessionFactory() as session:
-            param_str = json.dumps(parameters)
-            params_model = ProcessParameterModel(step=step, parameters=param_str)
+            params_model = ProcessParameterModel(
+                step=step, parameters=param_str, pipeline=pipeline
+            )
             session.add(params_model)
             session.commit()
 
-    def get_processing_parameters(self, step: str) -> Optional[dict]:
+    def get_processing_parameters(self, step: str) -> dict:
         """
         Retrieves preprocessing parameters of a step from the DB.
 
@@ -445,16 +461,48 @@ class AssayData:
             are defined by `PREPROCESSING_STEPS` in the `_constants` module.
 
         """
-        _check_preprocessing_step(step)
         with self.SessionFactory() as session:
             stmt = select(ProcessParameterModel).where(ProcessParameterModel.step == step)
             results = session.execute(stmt)
-            param_model = results.first()
+            param_model = results.scalar()
             if param_model is None:
-                params = param_model
+                params = None
             else:
-                params = json.loads(param_model.ProcessParameterModel.parameters)
+                params = json.loads(param_model.parameters)
+        if params is None:
+            msg = f"{step} not found in assay data."
+            raise ValueError(msg)
         return params
+
+    def get_pipeline_parameters(self, name: str) -> dict[str, dict]:
+        with self.SessionFactory() as session:
+            stmt = select(ProcessParameterModel).where(ProcessParameterModel.pipeline == name)
+            parameters = dict()
+            for row in session.execute(stmt):
+                param_model = row.ProcessParameterModel
+                params = json.loads(param_model.parameters)
+                parameters[param_model.step] = params
+        return parameters
+
+    def add_pipeline_parameters(self, name: str, parameters: dict[str, dict]):
+        parameter_model_list = list()
+        for step, param in parameters.items():
+            param_str = json.dumps(param)
+            model = ProcessParameterModel(step=step, parameters=param_str, pipeline=name)
+            parameter_model_list.append(model)
+
+        with self.SessionFactory() as session:
+            session.add_all(parameter_model_list)
+            session.commit()
+
+    def update_pipeline_parameters(self, name: str, parameters: dict[str, dict]):
+        update = list()
+        for step, param in parameters.items():
+            update.append({"pipeline": name, "step": step, "parameters": json.dumps(param)})
+
+        with self.SessionFactory() as session:
+            session.execute(sa.update(ProcessParameterModel), update)
+            session.commit()
 
     def add_roi_list(self, roi_list: Sequence[Roi], sample: Sample):
         """
@@ -467,14 +515,17 @@ class AssayData:
 
         """
         roi_model_list = list()
-        for roi in roi_list:
-            roi_model = RoiModel(sample_id=sample.id, data=roi.to_string())
+        for k, roi in enumerate(roi_list, start=self._roi_id):
+            roi.id = k
+            roi_model = RoiModel(sample_id=sample.id, data=roi.to_string(), id=roi.id)
             roi_model_list.append(roi_model)
+
         with self.SessionFactory() as session:
             session.add_all(roi_model_list)
             session.commit()
+        self._roi_id += len(roi_list)
 
-    def get_roi_list(self, sample: Sample) -> list[Roi]:
+    def get_roi_list(self, sample: Sample) -> Sequence[Roi]:
         """
         Retrieves a list of ROI detected in a sample.
 
@@ -495,6 +546,38 @@ class AssayData:
                 roi = row.RoiModel.to_roi(self.roi)
                 roi_list.append(roi)
         return roi_list
+
+    def get_roi_by_id(self, roi_id: int) -> Roi:
+        """
+        Retrieves a ROI by id
+
+        Parameters
+        ----------
+        roi_id : str
+
+        Returns
+        -------
+        Roi
+
+        """
+        with self.SessionFactory() as session:
+            stmt = select(RoiModel).where(RoiModel.id == roi_id)
+            result = session.execute(stmt).scalar()
+            if result is not None:
+                roi = result.to_roi(self.roi)
+                features = list()
+                for ft_model in result.features:
+                    annotation = ft_model.annotation.to_annotation()
+                    ft = ft_model.to_feature(self.feature, roi, annotation)
+                    features.append(ft)
+                roi.features = features
+            else:
+                roi = None
+
+        if roi is None:
+            msg = f"No ROI stored with id={roi_id}."
+            raise ValueError(msg)
+        return roi
 
     def delete_roi(self, sample: Optional[Sample] = None):
         """
@@ -526,15 +609,14 @@ class AssayData:
         annotation_model_list = list()
         descriptor_model_list = list()
         descriptor_names = self.feature.descriptor_names()
+        ft_id = self._feature_id
         for roi in roi_list:
             if roi.features is not None:
                 for ft in roi.features:
-                    # ft_model = FeatureModel(
-                    #     sample_id=sample.id, roi_id=roi.id, data=ft.to_str()
-                    # )
-                    ft_model = FeatureModel(roi_id=roi.id, data=ft.to_str())
+                    ft_model = FeatureModel(roi_id=roi.id, data=ft.to_str(), id=ft_id)
                     ann = ft.annotation
                     annotation_model = AnnotationModel(
+                        id=ft_id,
                         sample_id=sample.id,
                         roi_id=roi.id,
                         label=ann.label,
@@ -545,6 +627,7 @@ class AssayData:
                     ft_descriptors = {x: ft.get(x) for x in descriptor_names}
 
                     descriptor_model = self.DescriptorModel(
+                        id=ft_id,
                         sample_id=sample.id,
                         roi_id=roi.id,
                         label=ann.label,
@@ -554,11 +637,14 @@ class AssayData:
                     feature_model_list.append(ft_model)
                     annotation_model_list.append(annotation_model)
                     descriptor_model_list.append(descriptor_model)
+                    ft_id += 1
         with self.SessionFactory() as session:
             session.add_all(feature_model_list)
             session.add_all(annotation_model_list)
             session.add_all(descriptor_model_list)
             session.commit()
+            # only update the id if the transaction is successful
+            self._feature_id = ft_id + 1
 
     def get_features_by_sample(self, sample: Sample) -> list[Feature]:
         """
@@ -622,6 +708,36 @@ class AssayData:
                 feature_list.append(feature)
         return feature_list
 
+    def get_features_by_id(self, ft_id: int) -> Feature:
+        """
+        Retrieves all samples with an specific feature label.
+
+        Parameters
+        ----------
+        ft_id : int
+
+        Returns
+        -------
+        Feature
+
+        """
+        with self.SessionFactory() as session:
+            stmt = select(FeatureModel).join(AnnotationModel).where(FeatureModel.id == ft_id)
+            result = session.execute(stmt).scalar()
+            if result is not None:
+                annotation = result.annotation.to_annotation()
+                roi = result.roi.to_roi(self.roi)
+                feature = result.to_feature(self.feature, roi, annotation)
+
+            else:
+                feature = None
+
+        if feature is None:
+            msg = f"No feature stored found with id={ft_id}"
+            raise ValueError(msg)
+
+        return feature
+
     def delete_features(self):
         """
         Delete Features stored in the DB.
@@ -654,7 +770,7 @@ class AssayData:
 
         Returns
         -------
-        dict[str, list[float]]
+        dict[str, list]
             A dictionary that maps descriptor names to a list of values for each feature.
 
         Raises
@@ -673,7 +789,7 @@ class AssayData:
                     msg = f"{d} is not a valid descriptor. Valid descriptors are: {valid_str}."
                     raise ValueError(msg)
 
-        descriptors.extend(["label", "sample_id", "id"])
+        descriptors.extend(["id", "roi_id", "sample_id", "label"])
         descriptor_dict = {x: list() for x in descriptors}
 
         with self.SessionFactory() as session:
@@ -690,20 +806,37 @@ class AssayData:
         return descriptor_dict
 
     def get_sample_data(self, sample_id: str) -> SampleData:
-        with self.SessionFactory() as session:
-            stmt = select(SampleModel).where(SampleModel.id == sample_id)
-            sample = session.execute(stmt).scalar()
-
-        if sample is None:
-            msg = f"No sample with id={sample_id} was found."
-            raise ValueError(msg)
-        sample = sample.to_sample()
+        sample = self.search_sample(sample_id)
         roi_list = self.get_roi_list(sample)
         return SampleData(sample, roi_list)
 
+    def search_sample(self, sample_id: str) -> Sample:
+        """
+        Search a sample in the DB.
 
-def _check_preprocessing_step(step: Optional[str]):
-    if (step is not None) and (step not in c.PREPROCESSING_STEPS):
-        valid_steps = ", ".join(c.PREPROCESSING_STEPS)
-        msg = f"{step} is not a valid preprocessing step. valid values are {valid_steps}."
-        raise ValueError(msg)
+        Parameters
+        ----------
+        sample_id : str
+
+        Returns
+        -------
+        Sample
+
+        Raises
+        ------
+        ValueError
+            If no sample with the specified id exists.
+
+        """
+        with self.SessionFactory() as session:
+            stmt = select(SampleModel).where(SampleModel.id == sample_id)
+            result = session.execute(stmt).scalar()
+        if result is None:
+            msg = f"No sample with id={sample_id} was found."
+            raise ValueError(msg)
+        else:
+            return result.to_sample()
+
+    def store_sample_data(self, data: SampleData):
+        self.add_roi_list(data.roi, data.sample)
+        self.add_features(data.roi, data.sample)

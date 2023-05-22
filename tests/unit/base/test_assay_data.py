@@ -109,70 +109,88 @@ def test_AssayData_delete_samples(tmp_path: Path):
     assert test_sample_list == sample_list
 
 
-def test_AssayData_flag_samples(tmp_path: Path):
+def test_AssayData_flag_processed(tmp_path: Path):
     samples = [create_dummy_sample(tmp_path, x) for x in range(1, 11)]
     assay_data = AssayData("", LCTrace, Peak)
     assay_data.add_samples(samples)
-    step = "detect_features"
-    assay_data.flag_processed_samples(samples, step)
+    expected = samples[:3]
+    pipeline = "detect_features"
+    assay_data.flag_processed(expected, pipeline)
+    actual = assay_data.get_processed_samples(pipeline)
+    assert actual == expected
 
 
-def test_AssayData_flag_samples_invalid_step(tmp_path: Path):
+def test_AssayData_flag_unprocessed(tmp_path: Path):
     samples = [create_dummy_sample(tmp_path, x) for x in range(1, 11)]
     assay_data = AssayData("", LCTrace, Peak)
     assay_data.add_samples(samples)
-    step = "invalid_preprocessing_step"
-    with pytest.raises(ValueError):
-        assay_data.flag_processed_samples(samples, step)
+    expected = samples[:3]
+    pipeline = "detect_features"
 
+    # flag samples and check
+    assay_data.flag_processed(expected, pipeline)
+    actual = assay_data.get_processed_samples(pipeline)
+    assert actual == expected
 
-def test_AssayData_get_samples_processing_stage(tmp_path: Path):
-    samples = [create_dummy_sample(tmp_path, x) for x in range(1, 11)]
-    assay_data = AssayData("", LCTrace, Peak)
-    assay_data.add_samples(samples)
-    step = "detect_features"
-    assay_data.flag_processed_samples(samples, step)
-
-    new_samples = [create_dummy_sample(tmp_path, x) for x in range(20, 30)]
-    assay_data.add_samples(new_samples)
-
-    test_samples = assay_data.get_samples(step=step)
-    all_samples = assay_data.get_samples()
-    assert samples == test_samples
-    assert all_samples != test_samples
-
-
-def test_AssayData_get_samples_invalid_step(tmp_path: Path):
-    samples = [create_dummy_sample(tmp_path, x) for x in range(1, 11)]
-    assay_data = AssayData("", LCTrace, Peak)
-    assay_data.add_samples(samples)
-    step = "invalid_preprocessing_step"
-    with pytest.raises(ValueError):
-        assay_data.get_samples(step)
+    # remove flag
+    assay_data.flag_unprocessed(pipeline)
+    actual = assay_data.get_processed_samples(pipeline)
+    assert len(actual) == 0
 
 
 def test_AssayData_set_processing_parameters():
     assay_data = AssayData("", LCTrace, Peak)
     step = "detect_features"
+    pipeline = "pipeline"
     parameters = {"a": 1, "b": 2.0, "c": "a"}
-    assay_data.set_processing_parameters(step, parameters)
+    assay_data.set_processing_parameters(step, pipeline, parameters)
 
 
-def test_AssayData_set_processing_parameters_invalid_step():
+def test_AssayData_get_processing_parameters():
     assay_data = AssayData("", LCTrace, Peak)
-    step = "invalid_preprocessing_step"
-    parameters = {"a": 1, "b": 2.0, "c": "a"}
-    with pytest.raises(ValueError):
-        assay_data.set_processing_parameters(step, parameters)
+    step = "detect_features"
+    pipeline = "pipeline"
+    expected = {"a": 1, "b": 2.0, "c": "a"}
+    assay_data.set_processing_parameters(step, pipeline, expected)
+    actual = assay_data.get_processing_parameters(step)
+    assert expected == actual
 
 
 def test_AssayData_get_processing_parameters_invalid_step():
     assay_data = AssayData("", LCTrace, Peak)
-    step = "detect_features"
-    expected_parameters = {"a": 1, "b": 2.0, "c": "a"}
-    assay_data.set_processing_parameters(step, expected_parameters)
-    tests_parameters = assay_data.get_processing_parameters(step)
-    assert expected_parameters == tests_parameters
+    step = "invalid step"
+    with pytest.raises(ValueError):
+        assay_data.get_processing_parameters(step)
+
+
+def test_AssayData_get_pipeline_parameters():
+    expected = {
+        "step1": {"param1": 20.0, "param2": "value-1"},
+        "step2": {"param3": [1.0, 2.0], "param4": True},
+    }
+    name = "pipeline1"
+    assay_data = AssayData("", LCTrace, Peak)
+    assay_data.add_pipeline_parameters(name, expected)
+    actual = assay_data.get_pipeline_parameters(name)
+    assert actual == expected
+
+
+def test_AssayData_update_pipeline_parameters():
+    expected = {
+        "step1": {"param1": 20.0, "param2": "value-1"},
+        "step2": {"param3": [1.0, 2.0], "param4": True},
+    }
+    name = "pipeline1"
+    assay_data = AssayData("", LCTrace, Peak)
+    assay_data.add_pipeline_parameters(name, expected)
+    expected["step2"]["param4"] = False
+
+    # update only params of step 1
+    new_params = expected.copy()
+    new_params.pop("step1")
+    assay_data.update_pipeline_parameters(name, new_params)
+    actual = assay_data.get_pipeline_parameters(name)
+    assert expected == actual
 
 
 def test_AssayData_add_roi_list(tmp_path: Path):
@@ -239,6 +257,33 @@ def test_AssayData_delete_roi_list_no_delete(tmp_path: Path):
     assay_data.delete_roi(sample2)
     test_roi_list = assay_data.get_roi_list(sample)
     assert expected_roi_list == test_roi_list
+
+
+def test_AssayData_get_roi_by_id(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData("", LCTrace, Peak)
+    sample = create_dummy_sample(path, 1)
+    assay_data.add_samples([sample])
+    roi_list = [create_dummy_lc_trace() for _ in range(20)]
+    assay_data.add_roi_list(roi_list, sample)
+
+    roi_id = 5
+    expected = roi_list[roi_id]
+    actual = assay_data.get_roi_by_id(roi_id)
+    assert expected == actual
+
+
+def test_AssayData_get_roi_by_id_invalid_id(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData("", LCTrace, Peak)
+    sample = create_dummy_sample(path, 1)
+    assay_data.add_samples([sample])
+    roi_list = [create_dummy_lc_trace() for _ in range(20)]
+    assay_data.add_roi_list(roi_list, sample)
+
+    with pytest.raises(ValueError):
+        roi_id = 100
+        assay_data.get_roi_by_id(roi_id)
 
 
 def test_AssayData_add_features(tmp_path: Path):
