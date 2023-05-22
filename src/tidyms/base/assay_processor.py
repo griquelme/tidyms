@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from .assay_data import SampleData, AssayData
 from ..lcms import Feature
 from typing import Optional, Sequence
+from copy import deepcopy
 from math import inf
 
 
@@ -222,6 +223,12 @@ class ProcessingPipeline:
             msg = "Processor names must be unique."
             raise ValueError(msg)
 
+    def copy(self):
+        """
+        Creates a deep copy of the pipeline.
+        """
+        return deepcopy(self)
+
     def get_processor(self, name: str) -> Processor:
         processor = self._name_to_processor[name]
         return processor
@@ -284,6 +291,7 @@ class ProcessingPipeline:
         """
         for _, processor in self.processors:
             processor.process(data)
+        return data
 
 
 def _filter_features(sample_data: SampleData, filters: dict[str, tuple[float, float]]):
