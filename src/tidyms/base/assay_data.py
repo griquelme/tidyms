@@ -1,6 +1,10 @@
 """
 Storage tools for the Assay class.
 
+AssayData:
+    Interface to store/retrieve Sample, ROI, Feature, annotation and
+    descriptor data into/from a SQLite Database.
+
 """
 
 
@@ -16,9 +20,7 @@ from pathlib import Path
 from typing import Optional, Sequence, Type, Union
 
 
-# TODO: test all code
-# TODO: Remove sample data.
-# TODO: make add_roi and similar functions private.
+# TODO: Move Sample and SampleData to another module.
 # TODO: add update_feature_label
 # TODO: add remove empty ROI
 # TODO: add remove non-matched.
@@ -30,7 +32,7 @@ class Sample:
     Sample class to manage iteration over MSData objects.
 
     Attributes
-    -------
+    ----------
     path : Path or str
         Path to a raw data file.
     id : str
@@ -54,10 +56,12 @@ class Sample:
     group: str = ""
 
     def __post_init__(self):
+        """Normalize and validate data fields."""
         if isinstance(self.path, str):
             self.path = Path(self.path)
 
     def to_dict(self) -> dict:
+        """Convert data into a dictionary."""
         d = asdict(self)
         d["path"] = str(d["path"])
         return d
@@ -81,6 +85,7 @@ class SampleData:
         self.roi = roi
 
     def get_feature_list(self) -> Sequence[Feature]:
+        """Create a list of features from features stored in each ROI."""
         feature_list = list()
         for roi in self.roi:
             if roi.features is not None:
@@ -92,10 +97,7 @@ Base = orm.declarative_base()
 
 
 class ProcessParameterModel(Base):
-    """
-    Model for the Table with processing parameters of the Assay.
-
-    """
+    """Stores model parameters, step name and pipeline name."""
 
     __tablename__ = "parameters"
     step: Mapped[str] = mapped_column(sa.String, primary_key=True)
@@ -104,10 +106,7 @@ class ProcessParameterModel(Base):
 
 
 class SampleModel(Base):
-    """
-    Model for Sample objects included in the Assay.
-
-    """
+    """Stores data from Sample objects."""
 
     __tablename__ = "samples"
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -116,20 +115,16 @@ class SampleModel(Base):
     start_time: Mapped[float] = mapped_column(Float)
     end_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     group: Mapped[str] = mapped_column(String, nullable=True)
-    # rois: Mapped[list["RoiModel"]] = relationship(back_populates="samples")
-    # features: Mapped[list["FeatureModel"]] = relationship(back_populates="samples")
 
     def to_sample(self) -> Sample:
+        """Convert to a Sample object."""
         return Sample(
             str(self.path), self.id, self.ms_level, self.start_time, self.end_time, self.group
         )
 
 
 class ProcessedSampleModel(Base):
-    """
-    Model to record Samples processed in the different preprocessing stages.
-
-    """
+    """Store samples that have been processed by a given pipeline."""
 
     __tablename__ = "processed_samples"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -138,10 +133,7 @@ class ProcessedSampleModel(Base):
 
 
 class RoiModel(Base):
-    """
-    Model for ROI extracted in each Sample.
-
-    """
+    """Stores ROI data."""
 
     __tablename__ = "rois"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -156,16 +148,14 @@ class RoiModel(Base):
     )
 
     def to_roi(self, roi_type: Type[Roi]) -> Roi:
+        """Create a ROI instance."""
         roi = roi_type.from_string(self.data)
         roi.id = self.id
         return roi
 
 
 class FeatureModel(Base):
-    """
-    Model for Features extracted in each ROI.
-
-    """
+    """Store Feature data."""
 
     __tablename__ = "features"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -181,14 +171,12 @@ class FeatureModel(Base):
     def to_feature(
         self, feature_type: Type[Feature], roi: Roi, annotation: Annotation
     ) -> Feature:
+        """Create a Feature instance using the data stored."""
         return feature_type.from_str(self.data, roi, annotation)
 
 
 class AnnotationModel(Base):
-    """
-    Model for annotations of each Feature.
-
-    """
+    """Store data from Annotation objects."""
 
     __tablename__ = "annotations"
     id: Mapped[int] = mapped_column(ForeignKey("features.id"), primary_key=True)
@@ -202,6 +190,7 @@ class AnnotationModel(Base):
     feature: Mapped["FeatureModel"] = relationship(back_populates="annotation")
 
     def to_annotation(self) -> Annotation:
+        """Create an Annotation instance."""
         return Annotation(
             label=self.label,
             isotopologue_label=self.isotopologue_label,
@@ -212,7 +201,7 @@ class AnnotationModel(Base):
 
 def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData):
     """
-    Creates a Model for descriptors of features.
+    Create a Model for descriptors of features.
 
     The table is created using available descriptors from the Feature class.
 
@@ -249,7 +238,19 @@ def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData)
 
 class AssayData:
     """
-    Manages Sample, Roi and Feature persistence in an Assay using a SQLite DataBase.
+
+    Manage Sample, Roi and Feature persistence in an Assay using a SQLite DataBase.
+
+    Attributes
+    ----------
+    engine : sqlalchemy.Engine
+    feature : Type
+        Feature Type of Features stored in the DB.
+    roi : Type
+        ROI Type of ROI stored in the DB.
+    SessionFactory : sqlalchemy.sessionmaker
+    DescriptorModel : Type
+        Class attribute. Model Type for feature descriptors.
 
     """
 
@@ -262,6 +263,22 @@ class AssayData:
         feature: Type[Feature],
         echo: bool = False,
     ):
+        """
+
+        Create a new instance.
+
+        Parameters
+        ----------
+        name : Union[Path, str]
+            Path to SQLite DB.
+        roi : Type[Roi]
+            ROI type of ROI stored in the DB.
+        feature : Type[Feature]
+            Feature type of features stored in the DB.
+        echo : bool, default=False
+            If ``True``, logs statements emitted to the DB.
+
+        """
         self.roi = roi
         self.feature = feature
 
@@ -330,7 +347,7 @@ class AssayData:
 
     def flag_processed(self, samples: list[Sample], pipeline: str):
         """
-        Flags samples as processed in a preprocessing step.
+        Flag samples as processed in a preprocessing step.
 
         Parameters
         ----------
@@ -352,7 +369,7 @@ class AssayData:
 
     def flag_unprocessed(self, pipeline: str):
         """
-        Flags a list of samples as unprocessed.
+        Flag a list of samples as unprocessed.
 
         Parameters
         ----------
@@ -369,7 +386,7 @@ class AssayData:
 
     def get_samples(self) -> list[Sample]:
         """
-        Retrieves samples stored in the DB.
+        Retrieve samples stored in the DB.
 
         Returns
         -------
@@ -385,6 +402,19 @@ class AssayData:
         return samples
 
     def get_processed_samples(self, pipeline: str) -> list[Sample]:
+        """
+        Retrieve processed samples by a pipeline from the DB.
+
+        Parameters
+        ----------
+        pipeline : str
+            Pipeline name
+
+        Returns
+        -------
+        list[Sample]
+
+        """
         with self.SessionFactory() as session:
             stmt = (
                 select(SampleModel)
@@ -414,7 +444,7 @@ class AssayData:
 
     def set_processing_parameters(self, step: str, pipeline: str, parameters: dict):
         """
-        Stores preprocessing parameters of a step in the DB.
+        Store preprocessing parameters of a step in the DB.
 
         Parameters
         ----------
@@ -442,7 +472,7 @@ class AssayData:
 
     def get_processing_parameters(self, step: str) -> dict:
         """
-        Retrieves preprocessing parameters of a step from the DB.
+        Retrieve preprocessing parameters of a step from the DB.
 
         Parameters
         ----------
@@ -475,6 +505,21 @@ class AssayData:
         return params
 
     def get_pipeline_parameters(self, name: str) -> dict[str, dict]:
+        """
+        Retrieve the parameters of used in each pipeline step.
+
+        Parameters
+        ----------
+        name : str
+            Pipeline name.
+
+        Returns
+        -------
+        dict[str, dict]
+            A dictionary where each key is the name of each step and values
+            are the processing parameters.
+
+        """
         with self.SessionFactory() as session:
             stmt = select(ProcessParameterModel).where(ProcessParameterModel.pipeline == name)
             parameters = dict()
@@ -485,6 +530,16 @@ class AssayData:
         return parameters
 
     def add_pipeline_parameters(self, name: str, parameters: dict[str, dict]):
+        """
+        Store parameters used in a pipeline.
+
+        Parameters
+        ----------
+        name : str
+            Pipeline name.
+        parameters : dict[str, dict]
+            Pipeline parameters.
+        """
         parameter_model_list = list()
         for step, param in parameters.items():
             param_str = json.dumps(param)
@@ -496,6 +551,17 @@ class AssayData:
             session.commit()
 
     def update_pipeline_parameters(self, name: str, parameters: dict[str, dict]):
+        """
+        Update parameters of a pipeline.
+
+        Parameters
+        ----------
+        name : str
+            Pipeline name
+        parameters : dict[str, dict]
+            New parameters.
+
+        """
         update = list()
         for step, param in parameters.items():
             update.append({"pipeline": name, "step": step, "parameters": json.dumps(param)})
@@ -506,7 +572,7 @@ class AssayData:
 
     def add_roi_list(self, roi_list: Sequence[Roi], sample: Sample):
         """
-        Stores a list of ROI extracted from a sample in the DB.
+        Store a list of ROI extracted from a sample in the DB.
 
         Parameters
         ----------
@@ -527,7 +593,7 @@ class AssayData:
 
     def get_roi_list(self, sample: Sample) -> Sequence[Roi]:
         """
-        Retrieves a list of ROI detected in a sample.
+        Retrieve a list of ROI detected in a sample.
 
         Parameters
         ----------
@@ -549,7 +615,7 @@ class AssayData:
 
     def get_roi_by_id(self, roi_id: int) -> Roi:
         """
-        Retrieves a ROI by id
+        Retrieve a ROI by id.
 
         Parameters
         ----------
@@ -597,7 +663,7 @@ class AssayData:
 
     def add_features(self, roi_list: Sequence[Roi], sample: Sample):
         """
-        Stores a list of features in the DB.
+        Store a list of features in the DB.
 
         Parameters
         ----------
@@ -613,25 +679,8 @@ class AssayData:
         for roi in roi_list:
             if roi.features is not None:
                 for ft in roi.features:
-                    ft_model = FeatureModel(roi_id=roi.id, data=ft.to_str(), id=ft_id)
-                    ann = ft.annotation
-                    annotation_model = AnnotationModel(
-                        id=ft_id,
-                        sample_id=sample.id,
-                        roi_id=roi.id,
-                        label=ann.label,
-                        charge=ann.charge,
-                        isotopologue_label=ann.isotopologue_label,
-                        isotopologue_index=ann.isotopologue_index,
-                    )
-                    ft_descriptors = {x: ft.get(x) for x in descriptor_names}
-
-                    descriptor_model = self.DescriptorModel(
-                        id=ft_id,
-                        sample_id=sample.id,
-                        roi_id=roi.id,
-                        label=ann.label,
-                        **ft_descriptors,
+                    ft_model, annotation_model, descriptor_model = _create_feature_models(
+                        sample, roi, ft, ft_id, descriptor_names, self.DescriptorModel
                     )
 
                     feature_model_list.append(ft_model)
@@ -648,7 +697,7 @@ class AssayData:
 
     def get_features_by_sample(self, sample: Sample) -> list[Feature]:
         """
-        Retrieves all features detected in a sample.
+        Retrieve all features detected in a sample.
 
         Parameters
         ----------
@@ -676,7 +725,7 @@ class AssayData:
         self, label: int, groups: Optional[list[str]] = None
     ) -> list[Feature]:
         """
-        Retrieves all samples with an specific feature label.
+        Retrieve all samples with an specific feature label.
 
         Parameters
         ----------
@@ -710,7 +759,7 @@ class AssayData:
 
     def get_features_by_id(self, ft_id: int) -> Feature:
         """
-        Retrieves all samples with an specific feature label.
+        Retrieve all samples with an specific feature label.
 
         Parameters
         ----------
@@ -756,7 +805,7 @@ class AssayData:
         self, sample: Optional[Sample] = None, descriptors: Optional[list[str]] = None
     ):
         """
-        Retrieves the descriptors associated with each feature.
+        Retrieve the descriptors associated with each feature.
 
         Parameters
         ----------
@@ -806,6 +855,7 @@ class AssayData:
         return descriptor_dict
 
     def get_sample_data(self, sample_id: str) -> SampleData:
+        """Retrieve a SampleData instance."""
         sample = self.search_sample(sample_id)
         roi_list = self.get_roi_list(sample)
         return SampleData(sample, roi_list)
@@ -838,5 +888,43 @@ class AssayData:
             return result.to_sample()
 
     def store_sample_data(self, data: SampleData):
+        """Store a SampleData instance."""
         self.add_roi_list(data.roi, data.sample)
         self.add_features(data.roi, data.sample)
+
+
+def _create_feature_models(
+    sample: Sample,
+    roi: Roi,
+    ft: Feature,
+    ft_id: int,
+    descriptor_names: list[str],
+    descriptor_model_type,
+):
+    """
+    Create FeatureModel, AnnotationModel and FeatureModel for a Feature.
+
+    Auxiliary function to AssayData.add_features.
+
+    """
+    ft_model = FeatureModel(roi_id=roi.id, data=ft.to_str(), id=ft_id)
+    ann = ft.annotation
+    annotation_model = AnnotationModel(
+        id=ft_id,
+        sample_id=sample.id,
+        roi_id=roi.id,
+        label=ann.label,
+        charge=ann.charge,
+        isotopologue_label=ann.isotopologue_label,
+        isotopologue_index=ann.isotopologue_index,
+    )
+    ft_descriptors = {x: ft.get(x) for x in descriptor_names}
+
+    descriptor_model = descriptor_model_type(
+        id=ft_id,
+        sample_id=sample.id,
+        roi_id=roi.id,
+        label=ann.label,
+        **ft_descriptors,
+    )
+    return ft_model, annotation_model, descriptor_model
