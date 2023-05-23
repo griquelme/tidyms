@@ -1,5 +1,5 @@
 import numpy as np
-from tidyms.base.assay_data import AssayData, Sample
+from tidyms.base.assay_data import AssayData, Sample, SampleData
 from tidyms.lcms import LCTrace, Peak, Annotation
 from pathlib import Path
 import pytest
@@ -265,7 +265,9 @@ def test_AssayData_get_roi_by_id(tmp_path: Path):
     sample = create_dummy_sample(path, 1)
     assay_data.add_samples([sample])
     roi_list = [create_dummy_lc_trace() for _ in range(20)]
+    add_dummy_peaks(roi_list, 2)
     assay_data.add_roi_list(roi_list, sample)
+    assay_data.add_features(roi_list, sample)
 
     roi_id = 5
     expected = roi_list[roi_id]
@@ -431,6 +433,41 @@ def test_AssayData_get_features_by_sample_no_features(tmp_path: Path):
 
     test_features = assay_data.get_features_by_sample(sample)
     assert len(test_features) == 0
+
+
+def test_AssayData_get_feature_by_id(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData("", LCTrace, Peak)
+    sample = create_dummy_sample(path, 1)
+    assay_data.add_samples([sample])
+    roi_list = [create_dummy_lc_trace() for _ in range(20)]
+    add_dummy_peaks(roi_list, 2)
+    assay_data.add_roi_list(roi_list, sample)
+    assay_data.add_features(roi_list, sample)
+
+    expected = roi_list[2].features[1]
+    feature_id = 5  # Fifth feature added to the DB. Should have id=5
+    actual = cast(Peak, assay_data.get_features_by_id(feature_id))
+    assert expected.start == actual.start
+    assert expected.apex == actual.apex
+    assert expected.end == actual.end
+    assert expected.roi == actual.roi
+    assert expected.annotation == actual.annotation
+
+
+def test_AssayData_get_feature_by_id_invalid_id(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData("", LCTrace, Peak)
+    sample = create_dummy_sample(path, 1)
+    assay_data.add_samples([sample])
+    roi_list = [create_dummy_lc_trace() for _ in range(20)]
+    add_dummy_peaks(roi_list, 2)
+    assay_data.add_roi_list(roi_list, sample)
+    assay_data.add_features(roi_list, sample)
+
+    with pytest.raises(ValueError):
+        invalid_feature_id = 1000
+        assay_data.get_features_by_id(invalid_feature_id)
 
 
 def test_AssayData_get_descriptors_one_sample(tmp_path: Path):
@@ -601,3 +638,45 @@ def test_AssayData_load_existing_db(tmp_path: Path):
     assert len(test_feature_list) == 2
     for ft in test_feature_list:
         assert ft.annotation.label == test_label
+
+
+def test_AssayData_search_sample(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData("", LCTrace, Peak)
+    sample_list = [create_dummy_sample(path, x) for x in range(10, 20)]
+    assay_data.add_samples(sample_list)
+
+    samples = assay_data.get_samples()
+    expected = samples[5]
+    actual = assay_data.search_sample(samples[5].id)
+
+    assert expected == actual
+
+
+def test_AssayData_search_sample_invalid_sample(tmp_path: Path):
+    path = tmp_path / "test-assay"
+    assay_data = AssayData("", LCTrace, Peak)
+    sample_list = [create_dummy_sample(path, x) for x in range(10, 20)]
+    assay_data.add_samples(sample_list)
+
+    with pytest.raises(ValueError):
+        assay_data.search_sample("invalid_sample_id")
+
+
+def test_AssayData_store_sample_data(tmp_path: Path):
+    assay_data = AssayData("", LCTrace, Peak)
+
+    # add samples
+    sample = create_dummy_sample(tmp_path, 1)
+    assay_data.add_samples([sample])
+
+    # create roi and features
+    roi_list = [create_dummy_lc_trace() for _ in range(20)]
+    add_dummy_peaks(roi_list, 2)
+
+    expected = SampleData(sample, roi_list)
+
+    assay_data.store_sample_data(expected)
+    actual = assay_data.get_sample_data(sample.id)
+    assert expected.sample == actual.sample
+    assert expected.roi == actual.roi
