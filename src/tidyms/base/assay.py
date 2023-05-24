@@ -1,5 +1,11 @@
 """
-Base class to process datasets.
+Provides the Assay class, which centralizes tools to process datasets.
+
+Manages data processing including:
+
+- Storage of intermediate results and parameters.
+- Processing from raw data to Data matrix using ProcessingPipelines.
+- Parallelization of processing steps.
 
 """
 from pathlib import Path
@@ -18,7 +24,7 @@ from ..utils import get_progress_bar
 
 class Assay:
     """
-    Manages data processing and data storage of datasets.
+    Manage data processing and storage of datasets.
 
     See HERE for a tutorial on how to work with Assay objects.
 
@@ -48,17 +54,11 @@ class Assay:
         self._data.add_samples(samples)
 
     def get_samples(self) -> list[Sample]:
-        """
-        Lists all samples included in the assay.
-
-        """
+        """List all samples in the assay."""
         return self._data.get_samples()
 
     def get_parameters(self) -> dict:
-        """
-        Returns the processing parameters of each step applied in the assay pipeline.
-
-        """
+        """Get the processing parameters of each processing pipeline."""
         parameters = dict()
         parameters["sample pipeline"] = self._sample_pipeline.get_parameters()
         return parameters
@@ -67,25 +67,27 @@ class Assay:
         self, sample_id: Optional[str] = None, descriptors: Optional[list[str]] = None
     ) -> dict[str, list]:
         """
-        Retrieves descriptors for features detected in the assay.
+        Get descriptors for features detected in the assay.
 
         Parameters
         ----------
         sample_id : str or None, default=None
-            Retrieves descriptors for the selected sample. If ``None``, descriptors
-            for all samples are returned.
+            Retrieves descriptors for the selected sample. If ``None``,
+            descriptors for all samples are returned.
         descriptors : list[str] or None, default=None
-            Feature  descriptors to retrieve. By default, all available descriptors
-            are retrieved.
+            Feature  descriptors to retrieve. By default, all available
+            descriptors are retrieved.
 
         Returns
         -------
         dict[str, list]
-            Feature descriptors. Beside all descriptors, four additional entries
-            are provided: `id` is an unique identifier for the feature. `roi_id`
-            identifies the ROI where the feature was detected. `sample_id`
-            identifies the sample where the feature was detected. `label`
-            identifies the feature group obtained from feature correspondence.
+            A dictionary where each key is a descriptor and values are list of
+            values for each feature. Beside all descriptors, four additional
+            entries are provided: `id` is an unique identifier for the feature.
+            `roi_id` identifies the ROI where the feature was detected.
+            `sample_id` identifies the sample where the feature was detected.
+            `label` identifies the feature group obtained from feature
+            correspondence.
 
         """
         sample = None if sample_id is None else self._data.search_sample(sample_id)
@@ -93,8 +95,9 @@ class Assay:
 
     def get_features(self, key, by: str, groups: Optional[list[str]] = None) -> list[Feature]:
         """
-        Retrieves features from the assay. Feature can be retrieved by sample,
-        feature label or id.
+        Retrieve features from the assay.
+
+        Features can be retrieved by sample, feature label or id.
 
         Parameters
         ----------
@@ -128,15 +131,15 @@ class Assay:
 
     def get_roi(self, key, by: str) -> Sequence[Roi]:
         """
-        Retrieves ROIs from the assay. Data can be retrieved by sample, or id.
+        Retrieve ROIs from the assay. ROIs can be retrieved by sample, or id.
 
         Parameters
         ----------
         key : str or int
             Key used to search ROIs. If `by` is set
-            to ``"id"`` an integer must be provided. If `by` is
-            set to ``"sample"`` a string with the corresponding sample id must
-            be provided.
+            to ``"id"`` an integer must be provided. If `by` is set to
+            ``"sample"`` a string with the corresponding sample id must be
+            provided.
         by : {"sample", "id"}
             Criteria to select features.
         groups : list[str] or None, default=None

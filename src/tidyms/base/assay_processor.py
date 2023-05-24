@@ -31,14 +31,14 @@ class Processor(ABC):
     """
 
     def __repr__(self) -> str:
+        """Create a string representation of the instance."""
         name = self.__class__.__name__
         arg_str = ", ".join([f"{k}={v}" for k, v in self.get_parameters().items()])
         return f"{name}({arg_str})"
 
     @classmethod
     def _get_param_names(cls):
-        """Get parameter names for the estimator"""
-
+        """Get parameter names for the estimator."""
         init_signature = inspect.signature(cls.__init__)
 
         parameters = list()
@@ -87,23 +87,18 @@ class Processor(ABC):
 
     @abstractmethod
     def process(self, data):
+        """Apply processing function."""
         pass
 
     @staticmethod
     @abstractmethod
     def _validate_parameters(parameters: dict):
-        """
-        Takes a dictionary of parameters to be passed to set_parameters and validate them.
-
-        """
+        """Validate processor parameters."""
         ...
 
     @abstractmethod
     def set_default_parameters(self, instrument: str, separation: str):
-        """
-        Set default values for a processor based on instrument and separation type.
-
-        """
+        """Set default parameters based on instrument and separation type."""
         ...
 
 
@@ -120,6 +115,7 @@ class SingleSampleProcessor(Processor):
     """
 
     def process(self, sample_data: SampleData):
+        """Apply processor to a sample."""
         self._check_data(sample_data)
         self._func(sample_data)
 
@@ -135,8 +131,9 @@ class SingleSampleProcessor(Processor):
 
 class FeatureExtractor(SingleSampleProcessor):
     """
-    The base class for feature extraction. Includes utilities to filter Features
-    based on descriptor values.
+    The base class for feature extraction.
+
+    Includes utilities to filter Features based on descriptor values.
 
     MUST implement `_check_data` from SingleSampleProcessor.
     MUST implement the staticmethod `_extract_features_func` that takes a Roi
@@ -196,19 +193,23 @@ class FeatureExtractor(SingleSampleProcessor):
 
 class MultipleSampleProcessor(Processor):
     """
-    Base class for multiple class process. Data is managed through the AssayData class.
+    Base class for multiple class process.
+
+    Data is managed through the AssayData class.
+
+    MUST implement the process method.
 
     """
 
     @abstractmethod
     def process(self, data: AssayData):
+        """Apply processor to assay data."""
         ...
 
 
 class ProcessingPipeline:
     """
-    Combines a series of Processor objects of the same type into a data
-    processing pipeline.
+    Combines a Processor objects into a data processing pipeline.
 
     Attributes
     ----------
@@ -224,12 +225,11 @@ class ProcessingPipeline:
             raise ValueError(msg)
 
     def copy(self):
-        """
-        Creates a deep copy of the pipeline.
-        """
+        """Create a deep copy of the pipeline."""
         return deepcopy(self)
 
     def get_processor(self, name: str) -> Processor:
+        """Get pipeline processors based on name."""
         processor = self._name_to_processor[name]
         return processor
 
@@ -250,12 +250,12 @@ class ProcessingPipeline:
 
     def set_parameters(self, parameters: dict[str, dict]):
         """
-        Set parameters for processors
+        Set parameters for processors.
 
         Parameters
         ----------
         parameters : dict[str, dict]
-            A dictionary from processor name to processor parameters.
+            A dictionary that maps processor names to processor parameters.
 
         """
         for name, param in parameters.items():
@@ -279,7 +279,7 @@ class ProcessingPipeline:
 
     def process(self, data):
         """
-        Applies the processing pipeline
+        Apply the processing pipeline.
 
         Parameters
         ----------
@@ -331,10 +331,7 @@ def _is_valid_feature(ft: Feature, filters: dict[str, tuple[float, float]]) -> b
 def _fill_filter_boundaries(
     filters: dict[str, tuple[Optional[float], Optional[float]]]
 ) -> dict[str, tuple[float, float]]:
-    """
-    Replace ``None`` values in lower and upper bounds of filter.
-
-    """
+    """Replace ``None`` values in lower and upper bounds of filter."""
     d = dict()
     for name, (lower, upper) in filters.items():
         lower = lower if lower is not None else -inf
