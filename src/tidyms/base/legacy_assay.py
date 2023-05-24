@@ -1412,7 +1412,7 @@ def _process_features_roi(
         for ft in roi.features:
             d = _process_feature(ft, custom_descriptors, filters)
             if d is not None:
-                ft.index = new_index
+                ft.id = new_index
                 new_index += 1
                 filtered_features.append(ft)
                 descriptors.append(d)
