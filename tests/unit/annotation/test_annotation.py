@@ -79,7 +79,7 @@ def feature_list(compound_data) -> list[Peak]:
         r.id = k
         if r.features:
             for j, ft in enumerate(r.features):
-                ft.index = j
+                ft.id = j
             ft_list.extend(r.features)
     return ft_list
 

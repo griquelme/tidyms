@@ -582,7 +582,7 @@ class Feature(ABC):
     ----------
     roi: Roi
     annotation: Optional[Annotation]
-    index: int
+    id: int
 
     """
 
@@ -594,7 +594,7 @@ class Feature(ABC):
         if annotation is None:
             annotation = Annotation()
         self.annotation = annotation
-        self.index = -1
+        self.id = -1
 
     @property
     def mz(self) -> float:
