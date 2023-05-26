@@ -29,10 +29,12 @@ from . import consensus_annotation
 from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum
-from .base import LegacyAssay
+from .legacy_assay import LegacyAssay
 from .raw_data_utils import *
 from . import dartms
 from .annotation import annotation
+from . import lcms_assay
+from . import base
 
 utils.create_tidyms_dir()
 SETTINGS = utils.get_settings()

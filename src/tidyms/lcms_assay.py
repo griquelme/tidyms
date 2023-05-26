@@ -1,13 +1,13 @@
 import numpy as np
 from typing import Any, Optional
-from .assay_processor import SingleSampleProcessor, FeatureExtractor
-from .assay_data import SampleData
-from .. import _constants as c
-from .. import peaks
-from ..fileio import MSData_from_file
-from ..lcms import LCTrace, Peak
-from ..raw_data_utils import make_roi
-from ..validation import is_all_positive, ValidatorWithLowerThan, validate
+from .base.assay_processor import SingleSampleProcessor, FeatureExtractor
+from .base.assay_data import SampleData
+from . import _constants as c
+from . import peaks
+from .fileio import MSData_from_file
+from .lcms import LCTrace, Peak
+from .raw_data_utils import make_roi
+from .validation import is_all_positive, ValidatorWithLowerThan, validate
 
 
 class LCTraceExtractor(SingleSampleProcessor):
