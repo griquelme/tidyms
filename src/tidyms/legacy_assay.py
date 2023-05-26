@@ -8,19 +8,21 @@ from pathlib import Path
 import os
 from uuid import uuid4
 from typing import Callable, List, Optional, Tuple, Union
-from .. import _constants as c
-from .. import validation as val
-from .. import raw_data_utils
-from ..container import DataContainer
-from ..correspondence import match_features
-from ..fileio import MSData, read_pickle
-from ..lcms import Feature, Roi, LCTrace
-from ..utils import get_progress_bar
-from .._plot_bokeh import _LCAssayPlotter
-from ..fill_missing import fill_missing_lc
-from .._build_data_matrix import build_data_matrix
+
+from .base.base import Feature, Roi
+from . import _constants as c
+from . import validation as val
+from . import raw_data_utils
+from .container import DataContainer
+from .correspondence import match_features
+from .fileio import MSData, read_pickle
+from .lcms import LCTrace
+from .utils import get_progress_bar
+from ._plot_bokeh import _LCAssayPlotter
+from .fill_missing import fill_missing_lc
+from ._build_data_matrix import build_data_matrix
 import json
-from ..annotation import annotate, create_annotation_table, create_annotation_tools
+from .annotation import annotate, create_annotation_table, create_annotation_tools
 import copy
 import tempfile
 
