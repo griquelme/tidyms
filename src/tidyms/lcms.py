@@ -23,48 +23,17 @@ import bisect
 import bokeh.plotting
 import json
 import numpy as np
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from scipy.ndimage import gaussian_filter1d
-from typing import Any, Optional, Sequence, Tuple, Type, TypeVar, Union
+from typing import Any, Optional, Tuple, TypeVar
 from scipy.interpolate import interp1d
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
+
+from .base import Annotation, Feature, Roi
 from . import peaks
 from . import _plot_bokeh
 from . import _constants as c
 from .utils import array1d_to_str, str_to_array1d
-
-
-# Replace with Self when code is updated to Python 3.11
-AnyRoi = TypeVar("AnyRoi", bound="Roi")
-AnyFeature = TypeVar("AnyFeature", bound="Feature")
-
-
-@dataclass
-class Annotation:
-    """
-    Contains annotation information of features.
-
-    If an annotation is not available, ``-1`` is used.
-
-    Attributes
-    ----------
-    label : int
-        Correspondence label of features.
-    isotopologue_label : int
-        Groups features from the same isotopic envelope.
-    isotopologue_index : int
-        Position of the feature in an isotopic envelope.
-    charge : int
-        Charge state.
-
-    """
-
-    label: int = -1
-    isotopologue_label: int = -1
-    isotopologue_index: int = -1
-    charge: int = -1
 
 
 class MSSpectrum:
@@ -234,64 +203,6 @@ class MSSpectrum:
         if show:
             bokeh.plotting.show(fig)
         return fig
-
-
-class Roi(ABC):
-
-    """
-    Regions of interest extracted from raw MS data.
-
-    """
-
-    def __init__(self):
-        self.id = -1
-        self.features: Optional[list[Feature]] = None
-
-    def plot(self) -> bokeh.plotting.figure:
-        ...
-
-    @abstractmethod
-    def extract_features(self, **kwargs) -> list["Feature"]:
-        ...
-
-    def get_default_filters(self) -> dict[str, float]:
-        raise NotImplementedError
-
-    @classmethod
-    def from_string(cls: Type[AnyRoi], s: str) -> AnyRoi:
-        """Loads a ROI from a JSON string."""
-
-        d = cls._deserialize(s)
-        features = d.pop(c.ROI_FEATURE_LIST)
-        roi = cls(**d)
-        ft_class = cls._get_feature_type()
-        if features is not None:
-            roi.features = [ft_class.from_str(x, roi) for x in features]
-        return roi
-
-    @staticmethod
-    @abstractmethod
-    def _deserialize(s: str) -> dict:
-        """
-        Converts JSON str into a dictionary used to create a ROI instance.
-
-        This method needs to be overwritten in case that the attributes needs
-        to be further deserialized before instantiating a ROI.
-
-        See MZTrace as an example.
-        """
-        ...
-
-    @abstractmethod
-    def to_string(self) -> str:
-        """Serializes a ROI into a string."""
-        ...
-
-    @staticmethod
-    @abstractmethod
-    def _get_feature_type() -> Type["Feature"]:
-        """Feature Class stored under features attribute."""
-        ...
 
 
 class MZTrace(Roi):
@@ -572,121 +483,6 @@ class InvalidPeakException(ValueError):
     """
 
     pass
-
-
-class Feature(ABC):
-    """
-    Abstract representation of a feature.
-
-    Attributes
-    ----------
-    roi: Roi
-    annotation: Optional[Annotation]
-    id: int
-
-    """
-
-    def __init__(self, roi: Roi, annotation: Optional[Annotation] = None):
-        self.roi = roi
-        self._mz = None
-        self._area = None
-        self._height = None
-        if annotation is None:
-            annotation = Annotation()
-        self.annotation = annotation
-        self.id = -1
-
-    @property
-    def mz(self) -> float:
-        if self._mz is None:
-            self._mz = self.get_mz()
-        return self._mz
-
-    @property
-    def area(self) -> float:
-        if self._area is None:
-            self._area = self.get_area()
-        return self._area
-
-    @property
-    def height(self) -> float:
-        if self._height is None:
-            self._height = self.get_height()
-        return self._height
-
-    def __lt__(self, other: Union["Feature", float]):
-        if isinstance(other, float):
-            return self.mz < other
-        elif isinstance(other, Feature):
-            return self.mz < other.mz
-
-    def __le__(self, other: Union["Feature", float]):
-        if isinstance(other, float):
-            return self.mz <= other
-        elif isinstance(other, Feature):
-            return self.mz <= other.mz
-
-    def __gt__(self, other: Union["Feature", float]):
-        if isinstance(other, float):
-            return self.mz > other
-        elif isinstance(other, Feature):
-            return self.mz > other.mz
-
-    def __ge__(self, other: Union["Feature", float]):
-        if isinstance(other, float):
-            return self.mz >= other
-        elif isinstance(other, Feature):
-            return self.mz >= other.mz
-
-    @abstractmethod
-    def get_mz(self) -> float:
-        ...
-
-    @abstractmethod
-    def get_area(self) -> float:
-        ...
-
-    @abstractmethod
-    def get_height(self) -> float:
-        ...
-
-    def describe(self) -> dict[str, float]:
-        descriptors: dict[str, float] = dict()
-        for descriptor in self.descriptor_names():
-            descriptors[descriptor] = self.get(descriptor)
-        return descriptors
-
-    @abstractmethod
-    def compare(self, other: "Feature") -> float:
-        ...
-
-    @abstractmethod
-    def to_str(self) -> str:
-        ...
-
-    @classmethod
-    def from_str(cls, s: str, roi: Roi, annotation: Optional[Annotation] = None) -> "Feature":
-        d = cls._deserialize(s)
-        return cls(roi=roi, annotation=annotation, **d)
-
-    @staticmethod
-    @abstractmethod
-    def _deserialize(s: str) -> dict:
-        ...
-
-    @staticmethod
-    @abstractmethod
-    def compute_isotopic_envelope(
-        feature: Sequence["Feature"],
-    ) -> Tuple[list[float], list[float]]:
-        ...
-
-    def get(self, descriptor: str):
-        return self.__getattribute__(f"get_{descriptor}")()
-
-    @classmethod
-    def descriptor_names(cls) -> list[str]:
-        return [x.split("_", 1)[-1] for x in dir(cls) if x.startswith("get_")]
 
 
 class Peak(Feature):
