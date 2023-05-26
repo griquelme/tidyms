@@ -1,6 +1,7 @@
 import numpy as np
-from tidyms.base.assay_data import AssayData, Sample, SampleData
-from tidyms.lcms import LCTrace, Peak, Annotation
+from tidyms.base.assay_data import AssayData
+from tidyms.base import Annotation, Sample, SampleData
+from tidyms.lcms import LCTrace, Peak
 from pathlib import Path
 import pytest
 from typing import cast

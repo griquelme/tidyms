@@ -5,7 +5,7 @@ from .annotation_data import AnnotationData
 from ..chem.atoms import Element, PeriodicTable, EM
 from ..chem._formula_generator import FormulaCoefficientBounds
 from ..chem.envelope_tools import make_formula_coefficients_envelopes
-from ..lcms import Feature
+from ..base import Feature
 
 
 class MMIFinder:

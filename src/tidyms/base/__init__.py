@@ -1,17 +1,15 @@
-from .legacy_assay import LegacyAssay
 from .assay import Assay
-from .assay_data import AssayData, Sample, SampleData
+from .assay_data import AssayData
 from .assay_processor import ProcessingPipeline
-from .isotopologue_annotator import IsotopologueAnnotator
-from . import lcms_assay
+from .base import Annotation, Feature, Roi, Sample, SampleData
 
 __all__ = [
+    "Annotation",
     "Assay",
     "AssayData",
-    "IsotopologueAnnotator",
-    "LegacyAssay",
+    "Feature",
     "ProcessingPipeline",
+    "Roi",
     "Sample",
     "SampleData",
-    "lcms_assay",
 ]

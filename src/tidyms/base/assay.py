@@ -11,9 +11,9 @@ Manages data processing including:
 from pathlib import Path
 from multiprocessing.pool import Pool
 from typing import Optional, Union, Sequence, Type
-from .assay_data import AssayData, Sample, SampleData
+from .assay_data import AssayData
 from .assay_processor import ProcessingPipeline
-from ..lcms import Feature, Roi
+from .base import Feature, Roi, Sample, SampleData
 from ..utils import get_progress_bar
 
 

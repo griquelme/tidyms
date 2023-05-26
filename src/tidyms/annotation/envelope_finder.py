@@ -7,7 +7,7 @@ Functions to find isotopic envelopes candidates in a list of m/z values.
 import bisect
 from typing import Tuple
 from ..chem.atoms import Element, PeriodicTable
-from ..lcms import Feature
+from ..base import Feature
 from .annotation_data import AnnotationData, SimilarityCache
 from collections.abc import Sequence
 
@@ -186,9 +186,7 @@ def _find_envelopes(
         candidate = candidates.pop()
 
         # find features with compatible m/z and similarities
-        min_mz, max_mz = _get_next_mz_search_interval(
-            candidate, bounds, charge, mz_tolerance
-        )
+        min_mz, max_mz = _get_next_mz_search_interval(candidate, bounds, charge, mz_tolerance)
         start = bisect.bisect(features, min_mz)
         end = bisect.bisect(features, max_mz)
         new_features = list()

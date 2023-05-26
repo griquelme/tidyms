@@ -4,7 +4,7 @@ from typing import Sequence
 from .annotation_data import AnnotationData
 from .envelope_finder import EnvelopeFinder
 from .mmi_finder import MMIFinder
-from ..lcms import Feature
+from ..base import Feature
 from ..chem import EnvelopeValidator
 from ..chem.atoms import EM, PeriodicTable
 from .. import _constants as c

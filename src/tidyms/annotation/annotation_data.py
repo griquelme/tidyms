@@ -1,5 +1,5 @@
 from typing import Optional
-from ..lcms import Feature
+from ..base import Feature
 from collections.abc import Sequence
 
 

@@ -9,7 +9,7 @@ Base classes to create processors for assay data.
 import inspect
 from abc import ABC, abstractmethod
 from .assay_data import SampleData, AssayData
-from ..lcms import Feature
+from .base import Feature
 from typing import Optional, Sequence
 from copy import deepcopy
 from math import inf

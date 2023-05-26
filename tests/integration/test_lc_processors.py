@@ -13,8 +13,8 @@ def lc_sample() -> ms.base.SampleData:
 
 def test_lc_single_sample_pipeline(lc_sample: ms.base.SampleData):
     processing_steps = [
-        ("ROI extractor", ms.base.lcms_assay.LCTraceExtractor()),
-        ("Feature extractor", ms.base.lcms_assay.LCFeatureExtractor()),
+        ("ROI extractor", ms.lcms_assay.LCTraceExtractor()),
+        ("Feature extractor", ms.lcms_assay.LCFeatureExtractor()),
     ]
     pipeline = ms.base.ProcessingPipeline(processing_steps)
     pipeline.set_default_parameters("qtof", "uplc")
