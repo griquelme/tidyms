@@ -12,7 +12,7 @@ from joblib import Parallel, delayed
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
-from typing import Dict, Generator, List, Optional, Tuple
+from typing import Generator, Optional
 from .utils import get_progress_bar
 from . import _constants as c
 
@@ -20,7 +20,7 @@ from . import _constants as c
 def match_features(
     feature_table: pd.DataFrame,
     samples_per_class: dict,
-    include_classes: Optional[List[int]],
+    include_classes: Optional[list[int]],
     mz_tolerance: float,
     rt_tolerance: float,
     min_fraction: float,
@@ -28,7 +28,7 @@ def match_features(
     n_jobs: Optional[int] = None,
     verbose: bool = False,
 ):
-    r"""
+    """
     Match features across samples using DBSCAN and GMM.
 
     See the :ref:`user guide <ft-correspondence>` for a detailed description of
@@ -108,7 +108,7 @@ def match_features(
 
 def _get_min_sample(
     samples_per_class: dict[int, int],
-    include_classes: Optional[List[int]],
+    include_classes: Optional[list[int]],
     min_fraction: float,
 ) -> int:
     """
@@ -218,10 +218,10 @@ def _estimate_n_species(
     samples: np.ndarray,
     clusters: np.ndarray,
     classes: np.ndarray,
-    samples_per_class: Dict[int, int],
-    include_classes: List[int],
+    samples_per_class: dict[int, int],
+    include_classes: list[int],
     min_dr: float,
-) -> Dict[int, int]:
+) -> dict[int, int]:
     """
     Estimate the number of species in a cluster.
 
@@ -309,7 +309,7 @@ def _get_cluster_iterator(
 
 def _process_cluster(
     X_c: np.ndarray, samples_c: np.ndarray, n_species: int, max_deviation: float
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Process each cluster using GMM.
 
@@ -423,7 +423,7 @@ def _build_label(data, size):
     return label, score_list
 
 
-def _get_progress_bar_total(ft_per_cluster: Dict[int, int]) -> int:
+def _get_progress_bar_total(ft_per_cluster: dict[int, int]) -> int:
     total = 0
     for k, v in ft_per_cluster.items():
         if (k > -1) and (v > 0):
