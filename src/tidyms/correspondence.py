@@ -6,28 +6,27 @@ match_features: Match features based on descriptors dispersion.
 """
 
 import numpy as np
-import pandas as pd
 from functools import partial
 from joblib import Parallel, delayed
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
-from typing import Generator, Optional
+from typing import Any, cast, Generator, Optional
 from .utils import get_progress_bar
-from . import _constants as c
 
 
 def match_features(
-    feature_table: pd.DataFrame,
-    samples_per_class: dict,
+    X: np.ndarray[Any, np.dtype[np.floating]],
+    samples: np.ndarray[Any, np.dtype[np.integer]],
+    classes: np.ndarray[Any, np.dtype[np.integer]],
+    samples_per_class: dict[int, int],
     include_classes: Optional[list[int]],
-    mz_tolerance: float,
-    rt_tolerance: float,
+    tolerance: np.ndarray[Any, np.dtype[np.floating]],
     min_fraction: float,
     max_deviation: float,
     n_jobs: Optional[int] = None,
     verbose: bool = False,
-):
+) -> np.ndarray[Any, np.dtype[np.integer]]:
     """
     Match features across samples using DBSCAN and GMM.
 
@@ -36,19 +35,20 @@ def match_features(
 
     Parameters
     ----------
-    feature_table : pd.DataFrame
-        Feature table obtained after feature detection.
-    samples_per_class : dict
+    X : numpy.ndarray
+        ``(N, M) ndarray`` with feature descriptors used in the matching
+        process. Each row is a feature and each column is a descriptor.
+    samples: numpy.ndarray
+        ``(N,) ndarray`` with sample names coded using integers.
+    classes: numpy.ndarray
+        ``(N,) ndarray`` with class names coded using integers.
+    samples_per_class : dict[int, int]
         Maps a class name to the number of samples in the class.
     include_classes : List or None, default=None
         Sample classes used to estimate the minimum cluster size and number of
         chemical species in a cluster.
-    mz_tolerance : float
-        m/z tolerance used to group close features. Sets the `eps` parameter in
-        the DBSCAN algorithm.
-    rt_tolerance : float
-        Rt tolerance used to group close features. Sets the `eps` parameter in
-        the DBSCAN algorithm.
+    tolerance : numpy.ndarray
+        ``(M, ) ndarray `` with tolerances for each descriptor in `X`.
     min_fraction : float
         Minimum fraction of samples of a given class in a cluster. If
         `include_classes` is ``None``, the total number of sample is used
@@ -73,26 +73,25 @@ def match_features(
         than one cluster. Values close to zero indicate higher quality grouping.
 
     """
-    X = feature_table.loc[:, [c.MZ, c.RT]].to_numpy()
-    samples = feature_table[c.SAMPLE].to_numpy()
-    classes = feature_table[c.CLASS].to_numpy()
-    # scale rt to use the same tolerance in both dimensions
-    X[:, 1] *= mz_tolerance / rt_tolerance
-
-    min_samples = _get_min_sample(samples_per_class, include_classes, min_fraction)
-    if include_classes is None:
-        include_classes = list(samples_per_class.keys())
+    n_features, n_cols = X.shape
+    # scale columns to share the tolerance units
+    X *= tolerance / tolerance[0]
 
     # DBSCAN clustering
+    min_samples = _get_min_sample(samples_per_class, include_classes, min_fraction)
     max_size = 100000
-    cluster = _cluster_dbscan(X, mz_tolerance, min_samples, max_size)
+    eps = tolerance[0]
+    cluster = _cluster_dbscan(X, eps, min_samples, max_size)
 
+    # estimate the number of species per DBSCAN cluster
+    if include_classes is None:
+        include_classes = list(samples_per_class.keys())
     species_per_cluster = _estimate_n_species(
         samples, cluster, classes, samples_per_class, include_classes, min_fraction
     )
 
+    # split DBSCAN clusters with multiple species
     cluster_iterator = _get_cluster_iterator(X, cluster, samples, species_per_cluster)
-
     if verbose:
         progress_bar = get_progress_bar()
         total = _get_progress_bar_total(species_per_cluster)
@@ -101,9 +100,9 @@ def match_features(
     func = partial(_split_cluster_worker, max_deviation=max_deviation)
     func = delayed(func)
     data = Parallel(n_jobs=n_jobs)(func(x) for x in cluster_iterator)
-    refined_cluster, score = _build_label(data, feature_table.shape[0])
-    results = {c.LABEL: refined_cluster, "indecisiveness": score}
-    return results
+    # TODO: Remove score computation.
+    refined_cluster, score = _build_label(data, n_features)
+    return refined_cluster
 
 
 def _get_min_sample(
@@ -215,12 +214,12 @@ def _cluster_dbscan(X: np.ndarray, eps: float, min_samples: int, max_size: int) 
 
 
 def _estimate_n_species(
-    samples: np.ndarray,
-    clusters: np.ndarray,
-    classes: np.ndarray,
+    samples: np.ndarray[Any, np.dtype[np.integer]],
+    clusters: np.ndarray[Any, np.dtype[np.integer]],
+    classes: np.ndarray[Any, np.dtype[np.integer]],
     samples_per_class: dict[int, int],
     include_classes: list[int],
-    min_dr: float,
+    min_fraction: float,
 ) -> dict[int, int]:
     """
     Estimate the number of species in a cluster.
@@ -233,13 +232,13 @@ def _estimate_n_species(
         A mapping from cluster label to the number of species estimated.
 
     """
-    n_clusters = clusters.max() + 1
+    n_clusters: int = np.max(clusters) + 1
     n_class = len(include_classes)
     species_array = np.zeros((n_class, n_clusters), dtype=int)
     # estimate the number of species in a cluster according to each class
     for k, cl in enumerate(include_classes):
         n_samples = samples_per_class[cl]
-        n_min = round(n_samples * min_dr)
+        n_min = round(n_samples * min_fraction)
         c_mask = classes == cl
         c_samples = samples[c_mask]
         c_clusters = clusters[c_mask]
@@ -334,7 +333,11 @@ def _process_cluster(
     gmm.fit(X_c)
 
     # compute the deviation of the features respect to each cluster
-    deviation = _get_deviation(X_c, gmm.covariances_, gmm.means_)
+    deviation = _get_deviation(
+        X_c,
+        cast(np.ndarray[Any, np.dtype[np.floating]], gmm.covariances_),
+        cast(np.ndarray[Any, np.dtype[np.floating]], gmm.means_),
+    )
 
     # assign each feature in a sample to component in the GMM minimizing the
     # total deviation in the sample.
