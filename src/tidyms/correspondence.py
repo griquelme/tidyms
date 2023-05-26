@@ -16,15 +16,15 @@ from . import _constants as c
 
 
 def match_features(
-        feature_table: pd.DataFrame,
-        samples_per_class: dict,
-        include_classes: Optional[List[int]],
-        mz_tolerance: float,
-        rt_tolerance: float,
-        min_fraction: float,
-        max_deviation: float,
-        n_jobs: Optional[int] = None,
-        verbose: bool = False
+    feature_table: pd.DataFrame,
+    samples_per_class: dict,
+    include_classes: Optional[List[int]],
+    mz_tolerance: float,
+    rt_tolerance: float,
+    min_fraction: float,
+    max_deviation: float,
+    n_jobs: Optional[int] = None,
+    verbose: bool = False,
 ):
     r"""
     Match features across samples using DBSCAN and GMM.See the
@@ -76,9 +76,7 @@ def match_features(
     # scale rt to use the same tolerance in both dimensions
     X[:, 1] *= mz_tolerance / rt_tolerance
 
-    min_samples = _get_min_sample(
-        samples_per_class, include_classes, min_fraction
-    )
+    min_samples = _get_min_sample(samples_per_class, include_classes, min_fraction)
     if include_classes is None:
         include_classes = list(samples_per_class.keys())
 
@@ -87,17 +85,10 @@ def match_features(
     cluster = _cluster_dbscan(X, mz_tolerance, min_samples, max_size)
 
     species_per_cluster = _estimate_n_species(
-        samples,
-        cluster,
-        classes,
-        samples_per_class,
-        include_classes,
-        min_fraction
+        samples, cluster, classes, samples_per_class, include_classes, min_fraction
     )
 
-    cluster_iterator = _get_cluster_iterator(
-        X, cluster, samples, species_per_cluster
-    )
+    cluster_iterator = _get_cluster_iterator(X, cluster, samples, species_per_cluster)
 
     if verbose:
         progress_bar = get_progress_bar()
@@ -108,17 +99,14 @@ def match_features(
     func = delayed(func)
     data = Parallel(n_jobs=n_jobs)(func(x) for x in cluster_iterator)
     refined_cluster, score = _build_label(data, feature_table.shape[0])
-    results = {
-        c.LABEL: refined_cluster,
-        "indecisiveness": score
-    }
+    results = {c.LABEL: refined_cluster, "indecisiveness": score}
     return results
 
 
 def _get_min_sample(
     samples_per_class: Dict[int, int],
     include_classes: Optional[List[int]],
-    min_fraction: float
+    min_fraction: float,
 ) -> int:
     """
     Computes the `min_sample` parameter to use in the DBSCAN model.
@@ -147,12 +135,7 @@ def _get_min_sample(
     return min_samples
 
 
-def _cluster_dbscan(
-        X: np.ndarray,
-        eps: float,
-        min_samples: int,
-        max_size: int
-) -> np.ndarray:
+def _cluster_dbscan(X: np.ndarray, eps: float, min_samples: int, max_size: int) -> np.ndarray:
     """
     Clusterize rows of X using the DBSCAN algorithm. X is split into chunks to
     reduce memory usage. The split is done in a way such that the solution
@@ -226,12 +209,12 @@ def _cluster_dbscan(
 
 
 def _estimate_n_species(
-        samples: np.ndarray,
-        clusters: np.ndarray,
-        classes: np.ndarray,
-        samples_per_class: Dict[int, int],
-        include_classes: List[int],
-        min_dr: float
+    samples: np.ndarray,
+    clusters: np.ndarray,
+    classes: np.ndarray,
+    samples_per_class: Dict[int, int],
+    include_classes: List[int],
+    min_dr: float,
 ) -> Dict[int, int]:
     """
     Estimate the number of species in a cluster.
@@ -254,8 +237,7 @@ def _estimate_n_species(
         c_mask = classes == cl
         c_samples = samples[c_mask]
         c_clusters = clusters[c_mask]
-        c_species = _estimate_n_species_one_class(
-            c_samples, c_clusters, n_min, n_clusters)
+        c_species = _estimate_n_species_one_class(c_samples, c_clusters, n_min, n_clusters)
         species_array[k, :] = c_species
     # keep the estimation with the highest number of species
     species = species_array.max(axis=0)
@@ -264,10 +246,7 @@ def _estimate_n_species(
 
 
 def _estimate_n_species_one_class(
-        samples: np.ndarray,
-        clusters: np.ndarray,
-        min_samples: int,
-        n_clusters: int
+    samples: np.ndarray, clusters: np.ndarray, min_samples: int, n_clusters: int
 ) -> np.ndarray:
     """
     Estimates the number of species in a cluster. Assumes only one class.
@@ -294,7 +273,7 @@ def _get_cluster_iterator(
     X: np.ndarray,
     cluster: np.ndarray,
     samples: np.ndarray,
-    species_per_cluster: Dict[int, int]
+    species_per_cluster: Dict[int, int],
 ) -> Generator[Tuple[np.ndarray, np.ndarray], None, None]:
     """
     Yields the rows of X associated with a cluster.
@@ -323,10 +302,7 @@ def _get_cluster_iterator(
 
 
 def _process_cluster(
-    X_c: np.ndarray,
-    samples_c: np.ndarray,
-    n_species: int,
-    max_deviation: float
+    X_c: np.ndarray, samples_c: np.ndarray, n_species: int, max_deviation: float
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Process each cluster using GMM.
@@ -357,7 +333,7 @@ def _process_cluster(
 
     # assign each feature in a sample to component in the GMM minimizing the
     # total deviation in the sample.
-    label = - np.ones_like(samples_c)   # by default features are set as noise
+    label = -np.ones_like(samples_c)  # by default features are set as noise
     unique_samples = np.unique(samples_c)
     # the indecisiveness is a metric that counts the number of samples
     # where more than one feature can be potentially assigned to a species
@@ -371,7 +347,7 @@ def _process_cluster(
         sample_deviation = deviation[sample_mask, :]
         # indecisiveness
         count = (sample_deviation < max_deviation).sum(axis=0)
-        indecisiveness += (count > 1)
+        indecisiveness += count > 1
 
         # Find the best option for each feature
         best_row, best_col = linear_sum_assignment(sample_deviation)
@@ -380,7 +356,7 @@ def _process_cluster(
         valid_ft_mask = sample_deviation[best_row, best_col] <= max_deviation
         best_col = best_col[valid_ft_mask]
         best_row = best_row[valid_ft_mask]
-        sample_label = - np.ones(sample_deviation.shape[0], dtype=int)
+        sample_label = -np.ones(sample_deviation.shape[0], dtype=int)
         sample_label[best_row] = best_col
         label[sample_mask] = sample_label
     indecisiveness /= unique_samples.size
@@ -396,7 +372,7 @@ def _get_deviation(
     Compute the deviation of features.
 
     Auxiliary function to _process_cluster
-    
+
     Parameters
     ----------
     X: array
