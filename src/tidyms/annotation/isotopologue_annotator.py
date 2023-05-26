@@ -1,7 +1,7 @@
-from tidyms.base.assay_data import SampleData
+from ..base import SampleData
 from typing import Optional
-from .assay_processor import SingleSampleProcessor
-from ..annotation import create_annotation_tools, annotate
+from ..base.assay_processor import SingleSampleProcessor
+from . import create_annotation_tools, annotate
 from ..chem import get_chnops_bounds
 from ..validation import ValidatorWithLowerThan, validate
 
