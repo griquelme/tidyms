@@ -14,83 +14,14 @@ import sqlalchemy.orm as orm
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import delete, select, Column, Float, ForeignKey, Integer, String
 from sqlalchemy.exc import IntegrityError
-from ..lcms import Annotation, Feature, Roi
-from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional, Sequence, Type, Union
+from .base import Annotation, Feature, Roi, Sample, SampleData
 
 
 # TODO: Move Sample and SampleData to another module.
-# TODO: add update_feature_label
 # TODO: add remove empty ROI
 # TODO: add remove non-matched.
-
-
-@dataclass
-class Sample:
-    """
-    Sample class to manage iteration over MSData objects.
-
-    Attributes
-    ----------
-    path : Path or str
-        Path to a raw data file.
-    id : str
-        Sample name.
-    ms_level : int, default=1
-        MS level of data to use.
-    start_time: float, default=0.0
-        Minimum acquisition time of MS scans to include. If ``None``, start from the first scan.
-    end_time: float or None, default=None
-        Maximum acquisition time of MS scans to include. If ``None``, end at the last scan.
-    group : str, default=""
-        Sample group.
-
-    """
-
-    path: Union[Path, str]
-    id: str
-    ms_level: int = 1
-    start_time: float = 0.0
-    end_time: Optional[float] = None
-    group: str = ""
-
-    def __post_init__(self):
-        """Normalize and validate data fields."""
-        if isinstance(self.path, str):
-            self.path = Path(self.path)
-
-    def to_dict(self) -> dict:
-        """Convert data into a dictionary."""
-        d = asdict(self)
-        d["path"] = str(d["path"])
-        return d
-
-
-class SampleData:
-    """
-    Container class for the associated with a sample.
-
-    Attributes
-    ----------
-    sample : Sample
-    roi : Optional[Sequence[Roi]]
-
-    """
-
-    def __init__(self, sample: Sample, roi: Optional[Sequence[Roi]] = None) -> None:
-        self.sample = sample
-        if roi is None:
-            roi = list()
-        self.roi = roi
-
-    def get_feature_list(self) -> Sequence[Feature]:
-        """Create a list of features from features stored in each ROI."""
-        feature_list = list()
-        for roi in self.roi:
-            if roi.features is not None:
-                feature_list.extend(roi.features)
-        return feature_list
 
 
 Base = orm.declarative_base()
@@ -572,7 +503,7 @@ class AssayData:
 
     def add_roi_list(self, roi_list: Sequence[Roi], sample: Sample):
         """
-        Store a list of ROI extracted from a sample in the DB.
+        Store a list of ROI extracted from a sample.
 
         Parameters
         ----------
@@ -891,6 +822,24 @@ class AssayData:
         """Store a SampleData instance."""
         self.add_roi_list(data.roi, data.sample)
         self.add_features(data.roi, data.sample)
+
+    def update_feature_labels(self, labels: dict[int, int]):
+        """
+        Update group label of features.
+
+        No check is done on the correctness of the annotation. The user must
+        check that a unique feature label per sample was assigned.
+
+        Parameters
+        ----------
+        labels : dict[int, int]
+            A mapping from feature ids to group labels.
+
+        """
+        update = [{"id": k, "label": v} for k, v in labels.items()]
+        with self.SessionFactory() as session:
+            session.execute(sa.update(AnnotationModel), update)
+            session.commit()
 
 
 def _create_feature_models(
