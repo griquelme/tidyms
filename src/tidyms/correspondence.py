@@ -1,5 +1,7 @@
 """
-Functions used to match features
+Cluster-based feature correspondence utilities.
+
+match_features: Match features based on descriptors dispersion.
 
 """
 
@@ -27,9 +29,10 @@ def match_features(
     verbose: bool = False,
 ):
     r"""
-    Match features across samples using DBSCAN and GMM.See the
-    :ref:`user guide <ft-correspondence>` for a detailed description of the
-    algorithm.
+    Match features across samples using DBSCAN and GMM.
+
+    See the :ref:`user guide <ft-correspondence>` for a detailed description of
+    the algorithm.
 
     Parameters
     ----------
@@ -63,7 +66,7 @@ def match_features(
     Returns
     -------
     results: dictionary
-        `clusters_` Contains the results from the feature mathing, where each
+        `clusters_` Contains the results from the feature matching, where each
         number is a different ionic species. Features labelled with `-1` are
         considered noise. `indecisiveness` is a metric that counts the fraction
         of features in a cluster that could be potentially assigned to more
@@ -104,12 +107,12 @@ def match_features(
 
 
 def _get_min_sample(
-    samples_per_class: Dict[int, int],
+    samples_per_class: dict[int, int],
     include_classes: Optional[List[int]],
     min_fraction: float,
 ) -> int:
     """
-    Computes the `min_sample` parameter to use in the DBSCAN model.
+    Compute the `min_sample` parameter used in the DBSCAN model.
 
     Auxiliary function to feature_correspondence
 
@@ -127,7 +130,7 @@ def _get_min_sample(
     if include_classes is None:
         min_samples = round(sum(samples_per_class.values()) * min_fraction)
     else:
-        min_samples = np.inf
+        min_samples = sum(samples_per_class.values())
         for k, v in samples_per_class.items():
             if k in include_classes:
                 tmp = round(v * min_fraction)
@@ -137,9 +140,10 @@ def _get_min_sample(
 
 def _cluster_dbscan(X: np.ndarray, eps: float, min_samples: int, max_size: int) -> np.ndarray:
     """
-    Clusterize rows of X using the DBSCAN algorithm. X is split into chunks to
-    reduce memory usage. The split is done in a way such that the solution
-    obtained is the same as the solution using X.
+    Cluster rows of X using the DBSCAN algorithm.
+
+    X is split into chunks to reduce memory usage. The split is done in a way
+    such that the solution obtained is the same as the solution using X.
 
     Auxiliary function to match_features.
 
@@ -154,6 +158,7 @@ def _cluster_dbscan(X: np.ndarray, eps: float, min_samples: int, max_size: int) 
     max_size : int
         maximum number of rows in X. If the number of rows is greater than
         this value, the data is processed in chunks to reduce memory usage.
+
     Returns
     -------
     cluster : Series
@@ -186,8 +191,9 @@ def _cluster_dbscan(X: np.ndarray, eps: float, min_samples: int, max_size: int) 
         split_index = np.hstack((0, split_index, n_rows))
     else:
         split_index = np.array([0, n_rows])
+        revert_sorted_index = np.arange(X.shape[0])
 
-    # clusterize using DBSCAN on each chunk
+    # cluster using DBSCAN on each chunk
     dbscan = DBSCAN(eps=eps, min_samples=min_samples, metric="chebyshev")
     n_chunks = split_index.size - 1
     cluster = np.zeros(X.shape[0], dtype=int)
@@ -273,10 +279,10 @@ def _get_cluster_iterator(
     X: np.ndarray,
     cluster: np.ndarray,
     samples: np.ndarray,
-    species_per_cluster: Dict[int, int],
-) -> Generator[Tuple[np.ndarray, np.ndarray], None, None]:
+    species_per_cluster: dict[int, int],
+) -> Generator[tuple[np.ndarray, np.ndarray, int, np.ndarray], None, None]:
     """
-    Yields the rows of X associated with a cluster.
+    Yield the rows of X associated with a cluster.
 
     Auxiliary function to match_features.
 
@@ -323,7 +329,6 @@ def _process_cluster(
     label : np.ndarray
     indecisiveness : np.ndarray
     """
-
     # fit GMM
     gmm = GaussianMixture(n_components=n_species, covariance_type="diag")
     gmm.fit(X_c)
@@ -363,11 +368,7 @@ def _process_cluster(
     return label, indecisiveness
 
 
-def _get_deviation(
-    X: np.ndarray,
-    covariances_: np.ndarray,
-    means_: np.ndarray,
-) -> np.ndarray:
+def _get_deviation(X: np.ndarray, covariances_: np.ndarray, means_: np.ndarray) -> np.ndarray:
     """
     Compute the deviation of features.
 
@@ -383,7 +384,7 @@ def _get_deviation(
 
     Returns
     -------
-    deviation : array
+    deviation : numpy.ndarray
 
     """
     n_species = covariances_.shape[0]
@@ -397,10 +398,7 @@ def _get_deviation(
 
 
 def _split_cluster_worker(args, max_deviation):
-    """
-    Worker used to parallelize feature clustering.
-
-    """
+    """Worker used to parallelize feature clustering."""
     Xc, samples_c, n_ft, index = args
     label_c, score = _process_cluster(Xc, samples_c, n_ft, max_deviation)
     return label_c, score, index, n_ft
