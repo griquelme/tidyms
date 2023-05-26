@@ -1,5 +1,5 @@
 from tidyms.base.assay_data import AssayData, SampleData, Sample
-from tidyms.base import assay_processor
+from tidyms.base import assay
 from tidyms.lcms import LCTrace, Peak
 import pytest
 import numpy as np
@@ -22,11 +22,8 @@ def create_dummy_sample_data() -> SampleData:
     return SampleData(sample, roi_list)
 
 
-class DummyProcessor(assay_processor.Processor):
-    """
-    Dummy class for testing purposes
-
-    """
+class DummyProcessor(assay.Processor):
+    """Dummy class for testing purposes."""
 
     def __init__(self, param1: int = 1, param2: int = 0):
         self.param1 = param1
@@ -46,12 +43,8 @@ class DummyProcessor(assay_processor.Processor):
         pass
 
 
-class DummyFeatureExtractor(assay_processor.FeatureExtractor):
-    """
-
-    Dummy class for testing purposes
-
-    """
+class DummyFeatureExtractor(assay.FeatureExtractor):
+    """Dummy class for testing purposes."""
 
     _validation_schema = {}
 
@@ -82,7 +75,7 @@ class DummyFeatureExtractor(assay_processor.FeatureExtractor):
         self.set_parameters(params)
 
 
-class DummyRoiExtractor(assay_processor.SingleSampleProcessor):
+class DummyRoiExtractor(assay.SingleSampleProcessor):
     def __init__(self, param1: int = 1, param2: int = 0):
         self.param1 = param1
         self.param2 = param2
@@ -171,7 +164,7 @@ def test__is_valid_feature_valid_feature():
     filters = {"mz": (0.5, 1.5), "height": (0.5, 1.5)}
     roi = create_dummy_trace()
     ft = Peak(0, 5, 10, roi)
-    assert assay_processor._is_valid_feature(ft, filters)
+    assert assay._is_valid_feature(ft, filters)
 
 
 def test__is_valid_feature_invalid_feature():
@@ -179,12 +172,12 @@ def test__is_valid_feature_invalid_feature():
     filters = {"mz": (2.0, 3.0), "height": (0.5, 1.5)}
     roi = create_dummy_trace()
     ft = Peak(0, 5, 10, roi)
-    assert not assay_processor._is_valid_feature(ft, filters)
+    assert not assay._is_valid_feature(ft, filters)
 
 
 def test__fill_filter_boundaries():
     filters = {"param1": (0, 10.0), "param2": (None, 5.0), "param3": (10.0, None)}
-    filled = assay_processor._fill_filter_boundaries(filters)
+    filled = assay._fill_filter_boundaries(filters)
     expected = {"param1": (0, 10.0), "param2": (-inf, 5.0), "param3": (10.0, inf)}
     assert filled == expected
 
@@ -195,7 +188,7 @@ def test_ProcessingPipeline_processors_with_repeated_names_raises_error():
         ("ROI extractor", DummyFeatureExtractor()),
     ]
     with pytest.raises(ValueError):
-        assay_processor.ProcessingPipeline(processing_steps)
+        assay.ProcessingPipeline(processing_steps)
 
 
 def test_ProcessingPipeline_get_parameters():
@@ -203,7 +196,7 @@ def test_ProcessingPipeline_get_parameters():
         ("ROI extractor", DummyRoiExtractor()),
         ("Feature extractor", DummyFeatureExtractor()),
     ]
-    pipeline = assay_processor.ProcessingPipeline(processing_steps)
+    pipeline = assay.ProcessingPipeline(processing_steps)
     for name, parameters in pipeline.get_parameters():
         processor = pipeline.get_processor(name)
         assert parameters == processor.get_parameters()
@@ -214,7 +207,7 @@ def test_ProcessingPipeline_set_parameters():
         ("ROI extractor", DummyRoiExtractor()),
         ("Feature extractor", DummyFeatureExtractor()),
     ]
-    pipeline = assay_processor.ProcessingPipeline(processing_steps)
+    pipeline = assay.ProcessingPipeline(processing_steps)
 
     new_parameters = {
         "ROI extractor": {"param1": 25.0, "param2": 23.0},
@@ -231,7 +224,7 @@ def test_ProcessingPipeline_set_default_parameters():
         ("ROI extractor", DummyRoiExtractor()),
         ("Feature extractor", DummyFeatureExtractor()),
     ]
-    pipeline = assay_processor.ProcessingPipeline(processing_steps)
+    pipeline = assay.ProcessingPipeline(processing_steps)
     instrument = "qtof"
     separation = "uplc"
     pipeline.set_default_parameters(instrument, separation)
@@ -250,6 +243,6 @@ def test_ProcessingPipeline_process():
         ("ROI extractor", DummyRoiExtractor()),
         ("Feature extractor", DummyFeatureExtractor()),
     ]
-    pipeline = assay_processor.ProcessingPipeline(processing_steps)
+    pipeline = assay.ProcessingPipeline(processing_steps)
     sample = create_dummy_sample_data()
     pipeline.process(sample)
