@@ -1,9 +1,19 @@
+"""Tools to process LC-MS-based datasets."""
+
+
 import numpy as np
+from collections import Counter
 from typing import Any, Optional
-from .base.assay_processor import SingleSampleProcessor, FeatureExtractor
-from .base.assay_data import SampleData
+from .base import (
+    AssayData,
+    FeatureExtractor,
+    FeatureMatcher,
+    SampleData,
+    SingleSampleProcessor,
+)
 from . import _constants as c
 from . import peaks
+from .correspondence import match_features
 from .fileio import MSData_from_file
 from .lcms import LCTrace, Peak
 from .raw_data_utils import make_roi
@@ -85,6 +95,7 @@ class LCTraceExtractor(SingleSampleProcessor):
         )
 
     def set_default_parameters(self, instrument: str, separation: str):
+        """Set the default parameters."""
         defaults: dict[str, Any] = {"max_missing": 1, "pad": 2, "min_intensity": 250}
         instrument_parameters = {c.QTOF: {"tolerance": 0.01}, c.ORBITRAP: {"tolerance": 0.005}}
         separation_parameters = {c.UPLC: {"min_length": 10}, c.HPLC: {"min_length": 20}}
@@ -127,6 +138,7 @@ class LCFeatureExtractor(FeatureExtractor):
         pass
 
     def set_default_parameters(self, instrument: str, separation: str):
+        """Set the default parameters."""
         if separation == c.HPLC:
             filters = {"width": (10, 90), "snr": (5, None)}
         else:  # mode = "uplc"
@@ -147,3 +159,129 @@ class LCFeatureExtractor(FeatureExtractor):
             if descriptor not in valid_descriptors:
                 msg = f"{descriptor} is not a valid descriptor name."
                 raise ValueError(msg)
+
+
+class LCFeatureMatcher(FeatureMatcher):
+    """
+    Perform feature correspondence on LC-MS data using a cluster-based approach.
+
+    Features are initially grouped by m/z and Rt similarity using DBSCAN. In
+    a second step, these clusters are further processed using a GMM approach,
+    obtaining clusters where each sample contributes with only one sample.
+
+    See the :ref:`user guide <ft-correspondence>` for a detailed description of
+    the algorithm.
+
+    Attributes
+    ----------
+    mz_tolerance : float, default=0.01
+        m/z tolerance used to group close features. Sets the `eps` parameter in
+        the DBSCAN algorithm.
+    rt_tolerance : float, default=3.0
+        Rt tolerance in seconds used to group close features. Sets the `eps`
+        parameter in the DBSCAN algorithm.
+    min_fraction : float, default=0.25
+        Minimum fraction of samples of a given group in a cluster. If
+        `include_groups` is ``None``, the total number of sample is used
+        to compute the minimum fraction.
+    include_groups : List or None, default=None
+        Sample groups used to estimate the minimum cluster size and number of
+        chemical species in a cluster.
+    max_deviation : float, default=3.0
+        The maximum deviation of a feature from a cluster, measured in numbers
+        of standard deviations from the cluster.
+    n_jobs: int or None, default=None
+        Number of jobs to run in parallel. ``None`` means 1 unless in a
+        :obj:`joblib.parallel_backend` context. ``-1`` means using all
+        processors.
+    silent : bool, default=True
+        If False, shows a progress.
+
+    """
+
+    def __init__(
+        self,
+        mz_tolerance: float = 0.01,
+        rt_tolerance: float = 3.0,
+        min_fraction: float = 0.25,
+        include_groups: Optional[list[str]] = None,
+        max_deviation: float = 3.0,
+        n_jobs: Optional[int] = None,
+        silent: bool = True,
+    ):
+        self.mz_tolerance = mz_tolerance
+        self.rt_tolerance = rt_tolerance
+        self.min_fraction = min_fraction
+        self.include_groups = include_groups
+        self.max_deviation = max_deviation
+        self.n_jobs = n_jobs
+        self.silent = silent
+
+    def _func(self, data: AssayData) -> dict[int, int]:
+        descriptors_names = [c.MZ, c.RT]
+        descriptors = data.get_descriptors(descriptors=descriptors_names)
+        feature_id = descriptors.pop("id")
+
+        sample_names = descriptors.pop(c.SAMPLE)
+        sample_to_code = {name: k for k, name in enumerate(set(sample_names))}
+        samples = np.array([sample_to_code[x] for x in sample_names])
+
+        group_names = descriptors.pop(c.CLASS)
+        group_to_code = {name: k for k, name in enumerate(set(group_names))}
+        groups = np.array([group_to_code[x] for x in group_names])
+
+        X = np.hstack([descriptors[x] for x in descriptors_names]).T
+
+        parameters = self.get_parameters()
+        parameters.pop(c.MZ)
+        parameters.pop(c.RT)
+        parameters["tolerance"] = np.array([self.mz_tolerance, self.rt_tolerance])
+
+        samples_per_group = _count_samples_per_group(data, group_to_code)
+        labels = match_features(X, samples, groups, samples_per_group, **parameters)
+
+        feature_id_to_label = {x: y for x, y in zip(feature_id, labels)}
+
+        return feature_id_to_label
+
+    def set_default_parameters(self, instrument: str, separation: str) -> dict:
+        """
+        Set default values based on instrument type and separation method.
+
+        Parameters
+        ----------
+        instrument : str
+            MS instrument used for the measurements. See
+
+        """
+        if instrument == c.QTOF:
+            mz_tolerance = 0.01
+        elif instrument == c.ORBITRAP:
+            mz_tolerance = 0.005
+        else:
+            msg = f"Valid instruments are: {c.MS_INSTRUMENTS}. Got {instrument}."
+            raise ValueError(msg)
+
+        if separation == c.HPLC:
+            rt_tolerance = 10
+        elif separation == c.UPLC:
+            rt_tolerance = 5
+        else:
+            msg = f"Valid separation modes are: {c.LC_MODES}. Got {separation}."
+            raise ValueError(msg)
+
+        defaults = {
+            "mz_tolerance": mz_tolerance,
+            "rt_tolerance": rt_tolerance,
+            "min_fraction": 0.25,
+            "max_deviation": 3.0,
+            "include_groups": None,
+            "n_jobs": None,
+            "verbose": False,
+        }
+        return defaults
+
+
+def _count_samples_per_group(data: AssayData, group_to_code: dict[str, int]) -> dict[int, int]:
+    counter = Counter([group_to_code[x.group] for x in data.get_samples()])
+    return dict(counter)
