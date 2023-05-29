@@ -20,6 +20,7 @@ from .assay_data import AssayData
 from .assay import (
     Assay,
     FeatureExtractor,
+    FeatureMatcher,
     ProcessingPipeline,
     Processor,
     SingleSampleProcessor,
@@ -33,6 +34,7 @@ __all__ = [
     "AssayData",
     "Feature",
     "FeatureExtractor",
+    "FeatureMatcher",
     "MultipleSampleProcessor",
     "ProcessingPipeline",
     "Processor",
