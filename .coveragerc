@@ -8,3 +8,5 @@ exclude_lines =
     def plot
     pragma: no cover
     def __repr__
+    abstractmethod
+    @abc.abstractmethod
