@@ -18,9 +18,9 @@ from .utils import get_progress_bar
 def match_features(
     X: np.ndarray[Any, np.dtype[np.floating]],
     samples: np.ndarray[Any, np.dtype[np.integer]],
-    classes: np.ndarray[Any, np.dtype[np.integer]],
-    samples_per_class: dict[int, int],
-    include_classes: Optional[list[int]],
+    groups: np.ndarray[Any, np.dtype[np.integer]],
+    samples_per_group: dict[int, int],
+    include_groups: Optional[list[int]],
     tolerance: np.ndarray[Any, np.dtype[np.floating]],
     min_fraction: float,
     max_deviation: float,
@@ -39,19 +39,19 @@ def match_features(
         ``(N, M) ndarray`` with feature descriptors used in the matching
         process. Each row is a feature and each column is a descriptor.
     samples: numpy.ndarray
-        ``(N,) ndarray`` with sample names coded using integers.
-    classes: numpy.ndarray
-        ``(N,) ndarray`` with class names coded using integers.
-    samples_per_class : dict[int, int]
-        Maps a class name to the number of samples in the class.
-    include_classes : List or None, default=None
-        Sample classes used to estimate the minimum cluster size and number of
+        ``(N,) ndarray`` with sample names encoded using integers.
+    groups: numpy.ndarray
+        ``(N,) ndarray`` with sample groups encoded using integers.
+    samples_per_group : dict[int, int]
+        Maps a group to the number of samples in the group.
+    include_groups : List or None, default=None
+        Sample groups used to estimate the minimum cluster size and number of
         chemical species in a cluster.
     tolerance : numpy.ndarray
         ``(M, ) ndarray `` with tolerances for each descriptor in `X`.
     min_fraction : float
-        Minimum fraction of samples of a given class in a cluster. If
-        `include_classes` is ``None``, the total number of sample is used
+        Minimum fraction of samples of a given group in a cluster. If
+        `include_groups` is ``None``, the total number of sample is used
         to compute the minimum fraction.
     max_deviation : float
         The maximum deviation of a feature from a cluster, measured in numbers
@@ -78,16 +78,16 @@ def match_features(
     X *= tolerance / tolerance[0]
 
     # DBSCAN clustering
-    min_samples = _get_min_sample(samples_per_class, include_classes, min_fraction)
+    min_samples = _get_min_sample(samples_per_group, include_groups, min_fraction)
     max_size = 100000
     eps = tolerance[0]
     cluster = _cluster_dbscan(X, eps, min_samples, max_size)
 
     # estimate the number of species per DBSCAN cluster
-    if include_classes is None:
-        include_classes = list(samples_per_class.keys())
+    if include_groups is None:
+        include_groups = list(samples_per_group.keys())
     species_per_cluster = _estimate_n_species(
-        samples, cluster, classes, samples_per_class, include_classes, min_fraction
+        samples, cluster, groups, samples_per_group, include_groups, min_fraction
     )
 
     # split DBSCAN clusters with multiple species
@@ -106,8 +106,8 @@ def match_features(
 
 
 def _get_min_sample(
-    samples_per_class: dict[int, int],
-    include_classes: Optional[list[int]],
+    samples_per_group: dict[int, int],
+    include_groups: Optional[list[int]],
     min_fraction: float,
 ) -> int:
     """
@@ -117,8 +117,8 @@ def _get_min_sample(
 
     Parameters
     ----------
-    samples_per_class : Dict[int, int]
-    include_classes : List[int] or None
+    samples_per_group : Dict[int, int]
+    include_group : List[int] or None
     min_fraction : number between 0 and 1
 
     Returns
@@ -126,12 +126,12 @@ def _get_min_sample(
     min_sample : int
 
     """
-    if include_classes is None:
-        min_samples = round(sum(samples_per_class.values()) * min_fraction)
+    if include_groups is None:
+        min_samples = round(sum(samples_per_group.values()) * min_fraction)
     else:
-        min_samples = sum(samples_per_class.values())
-        for k, v in samples_per_class.items():
-            if k in include_classes:
+        min_samples = sum(samples_per_group.values())
+        for k, v in samples_per_group.items():
+            if k in include_groups:
                 tmp = round(v * min_fraction)
                 min_samples = min(tmp, min_samples)
     return min_samples
@@ -216,9 +216,9 @@ def _cluster_dbscan(X: np.ndarray, eps: float, min_samples: int, max_size: int) 
 def _estimate_n_species(
     samples: np.ndarray[Any, np.dtype[np.integer]],
     clusters: np.ndarray[Any, np.dtype[np.integer]],
-    classes: np.ndarray[Any, np.dtype[np.integer]],
-    samples_per_class: dict[int, int],
-    include_classes: list[int],
+    groups: np.ndarray[Any, np.dtype[np.integer]],
+    samples_per_group: dict[int, int],
+    include_groups: list[int],
     min_fraction: float,
 ) -> dict[int, int]:
     """
@@ -233,16 +233,16 @@ def _estimate_n_species(
 
     """
     n_clusters: int = np.max(clusters) + 1
-    n_class = len(include_classes)
-    species_array = np.zeros((n_class, n_clusters), dtype=int)
-    # estimate the number of species in a cluster according to each class
-    for k, cl in enumerate(include_classes):
-        n_samples = samples_per_class[cl]
+    n_groups = len(include_groups)
+    species_array = np.zeros((n_groups, n_clusters), dtype=int)
+    # estimate the number of species in a cluster according to each group
+    for k, cl in enumerate(include_groups):
+        n_samples = samples_per_group[cl]
         n_min = round(n_samples * min_fraction)
-        c_mask = classes == cl
+        c_mask = groups == cl
         c_samples = samples[c_mask]
         c_clusters = clusters[c_mask]
-        c_species = _estimate_n_species_one_class(c_samples, c_clusters, n_min, n_clusters)
+        c_species = _estimate_n_species_one_group(c_samples, c_clusters, n_min, n_clusters)
         species_array[k, :] = c_species
     # keep the estimation with the highest number of species
     species = species_array.max(axis=0)
@@ -250,11 +250,11 @@ def _estimate_n_species(
     return n_species_per_cluster
 
 
-def _estimate_n_species_one_class(
+def _estimate_n_species_one_group(
     samples: np.ndarray, clusters: np.ndarray, min_samples: int, n_clusters: int
 ) -> np.ndarray:
     """
-    Estimates the number of species in a cluster. Assumes only one class.
+    Estimates the number of species in a cluster. Assumes only one group.
 
     Auxiliary function to _estimate_n_species.
 

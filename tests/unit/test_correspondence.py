@@ -42,7 +42,7 @@ def test_estimate_n_species_one_class(min_samples, expected):
     clusters = np.array(([0] * 2 + [1] * 2) * 2)  # two clusters
     n_clusters = 2
     # two species in two clusters are expected
-    res = correspondence._estimate_n_species_one_class(
+    res = correspondence._estimate_n_species_one_group(
         samples, clusters, min_samples, n_clusters
     )
     assert np.array_equal(res, expected)
