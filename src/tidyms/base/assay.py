@@ -23,7 +23,8 @@ from math import inf
 from multiprocessing.pool import Pool
 from typing import Optional, Union, Sequence, Type
 from ..utils import get_progress_bar
-from . import AssayData, Feature, Roi, Sample, SampleData
+from .base import Feature, Roi, Sample, SampleData
+from .assay_data import AssayData
 
 
 # TODO: don't process multiple times the same sample.
@@ -46,6 +47,7 @@ class Assay:
         roi_type: Type[Roi],
         feature_type: Type[Feature],
     ):
+        # TODO: add docstring
         self._data = AssayData(path, roi_type, feature_type)
         self._sample_pipeline = sample_pipeline
         self._multiple_sample_pipeline = list()
