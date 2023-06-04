@@ -37,6 +37,7 @@ dependencies = [
     "scikit-learn>=1.0.2",
     "scipy>=1.8",
     "seaborn>=0.11",
+    "sqlalchemy>=2.0.9",
     "statsmodels>=0.13",
     "tqdm>=4.0",
     "umap-learn>=0.5.3",
