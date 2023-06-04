@@ -32,7 +32,7 @@ from .lcms import Chromatogram, MSSpectrum
 from .legacy_assay import LegacyAssay
 from .raw_data_utils import *
 from . import dartms
-from .annotation import annotation
+from . import annotation
 from . import lcms_assay
 from . import base
 
