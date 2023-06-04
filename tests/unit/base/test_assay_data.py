@@ -600,7 +600,8 @@ def test_AssayData_get_descriptors_descriptors_subset(tmp_path: Path):
 
     requested_descriptors = ["mz", "rt"]
     descriptors = assay_data.get_descriptors(sample1, descriptors=requested_descriptors)
-    assert len(descriptors) == len(requested_descriptors)
+    # sample id, roi id, feature id and feature label are also included
+    assert len(descriptors) == (len(requested_descriptors) + 4)
     for v in descriptors.values():
         assert len(v) == 20
 
