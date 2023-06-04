@@ -41,7 +41,7 @@ from .container import DataContainer
 from . import container
 from . import _filter_functions as ff
 from . import validation
-from . import _constants as c
+from .base import constants as c
 import os.path
 from warnings import warn
 from typing import Optional, List, Union, Callable

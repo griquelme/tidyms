@@ -78,7 +78,8 @@ __tidyMSdartmsVersion__ = "0.9.0"
 # Imports
 #
 
-from . import fileio, _constants
+from .base import constants
+from . import fileio
 from . import base as Assay
 from .chem.formula import Formula
 

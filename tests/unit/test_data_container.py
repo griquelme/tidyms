@@ -1,6 +1,6 @@
 from tidyms import container
 from tidyms.container import DataContainer
-from tidyms import _constants as c
+from tidyms.base import constants as c
 import numpy as np
 import pandas as pd
 import pytest

@@ -8,7 +8,7 @@ from scipy.interpolate import CubicSpline, interp1d
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from typing import List, Callable, Union, Optional
 from .utils import mad
-from . import _constants as c
+from .base import constants as c
 
 
 def average_replicates(

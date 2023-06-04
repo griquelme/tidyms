@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional, Sequence, Tuple, Type, TypeVar, Union
 
-from .. import _constants as c
+from . import constants as c
 
 # Replace with Self when code is updated to Python 3.11
 AnyRoi = TypeVar("AnyRoi", bound="Roi")

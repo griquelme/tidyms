@@ -3,7 +3,7 @@ import bokeh.plotting
 from bokeh.palettes import all_palettes
 from bokeh.models import ColumnDataSource, Segment
 from .utils import get_settings
-from . import _constants as c
+from .base import constants as c
 from typing import Dict, Generator, List, Optional
 
 

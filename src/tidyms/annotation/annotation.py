@@ -7,7 +7,7 @@ from .mmi_finder import MMIFinder
 from ..base import Feature
 from ..chem import EnvelopeValidator
 from ..chem.atoms import EM, PeriodicTable
-from .. import _constants as c
+from ..base import constants as c
 
 
 def create_annotation_table(feature_list: list[Feature]) -> pd.DataFrame:

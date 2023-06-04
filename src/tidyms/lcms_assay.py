@@ -11,7 +11,7 @@ from .base import (
     SampleData,
     SingleSampleProcessor,
 )
-from . import _constants as c
+from .base import constants as c
 from . import peaks
 from .correspondence import match_features
 from .fileio import MSData_from_file

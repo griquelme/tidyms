@@ -1,6 +1,6 @@
 from tidyms import legacy_assay
 from tidyms.lcms import LCTrace, Peak
-from tidyms import _constants as c
+from tidyms.base import constants as c
 import pytest
 from pathlib import Path
 import os

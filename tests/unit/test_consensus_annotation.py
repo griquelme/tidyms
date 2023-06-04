@@ -1,5 +1,5 @@
 from tidyms import consensus_annotation
-from tidyms import _constants as c
+from tidyms.base import constants as c
 import pandas as pd
 import pytest
 from collections import Counter

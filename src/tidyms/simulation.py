@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from . import _constants as c
+from .base import constants as c
 from typing import Optional
 from .container import DataContainer
 

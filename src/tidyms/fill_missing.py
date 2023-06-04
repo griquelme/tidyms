@@ -4,7 +4,7 @@ from functools import partial
 from joblib import Parallel, delayed
 from scipy.integrate import trapz
 from typing import Generator, Optional, Tuple
-from . import _constants as c
+from .base import constants as c
 from .fileio import MSData
 from .lcms import Chromatogram
 from .raw_data_utils import make_chromatograms

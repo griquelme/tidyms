@@ -31,7 +31,7 @@ from . import utils
 from . import validation
 from . import fileio
 from . import _batch_corrector
-from . import _constants as c
+from .base import constants as c
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA

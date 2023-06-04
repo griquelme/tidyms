@@ -34,7 +34,7 @@ import pandas as pd
 from pathlib import Path
 from typing import BinaryIO, Generator, List, Optional, TextIO, Tuple, Union
 from .container import DataContainer
-from . import _constants as c
+from .base import constants as c
 from . import lcms
 from . import validation as v
 from .utils import get_tidyms_path, gaussian_mixture

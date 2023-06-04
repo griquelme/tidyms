@@ -32,7 +32,7 @@ from scipy.integrate import cumtrapz
 from .base import Annotation, Feature, Roi
 from . import peaks
 from . import _plot_bokeh
-from . import _constants as c
+from .base import constants as c
 from .utils import array1d_to_str, str_to_array1d
 
 

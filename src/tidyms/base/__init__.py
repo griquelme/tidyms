@@ -27,11 +27,13 @@ from .assay import (
     MultipleSampleProcessor,
 )
 from .base import Annotation, Feature, Roi, Sample, SampleData
+from . import constants
 
 __all__ = [
     "Annotation",
     "Assay",
     "AssayData",
+    "constants",
     "Feature",
     "FeatureExtractor",
     "FeatureMatcher",

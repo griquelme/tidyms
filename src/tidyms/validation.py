@@ -8,7 +8,7 @@ from functools import wraps
 import cerberus
 from typing import Callable
 import numpy as np
-from . import _constants as c
+from .base import constants as c
 
 
 def is_callable(field, value, error):

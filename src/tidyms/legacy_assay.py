@@ -10,7 +10,7 @@ from uuid import uuid4
 from typing import Callable, List, Optional, Tuple, Union
 
 from .base.base import Feature, Roi
-from . import _constants as c
+from .base import constants as c
 from . import validation as val
 from . import raw_data_utils
 from .container import DataContainer

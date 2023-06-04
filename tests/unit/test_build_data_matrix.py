@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from tidyms import _build_data_matrix
-from tidyms import _constants as c
+from tidyms.base import constants as c
 import pytest
 
 

@@ -2,7 +2,7 @@ import pandas as pd
 import networkx as nx
 from collections import Counter
 from typing import Dict, Final, List, Tuple
-from . import _constants as c
+from .base import constants as c
 
 _COUNT: Final[str] = "count"
 _TOTAL: Final[str] = "total"
