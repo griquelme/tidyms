@@ -1,7 +1,8 @@
-from ..base import SampleData
+"""Processor class used for isotopologue annotation of features detected in a sample."""
+
 from typing import Optional
-from ..base.assay_processor import SingleSampleProcessor
 from . import create_annotation_tools, annotate
+from ..base import SampleData, SingleSampleProcessor
 from ..chem import get_chnops_bounds
 from ..validation import ValidatorWithLowerThan, validate
 
@@ -10,7 +11,11 @@ class IsotopologueAnnotator(SingleSampleProcessor):
     """
     Annotates isotopologues in a sample.
 
-    Annotations are added to the `annotation` attribute of each feature.
+    Groups isotopologue features. Each group is assigned an unique label, and a
+    charge state. Each feature in a group is assigned an unique index that
+    determines the position in the envelope.
+
+    Annotations are stored to the `annotation` attribute of each feature.
 
     Attributes
     ----------
@@ -82,6 +87,18 @@ class IsotopologueAnnotator(SingleSampleProcessor):
         pass
 
     def set_default_parameters(self, instrument: str, separation: str):
+        """
+        Set parameters using instrument type and separation method information.
+
+        Parameters
+        ----------
+        instrument : str
+            MS instrument type.
+        separation : str
+            Analytical separation method.
+
+        """
+        # TODO : set defaults using orbitrap and qtof
         bounds = get_chnops_bounds(2000)
         defaults = {
             "bounds": bounds,
