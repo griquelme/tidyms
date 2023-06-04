@@ -25,7 +25,7 @@ def match_features(
     min_fraction: float,
     max_deviation: float,
     n_jobs: Optional[int] = None,
-    verbose: bool = False,
+    silent: bool = True,
 ) -> np.ndarray[Any, np.dtype[np.integer]]:
     """
     Match features across samples using DBSCAN and GMM.
@@ -60,8 +60,8 @@ def match_features(
         Number of jobs to run in parallel. ``None`` means 1 unless in a
         :obj:`joblib.parallel_backend` context. ``-1`` means using all
         processors.
-    verbose : bool
-        If True, shows a progress bar.
+    silent : bool, default=True
+        If ``False``, shows a progress bar.
 
     Returns
     -------
@@ -92,7 +92,7 @@ def match_features(
 
     # split DBSCAN clusters with multiple species
     cluster_iterator = _get_cluster_iterator(X, cluster, samples, species_per_cluster)
-    if verbose:
+    if not silent:
         progress_bar = get_progress_bar()
         total = _get_progress_bar_total(species_per_cluster)
         cluster_iterator = progress_bar(cluster_iterator, total=total)
@@ -329,6 +329,10 @@ def _process_cluster(
     indecisiveness : np.ndarray
     """
     # fit GMM
+    n_rows = X_c.shape[0]
+    if n_rows == 1:
+        return samples_c, np.ones(n_rows, dtype=float)
+
     gmm = GaussianMixture(n_components=n_species, covariance_type="diag")
     gmm.fit(X_c)
 
