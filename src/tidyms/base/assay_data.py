@@ -769,7 +769,7 @@ class AssayData:
                     msg = f"{d} is not a valid descriptor. Valid descriptors are: {valid_str}."
                     raise ValueError(msg)
 
-        descriptors.extend(["id", "roi_id", "sample_id", "label"])
+        descriptors = descriptors + ["id", "roi_id", "sample_id", "label"]
         descriptor_dict = {x: list() for x in descriptors}
 
         with self.SessionFactory() as session:
