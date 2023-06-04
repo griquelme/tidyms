@@ -2,12 +2,12 @@
 
 
 import numpy as np
-from collections import Counter
 from typing import Any, Optional
 from .base import (
     AssayData,
     FeatureExtractor,
     FeatureMatcher,
+    Sample,
     SampleData,
     SingleSampleProcessor,
 )
@@ -221,26 +221,20 @@ class LCFeatureMatcher(FeatureMatcher):
         descriptors_names = [c.MZ, c.RT]
         descriptors = data.get_descriptors(descriptors=descriptors_names)
         feature_id = descriptors.pop("id")
+        dataset_samples = data.get_samples()
 
-        sample_names = descriptors.pop(c.SAMPLE)
-        sample_to_code = {name: k for k, name in enumerate(set(sample_names))}
-        samples = np.array([sample_to_code[x] for x in sample_names])
-
-        group_names = descriptors.pop(c.CLASS)
-        group_to_code = {name: k for k, name in enumerate(set(group_names))}
-        groups = np.array([group_to_code[x] for x in group_names])
-
-        X = np.hstack([descriptors[x] for x in descriptors_names]).T
-
+        # adapt input to match_features function
+        sample_names = descriptors.pop("sample_id")  # TODO: fix hardcoded names
+        samples = _create_sample_code_array(sample_names, dataset_samples)
+        groups = _create_group_code_array(sample_names, dataset_samples)
+        X = np.vstack([descriptors[x] for x in descriptors_names]).T
         parameters = self.get_parameters()
-        parameters.pop(c.MZ)
-        parameters.pop(c.RT)
-        parameters["tolerance"] = np.array([self.mz_tolerance, self.rt_tolerance])
+        _adapt_parameters(parameters, dataset_samples)
+        samples_per_group = _count_samples_per_group(dataset_samples)
 
-        samples_per_group = _count_samples_per_group(data, group_to_code)
         labels = match_features(X, samples, groups, samples_per_group, **parameters)
 
-        feature_id_to_label = {x: y for x, y in zip(feature_id, labels)}
+        feature_id_to_label = {x: int(y) for x, y in zip(feature_id, labels)}
 
         return feature_id_to_label
 
@@ -277,11 +271,65 @@ class LCFeatureMatcher(FeatureMatcher):
             "max_deviation": 3.0,
             "include_groups": None,
             "n_jobs": None,
-            "verbose": False,
+            "silent": True,
         }
         return defaults
 
+    @staticmethod
+    def _validate_parameters(parameters: dict):
+        schema = {
+            "mz_tolerance": {"type": "number", "min": 0.0},
+            "rt_tolerance": {"type": "number", "min": 0.0},
+            "min_fraction": {"type": "number", "min": 0.0, "max": 1.0},
+            "max_deviation": {"type": "number", "min": 0.0},
+            "include_classes": {
+                "type": "list",
+                "nullable": True,
+                "schema": {"type": "string"},
+            },
+            "n_jobs": {"nullable": True, "type": "integer"},
+            "silent": {"type": "boolean"},
+        }
+        validator = ValidatorWithLowerThan(schema)
+        validate(parameters, validator)
 
-def _count_samples_per_group(data: AssayData, group_to_code: dict[str, int]) -> dict[int, int]:
-    counter = Counter([group_to_code[x.group] for x in data.get_samples()])
-    return dict(counter)
+
+def _count_samples_per_group(dataset_samples: list[Sample]) -> dict[int, int]:
+    unique_groups = {x.group for x in dataset_samples}
+    group_to_code = {name: k for k, name in enumerate(unique_groups)}
+    groups = [group_to_code[x.group] for x in dataset_samples]
+    counts = dict()
+    for g in groups:
+        counts[g] = counts.get(g, 0) + 1
+    return counts
+
+
+def _create_sample_code_array(sample_names: list[str], dataset_samples: list[Sample]):
+    """Create an array where each element is an integer associated with the sample id."""
+    unique_samples = {x.id for x in dataset_samples}
+    sample_to_code = {name: k for k, name in enumerate(unique_samples)}
+    return np.array([sample_to_code[x] for x in sample_names])
+
+
+def _create_group_code_array(
+    sample_names: list[str], dataset_samples: list[Sample]
+) -> np.ndarray[Any, np.dtype[np.integer]]:
+    """Create an array where each element is an integer associated with the sample group."""
+    unique_samples = {x.id for x in dataset_samples}
+    unique_groups = {x.group for x in dataset_samples}
+    group_to_code = {name: k for k, name in enumerate(unique_groups)}
+    sample_to_group = {x.id: x.group for x in dataset_samples}
+    sample_to_group_code = {k: group_to_code[sample_to_group[k]] for k in unique_samples}
+    return np.array([sample_to_group_code[x] for x in sample_names])
+
+
+def _adapt_parameters(parameters: dict, dataset_samples: list[Sample]):
+    """Adapt LCFeatureMatcher parameters to match_features function."""
+    mz_tolerance = parameters.pop("mz_tolerance")
+    rt_tolerance = parameters.pop("rt_tolerance")
+    parameters["tolerance"] = np.array([mz_tolerance, rt_tolerance])
+    if parameters["include_groups"] is not None:
+        unique_groups = {x.group for x in dataset_samples}
+        group_to_code = {name: k for k, name in enumerate(unique_groups)}
+        include_groups = [group_to_code[x] for x in parameters["include_groups"]]
+        parameters["include_groups"] = include_groups
