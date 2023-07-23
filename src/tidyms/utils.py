@@ -64,7 +64,9 @@ def gaussian_mixture(x: np.ndarray, params: np.ndarray) -> np.ndarray:
     return mixture
 
 
-def normalize(df: pd.DataFrame, method: str, feature: Optional[str] = None) -> pd.DataFrame:
+def normalize(
+    df: pd.DataFrame, method: str, feature: Optional[str] = None
+) -> pd.DataFrame:
     """
     Normalize samples using different methods.
 
@@ -326,7 +328,9 @@ def _fill_na(s: reduced_type, fill_value: Optional[float]):
     return res
 
 
-def _find_closest_sorted(x: np.ndarray, xq: Union[np.ndarray, float, int]) -> np.ndarray:
+def _find_closest_sorted(
+    x: np.ndarray, xq: Union[np.ndarray, float, int]
+) -> np.ndarray:
     """
     Find the index in x closest to each xq element. Assumes that x is sorted.
 
@@ -547,9 +551,9 @@ def get_progress_bar():
     return progress_bar
 
 
-def array1d_to_str(arr: np.ndarray):
+def array_to_json_str(arr: np.ndarray) -> str:
     """
-    Encode a numpy array into a string.
+    Serialize a numpy array as a JSON string.
 
     Parameters
     ----------
@@ -558,16 +562,22 @@ def array1d_to_str(arr: np.ndarray):
     Returns
     -------
     str
+        JSON string with the following three fields. `dtype` store the array
+        dtype, `shape` contains the array shape and `base64_bytes` stores
+        the array data in base64 format.
 
     """
-    arr_str = base64.b64encode(arr.tobytes()).decode("utf8")
-    dtype_str = str(arr.dtype)
-    return dtype_str + "," + arr_str
+    d = {
+        "dtype": str(arr.dtype),
+        "shape": arr.shape,
+        "base64_bytes": base64.b64encode(arr.tobytes()).decode("utf8"),
+    }
+    return json.dumps(d)
 
 
-def str_to_array1d(s: str):
+def json_str_to_array(s: str):
     """
-    Decode a string generated with array1d_to_str into a numpy array.
+    Decode a string generated with array_to_json_str into a numpy array.
 
     Parameters
     ----------
@@ -578,7 +588,8 @@ def str_to_array1d(s: str):
     numpy.ndarray
 
     """
-    sep_index = s.index(",")
-    dtype = s[:sep_index]
-    data = base64.b64decode(bytes(s[sep_index + 1 :], "utf8"))
-    return np.frombuffer(data, dtype=dtype).copy()
+    d = json.loads(s)
+    dtype = d["dtype"]
+    shape = d["shape"]
+    data = base64.b64decode(bytes(d["base64_bytes"], "utf8"))
+    return np.frombuffer(data, dtype=dtype).reshape(shape).copy()

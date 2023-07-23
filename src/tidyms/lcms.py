@@ -33,7 +33,7 @@ from .base import Annotation, Feature, Roi
 from . import peaks
 from . import _plot_bokeh
 from .base import constants as c
-from .utils import array1d_to_str, str_to_array1d
+from .utils import array_to_json_str, json_str_to_array
 
 
 class MSSpectrum:
@@ -253,12 +253,14 @@ class MZTrace(Roi):
     @staticmethod
     def _deserialize(s: str) -> dict[str, Any]:
         d = json.loads(s)
-        d[c.SPINT] = str_to_array1d(d[c.SPINT])
-        d[c.MZ] = None if d[c.MZ] is None else str_to_array1d(d[c.MZ])
-        d[c.TIME] = str_to_array1d(d[c.TIME])
-        d[c.SCAN] = None if d[c.SCAN] is None else str_to_array1d(d[c.SCAN])
-        d[c.NOISE] = None if d[c.NOISE] is None else str_to_array1d(d[c.NOISE])
-        d[c.BASELINE] = None if d[c.BASELINE] is None else str_to_array1d(d[c.BASELINE])
+        d[c.SPINT] = json_str_to_array(d[c.SPINT])
+        d[c.MZ] = None if d[c.MZ] is None else json_str_to_array(d[c.MZ])
+        d[c.TIME] = json_str_to_array(d[c.TIME])
+        d[c.SCAN] = None if d[c.SCAN] is None else json_str_to_array(d[c.SCAN])
+        d[c.NOISE] = None if d[c.NOISE] is None else json_str_to_array(d[c.NOISE])
+        d[c.BASELINE] = (
+            None if d[c.BASELINE] is None else json_str_to_array(d[c.BASELINE])
+        )
         return d
 
     def to_string(self) -> str:
@@ -271,12 +273,14 @@ class MZTrace(Roi):
 
         """
         d = dict()
-        d[c.TIME] = array1d_to_str(self.time)
-        d[c.SPINT] = array1d_to_str(self.spint)
-        d[c.SCAN] = None if self.scan is None else array1d_to_str(self.scan)
-        d[c.MZ] = None if self.mz is None else array1d_to_str(self.mz)
-        d[c.BASELINE] = None if self.baseline is None else array1d_to_str(self.baseline)
-        d[c.NOISE] = None if self.noise is None else array1d_to_str(self.noise)
+        d[c.TIME] = array_to_json_str(self.time)
+        d[c.SPINT] = array_to_json_str(self.spint)
+        d[c.SCAN] = None if self.scan is None else array_to_json_str(self.scan)
+        d[c.MZ] = None if self.mz is None else array_to_json_str(self.mz)
+        d[c.BASELINE] = (
+            None if self.baseline is None else array_to_json_str(self.baseline)
+        )
+        d[c.NOISE] = None if self.noise is None else array_to_json_str(self.noise)
         # TODO: DELETE THIS BLOCK
         if self.features is None:
             d[c.ROI_FEATURE_LIST] = None
@@ -399,7 +403,9 @@ class LCTrace(MZTrace):
         if self.baseline is None:
             self.baseline = peaks.estimate_baseline(self.spint, self.noise)
 
-        start, apex, end = peaks.detect_peaks(self.spint, self.noise, self.baseline, **kwargs)
+        start, apex, end = peaks.detect_peaks(
+            self.spint, self.noise, self.baseline, **kwargs
+        )
         self.features = [Peak(s, a, e, self) for s, a, e in zip(start, apex, end)]
 
     def plot(
@@ -635,7 +641,8 @@ class Peak(Feature):
 
         """
         height = (
-            self.roi.spint[self.start : self.end] - self.roi.baseline[self.start : self.end]
+            self.roi.spint[self.start : self.end]
+            - self.roi.baseline[self.start : self.end]
         )
         area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
@@ -735,7 +742,9 @@ class Peak(Feature):
                 end = bisect.bisect(ft.roi.scan, scan_end)
                 apex = (start + end) // 2  # dummy value
                 tmp_peak = Peak(start, apex, end, ft.roi)
-                p_area = trapz(tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end])
+                p_area = trapz(
+                    tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end]
+                )
                 p.append(p_area)
                 mz.append(tmp_peak.mz)
         total_area = sum(p)
