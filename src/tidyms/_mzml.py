@@ -69,7 +69,7 @@ SECONDS = "UO:0000010"
 MINUTES = "UO:0000031"
 
 # data types
-FLOAT16 = "UNKNOWN" ## TODO check "MS:1000521"
+FLOAT16 = "UNKNOWN"
 FLOAT32 = "MS:1000521"
 FLOAT64 = "MS:1000523"
 INT32 = "MS:1000519"
@@ -84,7 +84,6 @@ DATA_TYPES = {
 
 
 class MZMLReader:
-
     def __init__(self, path: Path):
         self.path = path
         sp_offset, chrom_offset, index_offset = build_offset_list(path)
@@ -101,7 +100,7 @@ class MZMLReader:
             self.spectra_offset,
             self.chromatogram_offset,
             self.index_offset,
-            index
+            index,
         )
 
     def get_chromatogram(self, index: int) -> dict:
@@ -110,7 +109,7 @@ class MZMLReader:
             self.spectra_offset,
             self.chromatogram_offset,
             self.index_offset,
-            index
+            index,
         )
 
 
@@ -140,9 +139,7 @@ def build_offset_list(filename: Path) -> Tuple[list[int], list[int], int]:
             filename, index_offset
         )
     else:
-        spectra_offset, chromatogram_offset = _build_offset_list_non_indexed(
-            filename
-        )
+        spectra_offset, chromatogram_offset = _build_offset_list_non_indexed(filename)
         index_offset = getsize(filename)
     return spectra_offset, chromatogram_offset, index_offset
 
@@ -174,17 +171,12 @@ def get_spectrum(
 
     """
     xml_str = _get_xml_data(
-        filename,
-        spectra_offset,
-        chromatogram_offset,
-        index_offset,
-        n,
-        "spectrum"
+        filename, spectra_offset, chromatogram_offset, index_offset, n, "spectrum"
     )
     try:
         elements = list(fromstring(xml_str))
     except:
-        print("error", xml_str) 
+        print("error", xml_str)
         raise "laskjf"
     spectrum = dict()
     for el in elements:
@@ -229,12 +221,7 @@ def get_chromatogram(
 
     """
     xml_str = _get_xml_data(
-        filename,
-        spectra_offset,
-        chromatogram_offset,
-        index_offset,
-        n,
-        "chromatogram"
+        filename, spectra_offset, chromatogram_offset, index_offset, n, "chromatogram"
     )
     elements = fromstring(xml_str)
     name = elements.attrib.get("id")
@@ -443,9 +430,7 @@ def _get_index_offset(filename: Path) -> int:
     return index_offset
 
 
-def _build_offset_list_non_indexed(
-        filename: Path
-) -> Tuple[list[int], list[int]]:
+def _build_offset_list_non_indexed(filename: Path) -> Tuple[list[int], list[int]]:
     """
     Builds manually the indices for non-indexed mzML files.
 
@@ -502,8 +487,7 @@ def _find_chromatogram_tag_offset(line: str, regex: re.Pattern) -> int:
 
 
 def _build_offset_list_indexed(
-    filename: Path,
-    index_offset: int
+    filename: Path, index_offset: int
 ) -> Tuple[list[int], list[int]]:
     """
     Builds a list of offsets where spectra and chromatograms are stored.
