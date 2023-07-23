@@ -231,7 +231,9 @@ class Feature(ABC):
         ...
 
     @classmethod
-    def from_str(cls, s: str, roi: Roi, annotation: Optional[Annotation] = None) -> "Feature":
+    def from_str(
+        cls, s: str, roi: Roi, annotation: Optional[Annotation] = None
+    ) -> "Feature":
         """
         Create a feature instance from a string.
 
@@ -313,6 +315,10 @@ class Sample:
         Maximum acquisition time of MS scans to include. If ``None``, end at the last scan.
     group : str, default=""
         Sample group.
+    order : int, default=0
+        Measurement order of sample in an assay.
+    batch : int, default=0
+        Analytical batch of sample in an assay.
 
     """
 
@@ -322,6 +328,8 @@ class Sample:
     start_time: float = 0.0
     end_time: Optional[float] = None
     group: str = ""
+    order: int = 0
+    batch: int = 0
 
     def __post_init__(self):
         """Normalize and validate data fields."""

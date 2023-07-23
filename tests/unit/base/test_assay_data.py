@@ -9,7 +9,7 @@ from typing import cast
 
 def create_dummy_sample(path: Path, suffix: int, group: str = "") -> Sample:
     file = path / f"sample-{suffix}.mzML"
-    sample = Sample(path=str(file), id=file.stem, group=group)
+    sample = Sample(path=str(file), id=file.stem, group=group, order=suffix)
     return sample
 
 

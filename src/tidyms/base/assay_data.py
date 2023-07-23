@@ -46,6 +46,8 @@ class SampleModel(Base):
     start_time: Mapped[float] = mapped_column(Float)
     end_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     group: Mapped[str] = mapped_column(String, nullable=True)
+    order: Mapped[int] = mapped_column(Integer, default=0)
+    batch: Mapped[int] = mapped_column(Integer, default=0)
 
     def to_sample(self) -> Sample:
         """Convert to a Sample object."""
@@ -56,6 +58,8 @@ class SampleModel(Base):
             self.start_time,
             self.end_time,
             self.group,
+            self.order,
+            self.batch,
         )
 
 
