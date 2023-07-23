@@ -1,3 +1,5 @@
+"""Implementation of the Minimum Mass Finder."""
+
 import numpy as np
 import bisect
 from typing import Optional
@@ -10,8 +12,32 @@ from ..base import Feature
 
 class MMIFinder:
     """
-    Finds Minimum Mass Isotopologue (MMI) candidates using an array of feature
-    m/z and an array of feature area.
+    Find the Minimum Mass Isotopologue (MMI) in a list of features.
+
+    Parameters
+    ----------
+    bounds : dict
+        Mapping from an element symbol str to the minimum and maximum
+        allowed values in formulas.
+    max_mass : float
+        Maximum mass to build rules.
+    length : int
+        length of the theoretical envelopes used to compute the search
+        rules.
+    bin_size : int
+        Mass interval used to build the rules.
+    mz_tol : float
+        m/z tolerance to search candidates.
+    p_tol : float
+        abundance tolerance used to search candidates.
+    min_similarity : float, default=0.9
+        Minimum similarity to create candidates.
+    custom_abundances : dict, optional
+        Provides custom elemental abundances. A mapping from element
+        symbols str to an abundance array. The abundance array must have
+        the same size that the natural abundance and its sum must be equal
+        to one. For example, for "C", an alternative abundance can be
+        array([0.15, 0.85]) for isotopes with nominal mass 12 and 13.
 
     """
 
@@ -27,35 +53,6 @@ class MMIFinder:
         min_similarity: float,
         custom_abundances: Optional[dict[str, np.ndarray]] = None,
     ):
-        """
-        Constructor method.
-
-        Parameters
-        ----------
-        bounds : dict
-            Mapping from an element symbol str to the minimum and maximum
-            allowed values in formulas.
-        max_mass : float
-            Maximum mass to build rules.
-        length : int
-            length of the theoretical envelopes used to compute the search
-            rules.
-        bin_size : int
-            Mass interval used to build the rules.
-        mz_tol : float
-            m/z tolerance to search candidates.
-        p_tol : float
-            abundance tolerance used to search candidates.
-        min_similarity : float, default=0.9
-            Minimum similarity to create candidates.
-        custom_abundances : dict, optional
-            Provides custom elemental abundances. A mapping from element
-            symbols str to an abundance array. The abundance array must have
-            the same size that the natural abundance and its sum must be equal
-            to one. For example, for "C", an alternative abundance can be
-            array([0.15, 0.85]) for isotopes with nominal mass 12 and 13.
-
-        """
         self.rules = _create_rules_dict(
             bounds, max_mass, length, bin_size, p_tol, custom_abundances
         )
@@ -69,8 +66,7 @@ class MMIFinder:
 
     def find(self, data: AnnotationData) -> list[tuple[Feature, int]]:
         """
-        Search MMI candidates using m/z and area information from a feature
-        list.
+        Search MMI candidates using features m/z and area.
 
         Parameters
         ----------
@@ -142,7 +138,9 @@ def _find_candidate(
     if start < end:
         for k in range(start, end):
             candidate = data.features[k]
-            is_valid = _check_candidate(data, mono, candidate, min_similarity, min_qp, max_qp)
+            is_valid = _check_candidate(
+                data, mono, candidate, min_similarity, min_qp, max_qp
+            )
             if is_valid:
                 candidates.append((candidate, charge))
     return candidates
@@ -220,9 +218,9 @@ def _create_envelope_arrays(
     elements = _select_elements(list(bounds), custom_abundances)
     isotopes = [x.get_mmi() for x in elements]
     f_bounds = FormulaCoefficientBounds({x: bounds[x.get_symbol()] for x in isotopes})
-    coeff = f_bounds.make_coefficients(M_max)
+    formula_coefficients = f_bounds.make_coefficients(M_max)
     envelope = make_formula_coefficients_envelopes(
-        bounds, coeff, max_length, custom_abundances
+        bounds, formula_coefficients, max_length, custom_abundances
     )
     M = envelope.M
     p = envelope.p
