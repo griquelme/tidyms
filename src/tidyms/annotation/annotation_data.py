@@ -1,3 +1,5 @@
+"""Storage tools for the annotation algorithm."""
+
 from typing import Optional
 from ..base import Feature
 from collections.abc import Sequence
@@ -11,8 +13,6 @@ class AnnotationData:
     ----------
     features : list[Feature]
         List of features sorted by m/z
-    annotation : dict[Feature, int]
-        Annotation of features
     similarity_cache : SimilarityCache
         Stores similarity between features.
     non_annotated : set[Feature]
@@ -28,7 +28,7 @@ class AnnotationData:
         self._label_counter = 0
 
     def get_monoisotopologue(self) -> Optional[Feature]:
-        """Gets the current non-annotated feature with the greatest area."""
+        """Get the current non-annotated feature with the greatest area."""
         if self._monoisotopologues:
             mono = self._monoisotopologues[-1]
             while self._monoisotopologues and (mono not in self.non_annotated):
@@ -67,6 +67,7 @@ class SimilarityCache:
         self._cache: dict[Feature, dict[Feature, float]] = dict()
 
     def get_similarity(self, ft1: Feature, ft2: Feature):
+        """Get the similarity between a pair of features."""
         ft1_sim = self._cache.setdefault(ft1, dict())
         ft2_sim = self._cache.setdefault(ft2, dict())
         if ft2 in ft1_sim:
