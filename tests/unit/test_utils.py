@@ -169,22 +169,6 @@ def test_find_closest_multiple_values():
     assert np.array_equal(result, ind)
 
 
-def test_sample_to_path(tmpdir):
-    # create random names and then create empty files for a subset of them
-    random_file_names = [create_random_file_name() for _ in range(100)]
-    sample_names = [os.path.splitext(x)[0] for x in random_file_names]
-    available = np.random.choice(random_file_names, 30)
-    for names in available:
-        path = os.path.join(tmpdir, names)
-        open(path, "a").close()
-
-    sample_to_path = utils.sample_to_path(sample_names, tmpdir)
-    for names in available:
-        path = os.path.join(tmpdir, names)
-        fname = os.path.splitext(names)[0]
-        assert sample_to_path[fname] == path
-
-
 def test_cv_single_row_df(single_row_df):
     data = single_row_df
     # with one row the std is nan

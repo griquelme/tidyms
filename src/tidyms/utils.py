@@ -158,34 +158,6 @@ def transform(df: pd.DataFrame, method: str) -> pd.DataFrame:
     return transformed
 
 
-def sample_to_path(samples, path):
-    """
-    map sample names to raw path if available.
-
-    Parameters
-    ----------
-    samples : Iterable[str].
-        samples names
-    path : str.
-        path to raw sample data.
-
-    Returns
-    -------
-    d : dict
-
-    """
-    # TODO: this function should accept an extension parameter to prevent
-    #   files with the same name but invalid extensions from being used
-    available_files = os.listdir(path)
-    filenames = [os.path.splitext(x)[0] for x in available_files]
-    full_path = [os.path.join(path, x) for x in available_files]
-    d = dict()
-    for k, name in enumerate(filenames):
-        if name in samples:
-            d[name] = full_path[k]
-    return d
-
-
 def cv(df: data_type, fill_value: Optional[float] = None) -> reduced_type:
     """
     Computes the Coefficient of variation for each column.
