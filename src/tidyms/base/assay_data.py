@@ -50,7 +50,12 @@ class SampleModel(Base):
     def to_sample(self) -> Sample:
         """Convert to a Sample object."""
         return Sample(
-            str(self.path), self.id, self.ms_level, self.start_time, self.end_time, self.group
+            str(self.path),
+            self.id,
+            self.ms_level,
+            self.start_time,
+            self.end_time,
+            self.group,
         )
 
 
@@ -293,7 +298,9 @@ class AssayData:
             are defined by `PREPROCESSING_STEPS` in the `_constants` module.
 
         """
-        processed = [ProcessedSampleModel(sample_id=x.id, pipeline=pipeline) for x in samples]
+        processed = [
+            ProcessedSampleModel(sample_id=x.id, pipeline=pipeline) for x in samples
+        ]
         with self.SessionFactory() as session:
             session.add_all(processed)
             session.commit()
@@ -423,7 +430,9 @@ class AssayData:
 
         """
         with self.SessionFactory() as session:
-            stmt = select(ProcessParameterModel).where(ProcessParameterModel.step == step)
+            stmt = select(ProcessParameterModel).where(
+                ProcessParameterModel.step == step
+            )
             results = session.execute(stmt)
             param_model = results.scalar()
             if param_model is None:
@@ -452,7 +461,9 @@ class AssayData:
 
         """
         with self.SessionFactory() as session:
-            stmt = select(ProcessParameterModel).where(ProcessParameterModel.pipeline == name)
+            stmt = select(ProcessParameterModel).where(
+                ProcessParameterModel.pipeline == name
+            )
             parameters = dict()
             for row in session.execute(stmt):
                 param_model = row.ProcessParameterModel
@@ -474,7 +485,9 @@ class AssayData:
         parameter_model_list = list()
         for step, param in parameters.items():
             param_str = json.dumps(param)
-            model = ProcessParameterModel(step=step, parameters=param_str, pipeline=name)
+            model = ProcessParameterModel(
+                step=step, parameters=param_str, pipeline=name
+            )
             parameter_model_list.append(model)
 
         with self.SessionFactory() as session:
@@ -495,7 +508,9 @@ class AssayData:
         """
         update = list()
         for step, param in parameters.items():
-            update.append({"pipeline": name, "step": step, "parameters": json.dumps(param)})
+            update.append(
+                {"pipeline": name, "step": step, "parameters": json.dumps(param)}
+            )
 
         with self.SessionFactory() as session:
             session.execute(sa.update(ProcessParameterModel), update)
@@ -610,7 +625,11 @@ class AssayData:
         for roi in roi_list:
             if roi.features is not None:
                 for ft in roi.features:
-                    ft_model, annotation_model, descriptor_model = _create_feature_models(
+                    (
+                        ft_model,
+                        annotation_model,
+                        descriptor_model,
+                    ) = _create_feature_models(
                         sample, roi, ft, ft_id, descriptor_names, self.DescriptorModel
                     )
 
@@ -702,7 +721,11 @@ class AssayData:
 
         """
         with self.SessionFactory() as session:
-            stmt = select(FeatureModel).join(AnnotationModel).where(FeatureModel.id == ft_id)
+            stmt = (
+                select(FeatureModel)
+                .join(AnnotationModel)
+                .where(FeatureModel.id == ft_id)
+            )
             result = session.execute(stmt).scalar()
             if result is not None:
                 annotation = result.annotation.to_annotation()
@@ -785,6 +808,25 @@ class AssayData:
                     descriptor_dict[d].append(row.DescriptorModel.__dict__[d])
         return descriptor_dict
 
+    def get_annotations(self) -> dict[str, Sequence[int]]:
+        """Get annotations of features."""
+        columns = [
+            "id",
+            "label",
+            "sample_id",
+            "isotopologue_index",
+            "isotopologue_label",
+            "charge",
+        ]
+        annotation_dict = {x: list() for x in columns}
+        with self.SessionFactory() as session:
+            stmt = select(AnnotationModel).where(AnnotationModel.label != -1)
+            result = session.execute(stmt)
+            for row in result:
+                for c in columns:
+                    annotation_dict[c].append(row.AnnotationModel.__dict__[c])
+        return annotation_dict
+
     def get_sample_data(self, sample_id: str) -> SampleData:
         """Retrieve a SampleData instance."""
         sample = self.search_sample(sample_id)
@@ -839,6 +881,7 @@ class AssayData:
         update = [{"id": k, "label": v} for k, v in labels.items()]
         with self.SessionFactory() as session:
             session.execute(sa.update(AnnotationModel), update)
+            session.execute(sa.update(self.DescriptorModel), update)
             session.commit()
 
 

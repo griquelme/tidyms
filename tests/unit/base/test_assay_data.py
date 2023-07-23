@@ -606,6 +606,59 @@ def test_AssayData_get_descriptors_descriptors_subset(tmp_path: Path):
         assert len(v) == 20
 
 
+def test_AssayData_update_feature_labels(tmp_path: Path):
+    assay_data = AssayData("", LCTrace, Peak)
+
+    # add samples
+    sample1 = create_dummy_sample(tmp_path, 1)
+    sample2 = create_dummy_sample(tmp_path, 2)
+    assay_data.add_samples([sample1, sample2])
+
+    # add roi
+    roi_list = [create_dummy_lc_trace() for _ in range(10)]
+    assay_data.add_roi_list(roi_list, sample1)
+    assay_data.add_roi_list(roi_list, sample2)
+
+    # roi_list with roi.id values
+    roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample1))
+
+    # add features
+    add_dummy_peaks(roi_list, 2)
+
+    assay_data.add_features(roi_list, sample1)
+
+    # roi_list with roi.id values
+    roi_list = cast(list[LCTrace], assay_data.get_roi_list(sample2))
+
+    # add features
+    add_dummy_peaks(roi_list, 2)
+    assay_data.add_features(roi_list, sample2)
+
+    labels_before = assay_data.get_descriptors()["label"]
+    update_labels_dict = {5: 1, 10: 1, 11: 2}
+    assay_data.update_feature_labels(update_labels_dict)
+    descriptors = assay_data.get_descriptors()
+
+    # Check equality for descriptors data
+    labels = descriptors["label"]
+    feature_id = descriptors["id"]
+    for ft_id, updated_label, old_label in zip(feature_id, labels, labels_before):
+        if ft_id in update_labels_dict:
+            assert updated_label == update_labels_dict[ft_id]
+        else:
+            assert updated_label == old_label
+
+    # Check equality for annotation data
+    annotation_data = assay_data.get_annotations()
+    labels = annotation_data["label"]
+    feature_id = annotation_data["id"]
+    for ft_id, updated_label, old_label in zip(feature_id, labels, labels_before):
+        if ft_id in update_labels_dict:
+            assert updated_label == update_labels_dict[ft_id]
+        else:
+            assert updated_label == old_label
+
+
 def test_AssayData_load_existing_db(tmp_path: Path):
     db_path = tmp_path / "my_db.db"
     assay_data = AssayData(db_path, LCTrace, Peak)
