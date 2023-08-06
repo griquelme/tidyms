@@ -127,6 +127,7 @@ class Feature(ABC):
     """
 
     def __init__(self, roi: Roi, annotation: Optional[Annotation] = None):
+        self._descriptors = dict()  # descriptors cache
         self.roi = roi
         self._mz = None
         self._area = None
@@ -262,7 +263,7 @@ class Feature(ABC):
         """
         Compute the isotopic envelope from a list of isotopologue features.
 
-        Must return two list:
+        Must return two lists:
 
         - The sorted m/z values of the envelope.
         - The abundance associated to each isotopologue. Normalized to 1.
@@ -278,8 +279,17 @@ class Feature(ABC):
 
         A descriptor is a method that starts with `get_`.
 
+        Returns
+        -------
+        float
+            The value of the requested descriptor
+
         """
-        return self.__getattribute__(f"get_{descriptor}")()
+        value = self._descriptors.get(descriptor)
+        if value is None:
+            value = self.__getattribute__(f"get_{descriptor}")()
+            self._descriptors[descriptor] = value
+        return value
 
     @classmethod
     def descriptor_names(cls) -> list[str]:
