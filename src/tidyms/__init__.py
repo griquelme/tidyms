@@ -29,9 +29,9 @@ from . import consensus_annotation
 from .container import DataContainer
 from .fileio import MSData
 from .lcms import Chromatogram, MSSpectrum
-from .legacy_assay import LegacyAssay
+
+# from .legacy_assay import LegacyAssay
 from .raw_data_utils import *
-from . import dartms
 from . import annotation
 from . import lcms_assay
 from . import base
