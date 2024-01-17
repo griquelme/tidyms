@@ -11,16 +11,14 @@ AssayData:
 import json
 import sqlalchemy as sa
 import sqlalchemy.orm as orm
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, Session
 from sqlalchemy import delete, select, Column, Float, ForeignKey, Integer, String
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
-from typing import Optional, Sequence, Type, Union
+from typing import cast, Optional, Sequence, Type
 from .base import Annotation, Feature, Roi, Sample, SampleData
 
 
-# TODO: Move Sample and SampleData to another module.
-# TODO: add remove empty ROI
 # TODO: add remove non-matched.
 
 
@@ -89,7 +87,7 @@ class RoiModel(Base):
 
     def to_roi(self, roi_type: Type[Roi]) -> Roi:
         """Create a ROI instance."""
-        roi = roi_type.from_string(self.data)
+        roi = roi_type.from_str(self.data)
         roi.id = self.id
         return roi
 
@@ -139,58 +137,22 @@ class AnnotationModel(Base):
         )
 
 
-def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData):
+class AssayData:
     """
-    Create a Model for descriptors of features.
+    Storage class for Assay data.
 
-    The table is created using available descriptors from the Feature class.
+    Persists assay Samples, ROIs, features and feature descriptors using SQLite.
 
     Parameters
     ----------
-    feature_type : Type[Feature]
-        The Feature class used in the Assay.
-    metadata : MetaData
-        DB Metadata.
-
-    Returns
-    -------
-    DescriptorModel: Base
-
-    """
-    table_name = "descriptors"
-
-    columns: list[Column] = [
-        Column("id", Integer, ForeignKey("features.id"), primary_key=True),
-        Column("sample_id", String, ForeignKey("samples.id")),
-        Column("roi_id", Integer, ForeignKey("rois.id")),
-        Column("label", Integer, ForeignKey("annotations.label")),
-    ]
-
-    descriptors = [Column(x, Float) for x in feature_type.descriptor_names()]
-    columns.extend(descriptors)
-    attrs = {
-        "__tablename__": table_name,
-        "__table__": sa.Table(table_name, metadata, *columns),
-    }
-
-    return type("DescriptorModel", (Base,), attrs)
-
-
-class AssayData:
-    """
-
-    Manage Sample, Roi and Feature persistence in an Assay using a SQLite DataBase.
-
-    Attributes
-    ----------
-    engine : sqlalchemy.Engine
-    feature : Type
-        Feature Type of Features stored in the DB.
-    roi : Type
-        ROI Type of ROI stored in the DB.
-    SessionFactory : sqlalchemy.sessionmaker
-    DescriptorModel : Type
-        Class attribute. Model Type for feature descriptors.
+    name : Path or None.
+        Path to SQLite DB. If ``None``, uses an in-memory database.
+    roi : Type[Roi]
+        ROI type of :term:`ROI` stored in the DB.
+    feature : Type[Feature]
+        Feature type of :term:`feature` stored in the DB.
+    echo : bool, default=False
+        If ``True``, logs statements emitted to the DB.
 
     """
 
@@ -198,55 +160,47 @@ class AssayData:
 
     def __init__(
         self,
-        name: Union[Path, str],
+        path: Optional[Path],
         roi: Type[Roi],
         feature: Type[Feature],
         echo: bool = False,
     ):
-        """
-
-        Create a new instance.
-
-        Parameters
-        ----------
-        name : Union[Path, str]
-            Path to SQLite DB.
-        roi : Type[Roi]
-            ROI type of ROI stored in the DB.
-        feature : Type[Feature]
-            Feature type of features stored in the DB.
-        echo : bool, default=False
-            If ``True``, logs statements emitted to the DB.
-
-        """
         self.roi = roi
         self.feature = feature
 
-        # Create a database engine and session factory
-        if name:
-            db_address = f"sqlite:///{name}"
-        else:
+        if path is None:
             db_address = "sqlite:///:memory:"
+        else:
+            db_address = f"sqlite:///{path}"
+
         self.engine = sa.create_engine(db_address, echo=echo)
         self.SessionFactory = orm.sessionmaker(bind=self.engine)
         self._create_descriptor_model(feature)
 
-        # Create the table in the database
         Base.metadata.create_all(self.engine)
 
-        # set values for ROI id and Feature id
+        self._roi_id = 0
+        self._feature_id = 0
+        self._set_id_values()
+
+    @property
+    def roi_id(self):
+        """Get the first ROI id available."""
+        return self._roi_id
+
+    @property
+    def feature_id(self):
+        """Get the first feature id available."""
+        return self._feature_id
+
+    def _set_id_values(self):
+        """Set roi and feature id to index newly inserted data."""
         with self.SessionFactory() as session:
             roi_id = session.query(sa.sql.func.max(RoiModel.id)).scalar()
-            if roi_id is None:
-                roi_id = 0
-            else:
-                roi_id += 1
+            roi_id = 0 if roi_id is None else roi_id + 1
             self._roi_id = roi_id
             feature_id = session.query(sa.sql.func.max(FeatureModel.id)).scalar()
-            if feature_id is None:
-                feature_id = 0
-            else:
-                feature_id += 1
+            feature_id = 0 if feature_id is None else feature_id + 1
             self._feature_id = feature_id
 
     @classmethod
@@ -319,6 +273,7 @@ class AssayData:
         pipeline : str
 
         """
+        # TODO: add samples to unflag
         with self.SessionFactory() as session:
             stmt = delete(ProcessedSampleModel).where(
                 ProcessedSampleModel.pipeline == pipeline
@@ -386,7 +341,7 @@ class AssayData:
 
     def set_processing_parameters(self, step: str, pipeline: str, parameters: dict):
         """
-        Store preprocessing parameters of a step in the DB.
+        Store preprocessing parameters of a processing step in the DB.
 
         Parameters
         ----------
@@ -520,6 +475,12 @@ class AssayData:
             session.execute(sa.update(ProcessParameterModel), update)
             session.commit()
 
+    def _label_roi_list(self, roi_list: Sequence[Roi]):
+        """Add a id label to ROIs."""
+        for k_roi, roi in enumerate(roi_list, start=self._roi_id):
+            roi.id = k_roi
+        self._roi_id += len(roi_list)
+
     def add_roi_list(self, roi_list: Sequence[Roi], sample: Sample):
         """
         Store a list of ROI extracted from a sample.
@@ -531,15 +492,14 @@ class AssayData:
 
         """
         roi_model_list = list()
-        for k, roi in enumerate(roi_list, start=self._roi_id):
-            roi.id = k
-            roi_model = RoiModel(sample_id=sample.id, data=roi.to_string(), id=roi.id)
+        self._label_roi_list(roi_list)
+        for roi in roi_list:
+            roi_model = RoiModel(sample_id=sample.id, data=roi.to_str(), id=roi.id)
             roi_model_list.append(roi_model)
 
         with self.SessionFactory() as session:
             session.add_all(roi_model_list)
             session.commit()
-        self._roi_id += len(roi_list)
 
     def get_roi_list(self, sample: Sample) -> Sequence[Roi]:
         """
@@ -611,7 +571,57 @@ class AssayData:
             session.execute(stmt)
             session.commit()
 
-    def add_features(self, roi_list: Sequence[Roi], sample: Sample):
+    def _label_feature_list(self, feature_list: Sequence[Feature]):
+        """Add an id label for each feature."""
+        for k, ft in enumerate(feature_list, start=self._feature_id):
+            ft.id = k
+        self._feature_id += len(feature_list)
+
+    def _add_feature_data(self, feature_list: Sequence[Feature], session: Session):
+        """Add feature data to a Session."""
+        feature_model_list = list()
+        for ft in feature_list:
+            model = FeatureModel(roi_id=ft.roi.id, data=ft.to_str(), id=ft.id)
+            feature_model_list.append(model)
+        session.add_all(feature_model_list)
+
+    def _add_feature_annotation_data(
+        self, feature_list: Sequence[Feature], sample: Sample, session: Session
+    ):
+        """Add feature annotation data to session."""
+        feature_annotation_model_list = list()
+        for ft in feature_list:
+            model = AnnotationModel(
+                id=ft.id,
+                sample_id=sample.id,
+                roi_id=ft.roi.id,
+                label=ft.annotation.label,
+                charge=ft.annotation.charge,
+                isotopologue_label=ft.annotation.isotopologue_label,
+                isotopologue_index=ft.annotation.isotopologue_index,
+            )
+            feature_annotation_model_list.append(model)
+        session.add_all(feature_annotation_model_list)
+
+    def _add_feature_descriptors_data(
+        self, feature_list: Sequence[Feature], sample: Sample, session: Session
+    ):
+        """Add descriptor information to session."""
+        feature_annotation_model_list = list()
+        descriptor_names = self.feature.descriptor_names()
+        for ft in feature_list:
+            ft_descriptors = {x: ft.get(x) for x in descriptor_names}
+            model = self.DescriptorModel(
+                id=ft.id,
+                sample_id=sample.id,
+                roi_id=ft.roi.id,
+                label=ft.annotation.label,
+                **ft_descriptors,
+            )
+            feature_annotation_model_list.append(model)
+        session.add_all(feature_annotation_model_list)
+
+    def add_features(self, feature_list: Sequence[Feature], sample: Sample):
         """
         Store a list of features in the DB.
 
@@ -621,33 +631,12 @@ class AssayData:
         sample : Sample
 
         """
-        feature_model_list = list()
-        annotation_model_list = list()
-        descriptor_model_list = list()
-        descriptor_names = self.feature.descriptor_names()
-        ft_id = self._feature_id
-        for roi in roi_list:
-            if roi.features is not None:
-                for ft in roi.features:
-                    (
-                        ft_model,
-                        annotation_model,
-                        descriptor_model,
-                    ) = _create_feature_models(
-                        sample, roi, ft, ft_id, descriptor_names, self.DescriptorModel
-                    )
-
-                    feature_model_list.append(ft_model)
-                    annotation_model_list.append(annotation_model)
-                    descriptor_model_list.append(descriptor_model)
-                    ft_id += 1
+        self._label_feature_list(feature_list)
         with self.SessionFactory() as session:
-            session.add_all(feature_model_list)
-            session.add_all(annotation_model_list)
-            session.add_all(descriptor_model_list)
+            self._add_feature_data(feature_list, session)
+            self._add_feature_annotation_data(feature_list, sample, session)
+            self._add_feature_descriptors_data(feature_list, sample, session)
             session.commit()
-            # only update the id if the transaction is successful
-            self._feature_id = ft_id + 1
 
     def get_features_by_sample(self, sample: Sample) -> list[Feature]:
         """
@@ -812,7 +801,7 @@ class AssayData:
                     descriptor_dict[d].append(row.DescriptorModel.__dict__[d])
         return descriptor_dict
 
-    def get_annotations(self) -> dict[str, Sequence[int]]:
+    def get_annotations(self) -> dict[str, list[int]]:
         """Get annotations of features."""
         columns = [
             "id",
@@ -822,13 +811,14 @@ class AssayData:
             "isotopologue_label",
             "charge",
         ]
-        annotation_dict = {x: list() for x in columns}
+        annotation_dict: dict[str, list[int]] = {x: list() for x in columns}
         with self.SessionFactory() as session:
             stmt = select(AnnotationModel).where(AnnotationModel.label != -1)
             result = session.execute(stmt)
             for row in result:
                 for c in columns:
-                    annotation_dict[c].append(row.AnnotationModel.__dict__[c])
+                    val = cast(int, row.AnnotationModel.__dict__[c])
+                    annotation_dict[c].append(val)
         return annotation_dict
 
     def get_sample_data(self, sample_id: str) -> SampleData:
@@ -867,7 +857,7 @@ class AssayData:
     def store_sample_data(self, data: SampleData):
         """Store a SampleData instance."""
         self.add_roi_list(data.roi, data.sample)
-        self.add_features(data.roi, data.sample)
+        self.add_features(data.get_feature_list(), data.sample)
 
     def update_feature_labels(self, labels: dict[int, int]):
         """
@@ -889,38 +879,38 @@ class AssayData:
             session.commit()
 
 
-def _create_feature_models(
-    sample: Sample,
-    roi: Roi,
-    ft: Feature,
-    ft_id: int,
-    descriptor_names: list[str],
-    descriptor_model_type,
-):
+def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData):
     """
-    Create FeatureModel, AnnotationModel and FeatureModel for a Feature.
+    Create a Model for descriptors of features.
 
-    Auxiliary function to AssayData.add_features.
+    The table is created using available descriptors from the Feature class.
+
+    Parameters
+    ----------
+    feature_type : Type[Feature]
+        The Feature class used in the Assay.
+    metadata : MetaData
+        DB Metadata.
+
+    Returns
+    -------
+    DescriptorModel: Base
 
     """
-    ft_model = FeatureModel(roi_id=roi.id, data=ft.to_str(), id=ft_id)
-    ann = ft.annotation
-    annotation_model = AnnotationModel(
-        id=ft_id,
-        sample_id=sample.id,
-        roi_id=roi.id,
-        label=ann.label,
-        charge=ann.charge,
-        isotopologue_label=ann.isotopologue_label,
-        isotopologue_index=ann.isotopologue_index,
-    )
-    ft_descriptors = {x: ft.get(x) for x in descriptor_names}
+    table_name = "descriptors"
 
-    descriptor_model = descriptor_model_type(
-        id=ft_id,
-        sample_id=sample.id,
-        roi_id=roi.id,
-        label=ann.label,
-        **ft_descriptors,
-    )
-    return ft_model, annotation_model, descriptor_model
+    columns: list[Column] = [
+        Column("id", Integer, ForeignKey("features.id"), primary_key=True),
+        Column("sample_id", String, ForeignKey("samples.id")),
+        Column("roi_id", Integer, ForeignKey("rois.id")),
+        Column("label", Integer, ForeignKey("annotations.label")),
+    ]
+
+    descriptors = [Column(x, Float) for x in feature_type.descriptor_names()]
+    columns.extend(descriptors)
+    attrs = {
+        "__tablename__": table_name,
+        "__table__": sa.Table(table_name, metadata, *columns),
+    }
+
+    return type("DescriptorModel", (Base,), attrs)
