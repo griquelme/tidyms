@@ -36,8 +36,10 @@ Here is a list of the concepts used in TidyMS.
         each column is a feature.
 
     feature
-        A measurable property of a phenomenon being observed. In LC-MS a feature
-        is usually represented as a chromatographic peak.
+        In machine learning a feature is a measurable property of an observed
+        phenomenon. In TidyMS, a feature is a region from a row with associated
+        with the signal of compound. For example, In LC-MS, a feature is usually
+        represented as a chromatographic peak.
 
     feature correspondence
         The process of match features extracted in different samples.
@@ -79,6 +81,9 @@ Here is a list of the concepts used in TidyMS.
         Samples applied to demonstrate analytical accuracy, precision, and
         repeatability after data processing and can be converted to metrics
         describing data quality.
+
+    ROI
+        A region extracted from raw data where features may be found.
 
     run order
         Temporal order in which the different samples were analyzed.
