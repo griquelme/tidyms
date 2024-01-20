@@ -50,14 +50,14 @@ class SampleModel(Base):
     def to_sample(self) -> Sample:
         """Convert to a Sample object."""
         return Sample(
-            str(self.path),
-            self.id,
-            self.ms_level,
-            self.start_time,
-            self.end_time,
-            self.group,
-            self.order,
-            self.batch,
+            path=Path(self.path),
+            id=self.id,
+            ms_level=self.ms_level,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            group=self.group,
+            order=self.order,
+            batch=self.batch,
         )
 
 
@@ -233,7 +233,7 @@ class AssayData:
         """
         with self.SessionFactory() as session:
             try:
-                session.add_all([SampleModel(**x.to_dict()) for x in samples])
+                session.add_all([SampleModel(**x.model_dump()) for x in samples])
                 session.commit()
             except IntegrityError:
                 msg = "Trying to insert a sample with an existing ID"
@@ -501,7 +501,7 @@ class AssayData:
             session.add_all(roi_model_list)
             session.commit()
 
-    def get_roi_list(self, sample: Sample) -> Sequence[Roi]:
+    def get_roi_list(self, sample: Sample) -> list[Roi]:
         """
         Retrieve a list of ROI detected in a sample.
 
@@ -608,9 +608,8 @@ class AssayData:
     ):
         """Add descriptor information to session."""
         feature_annotation_model_list = list()
-        descriptor_names = self.feature.descriptor_names()
         for ft in feature_list:
-            ft_descriptors = {x: ft.get(x) for x in descriptor_names}
+            ft_descriptors = ft.describe()
             model = self.DescriptorModel(
                 id=ft.id,
                 sample_id=sample.id,
