@@ -16,7 +16,7 @@ import zlib
 from os import SEEK_END
 from os.path import getsize
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import cast, Optional
 from xml.etree.ElementTree import fromstring
 from xml.etree.ElementTree import Element
 
@@ -82,8 +82,12 @@ DATA_TYPES = {
     INT64: np.int64,
 }
 
+# TODO: add a Reader Interface.
+
 
 class MZMLReader:
+    """Reader class for mzML format."""
+
     def __init__(self, path: Path):
         self.path = path
         sp_offset, chrom_offset, index_offset = build_offset_list(path)
@@ -95,6 +99,7 @@ class MZMLReader:
         self.n_spectra = len(self.spectra_offset)
 
     def get_spectrum(self, index: int) -> dict:
+        """Retrieve a spectrum from file."""
         return get_spectrum(
             self.path,
             self.spectra_offset,
@@ -104,6 +109,7 @@ class MZMLReader:
         )
 
     def get_chromatogram(self, index: int) -> dict:
+        """Retrieve a chromatogram from file."""
         return get_chromatogram(
             self.path,
             self.spectra_offset,
@@ -113,10 +119,9 @@ class MZMLReader:
         )
 
 
-def build_offset_list(filename: Path) -> Tuple[list[int], list[int], int]:
+def build_offset_list(filename: Path) -> tuple[list[int], list[int], int]:
     """
-    Finds the offset values in the file where Spectrum or Chromatogram elements
-    start.
+    Find the offset values where Spectrum or Chromatogram elementsstart.
 
     Parameters
     ----------
@@ -146,13 +151,14 @@ def build_offset_list(filename: Path) -> Tuple[list[int], list[int], int]:
 
 def get_spectrum(
     filename: Path,
-    spectra_offset: List[int],
-    chromatogram_offset: List[int],
+    spectra_offset: list[int],
+    chromatogram_offset: list[int],
     index_offset: int,
     n: int,
-) -> Dict:
+) -> dict:
     """
-    Extracts m/z, intensity, polarity , time, and ms level from the nth scan.
+    Extract spectrum data from file.
+
     Parameters
     ----------
     filename : path to mzML file.
@@ -167,24 +173,22 @@ def get_spectrum(
 
     Returns
     -------
-    spectrum : dictionary with spectrum data.
+    dict
+        dictionary with m/z, intensity, polarity , time, and ms level.
 
     """
     xml_str = _get_xml_data(
         filename, spectra_offset, chromatogram_offset, index_offset, n, "spectrum"
     )
-    try:
-        elements = list(fromstring(xml_str))
-    except:
-        print("error", xml_str)
-        raise "laskjf"
+    elements = list(fromstring(xml_str))
     spectrum = dict()
     for el in elements:
         tag = el.tag
         if tag == "cvParam":
             accession = el.attrib.get("accession")
             if accession == MS_LEVEL:
-                spectrum["ms_level"] = int(el.attrib.get("value"))
+                ms_level = el.attrib.get("value")
+                spectrum["ms_level"] = 1 if ms_level is None else int(ms_level)
             elif accession == NEGATIVE_POLARITY:
                 spectrum["polarity"] = -1
             elif accession == POSITIVE_POLARITY:
@@ -199,13 +203,13 @@ def get_spectrum(
 
 def get_chromatogram(
     filename: Path,
-    spectra_offset: List[int],
-    chromatogram_offset: List[int],
+    spectra_offset: list[int],
+    chromatogram_offset: list[int],
     index_offset: int,
     n: int,
-) -> Dict:
+) -> dict:
     """
-    Extracts time and intensity from xml chunk.
+    Extract time and intensity from xml chunk.
 
     Parameters
     ----------
@@ -236,23 +240,19 @@ def get_chromatogram(
 
 class ReverseReader:
     """
-    Reads file objects starting from the EOF.
+    Read file objects starting from the EOF.
+
+    Parameters
+    ----------
+    filename : Path to the file
+    buffer_size : int
+        size of the chunk to get when using the `read_chunk` method
+    **kwargs :
+        keyword arguments to pass to the open function
 
     """
 
     def __init__(self, filename: Path, buffer_size: int, **kwargs):
-        """
-        Constructor object
-
-        Parameters
-        ----------
-        filename : Path to the file
-        buffer_size : int
-            size of the chunk to get when using the `read_chunk` method
-        **kwargs :
-            keyword arguments to pass to the open function
-        """
-
         self.file = open(filename, **kwargs)
         self.buffer_size = buffer_size
         self._size = self.file.seek(0, SEEK_END)
@@ -261,6 +261,7 @@ class ReverseReader:
 
     @property
     def offset(self) -> int:
+        """Retrieve the file offset."""
         return self._offset
 
     @offset.setter
@@ -277,10 +278,11 @@ class ReverseReader:
     def __exit__(self, t, value, traceback):
         self.file.close()
 
-    def read_chunk(self) -> str:
+    def read_chunk(self) -> Optional[str]:
         """
-        Reads a chunk of data from the file, starting from the end. If the
-        beginning of the file has been reached, it returns None.
+        Read a chunk of data from the file, starting from the end.
+
+        If the beginning of the file has been reached, it returns None.
 
         Returns
         -------
@@ -294,16 +296,14 @@ class ReverseReader:
         return res
 
     def reset(self):
-        """
-        Set the position of the reader to the EOF.
-        """
+        """Set the position of the reader to the EOF."""
         self.offset = self._size
         self._is_complete = False
 
 
-def _read_binary_data_array(element: Element) -> Tuple[np.ndarray, str]:
+def _read_binary_data_array(element: Element) -> tuple[np.ndarray, str]:
     """
-    Extracts the binary data and data kind from a binaryArray element.
+    Extract the binary data and data kind from a binaryArray element.
 
     Parameters
     ----------
@@ -317,7 +317,7 @@ def _read_binary_data_array(element: Element) -> Tuple[np.ndarray, str]:
     """
     has_zlib_compression = False
     data = None
-    kind = None
+    kind = "none"
     units = None
     dtype = None
     for e in element:
@@ -326,7 +326,6 @@ def _read_binary_data_array(element: Element) -> Tuple[np.ndarray, str]:
             data = e.text if e.text is None else e.text.strip()
         elif tag == "cvParam":
             accession = e.attrib.get("accession")
-            value = e.attrib.get("name")
             if accession in UNSUPPORTED_COMPRESSION:
                 msg = "Currently only zlib compression is supported."
                 raise NotImplementedError(msg)
@@ -353,9 +352,9 @@ def _read_binary_data_array(element: Element) -> Tuple[np.ndarray, str]:
     return data, kind
 
 
-def _parse_binary_data_list(element: Element) -> Dict:
+def _parse_binary_data_list(element: Element) -> dict:
     """
-    Extracts the data from a binaryDataArrayList.
+    Extract the data from a binaryDataArrayList.
 
     Parameters
     ----------
@@ -375,7 +374,7 @@ def _parse_binary_data_list(element: Element) -> Dict:
 
 def is_indexed(filename: Path) -> bool:
     """
-    Checks if a mzML file is indexed.
+    Check if a mzML file is indexed.
 
     Parameters
     ----------
@@ -393,7 +392,7 @@ def is_indexed(filename: Path) -> bool:
     """
     with ReverseReader(filename, 1024, mode="r") as fin:
         end_tag = "</indexedmzML>"
-        chunk = fin.read_chunk()
+        chunk = cast(str, fin.read_chunk())
         res = chunk.find(end_tag) != -1
     return res
 
@@ -430,17 +429,9 @@ def _get_index_offset(filename: Path) -> int:
     return index_offset
 
 
-def _build_offset_list_non_indexed(filename: Path) -> Tuple[list[int], list[int]]:
+def _build_offset_list_non_indexed(filename: Path) -> tuple[list[int], list[int]]:
     """
-    Builds manually the indices for non-indexed mzML files.
-
-    Parameters
-    ----------
-    filename : Path
-
-    Returns
-    -------
-
+    Build manually the indices for non-indexed mzML files.
     """
     # indices are build by finding the offset where spectrum or chromatogram
     # elements starts.
@@ -488,9 +479,9 @@ def _find_chromatogram_tag_offset(line: str, regex: re.Pattern) -> int:
 
 def _build_offset_list_indexed(
     filename: Path, index_offset: int
-) -> Tuple[list[int], list[int]]:
+) -> tuple[list[int], list[int]]:
     """
-    Builds a list of offsets where spectra and chromatograms are stored.
+    Build a list of offsets where spectra and chromatograms are stored.
 
     Parameters
     ----------
@@ -528,8 +519,8 @@ def _build_offset_list_indexed(
 
 def _get_xml_data(
     filename: Path,
-    spectra_offset: List[int],
-    chromatogram_offset: List[int],
+    spectra_offset: list[int],
+    chromatogram_offset: list[int],
     index_offset: int,
     n: int,
     kind: str,
@@ -598,7 +589,7 @@ def _get_time(element):
                     return value
 
 
-def _time_to_seconds(value: float, units: str):
+def _time_to_seconds(value, units):
     if units == MINUTES:
         value = value * 60
     return value
