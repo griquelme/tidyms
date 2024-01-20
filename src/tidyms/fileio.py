@@ -91,7 +91,9 @@ def read_progenesis(path: Union[str, TextIO]):
     raw_index = df_header.columns.get_loc("Raw abundance") - 1
     ft_def = df.iloc[:, 0:norm_index].copy()
     data = df.iloc[:, raw_index : (2 * raw_index - norm_index)].T
-    sample_info = df_header.iloc[:, (raw_index + 1) : (2 * raw_index - norm_index + 1)].T
+    sample_info = df_header.iloc[
+        :, (raw_index + 1) : (2 * raw_index - norm_index + 1)
+    ].T
 
     # rename data matrix
     data.index.rename("sample", inplace=True)
@@ -104,7 +106,9 @@ def read_progenesis(path: Union[str, TextIO]):
 
     # rename features def
     ft_def.index.rename("feature", inplace=True)
-    ft_def.rename({"m/z": "mz", "Retention time (min)": "rt"}, axis="columns", inplace=True)
+    ft_def.rename(
+        {"m/z": "mz", "Retention time (min)": "rt"}, axis="columns", inplace=True
+    )
     ft_def = ft_def.astype({"rt": float, "mz": float})
     ft_def["rt"] = ft_def["rt"] * 60
     v.validate_data_container(data, ft_def, sample_info)
@@ -295,7 +299,9 @@ class MSData:
             del kwargs["mz_params"]
             rt_params = kwargs["rt_params"]
             del kwargs["rt_params"]
-            return MSData_simulated(mz_values, rt_values, mz_params, rt_params, **kwargs)
+            return MSData_simulated(
+                mz_values, rt_values, mz_params, rt_params, **kwargs
+            )
         if data_import_mode.lower() == c.INFILE and "path" in kwargs:
             path = Path(kwargs["path"])
             suffix = path.suffix
@@ -538,7 +544,11 @@ class MSData_Proxy(MSData):
         end_time: Optional[float] = None,
     ) -> Generator[Tuple[int, lcms.MSSpectrum], None, None]:
         return self._to_MSData_object.get_spectra_iterator(
-            ms_level=ms_level, start=start, end=end, start_time=start_time, end_time=end_time
+            ms_level=ms_level,
+            start=start,
+            end=end,
+            start_time=start_time,
+            end_time=end_time,
         )
 
 
@@ -768,9 +778,14 @@ class MSData_in_memory(MSData):
 
     @abc.abstractmethod
     def generate_from_file(
-        path, ms_mode: str = "centroid", instrument: str = "qtof", separation: str = "uplc"
+        path,
+        ms_mode: str = "centroid",
+        instrument: str = "qtof",
+        separation: str = "uplc",
     ):
-        temp = MSData_in_memory(ms_mode=ms_mode, instrument=instrument, separation=separation)
+        temp = MSData_in_memory(
+            ms_mode=ms_mode, instrument=instrument, separation=separation
+        )
 
         path = Path(path)
         suffix = path.suffix
@@ -787,7 +802,10 @@ class MSData_in_memory(MSData):
         return temp
 
     def __init__(
-        self, ms_mode: str = "centroid", instrument: str = "qtof", separation: str = "uplc"
+        self,
+        ms_mode: str = "centroid",
+        instrument: str = "qtof",
+        separation: str = "uplc",
     ):
         super().__init__(
             ms_mode=ms_mode,
@@ -888,7 +906,14 @@ class MSData_simulated(MSData):  # pragma: no cover
         self._separation = separation
 
         self._reader = _SimulatedReader(
-            mz_values, rt_values, mz_params, rt_params, ms_mode, instrument, ft_noise, noise
+            mz_values,
+            rt_values,
+            mz_params,
+            rt_params,
+            ms_mode,
+            instrument,
+            ft_noise,
+            noise,
         )
 
     def get_n_chromatograms(self) -> int:
@@ -1041,7 +1066,9 @@ def _check_dataset_name(name: str):
         raise ValueError(msg)
 
 
-def download_tidyms_data(name: str, files: List[str], download_dir: Optional[str] = None):
+def download_tidyms_data(
+    name: str, files: List[str], download_dir: Optional[str] = None
+):
     """
     Download a list of files from the data repository
 

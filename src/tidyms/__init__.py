@@ -12,6 +12,7 @@ Provides
 
 """
 
+from .base.spectrum import MSSpectrum
 from . import chem
 from . import fileio
 from . import container
@@ -28,7 +29,7 @@ from . import fill_missing
 from . import consensus_annotation
 from .container import DataContainer
 from .fileio import MSData
-from .lcms import Chromatogram, MSSpectrum
+from .lcms import Chromatogram
 
 # from .legacy_assay import LegacyAssay
 from .raw_data_utils import *
