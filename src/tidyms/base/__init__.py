@@ -16,7 +16,7 @@ SampleData : Container class for a Sample and the ROIs detected.
 
 """
 
-from .assay_data import AssayData
+from .db import AssayData
 from .assay import (
     Assay,
     FeatureExtractor,
