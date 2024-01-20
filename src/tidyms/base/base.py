@@ -1,5 +1,5 @@
 """
-Base classes used by TidyMS.
+Abstract base classes used by TidyMS.
 
 Annotation : Stores annotation data from a feature.
 Feature : A region associated with a ROI that contains a chemical species.
@@ -9,84 +9,73 @@ SampleData : Container class for a Sample and the ROIs detected.
 
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, asdict
+from functools import lru_cache
 from pathlib import Path
-from typing import Optional, Sequence, Tuple, Type, TypeVar, Union
+from typing import Sequence, Type
 
-from . import constants as c
+import pydantic
+from typing_extensions import Annotated
+from pydantic.functional_validators import AfterValidator
 
-# Replace with Self when code is updated to Python 3.11
-AnyRoi = TypeVar("AnyRoi", bound="Roi")
-AnyFeature = TypeVar("AnyFeature", bound="Feature")
+from . import validation_utils as validation
 
 
 class Roi(ABC):
     """
     Base class for Regions of Interest (ROI) extracted from raw MS data.
 
-    MUST implement the `extract_features` method.
-    MUST implement `_deserialize` and `to_string` methods to be used in an Assay.
-    MUST implement the class method `get_feature_type` to check feature
-    compatibility.
-
-
-    Attributes
+    Properties
     ----------
     id : int
         An identifier for the ROI. Used by :class:`tidyms.base.AssayData` to
         persist data.
     features : list[Feature]
-        Features extracted from the ROI using the `extract_features` method.
+        Features extracted from the ROI.
 
     """
 
-    _feature_type: Type["Feature"]
+    def __init__(self, *, id_: int = -1):
+        self.id = id_
+        self.features = list()
 
-    def __init__(self):
-        self.id = -1
-        self.features: Optional[list[Feature]] = None
+    @property
+    def features(self) -> list[Feature]:
+        return self._features
 
-    @abstractmethod
-    def extract_features(self, **kwargs) -> list["Feature"]:
-        """Extract feature from ROI and stores in the `features` attribute."""
-        ...
+    @features.setter
+    def features(self, value: list[Feature]):
+        self._features = value
+
+    @property
+    def id(self) -> int:
+        return self._id
+
+    @id.setter
+    def id(self, value: int):
+        self._id = value
+
+    def add_feature(self, feature: Feature):
+        self.features.append(feature)
+
+    def remove_feature(self, feature: Feature):
+        """Remove feature from feature list."""
+        self.features.remove(feature)
 
     @classmethod
-    def from_string(cls: Type[AnyRoi], s: str) -> AnyRoi:
+    def from_str(cls: Type[Roi], s: str) -> Roi:
         """Load a ROI from a JSON string."""
-        d = cls._deserialize(s)
-        features = d.pop(c.ROI_FEATURE_LIST)
-        roi = cls(**d)
-        ft_class = cls._get_feature_type()
-        if features is not None:
-            roi.features = [ft_class.from_str(x, roi) for x in features]
-        return roi
-
-    @classmethod
-    @abstractmethod
-    def _get_feature_type(cls) -> Type["Feature"]:
-        """Get the Feature type to be used with the ROI."""
-        ...
-
-    @staticmethod
-    @abstractmethod
-    def _deserialize(s: str) -> dict:
-        """
-        Convert a JSON str into a dictionary used to create a ROI instance.
-
-        See MZTrace implementation as an example.
-        """
         ...
 
     @abstractmethod
-    def to_string(self) -> str:
+    def to_str(self) -> str:
         """Serialize a ROI into a string."""
         ...
 
 
-@dataclass
-class Annotation:
+class Annotation(pydantic.BaseModel):
     """
     Store annotation data of features.
 
@@ -126,57 +115,71 @@ class Feature(ABC):
 
     """
 
-    def __init__(self, roi: Roi, annotation: Optional[Annotation] = None):
-        self._descriptors = dict()  # descriptors cache
+    def __init__(
+        self, roi: Roi, *, id_: int = -1, annotation: Annotation | None = None
+    ):
+        self.id = id_
         self.roi = roi
-        self._mz = None
-        self._area = None
-        self._height = None
+        self._descriptors = dict()
+        roi.add_feature(self)
         if annotation is None:
             annotation = Annotation()
-        self.annotation = annotation
-        self.id = -1
+        self._annotation = annotation
+
+    @property
+    def id(self) -> int:
+        return self._id
+
+    @id.setter
+    def id(self, value: int):
+        self._id = value
+
+    @property
+    def roi(self) -> Roi:
+        return self._roi
+
+    @roi.setter
+    def roi(self, value: Roi):
+        self._roi = value
+
+    @property
+    def annotation(self) -> Annotation:
+        return self._annotation
 
     @property
     def mz(self) -> float:
         """Wrapper for get_mz."""
-        if self._mz is None:
-            self._mz = self.get_mz()
-        return self._mz
+        return self.get_mz()
 
     @property
     def area(self) -> float:
         """Wrapper fot get_area."""
-        if self._area is None:
-            self._area = self.get_area()
-        return self._area
+        return self.get_area()
 
     @property
     def height(self) -> float:
         """Wrapper for get_height."""
-        if self._height is None:
-            self._height = self.get_height()
-        return self._height
+        return self.get_height()
 
-    def __lt__(self, other: Union["Feature", float]):
+    def __lt__(self: Feature, other: Feature | float):
         if isinstance(other, float):
             return self.mz < other
         elif isinstance(other, Feature):
             return self.mz < other.mz
 
-    def __le__(self, other: Union["Feature", float]):
+    def __le__(self, other: Feature | float):
         if isinstance(other, float):
             return self.mz <= other
         elif isinstance(other, Feature):
             return self.mz <= other.mz
 
-    def __gt__(self, other: Union["Feature", float]):
+    def __gt__(self, other: Feature | float):
         if isinstance(other, float):
             return self.mz > other
         elif isinstance(other, Feature):
             return self.mz > other.mz
 
-    def __ge__(self, other: Union["Feature", float]):
+    def __ge__(self, other: Feature | float):
         if isinstance(other, float):
             return self.mz >= other
         elif isinstance(other, Feature):
@@ -204,22 +207,10 @@ class Feature(ABC):
         A descriptor is any method that starts with get_.
 
         """
-        descriptors: dict[str, float] = dict()
+        descriptors = dict()
         for descriptor in self.descriptor_names():
             descriptors[descriptor] = self.get(descriptor)
         return descriptors
-
-    @abstractmethod
-    def compare(self, other: "Feature") -> float:
-        """
-        Compare the similarity between two features.
-
-        Must return a number between 0.0 and 1.0.
-
-        Used by annotation methods to group features.
-
-        """
-        ...
 
     @abstractmethod
     def to_str(self) -> str:
@@ -232,9 +223,8 @@ class Feature(ABC):
         ...
 
     @classmethod
-    def from_str(
-        cls, s: str, roi: Roi, annotation: Optional[Annotation] = None
-    ) -> "Feature":
+    @abstractmethod
+    def from_str(cls, s: str, roi: Roi, annotation: Annotation) -> Feature:
         """
         Create a feature instance from a string.
 
@@ -245,30 +235,6 @@ class Feature(ABC):
         roi : Roi
             ROI where the feature was detected.
         annotation : Annotation
-
-        """
-        d = cls._deserialize(s)
-        return cls(roi=roi, annotation=annotation, **d)
-
-    @staticmethod
-    @abstractmethod
-    def _deserialize(s: str) -> dict:
-        ...
-
-    @staticmethod
-    @abstractmethod
-    def compute_isotopic_envelope(
-        feature: Sequence["Feature"],
-    ) -> Tuple[list[float], list[float]]:
-        """
-        Compute the isotopic envelope from a list of isotopologue features.
-
-        Must return two lists:
-
-        - The sorted m/z values of the envelope.
-        - The abundance associated to each isotopologue. Normalized to 1.
-
-        Used by annotation algorithms to annotate isotopologues.
 
         """
         ...
@@ -284,14 +250,25 @@ class Feature(ABC):
         float
             The value of the requested descriptor
 
+        Raises
+        ------
+        ValueError
+            If an non existent descriptor name is passed.
+
         """
         value = self._descriptors.get(descriptor)
-        if value is None:
-            value = self.__getattribute__(f"get_{descriptor}")()
-            self._descriptors[descriptor] = value
-        return value
+        if value is not None:
+            return value
+
+        try:
+            value = getattr(self, f"get_{descriptor}")()
+            return self._descriptors.setdefault(descriptor, value)
+        except AttributeError as e:
+            msg = f"{descriptor} is not a valid descriptor."
+            raise ValueError(msg) from e
 
     @classmethod
+    @lru_cache
     def descriptor_names(cls) -> list[str]:
         """
         List all descriptor names.
@@ -306,8 +283,41 @@ class Feature(ABC):
         return [x.split("_", 1)[-1] for x in dir(cls) if x.startswith("get_")]
 
 
-@dataclass
-class Sample:
+class AnnotableFeature(Feature):
+    """Base feature with also implements methods for feature annotation."""
+
+    @abstractmethod
+    def compare(self, other: "Feature") -> float:
+        """
+        Compare the similarity between two features.
+
+        Must return a number between 0.0 and 1.0.
+
+        Used by annotation methods to group features.
+
+        """
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def compute_isotopic_envelope(
+        feature: Sequence[Feature],
+    ) -> tuple[list[float], list[float]]:
+        """
+        Compute the isotopic envelope from a list of isotopologue features.
+
+        Must return two lists:
+
+        - The sorted m/z values of the envelope.
+        - The abundance associated to each isotopologue. Normalized to 1.
+
+        Used by annotation algorithms to annotate isotopologues.
+
+        """
+        ...
+
+
+class Sample(pydantic.BaseModel):
     """
     Sample class to manage iteration over MSData objects.
 
@@ -332,25 +342,18 @@ class Sample:
 
     """
 
-    path: Union[Path, str]
+    path: Annotated[Path, AfterValidator(validation.is_file)]
     id: str
-    ms_level: int = 1
-    start_time: float = 0.0
-    end_time: Optional[float] = None
+    ms_level: pydantic.PositiveInt = 1
+    start_time: pydantic.NonNegativeFloat = 0.0
+    end_time: pydantic.NonNegativeFloat | None = None
     group: str = ""
-    order: int = 0
-    batch: int = 0
+    order: pydantic.NonNegativeInt = 0
+    batch: pydantic.NonNegativeInt = 0
 
-    def __post_init__(self):
-        """Normalize and validate data fields."""
-        if isinstance(self.path, str):
-            self.path = Path(self.path)
-
-    def to_dict(self) -> dict:
-        """Convert data into a dictionary."""
-        d = asdict(self)
-        d["path"] = str(d["path"])
-        return d
+    @pydantic.field_serializer("path")
+    def serialize_path(self, path: Path, _info) -> str:
+        return str(path)
 
 
 class SampleData:
@@ -360,20 +363,35 @@ class SampleData:
     Attributes
     ----------
     sample : Sample
-    roi : Optional[Sequence[Roi]]
+    roi : Sequence[Roi] | None
 
     """
 
-    def __init__(self, sample: Sample, roi: Optional[Sequence[Roi]] = None) -> None:
+    def __init__(self, sample: Sample, roi: Sequence[Roi] | None = None) -> None:
         self.sample = sample
         if roi is None:
             roi = list()
-        self.roi = roi
+        self._roi = roi
+        self._features: list[Feature] | None = None
+        self._descriptors: dict[str, list[float]] | None = None
 
-    def get_feature_list(self) -> Sequence[Feature]:
-        """Create a list of features from features stored in each ROI."""
+    @property
+    def roi(self) -> Sequence[Roi]:
+        """Get the roi in the sample."""
+        return self._roi
+
+    @roi.setter
+    def roi(self, value: Sequence[Roi]):
+        self._roi = value
+
+    def get_feature_list(self) -> list[Feature]:
+        """Update the feature attribute using feature data from ROIs."""
         feature_list = list()
         for roi in self.roi:
             if roi.features is not None:
                 feature_list.extend(roi.features)
         return feature_list
+
+    def delete_empty_roi(self):
+        """Delete ROI with no features."""
+        self.roi = [x for x in self.roi if x.features]
