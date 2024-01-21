@@ -270,7 +270,9 @@ class LegacyAssay:
         return func
 
     @staticmethod
-    def _get_feature_matching_strategy(strategy: Union[str, Callable] = "default") -> Callable:
+    def _get_feature_matching_strategy(
+        strategy: Union[str, Callable] = "default"
+    ) -> Callable:
         """
         Sets the function used for mathing_features.
 
@@ -402,7 +404,7 @@ class LegacyAssay:
             offset, length = index[roi_index]
             fin.seek(offset)
             s = fin.read(length)
-            roi = roi_class.from_string(s)
+            roi = roi_class.from_str(s)
         return roi
 
     def load_roi_list(self, sample: str) -> List[Roi]:
@@ -451,7 +453,7 @@ class LegacyAssay:
             for offset, length in index:
                 fin.seek(offset)
                 s = fin.read(length)
-                roi = roi_class.from_string(s)
+                roi = roi_class.from_str(s)
                 roi_list.append(roi)
         return roi_list
 
@@ -715,7 +717,9 @@ class LegacyAssay:
 
             def worker(args):
                 roi_path, ft_path, roi_list = args
-                ft_table = _describe_features_default(roi_list, custom_descriptors, filters)
+                ft_table = _describe_features_default(
+                    roi_list, custom_descriptors, filters
+                )
                 _save_roi_list(roi_path, roi_list)
                 ft_table.to_pickle(ft_path)
 
@@ -940,7 +944,9 @@ class LegacyAssay:
                 tools = create_annotation_tools(**kwargs)
                 annotate(ft_list, *tools)
                 annotation_table = create_annotation_table(ft_list)
-                ft_table = pd.merge(ft_table, annotation_table, on=[c.ROI_INDEX, c.FT_INDEX])
+                ft_table = pd.merge(
+                    ft_table, annotation_table, on=[c.ROI_INDEX, c.FT_INDEX]
+                )
                 ft_table.to_pickle(ft_path)
 
             worker = delayed(worker)
@@ -1162,7 +1168,8 @@ class _AssayManager:
     ):
         if virtual_name not in self._sample_to_path:
             virtual_sample_path = os.path.join(
-                self.assay_path, "%s.mzML" % ((str(uuid4()) + str(uuid4())).replace("-", ""))
+                self.assay_path,
+                "%s.mzML" % ((str(uuid4()) + str(uuid4())).replace("-", "")),
             )
             self._sample_to_path[virtual_name] = Path(virtual_sample_path)
             self._virtual_MSData_objects[virtual_name] = MSData_object
@@ -1530,7 +1537,9 @@ def _describe_feature_list(
     return descriptor_list
 
 
-def _fill_filter_boundaries(filter_dict: dict[str, Tuple[Optional[float], Optional[float]]]):
+def _fill_filter_boundaries(
+    filter_dict: dict[str, Tuple[Optional[float], Optional[float]]]
+):
     """
     Replaces None in the filter boundaries to perform comparisons.
 
@@ -1569,7 +1578,13 @@ def _match_features_default(assay: LegacyAssay, **kwargs):
 
 
 def _create_assay_manager(
-    assay_path, data_path, sample_metadata, ms_mode, instrument, separation, data_import_mode
+    assay_path,
+    data_path,
+    sample_metadata,
+    ms_mode,
+    instrument,
+    separation,
+    data_import_mode,
 ) -> _AssayManager:
     assay_path = _normalize_assay_path(assay_path)
 
@@ -1722,7 +1737,7 @@ def _get_path_list(path: Union[str, List[str], Path]) -> List[Path]:
         if not p.is_file() or (p.suffix != ".mzML"):
             msg = "{} is not a path to a mzML file".format(p)
             raise ValueError(msg)
-
+to_str
     path_list = [x.absolute() for x in path_list]
     return path_list
 
@@ -1775,7 +1790,9 @@ def compare_dict(d1: Optional[dict], d2: Optional[dict]) -> bool:
     return res
 
 
-def _build_params_dict(ms_mode: str, separation: str, instrument: str, data_import_mode: str):
+def _build_params_dict(
+    ms_mode: str, separation: str, instrument: str, data_import_mode: str
+):
     params_dict = {
         "MSData": {
             "ms_mode": ms_mode,
