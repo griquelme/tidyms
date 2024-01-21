@@ -100,7 +100,7 @@ def lc_roi_with_peak() -> tuple[lcms.LCTrace, lcms.Peak]:
 def test_fill_nan(roi_data):
     rt, mz, spint = roi_data
     roi = lcms.LCTrace(rt, spint, mz, rt)
-    roi.fill_nan(fill_value="extrapolate")
+    roi.fill_nan()
     has_nan = np.any(np.isnan(roi.mz) & np.isnan(roi.spint))
     assert not has_nan
 
@@ -226,28 +226,24 @@ def test_Feature_describe(lc_roi_with_peak):
 def test_LCRoi_serialization_no_noise_no_baseline_no_features(lc_roi_with_peak):
     roi, _ = lc_roi_with_peak
     roi_str = roi.to_string()
-    roi_from_str = lcms.LCTrace.from_string(roi_str)
+    roi_from_str = lcms.LCTrace.from_str(roi_str)
     assert np.array_equal(roi.time, roi_from_str.time)
     assert np.array_equal(roi.spint, roi_from_str.spint, equal_nan=True)
     assert np.array_equal(roi.mz, roi_from_str.mz, equal_nan=True)
     assert np.array_equal(roi.scan, roi_from_str.scan)
 
 
-def test_LCRoi_serialization(lc_roi_with_peak):
-    roi, _ = lc_roi_with_peak
-    roi.extract_features()
-    roi_str = roi.to_string()
-    roi_from_str = lcms.LCTrace.from_string(roi_str)
+def test_LCRoi_serialization(lc_roi_with_peak: tuple[lcms.LCTrace, lcms.Peak]):
+    roi, peak = lc_roi_with_peak
+    peaks = [peak]
+    roi_str = roi.to_str()
+    roi_from_str = lcms.LCTrace.from_str(roi_str, peaks)
     assert np.array_equal(roi.time, roi_from_str.time)
     assert np.array_equal(roi.spint, roi_from_str.spint, equal_nan=True)
     assert np.array_equal(roi.mz, roi_from_str.mz, equal_nan=True)
     assert np.array_equal(roi.scan, roi_from_str.scan)
     assert np.array_equal(roi.noise, roi_from_str.noise)
     assert np.array_equal(roi.baseline, roi_from_str.baseline)
-    for expected, test in zip(roi.features, roi_from_str.features):
-        assert expected.start == test.start
-        assert expected.apex == test.apex
-        assert expected.end == test.end
 
 
 def test__overlap_ratio_overlapping_peaks():

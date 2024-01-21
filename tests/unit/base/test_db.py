@@ -1,44 +1,17 @@
 from tidyms.base.db import AssayData
-from tidyms.base import Annotation, Sample, SampleData
+from tidyms.base import SampleData
 from pathlib import Path
 import pytest
 from typing import cast
-from random import random, randint
 
-from dummy import ConcreteFeature, ConcreteRoi
-
-
-def create_dummy_sample(path: Path, suffix: int, group: str = "") -> Sample:
-    file = path / f"sample-{suffix}.mzML"
-    file.touch()
-    sample = Sample(path=file, id=file.stem, group=group, order=suffix)
-    return sample
-
-
-def create_dummy_roi() -> ConcreteRoi:
-    data = [random() for _ in range(5)]
-    return ConcreteRoi(data)
-
-
-def create_dummy_feature(roi: ConcreteRoi, annotation: Annotation) -> ConcreteFeature:
-    data = randint(0, 10)
-    return ConcreteFeature(roi, data, annotation=annotation)
-
-
-def add_dummy_features(roi_list: list[ConcreteRoi], n: int):
-    label_counter = 0
-    for roi in roi_list:
-        for _ in range(n):
-            annotation = Annotation(label=label_counter)
-            create_dummy_feature(roi, annotation)
-            label_counter += 1
-
-
-def get_feature_list(roi_list: list[ConcreteRoi]) -> list[ConcreteFeature]:
-    feature_list = list()
-    for roi in roi_list:
-        feature_list.extend(roi.features)
-    return feature_list
+from dummy import (
+    ConcreteFeature,
+    ConcreteRoi,
+    add_dummy_features,
+    create_dummy_sample,
+    create_dummy_roi,
+    get_feature_list,
+)
 
 
 @pytest.fixture

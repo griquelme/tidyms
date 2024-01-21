@@ -39,13 +39,16 @@ def test_concrete_roi_serialization(roi: ConcreteRoi):
 def test_Roi_add_feature():
     roi = ConcreteRoi(list())
     ft = ConcreteFeature(roi, 1)
+    roi.add_feature(ft)
     assert ft in roi.features
 
 
 def test_Roi_add_feature_add_multiple_features():
     roi = ConcreteRoi(list())
     ft1 = ConcreteFeature(roi, 1)
+    roi.add_feature(ft1)
     ft2 = ConcreteFeature(roi, 1)
+    roi.add_feature(ft2)
     assert ft1 in roi.features
     assert ft2 in roi.features
     assert ft1 is not ft2
@@ -54,6 +57,8 @@ def test_Roi_add_feature_add_multiple_features():
 def test_Roi_remove_feature():
     roi = ConcreteRoi(list())
     ft1 = ConcreteFeature(roi, 1)
+    roi.add_feature(ft1)
+    assert ft1 in roi.features
     roi.remove_feature(ft1)
     assert ft1 not in roi.features
 
@@ -61,8 +66,11 @@ def test_Roi_remove_feature():
 def test_Roi_remove_feature_remove_feature_after_adding_multiple_features():
     roi = ConcreteRoi(list())
     ft1 = ConcreteFeature(roi, 1)
+    roi.add_feature(ft1)
     ft2 = ConcreteFeature(roi, 1)
+    roi.add_feature(ft2)
     ft3 = ConcreteFeature(roi, 1)
+    roi.add_feature(ft3)
     roi.remove_feature(ft2)
     assert ft1 in roi.features
     assert ft2 not in roi.features

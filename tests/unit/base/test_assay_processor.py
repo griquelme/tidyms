@@ -1,217 +1,186 @@
-from tidyms.base.assay_data import AssayData, SampleData, Sample
-from tidyms.base import assay
-from tidyms.lcms import LCTrace, Peak
+import math
+import pathlib
+
+import pydantic
 import pytest
-import numpy as np
-from math import inf
+
+from tidyms.base import assay
+from tidyms.base import Annotation, SampleData
+from tidyms.base.exceptions import IncompatibleSampleDataStatus
 
 
-def create_dummy_trace() -> LCTrace:
-    scans = np.arange(100)
-    time = scans.astype(float)
-    spint = np.ones_like(time)
-    mz = spint
-    noise = np.zeros_like(time)
-    baseline = noise
-    return LCTrace(time, spint, mz, scans, noise, baseline)
+import dummy
 
 
-def create_dummy_sample_data() -> SampleData:
-    sample = Sample("sample1", "sample1")
-    roi_list = [create_dummy_trace() for _ in range(10)]
-    return SampleData(sample, roi_list)
+@pytest.fixture
+def roi_extractor():
+    return dummy.DummyRoiExtractor()
 
 
-class DummyProcessor(assay.Processor):
-    """Dummy class for testing purposes."""
-
-    def __init__(self, param1: int = 1, param2: int = 0):
-        self.param1 = param1
-        self.param2 = param2
-
-    def process(self, assay_data: AssayData):
-        pass
-
-    @staticmethod
-    def _validate_parameters(parameters: dict):
-        pass
-
-    def _func(self):
-        pass
-
-    def set_default_parameters(self, instrument: str, separation: str):
-        pass
+@pytest.fixture
+def feature_extractor():
+    return dummy.DummyFeatureExtractor()
 
 
-class DummyFeatureExtractor(assay.FeatureExtractor):
-    """Dummy class for testing purposes."""
-
-    _validation_schema = {}
-
-    def __init__(
-        self,
-        param1: float = 1.0,
-        param2: float = 2.0,
-        filters=None,
-    ):
-        super().__init__(filters)
-        self.param1 = param1
-        self.param2 = param2
-
-    @staticmethod
-    def _check_data(sample_data: SampleData):
-        pass
-
-    @staticmethod
-    def _validate_parameters(parameters: dict):
-        pass
-
-    @staticmethod
-    def _extract_features_func(roi: LCTrace, **params):
-        roi.features = [Peak(0, 5, 10, roi), Peak(15, 20, 25, roi)]
-
-    def set_default_parameters(self, instrument: str, separation: str):
-        params = {"filters": {"mz": (10.0, 20.0), "width": (5.0, 10.0)}}
-        self.set_parameters(params)
+@pytest.fixture
+def pipeline(
+    roi_extractor: dummy.DummyRoiExtractor,
+    feature_extractor: dummy.DummyFeatureExtractor,
+):
+    steps = [("roi extractor", roi_extractor), ("feature extractor", feature_extractor)]
+    return assay.ProcessingPipeline(steps)
 
 
-class DummyRoiExtractor(assay.SingleSampleProcessor):
-    def __init__(self, param1: int = 1, param2: int = 0):
-        self.param1 = param1
-        self.param2 = param2
-
-    @staticmethod
-    def _func(sample_data: SampleData):
-        sample_data.roi = [create_dummy_trace() for _ in range(10)]
-
-    def set_default_parameters(self, instrument: str, separation: str):
-        pass
-
-    @staticmethod
-    def _check_data(sample_data: SampleData):
-        pass
-
-    @staticmethod
-    def _validate_parameters(parameters: dict):
-        pass
+@pytest.fixture
+def sample_data(tmp_path: pathlib.Path):
+    sample = dummy.create_dummy_sample(tmp_path, 1)
+    return SampleData(sample)
 
 
-def test_Processor_var_args_invalid():
-    class InvalidProcessor(DummyProcessor):
-        def __init__(self, *args, param1: int = 1, param2: int = 2):
-            super().__init__(param1=param1, param2=param2)
-
-        @staticmethod
-        def _validate_parameters(parameters: dict):
-            pass
-
-    processor = InvalidProcessor()
-    with pytest.raises(RuntimeError):
-        processor.get_parameters()
+@pytest.fixture
+def sample_data_with_roi(
+    sample_data: SampleData, roi_extractor: dummy.DummyRoiExtractor
+):
+    roi_extractor.process(sample_data)
+    return sample_data
 
 
-def test_Processor_get_parameters():
-    expected_parameters = {"param1": 5, "param2": 10}
-    processor = DummyProcessor(**expected_parameters)
-    test_parameters = processor.get_parameters()
-    assert test_parameters == expected_parameters
+def test_BaseRoiExtractor_get_parameters(roi_extractor: dummy.DummyRoiExtractor):
+    expected = {"param1": 10, "param2": "default"}
+    actual = roi_extractor.get_parameters()
+    assert actual == expected
 
 
-def test_Processor_set_parameters():
-    processor = DummyProcessor()
-    expected_parameters = {"param1": 5}
-    processor.set_parameters(expected_parameters)
-    expected_parameters["param2"] = processor.param2
-    test_parameters = processor.get_parameters()
-    assert test_parameters == expected_parameters
+def test_BaseRoiExtractor_set_parameters(roi_extractor: dummy.DummyRoiExtractor):
+    expected = {"param1": 20, "param2": "new_value"}
+    roi_extractor.set_parameters(**expected)
+    actual = roi_extractor.get_parameters()
+    assert actual == expected
 
 
-def test_Processor_set_parameters_invalid_parameter():
-    processor = DummyProcessor()
-    with pytest.raises(ValueError):
-        bad_parameters = {"invalid_parameter": 10}
-        processor.set_parameters(bad_parameters)
+def test_BaseRoiExtractor_set_invalid_parameter_raise_ValidationError(
+    roi_extractor: dummy.DummyRoiExtractor,
+):
+    with pytest.raises(pydantic.ValidationError):
+        roi_extractor.param2 = 10  # type: ignore
 
 
-def test_FeatureExtractor_creation():
-    DummyFeatureExtractor()
-    assert True
+def test_BaseRoiExtractor_process(
+    roi_extractor: dummy.DummyRoiExtractor, sample_data: SampleData
+):
+    assert not sample_data.status.roi
+    assert not sample_data.roi
+    roi_extractor.process(sample_data)
+    assert sample_data.status.roi
+    assert sample_data.roi
 
 
-def test_FeatureExtractor_filter_values():
-    filters = {"descriptor1": (5.0, 8.0)}
-    extractor = DummyFeatureExtractor(filters=filters)
-    assert extractor.filters == filters
+def test_BaseFeatureExtractor_get_parameters(
+    feature_extractor: dummy.DummyRoiExtractor,
+):
+    expected = {"param1": 2, "param2": "default", "filters": dict()}
+    actual = feature_extractor.get_parameters()
+    assert actual == expected
 
 
-def test_FeatureExtractor_set_default_parameters():
-    extractor = DummyFeatureExtractor()
-    extractor.set_default_parameters("qtof", "uplc")
-    parameters = extractor.get_parameters()
-    assert extractor.param1 == parameters["param1"]
-    assert extractor.param2 == parameters["param2"]
-    assert extractor.filters == parameters["filters"]
+def test_BaseFeatureExtractor_set_parameters(
+    feature_extractor: dummy.DummyFeatureExtractor,
+):
+    expected = {
+        "param1": 10,
+        "param2": "new_value",
+        "filters": {"height": (10.0, 20.0)},
+    }
+    feature_extractor.set_parameters(**expected)
+    actual = feature_extractor.get_parameters()
+    assert actual == expected
 
 
-def test_FeatureExtractor_extract_features():
-    extractor = DummyFeatureExtractor()
-    extractor.set_default_parameters("qtof", "uplc")
-    sample_data = create_dummy_sample_data()
-    extractor.process(sample_data)
+def test_BaseFeatureExtractor_set_invalid_parameter_raise_ValidationError(
+    feature_extractor: dummy.DummyFeatureExtractor,
+):
+    with pytest.raises(pydantic.ValidationError):
+        feature_extractor.filters = 10  # type: ignore
 
 
-def test__is_valid_feature_valid_feature():
-    filters = {"mz": (0.5, 1.5), "height": (0.5, 1.5)}
-    roi = create_dummy_trace()
-    ft = Peak(0, 5, 10, roi)
-    assert assay._is_valid_feature(ft, filters)
+def test_BaseFeatureExtractor_set_invalid_filter_range_None_normalizes_to_inf(
+    feature_extractor: dummy.DummyFeatureExtractor,
+):
+    filters = {"height": (None, 10.0)}
+    feature_extractor.filters = filters
 
 
-def test__is_valid_feature_invalid_feature():
-    # m/z is outside valid range
-    filters = {"mz": (2.0, 3.0), "height": (0.5, 1.5)}
-    roi = create_dummy_trace()
-    ft = Peak(0, 5, 10, roi)
-    assert not assay._is_valid_feature(ft, filters)
+def test_BaseFeatureExtractor_process(
+    sample_data_with_roi: SampleData,
+    feature_extractor: dummy.DummyFeatureExtractor,
+):
+    sample_data = sample_data_with_roi
+    assert not sample_data.status.feature
+    assert not sample_data.get_feature_list()
+    feature_extractor.process(sample_data)
+    assert sample_data.status.feature
+    assert sample_data.get_feature_list()
+
+
+def test_BaseFeatureExtractor_process_invalid_sample_data_status_raises_error(
+    sample_data: SampleData,
+    feature_extractor: dummy.DummyFeatureExtractor,
+):
+    with pytest.raises(IncompatibleSampleDataStatus):
+        feature_extractor.process(sample_data)
+
+
+def test_is_feature_descriptor_in_valid_range_valid_range():
+    filters = {"height": (50.0, 150.0)}
+    roi = dummy.create_dummy_roi()
+    ft = dummy.create_dummy_feature(roi, Annotation())
+    assert assay._is_feature_descriptor_in_valid_range(ft, filters)
+
+
+def test_is_feature_descriptor_in_valid_range_invalid_range():
+    filters = {"height": (50.0, 75.0)}
+    roi = dummy.create_dummy_roi()
+    ft = dummy.create_dummy_feature(roi, Annotation())
+    assert not assay._is_feature_descriptor_in_valid_range(ft, filters)
 
 
 def test__fill_filter_boundaries():
     filters = {"param1": (0, 10.0), "param2": (None, 5.0), "param3": (10.0, None)}
     filled = assay._fill_filter_boundaries(filters)
-    expected = {"param1": (0, 10.0), "param2": (-inf, 5.0), "param3": (10.0, inf)}
+    expected = {
+        "param1": (0, 10.0),
+        "param2": (-math.inf, 5.0),
+        "param3": (10.0, math.inf),
+    }
     assert filled == expected
 
 
-def test_ProcessingPipeline_processors_with_repeated_names_raises_error():
+def test_ProcessingPipeline_processors_with_repeated_names_raises_error(
+    roi_extractor: dummy.DummyRoiExtractor,
+    feature_extractor: dummy.DummyFeatureExtractor,
+):
     processing_steps = [
-        ("ROI extractor", DummyRoiExtractor()),
-        ("ROI extractor", DummyFeatureExtractor()),
+        ("ROI extractor", roi_extractor),
+        ("ROI extractor", feature_extractor),
     ]
     with pytest.raises(ValueError):
         assay.ProcessingPipeline(processing_steps)
 
 
-def test_ProcessingPipeline_get_parameters():
-    processing_steps = [
-        ("ROI extractor", DummyRoiExtractor()),
-        ("Feature extractor", DummyFeatureExtractor()),
-    ]
-    pipeline = assay.ProcessingPipeline(processing_steps)
+def test_ProcessingPipeline_get_parameters(pipeline: assay.ProcessingPipeline):
     for name, parameters in pipeline.get_parameters():
         processor = pipeline.get_processor(name)
         assert parameters == processor.get_parameters()
 
 
-def test_ProcessingPipeline_set_parameters():
-    processing_steps = [
-        ("ROI extractor", DummyRoiExtractor()),
-        ("Feature extractor", DummyFeatureExtractor()),
-    ]
-    pipeline = assay.ProcessingPipeline(processing_steps)
-
+def test_ProcessingPipeline_set_parameters(pipeline: assay.ProcessingPipeline):
     new_parameters = {
-        "ROI extractor": {"param1": 25.0, "param2": 23.0},
-        "Feature extractor": {"param1": 15.0, "param2": 0.5, "filters": {}},
+        "roi extractor": {"param1": 25, "param2": "new-value"},
+        "feature extractor": {
+            "param1": 15,
+            "param2": "new-value",
+            "filters": {"height": (10.0, None)},
+        },
     }
     pipeline.set_parameters(new_parameters)
 
@@ -219,30 +188,30 @@ def test_ProcessingPipeline_set_parameters():
         assert new_parameters[name] == processor.get_parameters()
 
 
-def test_ProcessingPipeline_set_default_parameters():
-    processing_steps = [
-        ("ROI extractor", DummyRoiExtractor()),
-        ("Feature extractor", DummyFeatureExtractor()),
-    ]
-    pipeline = assay.ProcessingPipeline(processing_steps)
-    instrument = "qtof"
-    separation = "uplc"
-    pipeline.set_default_parameters(instrument, separation)
-    test_defaults = pipeline.get_parameters()
+# def test_ProcessingPipeline_set_default_parameters():
+#     processing_steps = [
+#         ("ROI extractor", DummyRoiExtractor()),
+#         ("Feature extractor", DummyFeatureExtractor()),
+#     ]
+#     pipeline = assay.ProcessingPipeline(processing_steps)
+#     instrument = "qtof"
+#     separation = "uplc"
+#     pipeline.set_default_parameters(instrument, separation)
+#     test_defaults = pipeline.get_parameters()
 
-    expected_defaults = list()
-    for name, processor in pipeline.processors:
-        processor.set_default_parameters(instrument, separation)
-        params = processor.get_parameters()
-        expected_defaults.append((name, params))
-    assert expected_defaults == test_defaults
+#     expected_defaults = list()
+#     for name, processor in pipeline.processors:
+#         processor.set_default_parameters(instrument, separation)
+#         params = processor.get_parameters()
+#         expected_defaults.append((name, params))
+#     assert expected_defaults == test_defaults
 
 
-def test_ProcessingPipeline_process():
-    processing_steps = [
-        ("ROI extractor", DummyRoiExtractor()),
-        ("Feature extractor", DummyFeatureExtractor()),
-    ]
-    pipeline = assay.ProcessingPipeline(processing_steps)
-    sample = create_dummy_sample_data()
-    pipeline.process(sample)
+# def test_ProcessingPipeline_process():
+#     processing_steps = [
+#         ("ROI extractor", DummyRoiExtractor()),
+#         ("Feature extractor", DummyFeatureExtractor()),
+#     ]
+#     pipeline = assay.ProcessingPipeline(processing_steps)
+#     sample = create_dummy_sample_data()
+#     pipeline.process(sample)

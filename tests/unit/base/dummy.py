@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 
-from tidyms.base import base
+from pathlib import Path
+from random import random, randint
+from typing import Sequence
+
+from tidyms.base import assay, base
+from tidyms.base import constants as c
 
 
 class ConcreteRoi(base.Roi):
@@ -67,3 +72,76 @@ class ConcreteFeature(base.Feature):
             and (self.id == other.id)
             and (self.annotation == other.annotation)
         )
+
+
+class DummyRoiExtractor(assay.BaseRoiExtractor):
+    param1: int = 10
+    param2: str = "default"
+
+    def _func(self, data: base.SampleData):
+        data.roi = [create_dummy_roi() for _ in range(5)]
+
+    def get_default_parameters(
+        self,
+        instrument: c.MSInstrument = c.MSInstrument.QTOF,
+        separation: c.SeparationMode = c.SeparationMode.UPLC,
+        polarity: c.Polarity = c.Polarity.POSITIVE,
+    ):
+        return dict()
+
+
+class DummyFeatureExtractor(assay.BaseFeatureExtractor):
+    param1: int = 2
+    param2: str = "default"
+
+    def _extract_features_func(self, roi: ConcreteRoi) -> Sequence[ConcreteFeature]:
+        feature_list = list()
+        for _ in range(self.param1):
+            ann = base.Annotation()
+            ft = create_dummy_feature(roi, ann)
+            feature_list.append(ft)
+        return feature_list
+
+    def get_default_parameters(
+        self,
+        instrument: c.MSInstrument = c.MSInstrument.QTOF,
+        separation: c.SeparationMode = c.SeparationMode.UPLC,
+        polarity: c.Polarity = c.Polarity.POSITIVE,
+    ):
+        return dict()
+
+
+def create_dummy_sample(path: Path, suffix: int, group: str = "") -> base.Sample:
+    file = path / f"sample-{suffix}.mzML"
+    file.touch()
+    sample = base.Sample(path=file, id=file.stem, group=group, order=suffix)
+    return sample
+
+
+def create_dummy_roi() -> ConcreteRoi:
+    data = [random() for _ in range(5)]
+    return ConcreteRoi(data)
+
+
+def create_dummy_feature(
+    roi: ConcreteRoi, annotation: base.Annotation
+) -> ConcreteFeature:
+    data = randint(0, 10)
+    return ConcreteFeature(roi, data, annotation=annotation)
+
+
+def add_dummy_features(roi_list: list[ConcreteRoi], n: int):
+    label_counter = 0
+    for roi in roi_list:
+        for _ in range(n):
+            annotation = base.Annotation(label=label_counter)
+            ft = create_dummy_feature(roi, annotation)
+            roi.add_feature(ft)
+            label_counter += 1
+
+
+def get_feature_list(roi_list: list[ConcreteRoi]) -> list[ConcreteFeature]:
+    feature_list = list()
+    for roi in roi_list:
+        feature_list.extend(roi.features)
+    return feature_list
