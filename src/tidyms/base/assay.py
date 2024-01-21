@@ -15,16 +15,32 @@ ProcessingPipeline :
     Apply several processing steps to data.
 
 """
-import inspect
+from __future__ import annotations
+
+import logging
+
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from pathlib import Path
 from math import inf
 from multiprocessing.pool import Pool
-from typing import Optional, Union, Sequence, Type
+from typing import Mapping, Sequence, Type
+
 from ..utils import get_progress_bar
-from .base import Feature, Roi, Sample, SampleData
-from .assay_data import AssayData
+from .base import (
+    Feature,
+    Roi,
+    Sample,
+    SampleData,
+    SampleDataProcessStatus,
+    ProcessingStepInfo,
+)
+from .db import AssayData
+from . import constants as c
+
+import pydantic
+
+logger = logging.getLogger(__file__)
 
 
 # TODO: don't process multiple times the same sample.
@@ -38,20 +54,44 @@ class Assay:
 
     See HERE for a tutorial on how to work with Assay objects.
 
+    Parameters
+    ----------
+    path : str or Path
+        Path to store the assay data. If ``None``, the assay data is stored
+        on memory. If a Path is passed, the processed data from each sample is
+        stored on disk.
+    sample_pipeline: ProcessingPipeline
+        A processing pipeline to process each sample.
+    roi_type: Type[Roi]
+        The Roi Type generated during sample processing. This value is passed
+        to :py:class:`tidyms.base.AssayData` to enable retrieval of data stored
+        on disk.
+    feature_type: Type[Feature]
+        The Feature Type generated during sample processing. This value is
+        passed to :py:class:`tidyms.base.AssayData` to enable retrieval of data
+        stored on disk.
+
     """
 
     def __init__(
         self,
-        path: Union[str, Path],
-        sample_pipeline: "ProcessingPipeline",
+        path: str | Path,
+        sample_pipeline: ProcessingPipeline,
         roi_type: Type[Roi],
         feature_type: Type[Feature],
     ):
-        # TODO: add docstring
+        if isinstance(path, str):
+            path = Path(path)
+
         self._data = AssayData(path, roi_type, feature_type)
         self._sample_pipeline = sample_pipeline
         self._multiple_sample_pipeline = list()
         self._data_matrix_pipeline = list()
+
+    @property
+    def data(self):
+        """Get the Assay data instance."""
+        return self._data
 
     def add_samples(self, samples: list[Sample]):
         """
@@ -62,11 +102,11 @@ class Assay:
         samples : list[Sample]
 
         """
-        self._data.add_samples(samples)
+        self.data.add_samples(samples)
 
     def get_samples(self) -> list[Sample]:
         """List all samples in the assay."""
-        return self._data.get_samples()
+        return self.data.get_samples()
 
     def get_parameters(self) -> dict:
         """Get the processing parameters of each processing pipeline."""
@@ -75,7 +115,7 @@ class Assay:
         return parameters
 
     def get_feature_descriptors(
-        self, sample_id: Optional[str] = None, descriptors: Optional[list[str]] = None
+        self, sample_id: str | None = None, descriptors: list[str] | None = None
     ) -> dict[str, list]:
         """
         Get descriptors for features detected in the assay.
@@ -101,10 +141,12 @@ class Assay:
             correspondence.
 
         """
-        sample = None if sample_id is None else self._data.search_sample(sample_id)
-        return self._data.get_descriptors(descriptors=descriptors, sample=sample)
+        sample = None if sample_id is None else self.data.search_sample(sample_id)
+        return self.data.get_descriptors(descriptors=descriptors, sample=sample)
 
-    def get_features(self, key, by: str, groups: Optional[list[str]] = None) -> list[Feature]:
+    def get_features(
+        self, key, by: str, groups: list[str] | None = None
+    ) -> list[Feature]:
         """
         Retrieve features from the assay.
 
@@ -115,9 +157,12 @@ class Assay:
         key : str or int
             Key used to search features. If `by` is set
             to ``"id"`` or ``"label"`` an integer must be provided. If `by` is
-            set to ``"sample"`` a string with the corresponding sample id.
+            set to ``"sample"`` a string with the corresponding sample id must
+            be passed.
         by : {"sample", "id", "label"}
-            Criteria to select features.
+            Criteria to select features. ``"sample"`` returns all features from
+            a given sample, ``"id"``, retrieves a feature by id and ``"label"``
+            retrieves features labelled by a correspondence algorithm.
         groups : list[str] or None, default=None
             Select features from these sample groups. Applied only if `by` is
             set to ``"label"``.
@@ -128,12 +173,12 @@ class Assay:
 
         """
         if by == "sample":
-            sample = self._data.search_sample(key)
-            features = self._data.get_features_by_sample(sample)
+            sample = self.data.search_sample(key)
+            features = self.data.get_features_by_sample(sample)
         elif by == "label":
-            features = self._data.get_features_by_label(key, groups=groups)
+            features = self.data.get_features_by_label(key, groups=groups)
         elif by == "id":
-            features = [self._data.get_features_by_id(key)]
+            features = [self.data.get_features_by_id(key)]
         else:
             msg = f"`by` must be one of 'sample', 'label' or 'id'. Got {by}."
             raise ValueError(msg)
@@ -171,7 +216,7 @@ class Assay:
         """
         if by == "sample":
             data = self._data.get_sample_data(key)
-            roi_list = data.roi
+            roi_list = data._roi
         elif by == "id":
             roi_list = [self._data.get_roi_by_id(key)]
         else:
@@ -181,8 +226,8 @@ class Assay:
 
     def process_samples(
         self,
-        samples: Optional[list[str]] = None,
-        n_jobs: Optional[int] = 1,
+        samples: list[str] | None = None,
+        n_jobs: int | None = 1,
         delete_empty_roi: bool = True,
         silent: bool = True,
     ):
@@ -231,167 +276,218 @@ class Assay:
         with Pool(n_jobs) as pool:
             for sample_data in pool.imap_unordered(_process_sample_worker, iterator()):
                 if delete_empty_roi:
-                    sample_data.roi = [x for x in sample_data.roi if x.features is not None]
-                self._data.store_sample_data(sample_data)
+                    sample_data.delete_empty_roi()
+                self.data.store_sample_data(sample_data)
                 if not silent and bar is not None:
                     bar.set_description(f"Processing {sample_data.sample.id}")
                     bar.update()
 
 
-class Processor(ABC):
+class _Processor(ABC, pydantic.BaseModel):
     """
-    The base class for data processor.
+    The base class for data processors.
 
-    MUST implement the processor method.
-
-    Processor Parameters MUST be defined as key-value parameters on the
-    `__init__` and set as attributes. Parameters constraints MUST be specified
-    in the _validation_schema class attribute.
-
-    MUST implement _validate_parameters staticmethod.
-    MUST implement set_default_parameters
+    Provides functionality to:
+    - set default parameters using instrument type, separation type and polarity.
+    - set parameters using a dictionary.
+    - get default parameters.
 
     """
 
-    def __repr__(self) -> str:
-        """Create a string representation of the instance."""
-        name = self.__class__.__name__
-        arg_str = ", ".join([f"{k}={v}" for k, v in self.get_parameters().items()])
-        return f"{name}({arg_str})"
-
-    @classmethod
-    def _get_param_names(cls):
-        """Get parameter names for the estimator."""
-        init_signature = inspect.signature(cls.__init__)
-
-        parameters = list()
-        for p in init_signature.parameters.values():
-            if p.kind == p.VAR_POSITIONAL:
-                raise RuntimeError(
-                    "Processors should always specify their parameters in the signature"
-                    " of their __init__ (no varargs)."
-                )
-            if (
-                (not p.name.startswith("_"))
-                and (p.kind != p.VAR_KEYWORD)
-                and (p.name != "self")
-            ):
-                parameters.append(p.name)
-        return sorted([p for p in parameters])
-
-    def get_parameters(self) -> dict:
-        """
-        Get the estimator parameters.
-
-        Returns
-        -------
-        params : dict
-            Parameter names mapped to their values.
-        """
-        parameters = {k: getattr(self, k) for k in self._get_param_names()}
-        return parameters
-
-    def set_parameters(self, parameters: dict):
-        """
-        Set processor parameters.
-
-        Parameters
-        ----------
-        parameters : dict
-
-        """
-        self._validate_parameters(parameters)
-        valid_parameters = self._get_param_names()
-        for k, v in parameters.items():
-            if k not in valid_parameters:
-                msg = f"{k} is not a valid parameter for {self.__class__}"
-                raise ValueError(msg)
-            setattr(self, k, v)
+    model_config = pydantic.ConfigDict(validate_assignment=True)
 
     @abstractmethod
     def process(self, data):
-        """Apply processing function."""
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def _validate_parameters(parameters: dict):
-        """Validate processor parameters."""
         ...
 
     @abstractmethod
-    def set_default_parameters(self, instrument: str, separation: str):
-        """Set default parameters based on instrument and separation type."""
+    def get_default_parameters(
+        self,
+        instrument: c.MSInstrument = c.MSInstrument.QTOF,
+        separation: c.SeparationMode = c.SeparationMode.UPLC,
+        polarity: c.Polarity = c.Polarity.POSITIVE,
+    ) -> dict:
+        """Get default parameters using instrument, separation type and polarity."""
         ...
 
+    def set_default_parameters(
+        self,
+        instrument: c.MSInstrument = c.MSInstrument.QTOF,
+        separation: c.SeparationMode = c.SeparationMode.UPLC,
+        polarity: c.Polarity = c.Polarity.POSITIVE,
+    ):
+        """
+        Set parameters using instrument type separation type and polarity.
 
-class SingleSampleProcessor(Processor):
+        Parameters
+        ----------
+        instrument : MSInstrument, default=MSInstrument.QTOF
+            The instrument type.
+        separation : SeparationMode, default=SeparationMode.UPLC
+            The separation analytical platform.
+        polarity : Polarity, default=Polarity.POSITIVE
+            The measurement polarity.
+
+        See Also
+        --------
+        get_default_parameters
+            Retrieve default parameters using instrument type, separation type
+            and polarity mode.
+
+        """
+        defaults = self.get_default_parameters(instrument, separation, polarity)
+        self.set_parameters(**defaults)
+
+    def get_parameters(self):
+        """Get instance parameters."""
+        return self.model_dump()
+
+    def set_parameters(self, **kwargs):
+        """Set instance parameters."""
+        self.__dict__.update(kwargs)
+
+
+class BaseSampleProcessor(_Processor):
     """
-    Base class to process samples in an assay independently.
+    Base class to process independent samples.
 
-    MUST implement _check_data to check compatibility of data with the processor.
-    MUST implement _func to process the sample data. Must modify sample data.
+    MUST implement _get_expected_sample_data_status to check if the sample
+    data status allows applying the processing function.
 
-    Processor Parameters MUST be defined as key-value parameters in the
-    `__init__` method and set as attributes.
+    MUST implement _update_sample_data_status to update the sample data status
+    after applying the processing function.
+
+    MUST implement _func to process the sample data.
 
     """
 
     def process(self, sample_data: SampleData):
-        """Apply processor to a sample."""
-        self._check_data(sample_data)
+        """Apply processor function to a sample."""
+        expected_status = self._get_expected_sample_data_status()
+        sample_data.status.check(expected_status)
+        info = self._get_processor_info()
+        msg = f"Applying {info.name} with parameters={info.parameters} to sample={sample_data.sample.id}."
+        logger.info(msg)
         self._func(sample_data)
-
-    @staticmethod
-    @abstractmethod
-    def _check_data(sample_data: SampleData):
-        ...
+        self._update_sample_data_status(sample_data)
+        sample_data.add_processing_step_info(info)
 
     @abstractmethod
     def _func(self, sample_data: SampleData):
+        """Processing function that modifies sample data."""
+        ...
+
+    def _get_processor_info(self) -> ProcessingStepInfo:
+        """Create a ProcessingStepInfo instance."""
+        return ProcessingStepInfo(
+            name=self.__class__.__name__, parameters=self.get_parameters()
+        )
+
+    @staticmethod
+    @abstractmethod
+    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
+        """Provide the expected sample data status to apply the processing function."""
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def _update_sample_data_status(sample_data: SampleData):
+        """Update the sample data status after applying the processing function."""
         ...
 
 
-class FeatureExtractor(SingleSampleProcessor):
+class BaseRoiExtractor(BaseSampleProcessor):
     """
-    The base class for feature extraction.
+    Base class to extract ROIs from raw data.
 
-    Includes utilities to filter Features based on descriptor values.
-
-    MUST implement `_check_data` from SingleSampleProcessor.
-    MUST implement the staticmethod `_extract_features_func` that takes a Roi
-    and stores detected features in the `features` attribute.
+    MUST implement _func to add ROIs to sample data.
 
     """
 
-    def __init__(
-        self, filters: Optional[dict[str, tuple[Optional[float], Optional[float]]]] = None
-    ):
-        if filters is None:
-            filters = dict()
-        self.filters = filters
+    @staticmethod
+    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
+        return SampleDataProcessStatus()
 
-    @property
-    def filters(self) -> dict[str, tuple[float, float]]:
-        """
-        Gets filter boundaries for each feature descriptor.
+    @staticmethod
+    def _update_sample_data_status(sample_data: SampleData):
+        sample_data.status.roi = True
 
-        Boundaries are expressed using the name of the descriptor as the key
-        and lower and upper bounds as a tuple. If only a lower/upper bound
-        is desired, ``None`` values must be used (e.g. ``(None, 10.0)`` to
-        use only an upper bound). Descriptors not included in the dictionary
-        are ignored during filtering.
 
-        Returns
-        -------
-        dict[str, tuple[float, float]]
-            Descriptor boundaries
-        """
-        return self._filters
+class BaseRoiTransformer(BaseSampleProcessor):
+    """
+    Base class to transform ROIs.
 
-    @filters.setter
-    def filters(self, value: dict[str, tuple[Optional[float], Optional[float]]]):
-        self._filters = _fill_filter_boundaries(value)
+    MUST implement _transform_roi to transform a ROI.
+
+    """
+
+    @staticmethod
+    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
+        return SampleDataProcessStatus(roi=True)
+
+    def _func(self, sample_data: SampleData):
+        for roi in sample_data.roi:
+            self._transform_roi(roi)
+
+    @staticmethod
+    def _update_sample_data_status(sample_data: SampleData):
+        sample_data.status.roi = True
+
+    @abstractmethod
+    def _transform_roi(self, roi: Roi):
+        ...
+
+
+class BaseFeatureTransformer(BaseSampleProcessor):
+    """
+    Base class to transform features.
+
+    MUST implement _transform_feature to transform a feature.
+
+    """
+
+    @staticmethod
+    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
+        return SampleDataProcessStatus(roi=True, feature=True)
+
+    def _func(self, sample_data: SampleData):
+        for roi in sample_data.roi:
+            for ft in roi.features:
+                self._transform_feature(ft)
+
+    @staticmethod
+    def _update_sample_data_status(sample_data: SampleData):
+        sample_data.status.roi = True
+
+    @abstractmethod
+    def _transform_feature(self, feature: Feature):
+        ...
+
+
+class BaseFeatureExtractor(BaseSampleProcessor):
+    """
+    Base class to extract features from ROIs.
+
+    MUST implement _extract_features_func to extract features from a ROI.
+
+    The filter field define valid boundaries for each feature descriptor.
+    Boundaries are expressed using the name of the descriptor as the key and
+    lower and upper bounds as a tuple. If only a lower/upper bound is desired,
+    ``None`` values must be used (e.g. ``(None, 10.0)`` to use only an upper
+    bound). Descriptors not included in the dictionary are ignored during
+    filtering.
+
+    """
+
+    filters: Mapping[str, tuple[float | None, float | None]] = dict()
+
+    @staticmethod
+    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
+        return SampleDataProcessStatus(roi=True)
+
+    @staticmethod
+    def _update_sample_data_status(sample_data: SampleData):
+        sample_data.status.feature = True
 
     def _func(self, sample_data: SampleData):
         """
@@ -402,19 +498,18 @@ class FeatureExtractor(SingleSampleProcessor):
         sample_data : SampleData
 
         """
-        params = self.get_parameters()
-        filters = params.pop("filters")
+        filters = _fill_filter_boundaries(self.filters)
         for roi in sample_data.roi:
-            self._extract_features_func(roi, **params)
-        _filter_features(sample_data, filters)
+            for ft in self._extract_features_func(roi):
+                if _is_feature_descriptor_in_valid_range(ft, filters):
+                    roi.add_feature(ft)
 
-    @staticmethod
     @abstractmethod
-    def _extract_features_func(roi, **params):
+    def _extract_features_func(self, roi: Roi) -> Sequence[Feature]:
         ...
 
 
-class MultipleSampleProcessor(Processor):
+class MultipleSampleProcessor(_Processor):
     """
     Base class for multiple class process.
 
@@ -435,7 +530,7 @@ class FeatureMatcher(MultipleSampleProcessor):
     Base class for feature correspondence.
 
     MUST implement the `_func` method, which takes an AssayData instance and
-    assigns a label to features from different samples if the have the same
+    assigns a label to features from different samples if they have the same
     chemical identity.
 
     """
@@ -461,7 +556,7 @@ class ProcessingPipeline:
 
     """
 
-    def __init__(self, steps: Sequence[tuple[str, Processor]]):
+    def __init__(self, steps: Sequence[tuple[str, _Processor]]):
         self.processors = steps
         self._name_to_processor = {x: y for x, y in steps}
         if len(self.processors) > len(self._name_to_processor):
@@ -472,7 +567,7 @@ class ProcessingPipeline:
         """Create a deep copy of the pipeline."""
         return deepcopy(self)
 
-    def get_processor(self, name: str) -> Processor:
+    def get_processor(self, name: str) -> _Processor:
         """Get pipeline processors based on name."""
         processor = self._name_to_processor[name]
         return processor
@@ -503,10 +598,15 @@ class ProcessingPipeline:
 
         """
         for name, param in parameters.items():
-            processor = self._name_to_processor[name]
-            processor.set_parameters(param)
+            processor = self.get_processor(name)
+            processor.set_parameters(**param)
 
-    def set_default_parameters(self, instrument: str, separation: str):
+    def set_default_parameters(
+        self,
+        instrument: c.MSInstrument = c.MSInstrument.QTOF,
+        separation: c.SeparationMode = c.SeparationMode.UPLC,
+        polarity: c.Polarity = c.Polarity.POSITIVE,
+    ):
         """
         Set the default parameters for each processor.
 
@@ -519,7 +619,7 @@ class ProcessingPipeline:
 
         """
         for _, processor in self.processors:
-            processor.set_default_parameters(instrument, separation)
+            processor.set_default_parameters(instrument, separation, polarity)
 
     def process(self, data):
         """
@@ -538,18 +638,9 @@ class ProcessingPipeline:
         return data
 
 
-def _filter_features(sample_data: SampleData, filters: dict[str, tuple[float, float]]):
-    """
-    Filter features using feature descriptors bounds.
-
-    Auxiliary function for FeatureExtractor
-    """
-    for roi in sample_data.roi:
-        if roi.features is not None:
-            roi.features = [ft for ft in roi.features if _is_valid_feature(ft, filters)]
-
-
-def _is_valid_feature(ft: Feature, filters: dict[str, tuple[float, float]]) -> bool:
+def _is_feature_descriptor_in_valid_range(
+    ft: Feature, filters: dict[str, tuple[float, float]]
+) -> bool:
     """
     Check if a feature descriptors are inside bounds defined by filters.
 
@@ -572,18 +663,18 @@ def _is_valid_feature(ft: Feature, filters: dict[str, tuple[float, float]]) -> b
     return is_valid
 
 
+def _process_sample_worker(args: tuple[ProcessingPipeline, SampleData]):
+    pipeline, sample_data = args
+    return pipeline.process(sample_data)
+
+
 def _fill_filter_boundaries(
-    filters: dict[str, tuple[Optional[float], Optional[float]]]
+    filters: Mapping[str, tuple[float | None, float | None]]
 ) -> dict[str, tuple[float, float]]:
-    """Replace ``None`` values in lower and upper bounds of filter."""
+    """Replace ``None`` values in lower and upper bounds of feature extractor filter."""
     d = dict()
     for name, (lower, upper) in filters.items():
         lower = lower if lower is not None else -inf
         upper = upper if upper is not None else inf
         d[name] = lower, upper
     return d
-
-
-def _process_sample_worker(args: tuple[ProcessingPipeline, SampleData]):
-    pipeline, sample_data = args
-    return pipeline.process(sample_data)
