@@ -14,12 +14,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from pathlib import Path
-from typing import Sequence, Type
+from typing import Any, Sequence, Type
 
 import pydantic
 from typing_extensions import Annotated
 from pydantic.functional_validators import AfterValidator
 
+from . import exceptions
 from . import validation_utils as validation
 
 
@@ -121,7 +122,6 @@ class Feature(ABC):
         self.id = id_
         self.roi = roi
         self._descriptors = dict()
-        roi.add_feature(self)
         if annotation is None:
             annotation = Annotation()
         self._annotation = annotation
@@ -371,9 +371,15 @@ class SampleData:
         self.sample = sample
         if roi is None:
             roi = list()
+        self._status = SampleDataProcessStatus()
         self._roi = roi
         self._features: list[Feature] | None = None
         self._descriptors: dict[str, list[float]] | None = None
+        self._processing_steps: list[ProcessingStepInfo] = list()
+
+    @property
+    def processing_steps(self) -> list[ProcessingStepInfo]:
+        return self._processing_steps
 
     @property
     def roi(self) -> Sequence[Roi]:
@@ -384,14 +390,62 @@ class SampleData:
     def roi(self, value: Sequence[Roi]):
         self._roi = value
 
+    @property
+    def status(self) -> SampleDataProcessStatus:
+        return self._status
+
+    def add_processing_step_info(self, info: ProcessingStepInfo):
+        """Store information from a processing step."""
+        self._processing_steps.append(info)
+
     def get_feature_list(self) -> list[Feature]:
         """Update the feature attribute using feature data from ROIs."""
         feature_list = list()
         for roi in self.roi:
-            if roi.features is not None:
-                feature_list.extend(roi.features)
+            feature_list.extend(roi.features)
         return feature_list
 
     def delete_empty_roi(self):
         """Delete ROI with no features."""
         self.roi = [x for x in self.roi if x.features]
+
+
+class ProcessingStepInfo(pydantic.BaseModel):
+    """Stores sample processing step name and parameters"""
+
+    name: str
+    parameters: dict[str, Any]
+
+
+class SampleDataProcessStatus:
+    """Report sample data process status."""
+
+    def __init__(
+        self,
+        roi: bool = False,
+        feature: bool = False,
+        isotopologue_annotation: bool = False,
+        adduct_annotation: bool = False,
+        correspondence: bool = False,
+    ):
+        self.roi = roi
+        self.feature = feature
+        self.isotopologue_annotation = isotopologue_annotation
+        self.adduct_annotation = adduct_annotation
+        self.correspondence = correspondence
+
+    def check(self, other: SampleDataProcessStatus):
+        for attr in self.__dict__:
+            actual = getattr(self, attr)
+            expected = getattr(other, attr)
+            status = _compare_process_status(actual, expected)
+            if not status:
+                msg = f"Expected status={expected} for {attr}. Got status={actual}."
+                raise exceptions.IncompatibleSampleDataStatus(msg)
+
+
+def _compare_process_status(actual: bool, expected: bool) -> bool:
+    if expected:
+        return expected and actual
+    else:
+        return True
