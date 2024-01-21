@@ -1,4 +1,5 @@
 from typing import Final, List
+import enum
 
 
 # separation modes
@@ -9,6 +10,37 @@ LC_MODES: Final[List[str]] = [UPLC, HPLC, DART]
 SEPARATION_MODES: Final[List[str]] = LC_MODES + []
 
 # instruments
+
+
+class SeparationMode(enum.Enum):
+    """Analytical method separation platform."""
+
+    DART = "DART"
+    HPLC = "HPLC"
+    UPLC = "UPLC"
+
+
+class MSInstrument(enum.Enum):
+    """Available MS instrument types."""
+
+    QTOF = "qtof"
+    ORBITRAP = "orbitrap"
+
+
+class Polarity(enum.Enum):
+    """Scan polarity."""
+
+    POSITIVE = 1
+    NEGATIVE = 2
+
+
+class MSDataMode(enum.Enum):
+    """Raw data mode."""
+
+    PROFILE = 1
+    CENTROID = 2
+
+
 QTOF: Final[str] = "qtof"
 ORBITRAP: Final[str] = "orbitrap"
 MS_INSTRUMENTS: Final[List[str]] = [QTOF, ORBITRAP]
