@@ -30,12 +30,25 @@ class Roi(pydantic.BaseModel):
     """
     Base class for Regions of Interest (ROI) extracted from raw MS data.
 
-    Properties
+    Roi inherits from pydantic BaseModel, and support most of its functionality.
+    New Rois subclasses are created by inheritance of this class and setting
+    data fields using Pydantic's standard approach.
+
+    For Numpy array fields, check out the `NumpyArray` type which provides type
+    checking for arrays and efficient serialization/deserialization.
+
+    Two attributes are defined for the Roi class: `id` and `features`. Both
+    are managed by other components and should never be set directly by the
+    user.
+
+    TODO: add link
+    See THIS GUIDE for an example on how to create a new Roi class.
+
+    Attributes
     ----------
-    id : int
-        An identifier for the ROI. Used by :class:`tidyms.base.AssayData` to
-        persist data.
-    features : list[Feature]
+    id : int, default=-1
+        An identifier for the ROI.
+    features : list[Feature], defaults to an empty list.
         Features extracted from the ROI.
 
     """
@@ -71,15 +84,15 @@ class Annotation(pydantic.BaseModel):
 
     Attributes
     ----------
-    label : int
-        Feature group of features. Groups features from different samples based
+    label : int, default=-1
+        Feature group id. Groups features from different samples based
         their chemical identity. Used to create a data matrix.
-    isotopologue_label : int
-        Groups features from the same isotopic envelope.
-    isotopologue_index : int
+    isotopologue_label : int, default=-1
+        Groups features from the same isotopic envelope in a sample.
+    isotopologue_index : int, default=-1
         Position of the feature in an isotopic envelope.
-    charge : int
-        Charge state.
+    charge : int, default=-1
+        Feature charge state.
     """
 
     label: int = -1
@@ -90,16 +103,52 @@ class Annotation(pydantic.BaseModel):
 
 class Feature(pydantic.BaseModel):
     """
-    Base class to represent a feature.
+    Base class to represent a feature extracted from a ROI.
+
+    Feature inherits from pydantic BaseModel, and support most of its
+    functionality. New Feature subclasses are created by inheritance of this
+    class and setting data fields using Pydantic's standard approach.
+
+    There are two type of data fields for features: data fields and descriptors.
+    Data fields contain information to represent the feature. e.g. the start
+    and end position of a chromatographic peak. Descriptors are properties that
+    describe the feature. e.g, the peak width or peak area in a chromatographic
+    peak. Descriptors are set in the same way as data fields, but two
+    additional restriction apply. First, the type of a descriptor must be `float`
+    and the default value of the descriptor must be ``nan``. Second, a method
+    called `_set_descriptor_name` must be created for each feature, which
+    computes the corresponding descriptor value and stores in the corresponding
+    instance attribute. As an example:
+
+    .. code-block: python
+
+        from math import nan
+        from tidyms.core.models import Feature
+
+        class MyFeature(Feature):
+            custom_descriptor: float = nan
+
+        def _set_custom_descriptor(self):
+            self.custom_descriptor = 100.0
+
+    Three descriptors are defined by default: mz, area and height. Those
+    descriptors must be defined for each subclass defined.
+
+    Finally, three attributes are defined for the Feature class: `id`, `roi` and
+    `annotation`. These parameters are managed by other components and should
+    never be set directly by the user.
+
+    TODO: add link
+    See THIS GUIDE for an example on how to create a new Feature class.
 
     Attributes
     ----------
     roi: Roi
-        ROI where the feature was detected.
+        the ROI where the feature was detected.
     annotation: Annotation
         Annotation data of the feature.
     id: int
-        An unique label used by :class:`tidyms.base.AssayData` to persist data.
+        An identifier for the feature.
 
     """
 
@@ -233,10 +282,16 @@ class Feature(pydantic.BaseModel):
 
 
 class AnnotableFeature(Feature, ABC):
-    """Base feature with also implements methods for feature annotation."""
+    """
+    Abstract feature class which inherits from Feature.
+
+    Provides extra functionality to perform feature annotation.
+    Base feature with also implements methods for feature annotation.
+
+    """
 
     @abstractmethod
-    def compare(self, other: "Feature") -> float:
+    def compare(self, other: Feature) -> float:
         """
         Compare the similarity between two features.
 
