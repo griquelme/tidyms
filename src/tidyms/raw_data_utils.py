@@ -261,7 +261,9 @@ def make_roi(
         if min_intensity is None:
             mz_filter = None
         else:
-            mz_filter = _make_mz_filter(ms_data, min_intensity, ms_level, start_time, end_time)
+            mz_filter = _make_mz_filter(
+                ms_data, min_intensity, ms_level, start_time, end_time
+            )
         targeted = False
     else:
         mz_filter = np.sort(targeted_mz)
@@ -589,7 +591,9 @@ class _RoiMaker:
         finished_mask = self.tmp_roi_list.missing_count > self.max_missing
         finished_roi_index = np.where(finished_mask)[0]
         if self.min_intensity is not None:
-            valid_mask = finished_mask & (self.tmp_roi_list.max_int >= self.min_intensity)
+            valid_mask = finished_mask & (
+                self.tmp_roi_list.max_int >= self.min_intensity
+            )
         else:
             valid_mask = finished_mask
 
@@ -986,7 +990,9 @@ def _filter_zero_intensity_signals(
     return mz[match_mask], sp[match_mask]
 
 
-def _get_profile_mode_mz_deltas(mz: np.ndarray, convert_to_ppm: bool = True) -> np.ndarray:
+def _get_profile_mode_mz_deltas(
+    mz: np.ndarray, convert_to_ppm: bool = True
+) -> np.ndarray:
     """_get_profile_mode_mz_deltas
 
     Args:
@@ -1093,7 +1099,9 @@ def _match_mz(
         elif mode == "closest":
             match_index_mz = np.where(match_mask)[0][match_first]
             multiple_match_index_mz = match_index_mz[multiple_match_mask]
-            iterator = zip(multiple_match_index_mz, multiple_match_first, multiple_match_count)
+            iterator = zip(
+                multiple_match_index_mz, multiple_match_first, multiple_match_count
+            )
             for mz2_index, first, count in iterator:
                 closest = np.argmin(dmz[mz2_index : mz2_index + count])
                 # flag all multiple matches as no match except the closest one
