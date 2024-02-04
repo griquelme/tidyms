@@ -1,8 +1,9 @@
 from tidyms import consensus_annotation
-from tidyms.base import constants as c
+from tidyms.core import constants as c
 import pandas as pd
 import pytest
 from collections import Counter
+
 
 @pytest.fixture
 def feature_table():
@@ -46,9 +47,10 @@ def test__build_graph_nodes(feature_table):
     expected = {
         0: {c.CHARGE: 1, c.ENVELOPE_INDEX: 0},
         1: {c.CHARGE: 1, c.ENVELOPE_INDEX: 1},
-        2: {c.CHARGE: 1, c.ENVELOPE_INDEX: 2}
+        2: {c.CHARGE: 1, c.ENVELOPE_INDEX: 2},
     }
     assert nodes == expected
+
 
 def test__build_graph_edges(feature_table):
     edges = consensus_annotation._build_graph_edges(feature_table)

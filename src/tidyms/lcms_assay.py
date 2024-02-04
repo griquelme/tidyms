@@ -2,10 +2,10 @@
 
 import numpy as np
 from typing import Any, Optional
-from .base.base import Sample, SampleData
-from .base.db import AssayData
-from .base.assay import BaseFeatureExtractor, BaseSampleProcessor, FeatureMatcher
-from .base import constants as c
+from .core.base import Sample, SampleData
+from .core.db import AssayData
+from .core.assay import BaseFeatureExtractor, BaseSampleProcessor, FeatureMatcher
+from .core import constants as c
 from . import peaks
 from .correspondence import match_features
 from .fileio import MSData_from_file

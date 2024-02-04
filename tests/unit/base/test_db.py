@@ -1,4 +1,4 @@
-from tidyms.base.db import AssayData
+from tidyms.core.db import AssayData
 from pathlib import Path
 import pytest
 from typing import cast

@@ -2,7 +2,7 @@ import pandas as pd
 import networkx as nx
 from collections import Counter
 from typing import Dict, Final, List, Tuple
-from .base import constants as c
+from .core import constants as c
 
 _COUNT: Final[str] = "count"
 _TOTAL: Final[str] = "total"
@@ -192,7 +192,9 @@ def _group_edges(graph: nx.Graph, node: int) -> Dict[int, List[Tuple[int, int]]]
     return groups
 
 
-def _solve_conflict_mmi(graph: nx.Graph, grouped_edges: Dict[int, List[Tuple[int, int]]]):
+def _solve_conflict_mmi(
+    graph: nx.Graph, grouped_edges: Dict[int, List[Tuple[int, int]]]
+):
     """
     Solve conflicts with a group of edges from an MMI node (envelope_index==0).
 
@@ -205,7 +207,7 @@ def _solve_conflict_mmi(graph: nx.Graph, grouped_edges: Dict[int, List[Tuple[int
     """
     # If a neighbour has envelope_index == 0 it added to the list of edges to remove
     remove_edges = grouped_edges.pop(0, list())
-    edge_attributes = dict()    # stores the total count of valid edges
+    edge_attributes = dict()  # stores the total count of valid edges
     for edges in grouped_edges.values():
         max_count = 0
         total_count = 0
@@ -226,7 +228,9 @@ def _solve_conflict_mmi(graph: nx.Graph, grouped_edges: Dict[int, List[Tuple[int
     return edge_attributes
 
 
-def _solve_conflict_not_mmi(graph: nx.Graph, grouped_edges: Dict[int, List[Tuple[int, int]]]):
+def _solve_conflict_not_mmi(
+    graph: nx.Graph, grouped_edges: Dict[int, List[Tuple[int, int]]]
+):
     """
     Solve conflicts with a group of edges connecting to a non-MMI node.
 
@@ -292,7 +296,7 @@ def _get_annotations(graph: nx.Graph) -> Dict[int, Dict[str, int]]:
                     c.CHARGE: node_attributes.get(c.CHARGE),
                     c.ENVELOPE_INDEX: node_index,
                     _TOTAL: edge_total,
-                    _COUNT: edge_count
+                    _COUNT: edge_count,
                 }
                 annotations[n] = node_annotation
             label_counter += 1

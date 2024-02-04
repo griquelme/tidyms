@@ -1,6 +1,6 @@
 from tidyms import container
 from tidyms.container import DataContainer
-from tidyms.base import constants as c
+from tidyms.core import constants as c
 import numpy as np
 import pandas as pd
 import pytest
@@ -347,7 +347,9 @@ def test_set_plot_mode(data_container_with_order):
 
 def test_add_run_order_from_csv(tmpdir, data_container_without_order):
     data = data_container_without_order
-    order_data = pd.DataFrame(data=np.arange(data.data_matrix.shape[0]), columns=["order"])
+    order_data = pd.DataFrame(
+        data=np.arange(data.data_matrix.shape[0]), columns=["order"]
+    )
     order_data["sample"] = data.data_matrix.index
     order_data["batch"] = 1
     save_path = os.path.join(tmpdir, "order.csv")
@@ -452,7 +454,9 @@ def test_metrics_pca(data_container_with_order):
 def test_metrics_pca_n_components(data_container_with_order):
     n_comp = 3
     data = data_container_with_order
-    scores, loadings, pc_variance, total_variance = data.metrics.pca(n_components=n_comp)
+    scores, loadings, pc_variance, total_variance = data.metrics.pca(
+        n_components=n_comp
+    )
     # shape check for scores and loadings
     assert scores.shape[1] == n_comp
     assert scores.shape[0] == data.data_matrix.shape[0]

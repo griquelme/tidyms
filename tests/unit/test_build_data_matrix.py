@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from tidyms import _build_data_matrix
-from tidyms.base import constants as c
+from tidyms.core import constants as c
 import pytest
 
 
@@ -34,7 +34,9 @@ def create_dummy_feature_table(n_ft, n_samples):
         return df
 
     feature_table[c.SAMPLE] = np.random.choice(samples, replace=True, size=n_rows)
-    feature_table = feature_table.groupby(c.SAMPLE, group_keys=False).apply(assign_cluster)
+    feature_table = feature_table.groupby(c.SAMPLE, group_keys=False).apply(
+        assign_cluster
+    )
     feature_table = feature_table[feature_table[c.LABEL] > -1]
 
     return feature_table
@@ -379,7 +381,9 @@ def test__lc_merge_close_features_all_features_above_merge_threshold():
     )
     ft_descriptors = [c.MZ, c.RT]
     feature_metadata = pd.DataFrame(
-        data=[[1, 1], [1.005, 1.005], [3, 3], [4, 4]], columns=ft_descriptors, index=ft_names
+        data=[[1, 1], [1.005, 1.005], [3, 3], [4, 4]],
+        columns=ft_descriptors,
+        index=ft_names,
     )
 
     mz_merge = 0.01
@@ -407,7 +411,9 @@ def test__lc_merge_close_features_merge_one_feature():
     )
     ft_descriptors = [c.MZ, c.RT]
     feature_metadata = pd.DataFrame(
-        data=[[1, 1], [1.005, 1.005], [3, 3], [4, 4]], columns=ft_descriptors, index=ft_names
+        data=[[1, 1], [1.005, 1.005], [3, 3], [4, 4]],
+        columns=ft_descriptors,
+        index=ft_names,
     )
 
     # set values in FT2 to nan
@@ -420,9 +426,9 @@ def test__lc_merge_close_features_merge_one_feature():
     merge_threshold = 1.0
 
     expected_data_matrix = data_matrix.copy()
-    expected_data_matrix[main_ft] = expected_data_matrix[main_ft] + expected_data_matrix[
-        merge_ft
-    ].fillna(0)
+    expected_data_matrix[main_ft] = expected_data_matrix[
+        main_ft
+    ] + expected_data_matrix[merge_ft].fillna(0)
     expected_data_matrix.drop(columns=[merge_ft], inplace=True)
     expected_feature_metadata = feature_metadata.copy()
     expected_feature_metadata.drop(index=[merge_ft], inplace=True)

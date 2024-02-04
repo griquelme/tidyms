@@ -3,7 +3,7 @@ import bokeh.plotting
 from bokeh.palettes import all_palettes
 from bokeh.models import ColumnDataSource, Segment
 from .utils import get_settings
-from .base import constants as c
+from .core import constants as c
 from typing import Dict, Generator, List, Optional
 
 
@@ -68,7 +68,7 @@ def add_line(
     figure: bokeh.plotting.figure,
     x: np.ndarray,
     y: np.ndarray,
-    line_params: Optional[dict] = None
+    line_params: Optional[dict] = None,
 ):
     """
     Plots a line.
@@ -129,7 +129,7 @@ def add_stems(
     fig: bokeh.plotting.figure,
     x: np.ndarray,
     y: np.ndarray,
-    line_params: Optional[Dict] = None
+    line_params: Optional[Dict] = None,
 ):
     default_line_params = get_line_params()
     if line_params:
@@ -142,7 +142,7 @@ def add_stems(
     fig.add_glyph(source, stems)
 
 
-class _LCAssayPlotter:     # pragma: no cover
+class _LCAssayPlotter:  # pragma: no cover
     """
     Methods to plot data from an Assay. Generates Bokeh Figures.
 
@@ -154,6 +154,7 @@ class _LCAssayPlotter:     # pragma: no cover
         Overlapped chromatographic peaks for a feature in all samples
 
     """
+
     def __init__(self, assay):
         self.assay = assay
         self.roi_index = None
@@ -203,7 +204,7 @@ class _LCAssayPlotter:     # pragma: no cover
             ("width", "@{}".format(c.WIDTH)),
             ("SNR", "@{}".format(c.SNR)),
             ("roi index", "@{}".format(c.ROI_INDEX)),
-            ("feature index", "@{}".format(c.FT_INDEX))
+            ("feature index", "@{}".format(c.FT_INDEX)),
         ]
         fig = bokeh.plotting.figure(tooltips=TOOLTIPS)
 
@@ -212,16 +213,14 @@ class _LCAssayPlotter:     # pragma: no cover
         for r in roi:
             rt_list.append(r.time)
             mz_list.append(r.mz)
-        line_source = bokeh.plotting.ColumnDataSource(
-            dict(xs=rt_list, ys=mz_list)
-        )
+        line_source = bokeh.plotting.ColumnDataSource(dict(xs=rt_list, ys=mz_list))
         line_params = get_line_params()
         fig.multi_line(xs="xs", ys="ys", source=line_source, **line_params)
 
         try:
             ft = self.assay.load_features(sample)
             source = bokeh.plotting.ColumnDataSource(ft)
-            fig.circle('rt', 'mz', size=5, source=source)
+            fig.circle("rt", "mz", size=5, source=source)
         except ValueError:
             pass
         fig.xaxis.update(axis_label="Rt [s]")
@@ -234,7 +233,7 @@ class _LCAssayPlotter:     # pragma: no cover
         self,
         cluster: int,
         include_classes: Optional[List[str]] = None,
-        show: bool = True
+        show: bool = True,
     ) -> bokeh.plotting.figure:
         """
         Plots chromatograms of a feature detected across different samples.
@@ -279,9 +278,8 @@ class _LCAssayPlotter:     # pragma: no cover
 
         iterator = zip(samples, roi_index, ft_index, classes)
         for sample, roi_index, ft_index, class_ in iterator:
-            check_draw = (
-                (roi_index > -1) and
-                ((include_classes is None) or (class_ in include_classes))
+            check_draw = (roi_index > -1) and (
+                (include_classes is None) or (class_ in include_classes)
             )
             if check_draw:
                 if include_classes is None:
@@ -291,8 +289,7 @@ class _LCAssayPlotter:     # pragma: no cover
                 r = self.assay.load_roi(sample, roi_index)
                 ft = r.features[ft_index]
                 add_line(fig, r.time, r.spint)
-                fill_area(
-                    fig, r.time, r.spint, ft.start, ft.end, color, alpha=0.2)
+                fill_area(fig, r.time, r.spint, ft.start, ft.end, color, alpha=0.2)
         set_chromatogram_axis_params(fig)
         if show:
             bokeh.plotting.show(fig)

@@ -2,8 +2,8 @@
 
 from typing import Optional
 from . import create_annotation_tools, annotate
-from ..base.base import SampleData
-from ..base.assay import BaseSampleProcessor
+from ..core.base import SampleData
+from ..core.assay import BaseSampleProcessor
 from ..chem import get_chnops_bounds
 from ..validation import ValidatorWithLowerThan, validate
 

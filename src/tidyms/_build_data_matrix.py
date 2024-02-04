@@ -6,7 +6,7 @@ feature table.
 
 import pandas as pd
 from numpy import nan
-from .base import constants as c
+from .core import constants as c
 from .consensus_annotation import vote_annotations
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -240,7 +240,9 @@ def _find_merge_candidates(
 ) -> pd.Index:
     ft_mz = mz[ft]
     ft_rt = rt[ft]
-    merge_candidates_mask = ((rt - ft_rt).abs() < rt_merge) & ((mz - ft_mz).abs() < mz_merge)
+    merge_candidates_mask = ((rt - ft_rt).abs() < rt_merge) & (
+        (mz - ft_mz).abs() < mz_merge
+    )
     merge_candidates_mask[ft] = False
     return features[merge_candidates_mask].intersection(feature_set)
 

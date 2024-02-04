@@ -6,7 +6,7 @@ Functions to find isotopic envelopes candidates in a list of m/z values.
 import bisect
 from typing import Tuple
 from ..chem.atoms import Element, PeriodicTable
-from ..base.base import Feature
+from ..core.base import Feature
 from .annotation_data import AnnotationData, SimilarityCache
 from collections.abc import Sequence
 

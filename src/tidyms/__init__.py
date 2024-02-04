@@ -12,7 +12,7 @@ Provides
 
 """
 
-from .base.spectrum import MSSpectrum
+from .core.spectrum import MSSpectrum
 from . import chem
 from . import fileio
 from . import container
@@ -35,7 +35,7 @@ from .lcms import Chromatogram
 from .raw_data_utils import *
 from . import annotation
 from . import lcms_assay
-from . import base
+from . import core
 
 utils.create_tidyms_dir()
 SETTINGS = utils.get_settings()

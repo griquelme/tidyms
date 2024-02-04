@@ -8,11 +8,14 @@ from scipy.interpolate import CubicSpline, interp1d
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from typing import List, Callable, Union, Optional
 from .utils import mad
-from .base import constants as c
+from .core import constants as c
 
 
 def average_replicates(
-    data: pd.DataFrame, sample_id: pd.Series, classes: pd.Series, process_classes: List[str]
+    data: pd.DataFrame,
+    sample_id: pd.Series,
+    classes: pd.Series,
+    process_classes: List[str],
 ) -> pd.DataFrame:
     """
     Group samples by id and computes the average.
@@ -163,7 +166,9 @@ def _generate_batches(
         corrector_df = df_batch.loc[classes_batch.isin(corrector_classes), :]
         process_order = run_order[process_df.index]
         corrector_order = run_order[corrector_df.index]
-        batch_order = run_order[corrector_df.index.union(process_df.index)].sort_values()
+        batch_order = run_order[
+            corrector_df.index.union(process_df.index)
+        ].sort_values()
         corrector_df = corrector_df.set_index(corrector_order).sort_index()
         process_df = process_df.set_index(process_order).sort_index()
         yield corrector_df, process_df, batch_order
@@ -195,7 +200,11 @@ def get_outside_bounds_index(
 
 
 def batch_ext(
-    order: pd.Series, batch: pd.Series, classes: pd.Series, class_list: List[str], ext: str
+    order: pd.Series,
+    batch: pd.Series,
+    classes: pd.Series,
+    class_list: List[str],
+    ext: str,
 ) -> pd.Series:
     """
     get minimum/maximum order of samples of classes in class_list. Auxiliary
@@ -264,7 +273,9 @@ def check_qc_prevalence(
     """
     invalid_features = pd.Index([])
     for batch_number, batch_class in classes.groupby(batch):
-        block_type, block_number = make_sample_blocks(batch_class, qc_classes, sample_classes)
+        block_type, block_number = make_sample_blocks(
+            batch_class, qc_classes, sample_classes
+        )
         qc_blocks = block_number[block_type == 0]
         block_prevalence = (
             data_matrix.loc[qc_blocks.index]

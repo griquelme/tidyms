@@ -31,11 +31,11 @@ from scipy.interpolate import interp1d
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
 
-from .base.base import Annotation, Feature, Roi
+from .core.base import Annotation, Feature, Roi
 from . import peaks
 from . import _plot_bokeh
-from .base import constants as c
-from .base.spectrum import MSSpectrum
+from .core import constants as c
+from .core.spectrum import MSSpectrum
 from .utils import array_to_json_str, json_str_to_array
 
 

@@ -8,9 +8,9 @@ from pathlib import Path
 from random import random, randint
 from typing import Sequence
 
-from tidyms.base import assay, base
-from tidyms.base import constants as c
-from tidyms.base.base import Feature, Roi
+from tidyms.core import assay, base
+from tidyms.core import constants as c
+from tidyms.core.base import Feature, Roi
 
 
 class ConcreteRoi(base.Roi):

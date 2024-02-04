@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from .base import constants as c
+from .core import constants as c
 from typing import Optional
 from .container import DataContainer
 
@@ -75,7 +75,9 @@ def simulate_dataset(
         append_blank,
         batch_size,
     )
-    dm = _make_data_matrix(population, sm, mean_dict, cov_dict, blank_contribution, noise_dict)
+    dm = _make_data_matrix(
+        population, sm, mean_dict, cov_dict, blank_contribution, noise_dict
+    )
     fm = np.vstack((feature_mz, feature_rt)).T
     fm = pd.DataFrame(data=fm, columns=["mz", "rt"], index=dm.columns)
     mapping = {"sample": list(population)}
@@ -147,7 +149,12 @@ def _make_sample_list(
     )
     order = list(range(1, len(batch_number) + 1))
     sample_name = _make_sample_name(len(batch_number))
-    sample_list = {c.ID: sample_name, c.CLASS: classes, c.ORDER: order, c.BATCH: batch_number}
+    sample_list = {
+        c.ID: sample_name,
+        c.CLASS: classes,
+        c.ORDER: order,
+        c.BATCH: batch_number,
+    }
     sample_list = pd.DataFrame(data=sample_list, index=sample_name)
     sample_list.index.name = c.SAMPLE
     return sample_list
@@ -214,7 +221,9 @@ def _make_data_matrix(
     return data_matrix
 
 
-def _make_sample_classes(sample_distribution, batch_size, qc_bracket_size, prepend, append):
+def _make_sample_classes(
+    sample_distribution, batch_size, qc_bracket_size, prepend, append
+):
     n_study_samples = sum(sample_distribution.values())
     # randomize classes and make QC brackets
     classes = list()
@@ -229,14 +238,18 @@ def _make_sample_classes(sample_distribution, batch_size, qc_bracket_size, prepe
     end = min(batch_size, n_study_samples)
     for k_batches in range(n_batches):
         res += prepend
-        res += _make_batch_sample_block(classes, permutation_index[start:end], qc_bracket_size)
+        res += _make_batch_sample_block(
+            classes, permutation_index[start:end], qc_bracket_size
+        )
         res += append
         start = end
         end = min(start + batch_size, n_study_samples)
     return res
 
 
-def _make_batch_number(batch_size, n_study_samples, n_prepend, n_append, qc_bracket_size):
+def _make_batch_number(
+    batch_size, n_study_samples, n_prepend, n_append, qc_bracket_size
+):
     n_batch, n_study_samples_last_batch = divmod(n_study_samples, batch_size)
     # adds an extra batch for the last batch
     n_batch += int(n_study_samples_last_batch > 0)

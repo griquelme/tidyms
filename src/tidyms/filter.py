@@ -36,12 +36,11 @@ MissingValueError : Error raised when the data matrix has missing values.
 
 """
 
-
 from .container import DataContainer
 from . import container
 from . import _filter_functions as ff
 from . import validation
-from .base import constants as c
+from .core import constants as c
 import os.path
 from warnings import warn
 from typing import Optional, List, Union, Callable
@@ -101,7 +100,9 @@ class Reporter(object):
             removed_samples = (
                 self.metrics["before"]["samples"] - self.metrics["after"]["samples"]
             )
-            cv_reduction = (self.metrics["before"]["cv"] - self.metrics["after"]["cv"]) * 100
+            cv_reduction = (
+                self.metrics["before"]["cv"] - self.metrics["after"]["cv"]
+            ) * 100
             results = dict()
             results["features"] = removed_features
             results["samples"] = removed_samples
@@ -497,7 +498,9 @@ class PrevalenceFilter(Processor):
             groupby = "class"
         else:
             groupby = None
-        dr = dc.metrics.detection_rate(groupby=groupby, threshold=self.params["threshold"])
+        dr = dc.metrics.detection_rate(
+            groupby=groupby, threshold=self.params["threshold"]
+        )
         dr = dr.loc[self.params["process_classes"], :]
         lb = self.params["lb"]
         ub = self.params["ub"]
@@ -608,7 +611,13 @@ class VariationFilter(Processor):
     """
 
     def __init__(
-        self, lb=0, ub=0.25, process_classes=None, robust=False, intraclass=True, verbose=False
+        self,
+        lb=0,
+        ub=0.25,
+        process_classes=None,
+        robust=False,
+        intraclass=True,
+        verbose=False,
     ):
         """
         Constructor of the VariationFilter.
@@ -704,7 +713,9 @@ class DilutionFilter(Processor):
         mode = self.params["mode"]
         min_corr = self.params["min_corr"]
         plim = self.params["plim"]
-        corr = dc.metrics.correlation("dilution", mode=mode, classes=dc.mapping[c.DQC_TYPE])
+        corr = dc.metrics.correlation(
+            "dilution", mode=mode, classes=dc.mapping[c.DQC_TYPE]
+        )
         if mode == "ols":
             r2_ind = ff.get_outside_bounds_index(corr.loc["r2", :], min_corr, 1)
             jb_ind = ff.get_outside_bounds_index(corr.loc["JB", :], plim, 1)
@@ -748,7 +759,10 @@ class _TemplateValidationFilter(Processor):
         }
         (
             super(_TemplateValidationFilter, self).__init__(
-                axis="samples", mode="filter", verbose=verbose, requirements=requirements
+                axis="samples",
+                mode="filter",
+                verbose=verbose,
+                requirements=requirements,
             )
         )
         self.name = "Batch Template Check"
@@ -847,7 +861,10 @@ class _BatchCorrectorPrevalenceFilter(Processor):
         }
         (
             super(_BatchCorrectorPrevalenceFilter, self).__init__(
-                axis="features", mode="filter", verbose=verbose, requirements=requirements
+                axis="features",
+                mode="filter",
+                verbose=verbose,
+                requirements=requirements,
             )
         )
         self.name = "Batch Prevalence Checker"

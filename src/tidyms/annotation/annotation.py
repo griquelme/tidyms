@@ -4,10 +4,10 @@ from typing import Sequence
 from .annotation_data import AnnotationData
 from .envelope_finder import EnvelopeFinder
 from .mmi_finder import MMIFinder
-from ..base.base import Feature
+from ..core.base import Feature
 from ..chem import EnvelopeValidator
 from ..chem.atoms import EM, PeriodicTable
-from ..base import constants as c
+from ..core import constants as c
 
 
 def create_annotation_table(feature_list: list[Feature]) -> pd.DataFrame:

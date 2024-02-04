@@ -1,7 +1,6 @@
 """Spectra plotting utilities"""
 
-
-from ..base.spectrum import MSSpectrum
+from ..core.spectrum import MSSpectrum
 
 
 # TODO: complete.

@@ -31,7 +31,7 @@ from . import utils
 from . import validation
 from . import fileio
 from . import _batch_corrector
-from .base import constants as c
+from .core import constants as c
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -121,7 +121,6 @@ class DataContainer(object):
         mapping: Optional[dict] = None,
         plot_mode: str = "bokeh",
     ):
-
         """
         See help(DataContainer) for more details
 
@@ -141,15 +140,21 @@ class DataContainer(object):
             The package used to generate plots with the plot methods
 
         """
-        validation.validate_data_container(data_matrix, feature_metadata, sample_metadata)
+        validation.validate_data_container(
+            data_matrix, feature_metadata, sample_metadata
+        )
 
         # sort columns and indices of each DataFrame
         data_matrix = data_matrix.sort_index()
         data_matrix = data_matrix.reindex(sorted(data_matrix.columns), axis=1)
         sample_metadata = sample_metadata.sort_index()
-        sample_metadata = sample_metadata.reindex(sorted(sample_metadata.columns), axis=1)
+        sample_metadata = sample_metadata.reindex(
+            sorted(sample_metadata.columns), axis=1
+        )
         feature_metadata = feature_metadata.sort_index()
-        feature_metadata = feature_metadata.reindex(sorted(feature_metadata.columns), axis=1)
+        feature_metadata = feature_metadata.reindex(
+            sorted(feature_metadata.columns), axis=1
+        )
 
         # check and convert order and batch information
         try:
@@ -625,7 +630,9 @@ class MetricMethods:
                 by = self.__data.sample_metadata[groupby]
             else:
                 by = [self.__data.sample_metadata[x] for x in groupby]
-            result = self.__data.data_matrix.groupby(by).apply(cv_func, fill_value=fill_value)
+            result = self.__data.data_matrix.groupby(by).apply(
+                cv_func, fill_value=fill_value
+            )
         else:
             result = cv_func(self.__data.data_matrix, fill_value=fill_value)
         return result
@@ -668,7 +675,9 @@ class MetricMethods:
         dratio = utils.sd_ratio(qc_data, sample_data, robust=robust, fill_value=np.inf)
         return dratio
 
-    def detection_rate(self, groupby: Union[str, List[str], None] = "class", threshold=0):
+    def detection_rate(
+        self, groupby: Union[str, List[str], None] = "class", threshold=0
+    ):
         """
         Computes the fraction of samples where a feature was detected.
 
@@ -691,7 +700,9 @@ class MetricMethods:
                 utils.detection_rate, threshold=threshold
             )
         else:
-            result = self.__data.data_matrix.apply(utils.detection_rate, threshold=threshold)
+            result = self.__data.data_matrix.apply(
+                utils.detection_rate, threshold=threshold
+            )
         return result
 
     def pca(
@@ -752,7 +763,9 @@ class MetricMethods:
         total_variance = data.var().sum()
         return scores, loadings, variance, total_variance
 
-    def correlation(self, field: str, mode: str = "ols", classes: Optional[List[str]] = None):
+    def correlation(
+        self, field: str, mode: str = "ols", classes: Optional[List[str]] = None
+    ):
         """
         Correlates features with sample metadata properties.
 
@@ -904,7 +917,7 @@ class BokehPlotMethods:  # pragma: no cover
             y=y_name,
             color=factor_cmap(hue, palette, unique_values),
             legend_group=hue,
-            **scatter_params
+            **scatter_params,
         )
 
         #  figure appearance
@@ -1093,7 +1106,7 @@ class BokehPlotMethods:  # pragma: no cover
             y=ft,
             color=cmap_factor,
             legend_group=hue,
-            **scatter_params
+            **scatter_params,
         )
 
         fig.xaxis.axis_label = "Run order"

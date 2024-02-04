@@ -2,13 +2,12 @@
 Validation functions for Filter, Pipelines and DataContainer
 """
 
-
 import warnings
 from functools import wraps
 import cerberus
 from typing import Callable
 import numpy as np
-from .base import constants as c
+from .core import constants as c
 
 
 def is_callable(field, value, error):
@@ -120,7 +119,8 @@ def validate_data_matrix(df):
     # check nan
     if (df.isna()).sum().sum():
         warnings.warn(
-            "Data matrix has NANs. These values should be imputed " "before further analysis"
+            "Data matrix has NANs. These values should be imputed "
+            "before further analysis"
         )
 
 
@@ -176,8 +176,16 @@ def validate_data_container(data_matrix, feature_definitions, sample_info):
 
 def validate_blank_corrector_params(params):
     schema = {
-        "corrector_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
-        "process_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "corrector_classes": {
+            "type": "list",
+            "nullable": True,
+            "schema": {"type": "string"},
+        },
+        "process_classes": {
+            "type": "list",
+            "nullable": True,
+            "schema": {"type": "string"},
+        },
         "mode": {
             "anyof": [
                 {"type": "string", "allowed": ["lod", "loq", "mean", "max"]},
@@ -198,7 +206,11 @@ def validate_prevalence_filter_params(params):
         "ub": {"type": "number", "min": 0, "max": 1},
         "threshold": {"type": "number", "min": 0},
         "intraclass": {"type": "boolean"},
-        "process_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "process_classes": {
+            "type": "list",
+            "nullable": True,
+            "schema": {"type": "string"},
+        },
     }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
@@ -230,7 +242,11 @@ def validate_variation_filter_params(params):
         "lb": {"type": "number", "min": 0, "max": 1, "lower_or_equal": "ub"},
         "ub": {"type": "number", "min": 0, "max": 1},
         "intraclass": {"type": "boolean"},
-        "process_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "process_classes": {
+            "type": "list",
+            "nullable": True,
+            "schema": {"type": "string"},
+        },
     }
     validator = ValidatorWithLowerThan(schema)
     validate(params, validator)
@@ -244,8 +260,16 @@ def validate_batch_corrector_params(params):
         "interpolator": {"type": "string", "allowed": ["splines", "linear"]},
         "process_qc": {"type": "boolean"},
         "threshold": {"type": "number", "min": 0},
-        "corrector_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
-        "process_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "corrector_classes": {
+            "type": "list",
+            "nullable": True,
+            "schema": {"type": "string"},
+        },
+        "process_classes": {
+            "type": "list",
+            "nullable": True,
+            "schema": {"type": "string"},
+        },
         "method": {"allowed": ["additive", "multiplicative"], "type": "string"},
     }
     validator = ValidatorWithLowerThan(schema)
@@ -288,7 +312,11 @@ def validate_detect_peaks_params(params):
     baseline_schema = {"min_proba": {"is_positive": True, "max": 1.0, "type": "number"}}
     schema = {
         "noise_params": {"type": "dict", "schema": noise_schema, "nullable": True},
-        "baseline_params": {"type": "dict", "schema": baseline_schema, "nullable": True},
+        "baseline_params": {
+            "type": "dict",
+            "schema": baseline_schema,
+            "nullable": True,
+        },
         "smoothing_strength": {"type": "number", "nullable": True, "is_positive": True},
     }
     if params is not None:
@@ -378,7 +406,9 @@ def make_roi_schema(ms_data):
         "targeted_mz": {"nullable": True, "check_with": is_all_positive},
         "multiple_match": {"allowed": ["closest", "reduce"]},
         "mz_reduce": {"anyof": [{"allowed": ["mean"]}, {"check_with": is_callable}]},
-        "sp_reduce": {"anyof": [{"allowed": ["mean", "sum"]}, {"check_with": is_callable}]},
+        "sp_reduce": {
+            "anyof": [{"allowed": ["mean", "sum"]}, {"check_with": is_callable}]
+        },
         "min_intensity": {"type": "number", "min": 0.0, "nullable": True},
         "min_length": {
             "type": "integer",
@@ -500,7 +530,11 @@ def match_features_schema():
             "type": "number",
             "min": 0.0,
         },
-        "include_classes": {"type": "list", "nullable": True, "schema": {"type": "string"}},
+        "include_classes": {
+            "type": "list",
+            "nullable": True,
+            "schema": {"type": "string"},
+        },
         "n_jobs": {"nullable": True, "type": "integer"},
         "verbose": {"type": "boolean"},
     }

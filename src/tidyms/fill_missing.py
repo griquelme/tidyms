@@ -4,7 +4,7 @@ from functools import partial
 from joblib import Parallel, delayed
 from scipy.integrate import trapz
 from typing import Generator, Optional, Tuple
-from .base import constants as c
+from .core import constants as c
 from .fileio import MSData
 from .lcms import Chromatogram
 from .raw_data_utils import make_chromatograms
@@ -13,7 +13,16 @@ from sklearn.impute import KNNImputer
 
 
 missing_data_iterator_type = Generator[
-    Tuple[MSData, str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, pd.Index],
+    Tuple[
+        MSData,
+        str,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        pd.Index,
+    ],
     None,
     None,
 ]

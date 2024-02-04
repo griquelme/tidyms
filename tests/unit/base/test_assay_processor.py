@@ -4,9 +4,9 @@ import pathlib
 import pydantic
 import pytest
 
-from tidyms.base import assay
-from tidyms.base import Annotation, SampleData
-from tidyms.base import exceptions
+from tidyms.core import assay
+from tidyms.core.base import Annotation, SampleData
+from tidyms.core import exceptions
 
 
 import dummy
