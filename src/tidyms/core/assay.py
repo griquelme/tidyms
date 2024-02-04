@@ -28,7 +28,7 @@ from multiprocessing.pool import Pool
 from typing import Mapping, Sequence, Type
 
 from ..utils import get_progress_bar
-from .base import (
+from .models import (
     Feature,
     Roi,
     Sample,

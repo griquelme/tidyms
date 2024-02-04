@@ -1,7 +1,7 @@
 """Storage tools for the annotation algorithm."""
 
 from typing import Optional
-from ..core.base import Feature
+from ..core.models import Feature
 from collections.abc import Sequence
 
 

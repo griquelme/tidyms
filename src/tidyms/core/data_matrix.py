@@ -9,7 +9,7 @@ DataMatrix : Stores data in `tidy` format.
 import numpy as np
 from typing import Any, Optional, Sequence
 
-from .base import Sample
+from .models import Sample
 from . import constants as c
 
 # TODO: think about using a dict of labels to columns as data matrix
@@ -113,7 +113,9 @@ def create_data_matrix_from_feature_table(
     """
     samples = sorted(samples, key=lambda x: x.order)
     sample_id: Sequence[str] = descriptors["sample_id"]
-    labels: Sequence[int] = descriptors["label"]  # TODO: fix after removing container module
+    labels: Sequence[int] = descriptors[
+        "label"
+    ]  # TODO: fix after removing container module
     values: Sequence[float] = descriptors[value_descriptor]
 
     if aggregate is None:
@@ -162,7 +164,9 @@ def _create_column_descriptors(
     """Compute aggregated values for each selected descriptor."""
     labels: Sequence[int] = descriptors["labels"]
     unique_labels, inverse_index = np.unique(labels, return_inverse=True)
-    grouped_index = dict()  # contains a list with indices of features for each label group
+    grouped_index = (
+        dict()
+    )  # contains a list with indices of features for each label group
     for i in inverse_index:
         label = unique_labels[i]
         label_index = grouped_index.setdefault(label, list())

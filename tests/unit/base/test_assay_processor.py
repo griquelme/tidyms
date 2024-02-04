@@ -5,7 +5,7 @@ import pydantic
 import pytest
 
 from tidyms.core import assay
-from tidyms.core.base import Annotation, SampleData
+from tidyms.core.models import Annotation, SampleData
 from tidyms.core import exceptions
 
 

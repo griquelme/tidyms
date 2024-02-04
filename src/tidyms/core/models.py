@@ -1,5 +1,5 @@
 """
-Abstract base classes used by TidyMS.
+Data models used by TidyMS.
 
 Annotation : Stores annotation data from a feature.
 Feature : A region associated with a ROI that contains a chemical species.

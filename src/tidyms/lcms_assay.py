@@ -2,7 +2,7 @@
 
 import numpy as np
 from typing import Any, Optional
-from .core.base import Sample, SampleData
+from .core.models import Sample, SampleData
 from .core.db import AssayData
 from .core.assay import BaseFeatureExtractor, BaseSampleProcessor, FeatureMatcher
 from .core import constants as c

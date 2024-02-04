@@ -31,7 +31,7 @@ from scipy.interpolate import interp1d
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
 
-from .core.base import Annotation, Feature, Roi
+from .core.models import Annotation, Feature, Roi
 from . import peaks
 from . import _plot_bokeh
 from .core import constants as c

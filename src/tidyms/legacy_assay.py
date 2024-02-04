@@ -9,7 +9,7 @@ import os
 from uuid import uuid4
 from typing import Callable, List, Optional, Tuple, Union
 
-from .core.base import Feature, Roi
+from .core.models import Feature, Roi
 from .core import constants as c
 from . import validation as val
 from . import raw_data_utils

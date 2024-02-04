@@ -8,12 +8,12 @@ from pathlib import Path
 from random import random, randint
 from typing import Sequence
 
-from tidyms.core import assay, base
+from tidyms.core import assay, models
 from tidyms.core import constants as c
-from tidyms.core.base import Feature, Roi
+from tidyms.core.models import Feature, Roi
 
 
-class ConcreteRoi(base.Roi):
+class ConcreteRoi(models.Roi):
     def __init__(self, data: list[float], *, id_: int = -1):
         self.data = data
         super().__init__(id_=id_)
@@ -31,13 +31,13 @@ class ConcreteRoi(base.Roi):
         return (self.data == other.data) and (self.id == other.id)
 
 
-class ConcreteFeature(base.Feature):
+class ConcreteFeature(models.Feature):
     def __init__(
         self,
-        roi: base.Roi,
+        roi: models.Roi,
         data: int,
         id_: int = -1,
-        annotation: base.Annotation | None = None,
+        annotation: models.Annotation | None = None,
     ):
         super().__init__(roi, id_=id_, annotation=annotation)
         self.data = data
@@ -59,7 +59,7 @@ class ConcreteFeature(base.Feature):
 
     @classmethod
     def from_str(
-        cls, s: str, roi: base.Roi, annotation: base.Annotation
+        cls, s: str, roi: models.Roi, annotation: models.Annotation
     ) -> ConcreteFeature:
         d = json.loads(s)
         ft = cls(roi, data=d["data"], id_=d["id"], annotation=annotation)
@@ -79,7 +79,7 @@ class DummyRoiExtractor(assay.BaseRoiExtractor):
     param1: int = 10
     param2: str = "default"
 
-    def _extract_roi_func(self, sample: base.Sample) -> list[ConcreteRoi]:
+    def _extract_roi_func(self, sample: models.Sample) -> list[ConcreteRoi]:
         return [create_dummy_roi() for _ in range(5)]
 
     def get_default_parameters(
@@ -114,7 +114,7 @@ class DummyFeatureExtractor(assay.BaseFeatureExtractor):
     def _extract_features_func(self, roi: ConcreteRoi) -> Sequence[ConcreteFeature]:
         feature_list = list()
         for _ in range(self.param1):
-            ann = base.Annotation()
+            ann = models.Annotation()
             ft = create_dummy_feature(roi, ann)
             feature_list.append(ft)
         return feature_list
@@ -144,10 +144,10 @@ class DummyFeatureTransformer(assay.BaseFeatureTransformer):
         return dict()
 
 
-def create_dummy_sample(path: Path, suffix: int, group: str = "") -> base.Sample:
+def create_dummy_sample(path: Path, suffix: int, group: str = "") -> models.Sample:
     file = path / f"sample-{suffix}.mzML"
     file.touch()
-    sample = base.Sample(path=file, id=file.stem, group=group, order=suffix)
+    sample = models.Sample(path=file, id=file.stem, group=group, order=suffix)
     return sample
 
 
@@ -157,7 +157,7 @@ def create_dummy_roi() -> ConcreteRoi:
 
 
 def create_dummy_feature(
-    roi: ConcreteRoi, annotation: base.Annotation
+    roi: ConcreteRoi, annotation: models.Annotation
 ) -> ConcreteFeature:
     data = randint(0, 10)
     return ConcreteFeature(roi, data, annotation=annotation)
@@ -167,7 +167,7 @@ def add_dummy_features(roi_list: list[ConcreteRoi], n: int):
     label_counter = 0
     for roi in roi_list:
         for _ in range(n):
-            annotation = base.Annotation(label=label_counter)
+            annotation = models.Annotation(label=label_counter)
             ft = create_dummy_feature(roi, annotation)
             roi.add_feature(ft)
             label_counter += 1

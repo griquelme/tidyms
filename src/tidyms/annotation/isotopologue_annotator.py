@@ -2,7 +2,7 @@
 
 from typing import Optional
 from . import create_annotation_tools, annotate
-from ..core.base import SampleData
+from ..core.models import SampleData
 from ..core.assay import BaseSampleProcessor
 from ..chem import get_chnops_bounds
 from ..validation import ValidatorWithLowerThan, validate

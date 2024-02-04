@@ -15,7 +15,7 @@ from sqlalchemy import delete, select, Column, Float, ForeignKey, Integer, Strin
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
 from typing import cast, Sequence, Type
-from .base import Annotation, Feature, Roi, Sample, SampleData
+from .models import Annotation, Feature, Roi, Sample, SampleData
 
 Base = orm.declarative_base()
 
