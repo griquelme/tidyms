@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from functools import lru_cache
-from copy import deepcopy
 import json
 from math import isnan, nan
 from pathlib import Path
