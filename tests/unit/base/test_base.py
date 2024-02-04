@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dummy import ConcreteFeature, ConcreteRoi
+from tests.unit.base.utils import ConcreteFeature, ConcreteRoi
 
 
 @pytest.fixture

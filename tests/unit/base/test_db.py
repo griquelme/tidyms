@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from typing import cast
 
-from dummy import (
+from tests.unit.base.utils import (
     ConcreteFeature,
     ConcreteRoi,
     add_dummy_features,

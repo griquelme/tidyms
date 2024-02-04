@@ -9,7 +9,7 @@ from tidyms.core.models import Annotation, SampleData
 from tidyms.core import exceptions
 
 
-import dummy
+import tests.unit.base.utils as utils
 
 
 @pytest.fixture
@@ -19,30 +19,30 @@ def proc_params():
 
 @pytest.fixture
 def roi_extractor():
-    return dummy.DummyRoiExtractor(id="roi extractor")
+    return utils.DummyRoiExtractor(id="roi extractor")
 
 
 @pytest.fixture
 def feature_extractor():
-    return dummy.DummyFeatureExtractor(id="feature extractor")
+    return utils.DummyFeatureExtractor(id="feature extractor")
 
 
 @pytest.fixture
 def roi_transformer():
-    return dummy.DummyRoiTransformer(id="roi transformer")
+    return utils.DummyRoiTransformer(id="roi transformer")
 
 
 @pytest.fixture
 def feature_transformer():
-    return dummy.DummyFeatureTransformer(id="feature transformer")
+    return utils.DummyFeatureTransformer(id="feature transformer")
 
 
 @pytest.fixture
 def pipeline(
-    roi_extractor: dummy.DummyRoiExtractor,
-    roi_transformer: dummy.DummyRoiTransformer,
-    feature_extractor: dummy.DummyFeatureExtractor,
-    feature_transformer: dummy.DummyFeatureTransformer,
+    roi_extractor: utils.DummyRoiExtractor,
+    roi_transformer: utils.DummyRoiTransformer,
+    feature_extractor: utils.DummyFeatureExtractor,
+    feature_transformer: utils.DummyFeatureTransformer,
 ):
     id_ = "my-pipeline"
     steps = (roi_extractor, roi_transformer, feature_extractor, feature_transformer)
@@ -51,13 +51,13 @@ def pipeline(
 
 @pytest.fixture
 def sample_data(tmp_path: pathlib.Path):
-    sample = dummy.create_dummy_sample(tmp_path, 1)
+    sample = utils.create_dummy_sample(tmp_path, 1)
     return SampleData(sample)
 
 
 @pytest.fixture
 def sample_data_with_roi(
-    sample_data: SampleData, roi_extractor: dummy.DummyRoiExtractor
+    sample_data: SampleData, roi_extractor: utils.DummyRoiExtractor
 ):
     roi_extractor.process(sample_data)
     return sample_data
@@ -80,7 +80,7 @@ def test_BaseRoiExtractor_set_parameters(roi_extractor, proc_params):
 
 
 def test_BaseRoiExtractor_set_invalid_parameter_raise_ValidationError(
-    roi_extractor: dummy.DummyRoiExtractor,
+    roi_extractor: utils.DummyRoiExtractor,
 ):
     with pytest.raises(pydantic.ValidationError):
         roi_extractor.param2 = 10  # type: ignore
@@ -112,14 +112,14 @@ def test_BaseFeatureExtractor_set_parameters(feature_extractor, proc_params):
 
 
 def test_BaseFeatureExtractor_set_invalid_parameter_raise_ValidationError(
-    feature_extractor: dummy.DummyFeatureExtractor,
+    feature_extractor: utils.DummyFeatureExtractor,
 ):
     with pytest.raises(pydantic.ValidationError):
         feature_extractor.filters = 10  # type: ignore
 
 
 def test_BaseFeatureExtractor_set_invalid_filter_range_None_normalizes_to_inf(
-    feature_extractor: dummy.DummyFeatureExtractor,
+    feature_extractor: utils.DummyFeatureExtractor,
 ):
     filters = {"height": (None, 10.0)}
     feature_extractor.filters = filters
@@ -127,7 +127,7 @@ def test_BaseFeatureExtractor_set_invalid_filter_range_None_normalizes_to_inf(
 
 def test_BaseFeatureExtractor_process(
     sample_data_with_roi: SampleData,
-    feature_extractor: dummy.DummyFeatureExtractor,
+    feature_extractor: utils.DummyFeatureExtractor,
 ):
     sample_data = sample_data_with_roi
     assert not sample_data.get_feature_list()
@@ -137,15 +137,15 @@ def test_BaseFeatureExtractor_process(
 
 def test_is_feature_descriptor_in_valid_range_valid_range():
     filters = {"height": (50.0, 150.0)}
-    roi = dummy.create_dummy_roi()
-    ft = dummy.create_dummy_feature(roi, Annotation())
+    roi = utils.create_dummy_roi()
+    ft = utils.create_dummy_feature(roi, Annotation())
     assert assay._is_feature_descriptor_in_valid_range(ft, filters)
 
 
 def test_is_feature_descriptor_in_valid_range_invalid_range():
     filters = {"height": (50.0, 75.0)}
-    roi = dummy.create_dummy_roi()
-    ft = dummy.create_dummy_feature(roi, Annotation())
+    roi = utils.create_dummy_roi()
+    ft = utils.create_dummy_feature(roi, Annotation())
     assert not assay._is_feature_descriptor_in_valid_range(ft, filters)
 
 
@@ -161,8 +161,8 @@ def test__fill_filter_boundaries():
 
 
 def test_ProcessingPipeline_processors_with_repeated_names_raises_error(
-    roi_extractor: dummy.DummyRoiExtractor,
-    feature_extractor: dummy.DummyFeatureExtractor,
+    roi_extractor: utils.DummyRoiExtractor,
+    feature_extractor: utils.DummyFeatureExtractor,
 ):
     feature_extractor.id = roi_extractor.id
     id_ = "my-pipeline"
@@ -172,10 +172,10 @@ def test_ProcessingPipeline_processors_with_repeated_names_raises_error(
 
 
 def test_sample_pipeline_creation(
-    roi_extractor: dummy.DummyRoiExtractor,
-    roi_transformer: dummy.DummyRoiTransformer,
-    feature_extractor: dummy.DummyFeatureExtractor,
-    feature_transformer: dummy.DummyFeatureTransformer,
+    roi_extractor: utils.DummyRoiExtractor,
+    roi_transformer: utils.DummyRoiTransformer,
+    feature_extractor: utils.DummyFeatureExtractor,
+    feature_transformer: utils.DummyFeatureTransformer,
 ):
     id_ = "my-pipeline"
     steps = (roi_extractor, roi_transformer, feature_extractor, feature_transformer)
@@ -184,9 +184,9 @@ def test_sample_pipeline_creation(
 
 
 def test_sample_pipeline_creation_without_roi_extractor_in_first_step_raises_error(
-    roi_transformer: dummy.DummyRoiTransformer,
-    feature_extractor: dummy.DummyFeatureExtractor,
-    feature_transformer: dummy.DummyFeatureTransformer,
+    roi_transformer: utils.DummyRoiTransformer,
+    feature_extractor: utils.DummyFeatureExtractor,
+    feature_transformer: utils.DummyFeatureTransformer,
 ):
     id_ = "my-pipeline"
     steps = (roi_transformer, feature_extractor, feature_transformer)
@@ -195,9 +195,9 @@ def test_sample_pipeline_creation_without_roi_extractor_in_first_step_raises_err
 
 
 def test_sample_pipeline_creation_without_feature_extractor_raises_error(
-    roi_extractor: dummy.DummyRoiExtractor,
-    roi_transformer: dummy.DummyRoiTransformer,
-    feature_transformer: dummy.DummyFeatureTransformer,
+    roi_extractor: utils.DummyRoiExtractor,
+    roi_transformer: utils.DummyRoiTransformer,
+    feature_transformer: utils.DummyFeatureTransformer,
 ):
     id_ = "my-pipeline"
     steps = (roi_extractor, roi_transformer, feature_transformer)
