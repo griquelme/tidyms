@@ -15,6 +15,7 @@ ProcessingPipeline :
     Apply several processing steps to data.
 
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,10 +33,10 @@ from .base import (
     Roi,
     Sample,
     SampleData,
-    SampleDataProcessStatus,
-    ProcessingStepInfo,
+    ProcessorInformation,
 )
 from .db import AssayData
+from . import exceptions
 from . import constants as c
 
 import pydantic
@@ -44,8 +45,6 @@ logger = logging.getLogger(__file__)
 
 
 # TODO: don't process multiple times the same sample.
-# TODO: set_parameters and set_default_parameters.
-# TODO: store pipeline parameters using set parameters.
 
 
 class Assay:
@@ -215,8 +214,8 @@ class Assay:
 
         """
         if by == "sample":
-            data = self._data.get_sample_data(key)
-            roi_list = data._roi
+            sample = self._data.search_sample(key)
+            roi_list = self._data.get_roi_list(sample)
         elif by == "id":
             roi_list = [self._data.get_roi_by_id(key)]
         else:
@@ -295,10 +294,12 @@ class _Processor(ABC, pydantic.BaseModel):
     """
 
     model_config = pydantic.ConfigDict(validate_assignment=True)
+    id: str = ""
+    order: int | None = None
+    pipeline: str | None = None
 
     @abstractmethod
-    def process(self, data):
-        ...
+    def process(self, data): ...
 
     @abstractmethod
     def get_default_parameters(
@@ -340,11 +341,19 @@ class _Processor(ABC, pydantic.BaseModel):
 
     def get_parameters(self):
         """Get instance parameters."""
-        return self.model_dump()
+        return self.model_dump(exclude={"id"})
 
     def set_parameters(self, **kwargs):
         """Set instance parameters."""
         self.__dict__.update(kwargs)
+
+    @staticmethod
+    @abstractmethod
+    def get_expected_process_status_in() -> BaseProcessStatus: ...
+
+    @staticmethod
+    @abstractmethod
+    def update_status_out(status_in: BaseProcessStatus) -> BaseProcessStatus: ...
 
 
 class BaseSampleProcessor(_Processor):
@@ -363,54 +372,54 @@ class BaseSampleProcessor(_Processor):
 
     def process(self, sample_data: SampleData):
         """Apply processor function to a sample."""
-        expected_status = self._get_expected_sample_data_status()
-        sample_data.status.check(expected_status)
-        info = self._get_processor_info()
-        msg = f"Applying {info.name} with parameters={info.parameters} to sample={sample_data.sample.id}."
+        info = self.get_processor_info()
+        msg = f"Applying {info.id} with parameters={info.parameters} to sample={sample_data.sample.id}."
         logger.info(msg)
         self._func(sample_data)
-        self._update_sample_data_status(sample_data)
-        sample_data.add_processing_step_info(info)
+        sample_data._snapshot_data(info)
 
     @abstractmethod
     def _func(self, sample_data: SampleData):
         """Processing function that modifies sample data."""
         ...
 
-    def _get_processor_info(self) -> ProcessingStepInfo:
+    def get_processor_info(self) -> ProcessorInformation:
         """Create a ProcessingStepInfo instance."""
-        return ProcessingStepInfo(
-            name=self.__class__.__name__, parameters=self.get_parameters()
+        return ProcessorInformation(
+            id=self.id,
+            pipeline=self.pipeline,
+            order=self.order,
+            parameters=self.get_parameters(),
         )
-
-    @staticmethod
-    @abstractmethod
-    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
-        """Provide the expected sample data status to apply the processing function."""
-        ...
-
-    @staticmethod
-    @abstractmethod
-    def _update_sample_data_status(sample_data: SampleData):
-        """Update the sample data status after applying the processing function."""
-        ...
 
 
 class BaseRoiExtractor(BaseSampleProcessor):
     """
     Base class to extract ROIs from raw data.
 
-    MUST implement _func to add ROIs to sample data.
+    MUST implement extract_roi_func to extract ROIs from raw data.
 
     """
 
     @staticmethod
-    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
+    def get_expected_process_status_in() -> SampleDataProcessStatus:
         return SampleDataProcessStatus()
 
+    def _func(self, sample_data: SampleData):
+        """Add extracted ROIs to sample data."""
+        info = self.get_processor_info()
+        roi_list = self._extract_roi_func(sample_data.sample)
+        sample_data.set_roi_list(roi_list, info)
+
+    @abstractmethod
+    def _extract_roi_func(self, sample: Sample) -> list[Roi]: ...
+
     @staticmethod
-    def _update_sample_data_status(sample_data: SampleData):
-        sample_data.status.roi = True
+    def update_status_out(
+        status_in: SampleDataProcessStatus,
+    ) -> SampleDataProcessStatus:
+        status_in.roi = True
+        return status_in
 
 
 class BaseRoiTransformer(BaseSampleProcessor):
@@ -421,21 +430,23 @@ class BaseRoiTransformer(BaseSampleProcessor):
 
     """
 
-    @staticmethod
-    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
-        return SampleDataProcessStatus(roi=True)
-
     def _func(self, sample_data: SampleData):
-        for roi in sample_data.roi:
+        info = self.get_processor_info()
+        for roi in sample_data.get_roi_list_snapshot(info):
             self._transform_roi(roi)
 
     @staticmethod
-    def _update_sample_data_status(sample_data: SampleData):
-        sample_data.status.roi = True
+    def get_expected_process_status_in() -> SampleDataProcessStatus:
+        return SampleDataProcessStatus(roi=True)
+
+    @staticmethod
+    def update_status_out(
+        status_in: SampleDataProcessStatus,
+    ) -> SampleDataProcessStatus:
+        return status_in
 
     @abstractmethod
-    def _transform_roi(self, roi: Roi):
-        ...
+    def _transform_roi(self, roi: Roi): ...
 
 
 class BaseFeatureTransformer(BaseSampleProcessor):
@@ -446,22 +457,24 @@ class BaseFeatureTransformer(BaseSampleProcessor):
 
     """
 
-    @staticmethod
-    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
-        return SampleDataProcessStatus(roi=True, feature=True)
-
     def _func(self, sample_data: SampleData):
-        for roi in sample_data.roi:
+        info = self.get_processor_info()
+        for roi in sample_data.get_roi_list_snapshot(info):
             for ft in roi.features:
                 self._transform_feature(ft)
 
     @staticmethod
-    def _update_sample_data_status(sample_data: SampleData):
-        sample_data.status.roi = True
+    def get_expected_process_status_in() -> SampleDataProcessStatus:
+        return SampleDataProcessStatus(roi=True, feature=True)
+
+    @staticmethod
+    def update_status_out(
+        status_in: SampleDataProcessStatus,
+    ) -> SampleDataProcessStatus:
+        return status_in
 
     @abstractmethod
-    def _transform_feature(self, feature: Feature):
-        ...
+    def _transform_feature(self, feature: Feature): ...
 
 
 class BaseFeatureExtractor(BaseSampleProcessor):
@@ -482,12 +495,15 @@ class BaseFeatureExtractor(BaseSampleProcessor):
     filters: Mapping[str, tuple[float | None, float | None]] = dict()
 
     @staticmethod
-    def _get_expected_sample_data_status() -> SampleDataProcessStatus:
+    def get_expected_process_status_in() -> BaseProcessStatus:
         return SampleDataProcessStatus(roi=True)
 
     @staticmethod
-    def _update_sample_data_status(sample_data: SampleData):
-        sample_data.status.feature = True
+    def update_status_out(
+        status_in: SampleDataProcessStatus,
+    ) -> SampleDataProcessStatus:
+        status_in.feature = True
+        return status_in
 
     def _func(self, sample_data: SampleData):
         """
@@ -499,14 +515,14 @@ class BaseFeatureExtractor(BaseSampleProcessor):
 
         """
         filters = _fill_filter_boundaries(self.filters)
-        for roi in sample_data.roi:
+        processor_info = self.get_processor_info()
+        for roi in sample_data.get_roi_list_snapshot(processor_info):
             for ft in self._extract_features_func(roi):
                 if _is_feature_descriptor_in_valid_range(ft, filters):
                     roi.add_feature(ft)
 
     @abstractmethod
-    def _extract_features_func(self, roi: Roi) -> Sequence[Feature]:
-        ...
+    def _extract_features_func(self, roi: Roi) -> Sequence[Feature]: ...
 
 
 class MultipleSampleProcessor(_Processor):
@@ -548,20 +564,35 @@ class FeatureMatcher(MultipleSampleProcessor):
 
 class ProcessingPipeline:
     """
-    Combines a Processor objects into a data processing pipeline.
+    Combines Processor objects into a data processing pipeline.
+
+    Processors must be all subclasses from one of the three:
+
+    - BaseSampleProcessor
+    - BaseAssayProcessor
+    - BaseMatrixProcessor
 
     Attributes
     ----------
-    processors : list[tuple[str, Processor]]
+    processors : list[_Processor]
 
     """
 
-    def __init__(self, steps: Sequence[tuple[str, _Processor]]):
-        self.processors = steps
-        self._name_to_processor = {x: y for x, y in steps}
-        if len(self.processors) > len(self._name_to_processor):
-            msg = "Processor names must be unique."
-            raise ValueError(msg)
+    def __init__(self, id_: str, *steps: _Processor):
+        _validate_processors(*steps)
+        self.id = id_
+        self._processors = steps
+        name_to_processor = dict()
+        for k, processor in enumerate(steps):
+            processor.order = k
+            processor.pipeline = self.id
+            name_to_processor[processor.id] = processor
+
+        self._name_to_processor = name_to_processor
+
+    @property
+    def processors(self) -> Sequence[_Processor]:
+        return self._processors
 
     def copy(self):
         """Create a deep copy of the pipeline."""
@@ -582,9 +613,9 @@ class ProcessingPipeline:
 
         """
         parameters = list()
-        for name, processor in self.processors:
+        for processor in self.processors:
             params = processor.get_parameters()
-            parameters.append((name, params))
+            parameters.append((processor.id, params))
         return parameters
 
     def set_parameters(self, parameters: dict[str, dict]):
@@ -618,7 +649,7 @@ class ProcessingPipeline:
             Separation method.
 
         """
-        for _, processor in self.processors:
+        for processor in self.processors:
             processor.set_default_parameters(instrument, separation, polarity)
 
     def process(self, data):
@@ -633,9 +664,67 @@ class ProcessingPipeline:
             AssayData is expected.
 
         """
-        for _, processor in self.processors:
+        for processor in self.processors:
             processor.process(data)
         return data
+
+
+class BaseProcessStatus(ABC):
+    """Base class to define the status of samples through a processing pipeline."""
+
+    def check(self, other: BaseProcessStatus):
+        for attr in self.__dict__:
+            actual = getattr(self, attr)
+            expected = getattr(other, attr)
+            status = _compare_process_status(actual, expected)
+            if not status:
+                msg = f"Expected status={expected} for {attr}. Got status={actual}."
+                raise exceptions.IncompatibleProcessorStatus(msg)
+
+
+class SampleDataProcessStatus(BaseProcessStatus):
+    """
+    Report sample data process status.
+
+    Each attribute stores a boolean representing the sample data stored.
+
+    Attributes
+    ----------
+    roi : bool, default=False
+        set to ``True`` if a :py:class:`tidyms.base.assay.RoiExtractor` was
+        used to process the sample.
+    feature : bool, default=False
+        set to ``True`` if a :py:class:`tidyms.base.assay.FeatureExtractor` was
+        used to process the sample.
+    isotopologue_annotation: bool, default=False
+        set to ``True`` if isotopologue annotation was performed on the sample.
+    adduct_annotation: bool, default=False
+        set to ``True`` if adduct annotation was performed on the sample.
+    correspondence: bool, default=False
+        set to ``True`` if feature matching was applied to this sample.
+
+    """
+
+    def __init__(
+        self,
+        roi: bool = False,
+        feature: bool = False,
+        isotopologue_annotation: bool = False,
+        adduct_annotation: bool = False,
+        correspondence: bool = False,
+    ):
+        self.roi = roi
+        self.feature = feature
+        self.isotopologue_annotation = isotopologue_annotation
+        self.adduct_annotation = adduct_annotation
+        self.correspondence = correspondence
+
+
+def _compare_process_status(actual: bool, expected: bool) -> bool:
+    if expected:
+        return expected and actual
+    else:
+        return True
 
 
 def _is_feature_descriptor_in_valid_range(
@@ -678,3 +767,62 @@ def _fill_filter_boundaries(
         upper = upper if upper is not None else inf
         d[name] = lower, upper
     return d
+
+
+def _validate_processors(*steps: _Processor):
+    """Validate the processor list provided to the Pipeline constructor."""
+    if not steps:
+        msg = "`steps` cannot be an empty list."
+        raise ValueError(msg)
+
+    unique_names = {x.id for x in steps}
+
+    if len(steps) > len(unique_names):
+        msg = "Processor names must be unique."
+        raise ValueError(msg)
+
+    processor_type = _get_pipeline_processor_type(steps)
+    _check_all_same_base_processor_type(steps, processor_type)
+
+    status = _get_expected_initial_status(processor_type)
+    for proc in steps:
+        proc_status_in = proc.get_expected_process_status_in()
+        status.check(proc_status_in)
+        proc.update_status_out(status)
+
+    expected_final_status = _get_expected_final_status(processor_type)
+    status.check(expected_final_status)
+
+
+def _get_pipeline_processor_type(processors: Sequence[_Processor]) -> Type[_Processor]:
+    p = processors[0]
+
+    if isinstance(p, BaseSampleProcessor):
+        processor_type = BaseSampleProcessor
+    else:
+        # TODO: add other base processors
+        raise NotImplementedError
+    return processor_type
+
+
+def _check_all_same_base_processor_type(
+    processors: Sequence[_Processor], processor_type: Type[_Processor]
+) -> None:
+    all_same_base_type = all(isinstance(p, processor_type) for p in processors)
+    if not all_same_base_type:
+        msg = "All Processors in a pipeline must be of the same base processor type."
+        raise exceptions.InvalidProcessingPipeline(msg)
+
+
+def _get_expected_initial_status(processor_type: Type[_Processor]) -> BaseProcessStatus:
+    if processor_type is BaseSampleProcessor:
+        return SampleDataProcessStatus()
+    else:
+        raise NotImplementedError
+
+
+def _get_expected_final_status(processor_type: Type[_Processor]) -> BaseProcessStatus:
+    if processor_type is BaseSampleProcessor:
+        return SampleDataProcessStatus(roi=True, feature=True)
+    else:
+        raise NotImplementedError

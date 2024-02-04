@@ -7,7 +7,6 @@ AssayData:
 
 """
 
-
 import json
 import sqlalchemy as sa
 import sqlalchemy.orm as orm
@@ -15,12 +14,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, Session
 from sqlalchemy import delete, select, Column, Float, ForeignKey, Integer, String
 from sqlalchemy.exc import IntegrityError
 from pathlib import Path
-from typing import cast, Optional, Sequence, Type
+from typing import cast, Sequence, Type
 from .base import Annotation, Feature, Roi, Sample, SampleData
-
-
-# TODO: add remove non-matched.
-
 
 Base = orm.declarative_base()
 
@@ -28,8 +23,9 @@ Base = orm.declarative_base()
 class ProcessParameterModel(Base):
     """Stores model parameters, step name and pipeline name."""
 
-    __tablename__ = "parameters"
-    step: Mapped[str] = mapped_column(sa.String, primary_key=True)
+    __tablename__ = "processors"
+    id: Mapped[str] = mapped_column(sa.String, primary_key=True)
+    order: Mapped[int] = mapped_column(Integer)
     parameters: Mapped[str] = mapped_column(sa.String)
     pipeline: Mapped[str] = mapped_column(sa.String)
 
@@ -42,23 +38,10 @@ class SampleModel(Base):
     path: Mapped[str] = mapped_column(String, nullable=False)
     ms_level: Mapped[int] = mapped_column(Integer)
     start_time: Mapped[float] = mapped_column(Float)
-    end_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    end_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     group: Mapped[str] = mapped_column(String, nullable=True)
-    order: Mapped[int] = mapped_column(Integer, default=0)
-    batch: Mapped[int] = mapped_column(Integer, default=0)
-
-    def to_sample(self) -> Sample:
-        """Convert to a Sample object."""
-        return Sample(
-            path=Path(self.path),
-            id=self.id,
-            ms_level=self.ms_level,
-            start_time=self.start_time,
-            end_time=self.end_time,
-            group=self.group,
-            order=self.order,
-            batch=self.batch,
-        )
+    order: Mapped[int] = mapped_column(Integer, unique=True)
+    batch: Mapped[int] = mapped_column(Integer)
 
 
 class ProcessedSampleModel(Base):
@@ -67,7 +50,7 @@ class ProcessedSampleModel(Base):
     __tablename__ = "processed_samples"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sample_id: Mapped[str] = mapped_column(String, ForeignKey("samples.id"))
-    pipeline: Mapped[str] = mapped_column(String, ForeignKey("parameters.pipeline"))
+    processor: Mapped[str] = mapped_column(String, ForeignKey("processors.id"))
 
 
 class RoiModel(Base):
@@ -77,19 +60,8 @@ class RoiModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"), index=True)
     data: Mapped[str] = mapped_column(String)
-    # samples: Mapped["SampleModel"] = relationship(back_populates="rois")
-    features: Mapped[list["FeatureModel"]] = relationship(
-        back_populates="roi", lazy="immediate"
-    )
-    annotations: Mapped[list["AnnotationModel"]] = relationship(
-        back_populates="roi", lazy="immediate"
-    )
-
-    def to_roi(self, roi_type: Type[Roi]) -> Roi:
-        """Create a ROI instance."""
-        roi = roi_type.from_str(self.data)
-        roi.id = self.id
-        return roi
+    features: Mapped[list["FeatureModel"]] = relationship(back_populates="roi")
+    annotations: Mapped[list["AnnotationModel"]] = relationship(back_populates="roi")
 
 
 class FeatureModel(Base):
@@ -97,20 +69,12 @@ class FeatureModel(Base):
 
     __tablename__ = "features"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
     roi_id: Mapped[int] = mapped_column(ForeignKey("rois.id"))
     data: Mapped[str] = mapped_column(String)
-    roi: Mapped["RoiModel"] = relationship(back_populates="features", lazy="immediate")
-    # samples: Mapped["SampleModel"] = relationship(back_populates="features", lazy="immediate")
+    roi: Mapped["RoiModel"] = relationship(back_populates="features")
     annotation: Mapped["AnnotationModel"] = relationship(
         back_populates="feature", lazy="immediate"
     )
-
-    def to_feature(
-        self, feature_type: Type[Feature], roi: Roi, annotation: Annotation
-    ) -> Feature:
-        """Create a Feature instance using the data stored."""
-        return feature_type.from_str(self.data, roi, annotation)
 
 
 class AnnotationModel(Base):
@@ -126,15 +90,6 @@ class AnnotationModel(Base):
     charge: Mapped[int] = mapped_column(Integer)
     roi: Mapped["RoiModel"] = relationship(back_populates="annotations")
     feature: Mapped["FeatureModel"] = relationship(back_populates="annotation")
-
-    def to_annotation(self) -> Annotation:
-        """Create an Annotation instance."""
-        return Annotation(
-            label=self.label,
-            isotopologue_label=self.isotopologue_label,
-            isotopologue_index=self.isotopologue_index,
-            charge=self.charge,
-        )
 
 
 class AssayData:
@@ -160,7 +115,7 @@ class AssayData:
 
     def __init__(
         self,
-        path: Optional[Path],
+        path: Path | None,
         roi: Type[Roi],
         feature: Type[Feature],
         echo: bool = False,
@@ -194,7 +149,7 @@ class AssayData:
         return self._feature_id
 
     def _set_id_values(self):
-        """Set roi and feature id to index newly inserted data."""
+        """Set roi and feature id to index new data."""
         with self.SessionFactory() as session:
             roi_id = session.query(sa.sql.func.max(RoiModel.id)).scalar()
             roi_id = 0 if roi_id is None else roi_id + 1
@@ -295,7 +250,7 @@ class AssayData:
             result = session.execute(stmt)
             samples = list()
             for row in result:
-                samples.append(row.SampleModel.to_sample())
+                samples.append(_sample_model_to_sample(row.SampleModel))
         return samples
 
     def get_processed_samples(self, pipeline: str) -> list[Sample]:
@@ -320,7 +275,7 @@ class AssayData:
             )
             processed_samples = list()
             for row in session.execute(stmt):
-                sample = row.SampleModel.to_sample()
+                sample = _sample_model_to_sample(row.SampleModel)
                 processed_samples.append(sample)
         return processed_samples
 
@@ -389,9 +344,7 @@ class AssayData:
 
         """
         with self.SessionFactory() as session:
-            stmt = select(ProcessParameterModel).where(
-                ProcessParameterModel.step == step
-            )
+            stmt = select(ProcessParameterModel).where(ProcessParameterModel.id == step)
             results = session.execute(stmt)
             param_model = results.scalar()
             if param_model is None:
@@ -475,25 +428,25 @@ class AssayData:
             session.execute(sa.update(ProcessParameterModel), update)
             session.commit()
 
-    def _label_roi_list(self, roi_list: Sequence[Roi]):
+    def _label_roi_list(self, *rois: Roi):
         """Add a id label to ROIs."""
-        for k_roi, roi in enumerate(roi_list, start=self._roi_id):
+        for k_roi, roi in enumerate(rois, start=self._roi_id):
             roi.id = k_roi
-        self._roi_id += len(roi_list)
+        self._roi_id += len(rois)
 
-    def add_roi_list(self, roi_list: Sequence[Roi], sample: Sample):
+    def add_roi_list(self, sample: Sample, *rois: Roi):
         """
         Store a list of ROI extracted from a sample.
 
         Parameters
         ----------
-        roi_list : Sequence[Roi]
         sample : Sample
+        *rois : Roi
 
         """
         roi_model_list = list()
-        self._label_roi_list(roi_list)
-        for roi in roi_list:
+        self._label_roi_list(*rois)
+        for roi in rois:
             roi_model = RoiModel(sample_id=sample.id, data=roi.to_str(), id=roi.id)
             roi_model_list.append(roi_model)
 
@@ -501,13 +454,14 @@ class AssayData:
             session.add_all(roi_model_list)
             session.commit()
 
-    def get_roi_list(self, sample: Sample) -> list[Roi]:
+    def get_roi_list(self, sample: Sample, load_features: bool = True) -> list[Roi]:
         """
         Retrieve a list of ROI detected in a sample.
 
         Parameters
         ----------
         sample : Sample
+        bool : Wether to load or not feature data detected in the ROI.
 
         Returns
         -------
@@ -515,15 +469,25 @@ class AssayData:
 
         """
         with self.SessionFactory() as session:
-            stmt = select(RoiModel).where(RoiModel.sample_id == sample.id)
+            if load_features:
+                stmt = (
+                    select(RoiModel)
+                    .where(RoiModel.sample_id == sample.id)
+                    .options(orm.immediateload(RoiModel.features))
+                )
+            else:
+                stmt = select(RoiModel).where(RoiModel.sample_id == sample.id)
             result = session.execute(stmt)
             roi_list = list()
             for row in result:
-                roi = row.RoiModel.to_roi(self.roi)
+                model = row.RoiModel
+                roi = _roi_model_to_roi(
+                    model, self.roi, self.feature, load_features=load_features
+                )
                 roi_list.append(roi)
         return roi_list
 
-    def get_roi_by_id(self, roi_id: int) -> Roi:
+    def get_roi_by_id(self, roi_id: int, load_features: bool = True) -> Roi:
         """
         Retrieve a ROI by id.
 
@@ -537,16 +501,19 @@ class AssayData:
 
         """
         with self.SessionFactory() as session:
-            stmt = select(RoiModel).where(RoiModel.id == roi_id)
+            if load_features:
+                stmt = (
+                    select(RoiModel)
+                    .where(RoiModel.id == roi_id)
+                    .options(orm.immediateload(RoiModel.features))
+                )
+            else:
+                stmt = select(RoiModel).where(RoiModel.id == roi_id)
             result = session.execute(stmt).scalar()
             if result is not None:
-                roi = result.to_roi(self.roi)
-                features = list()
-                for ft_model in result.features:
-                    annotation = ft_model.annotation.to_annotation()
-                    ft = ft_model.to_feature(self.feature, roi, annotation)
-                    features.append(ft)
-                roi.features = features
+                roi = _roi_model_to_roi(
+                    result, self.roi, self.feature, load_features=load_features
+                )
             else:
                 roi = None
 
@@ -555,7 +522,7 @@ class AssayData:
             raise ValueError(msg)
         return roi
 
-    def delete_roi(self, sample: Optional[Sample] = None):
+    def delete_roi(self, sample: Sample | None = None):
         """
         Delete ROIs from a sample.
 
@@ -564,6 +531,7 @@ class AssayData:
         sample : Sample
 
         """
+        # TODO: cascade and delete features
         with self.SessionFactory() as session:
             stmt = delete(RoiModel)
             if sample is not None:
@@ -620,21 +588,21 @@ class AssayData:
             feature_annotation_model_list.append(model)
         session.add_all(feature_annotation_model_list)
 
-    def add_features(self, feature_list: Sequence[Feature], sample: Sample):
+    def add_features(self, sample: Sample, *features: Feature):
         """
         Store a list of features in the DB.
 
         Parameters
         ----------
-        roi_list : Sequence[Roi]
         sample : Sample
+        *features: Feature
 
         """
-        self._label_feature_list(feature_list)
+        self._label_feature_list(features)
         with self.SessionFactory() as session:
-            self._add_feature_data(feature_list, session)
-            self._add_feature_annotation_data(feature_list, sample, session)
-            self._add_feature_descriptors_data(feature_list, sample, session)
+            self._add_feature_data(features, session)
+            self._add_feature_annotation_data(features, sample, session)
+            self._add_feature_descriptors_data(features, sample, session)
             session.commit()
 
     def get_features_by_sample(self, sample: Sample) -> list[Feature]:
@@ -651,20 +619,22 @@ class AssayData:
 
         """
         with self.SessionFactory() as session:
-            stmt = select(RoiModel).where(RoiModel.sample_id == sample.id)
+            stmt = (
+                select(RoiModel)
+                .where(RoiModel.sample_id == sample.id)
+                .options(orm.immediateload(RoiModel.features))
+            )
             result = session.execute(stmt)
             feature_list = list()
             for row in result:
                 rm = row.RoiModel
-                roi = rm.to_roi(self.roi)
-                for ft_model, ann_model in zip(rm.features, rm.annotations):
-                    ann = ann_model.to_annotation()
-                    ft = self.feature.from_str(ft_model.data, roi, ann)
+                roi = _roi_model_to_roi(rm, self.roi, self.feature, load_features=True)
+                for ft in roi.features:
                     feature_list.append(ft)
         return feature_list
 
     def get_features_by_label(
-        self, label: int, groups: Optional[list[str]] = None
+        self, label: int, groups: list[str] | None = None
     ) -> list[Feature]:
         """
         Retrieve all samples with an specific feature label.
@@ -684,7 +654,11 @@ class AssayData:
         """
         with self.SessionFactory() as session:
             cond = AnnotationModel.label == label
-            stmt = select(FeatureModel).join(AnnotationModel)
+            stmt = (
+                select(FeatureModel)
+                .join(AnnotationModel)
+                .options(orm.immediateload(FeatureModel.roi))
+            )
             if groups is not None:
                 cond = cond & (SampleModel.group.in_(groups))
                 stmt = stmt.join(SampleModel)
@@ -693,9 +667,10 @@ class AssayData:
             result = session.execute(stmt)
             feature_list = list()
             for row in result:
-                annotation = row.FeatureModel.annotation.to_annotation()
-                roi = row.FeatureModel.roi.to_roi(self.roi)
-                feature = row.FeatureModel.to_feature(self.feature, roi, annotation)
+                roi = _roi_model_to_roi(
+                    row.FeatureModel.roi, self.roi, self.feature, load_features=False
+                )
+                feature = _feature_model_to_feature(row.FeatureModel, self.feature, roi)
                 feature_list.append(feature)
         return feature_list
 
@@ -717,12 +692,14 @@ class AssayData:
                 select(FeatureModel)
                 .join(AnnotationModel)
                 .where(FeatureModel.id == ft_id)
+                .options(orm.immediateload(FeatureModel.roi))
             )
             result = session.execute(stmt).scalar()
             if result is not None:
-                annotation = result.annotation.to_annotation()
-                roi = result.roi.to_roi(self.roi)
-                feature = result.to_feature(self.feature, roi, annotation)
+                roi = _roi_model_to_roi(
+                    result.roi, self.roi, self.feature, load_features=False
+                )
+                feature = _feature_model_to_feature(result, self.feature, roi)
 
             else:
                 feature = None
@@ -748,7 +725,7 @@ class AssayData:
             session.commit()
 
     def get_descriptors(
-        self, sample: Optional[Sample] = None, descriptors: Optional[list[str]] = None
+        self, sample: Sample | None = None, descriptors: list[str] | None = None
     ):
         """
         Retrieve the descriptors associated with each feature.
@@ -792,7 +769,7 @@ class AssayData:
                 stmt = select(self.DescriptorModel)
             else:
                 stmt = select(self.DescriptorModel).where(
-                    self.DescriptorModel.sample_id == sample.id
+                    self.DescriptorModel.sample_id == sample.id  # type: ignore
                 )
             result = session.execute(stmt)
             for row in result:
@@ -823,8 +800,8 @@ class AssayData:
     def get_sample_data(self, sample_id: str) -> SampleData:
         """Retrieve a SampleData instance."""
         sample = self.search_sample(sample_id)
-        roi_list = self.get_roi_list(sample)
-        return SampleData(sample, roi_list)
+        # roi_list = self.get_roi_list(sample)
+        return SampleData(sample)
 
     def search_sample(self, sample_id: str) -> Sample:
         """
@@ -850,13 +827,12 @@ class AssayData:
         if result is None:
             msg = f"No sample with id={sample_id} was found."
             raise ValueError(msg)
-        else:
-            return result.to_sample()
+        return _sample_model_to_sample(result)
 
     def store_sample_data(self, data: SampleData):
         """Store a SampleData instance."""
-        self.add_roi_list(data.roi, data.sample)
-        self.add_features(data.get_feature_list(), data.sample)
+        self.add_roi_list(data.sample, *data.get_roi_list())
+        self.add_features(data.sample, *data.get_feature_list())
 
     def update_feature_labels(self, labels: dict[int, int]):
         """
@@ -913,3 +889,52 @@ def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData)
     }
 
     return type("DescriptorModel", (Base,), attrs)
+
+
+def _roi_model_to_roi(
+    model: RoiModel,
+    roi_type: Type[Roi],
+    feature_type: Type[Feature],
+    load_features: bool = False,
+) -> Roi:
+    """Create a ROI instance."""
+    roi = roi_type.from_str(model.data)
+    roi.id = model.id
+    if load_features:
+        for ft_model in model.features:
+            ft = _feature_model_to_feature(ft_model, feature_type, roi)
+            roi.add_feature(ft)
+    return roi
+
+
+def _feature_model_to_feature(
+    model: FeatureModel, feature_type: Type[Feature], roi: Roi
+) -> Feature:
+    """Create a Feature instance from a FeatureModel instance."""
+    ann_model = model.annotation
+    annotation = _annotation_model_to_annotation(ann_model)
+    return feature_type.from_str(model.data, roi, annotation)
+
+
+def _annotation_model_to_annotation(model: AnnotationModel) -> Annotation:
+    """Create an Annotation instance from an AnnotationModel instance."""
+    return Annotation(
+        label=model.label,
+        isotopologue_label=model.isotopologue_label,
+        isotopologue_index=model.isotopologue_index,
+        charge=model.charge,
+    )
+
+
+def _sample_model_to_sample(model: SampleModel) -> Sample:
+    """Convert to a Sample object."""
+    return Sample(
+        path=Path(model.path),
+        id=model.id,
+        ms_level=model.ms_level,
+        start_time=model.start_time,
+        end_time=model.end_time,
+        group=model.group,
+        order=model.order,
+        batch=model.batch,
+    )

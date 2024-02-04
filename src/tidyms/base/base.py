@@ -13,14 +13,16 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from functools import lru_cache
+from copy import deepcopy
+import json
 from pathlib import Path
+
 from typing import Any, Sequence, Type
 
 import pydantic
 from typing_extensions import Annotated
 from pydantic.functional_validators import AfterValidator
 
-from . import exceptions
 from . import validation_utils as validation
 
 
@@ -41,6 +43,10 @@ class Roi(ABC):
     def __init__(self, *, id_: int = -1):
         self.id = id_
         self.features = list()
+
+    def copy(self) -> Roi:
+        """Create an independent copy of the ROI instance."""
+        return deepcopy(self)
 
     @property
     def features(self) -> list[Feature]:
@@ -358,94 +364,119 @@ class Sample(pydantic.BaseModel):
 
 class SampleData:
     """
-    Container class for the associated with a sample.
+    Container class for sample data.
 
     Attributes
     ----------
     sample : Sample
-    roi : Sequence[Roi] | None
+    copy : bool
+        If ``True``, create an independent copy of the data for each processing
+        step.
 
     """
 
-    def __init__(self, sample: Sample, roi: Sequence[Roi] | None = None) -> None:
+    def __init__(self, sample: Sample, snapshot: bool = False) -> None:
         self.sample = sample
-        if roi is None:
-            roi = list()
-        self._status = SampleDataProcessStatus()
-        self._roi = roi
-        self._features: list[Feature] | None = None
-        self._descriptors: dict[str, list[float]] | None = None
-        self._processing_steps: list[ProcessingStepInfo] = list()
+        self._snapshot = snapshot
+        self._latest_roi: list[Roi] = list()
+        self._roi_snapshots: list[list[Roi]] = list()
+        self._roi_snapshots.append(self._latest_roi)
+        self._processing_steps: list[ProcessorInformation] = list()
+        self._snapshots_id = set()
 
     @property
-    def processing_steps(self) -> list[ProcessingStepInfo]:
+    def processing_steps(self) -> list[ProcessorInformation]:
         return self._processing_steps
 
-    @property
-    def roi(self) -> Sequence[Roi]:
-        """Get the roi in the sample."""
-        return self._roi
-
-    @roi.setter
-    def roi(self, value: Sequence[Roi]):
-        self._roi = value
-
-    @property
-    def status(self) -> SampleDataProcessStatus:
-        return self._status
-
-    def add_processing_step_info(self, info: ProcessingStepInfo):
-        """Store information from a processing step."""
-        self._processing_steps.append(info)
-
     def get_feature_list(self) -> list[Feature]:
-        """Update the feature attribute using feature data from ROIs."""
         feature_list = list()
-        for roi in self.roi:
+        for roi in self.get_roi_list():
             feature_list.extend(roi.features)
         return feature_list
 
-    def delete_empty_roi(self):
+    def get_feature_list_snapshot(self, step: ProcessorInformation) -> list[Feature]:
+        """Update the feature attribute using feature data from ROIs."""
+        feature_list = list()
+        for roi in self.get_roi_list_snapshot(step):
+            feature_list.extend(roi.features)
+        return feature_list
+
+    def set_roi_list(self, roi_list: list[Roi], step: ProcessorInformation):
+
+        if step.id in self._snapshots_id:
+            msg = f"A snapshot with id={step.id} already exists for sample={self.sample.id}."
+            raise ValueError(msg)
+
+        self._latest_roi = roi_list
+        self._snapshot_data(step)
+
+    def get_roi_list(self) -> list[Roi]:
+        return self._roi_snapshots[-1]
+
+    def get_roi_list_snapshot(self, step: ProcessorInformation) -> list[Roi]:
+        """
+        Retrieve the list of ROIs stored.
+
+        Parameters
+        ----------
+        step: str
+            The id of processing step applied to the sample. If the SampleData
+            instance was created with the `copy` parameter set to ``False``,
+            this parameter is ignored.
+
+        Raises
+        ------
+        ValueError
+            If an invalid processing step id is passed.
+
+        """
+        if step.id not in self._snapshots_id:
+            self._snapshot_data(step)
+
+        if self._snapshot:
+            step_index = self._processing_steps.index(step)
+            roi_list = self._roi_snapshots[step_index]
+        else:
+            roi_list = self._latest_roi
+        return roi_list
+
+    def delete_empty_roi(self, step: ProcessorInformation):
         """Delete ROI with no features."""
-        self.roi = [x for x in self.roi if x.features]
+        if step.id not in self._snapshots_id:
+            msg = f"No snapshot taken for processor with id={step.id} for sample={self.sample.id}."
+            raise ValueError(msg)
+
+        index = self._processing_steps.index(step)
+        self._roi_snapshots[index] = [
+            x for x in self.get_roi_list_snapshot(step) if x.features
+        ]
+
+    def _snapshot_data(self, info: ProcessorInformation):
+        if self._snapshot:
+            roi_list = [x.copy() for x in self._latest_roi]
+        else:
+            roi_list = self._latest_roi
+
+        self._roi_snapshots.append(roi_list)
+        self._latest_roi = roi_list
+        self._processing_steps.append(info)
+        self._snapshots_id.add(info.id)
+
+    def delete_latest_snapshot(self):
+        if self._processing_steps:
+            self._processing_steps.pop()
+            self._roi_snapshots.pop()
+            self._latest_roi = self._roi_snapshots[-1]
 
 
-class ProcessingStepInfo(pydantic.BaseModel):
+class ProcessorInformation(pydantic.BaseModel):
     """Stores sample processing step name and parameters"""
 
-    name: str
+    id: str
+    pipeline: str | None
+    order: int | None
     parameters: dict[str, Any]
 
-
-class SampleDataProcessStatus:
-    """Report sample data process status."""
-
-    def __init__(
-        self,
-        roi: bool = False,
-        feature: bool = False,
-        isotopologue_annotation: bool = False,
-        adduct_annotation: bool = False,
-        correspondence: bool = False,
-    ):
-        self.roi = roi
-        self.feature = feature
-        self.isotopologue_annotation = isotopologue_annotation
-        self.adduct_annotation = adduct_annotation
-        self.correspondence = correspondence
-
-    def check(self, other: SampleDataProcessStatus):
-        for attr in self.__dict__:
-            actual = getattr(self, attr)
-            expected = getattr(other, attr)
-            status = _compare_process_status(actual, expected)
-            if not status:
-                msg = f"Expected status={expected} for {attr}. Got status={actual}."
-                raise exceptions.IncompatibleSampleDataStatus(msg)
-
-
-def _compare_process_status(actual: bool, expected: bool) -> bool:
-    if expected:
-        return expected and actual
-    else:
-        return True
+    @pydantic.field_serializer("parameters")
+    def serialize_parameters(self, parameters: dict[str, Any], _info) -> str:
+        return json.dumps(parameters)
