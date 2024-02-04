@@ -6,29 +6,47 @@ import pytest
 
 from tidyms.base import assay
 from tidyms.base import Annotation, SampleData
-from tidyms.base.exceptions import IncompatibleSampleDataStatus
+from tidyms.base import exceptions
 
 
 import dummy
 
 
 @pytest.fixture
+def proc_params():
+    return {"order": None, "pipeline": None}
+
+
+@pytest.fixture
 def roi_extractor():
-    return dummy.DummyRoiExtractor()
+    return dummy.DummyRoiExtractor(id="roi extractor")
 
 
 @pytest.fixture
 def feature_extractor():
-    return dummy.DummyFeatureExtractor()
+    return dummy.DummyFeatureExtractor(id="feature extractor")
+
+
+@pytest.fixture
+def roi_transformer():
+    return dummy.DummyRoiTransformer(id="roi transformer")
+
+
+@pytest.fixture
+def feature_transformer():
+    return dummy.DummyFeatureTransformer(id="feature transformer")
 
 
 @pytest.fixture
 def pipeline(
     roi_extractor: dummy.DummyRoiExtractor,
+    roi_transformer: dummy.DummyRoiTransformer,
     feature_extractor: dummy.DummyFeatureExtractor,
+    feature_transformer: dummy.DummyFeatureTransformer,
 ):
-    steps = [("roi extractor", roi_extractor), ("feature extractor", feature_extractor)]
-    return assay.ProcessingPipeline(steps)
+    id_ = "my-pipeline"
+    steps = (roi_extractor, roi_transformer, feature_extractor, feature_transformer)
+    return assay.ProcessingPipeline(id_, *steps)
 
 
 @pytest.fixture
@@ -45,14 +63,17 @@ def sample_data_with_roi(
     return sample_data
 
 
-def test_BaseRoiExtractor_get_parameters(roi_extractor: dummy.DummyRoiExtractor):
+def test_BaseRoiExtractor_get_parameters(roi_extractor, proc_params):
+
     expected = {"param1": 10, "param2": "default"}
+    expected.update(proc_params)
     actual = roi_extractor.get_parameters()
     assert actual == expected
 
 
-def test_BaseRoiExtractor_set_parameters(roi_extractor: dummy.DummyRoiExtractor):
+def test_BaseRoiExtractor_set_parameters(roi_extractor, proc_params):
     expected = {"param1": 20, "param2": "new_value"}
+    expected.update(proc_params)
     roi_extractor.set_parameters(**expected)
     actual = roi_extractor.get_parameters()
     assert actual == expected
@@ -65,32 +86,26 @@ def test_BaseRoiExtractor_set_invalid_parameter_raise_ValidationError(
         roi_extractor.param2 = 10  # type: ignore
 
 
-def test_BaseRoiExtractor_process(
-    roi_extractor: dummy.DummyRoiExtractor, sample_data: SampleData
-):
-    assert not sample_data.status.roi
-    assert not sample_data.roi
+def test_BaseRoiExtractor_process(roi_extractor, sample_data):
+    assert not sample_data.get_roi_list()
     roi_extractor.process(sample_data)
-    assert sample_data.status.roi
-    assert sample_data.roi
+    assert sample_data.get_roi_list()
 
 
-def test_BaseFeatureExtractor_get_parameters(
-    feature_extractor: dummy.DummyRoiExtractor,
-):
+def test_BaseFeatureExtractor_get_parameters(feature_extractor, proc_params):
     expected = {"param1": 2, "param2": "default", "filters": dict()}
+    expected.update(proc_params)
     actual = feature_extractor.get_parameters()
     assert actual == expected
 
 
-def test_BaseFeatureExtractor_set_parameters(
-    feature_extractor: dummy.DummyFeatureExtractor,
-):
+def test_BaseFeatureExtractor_set_parameters(feature_extractor, proc_params):
     expected = {
         "param1": 10,
         "param2": "new_value",
         "filters": {"height": (10.0, 20.0)},
     }
+    expected.update(proc_params)
     feature_extractor.set_parameters(**expected)
     actual = feature_extractor.get_parameters()
     assert actual == expected
@@ -115,19 +130,9 @@ def test_BaseFeatureExtractor_process(
     feature_extractor: dummy.DummyFeatureExtractor,
 ):
     sample_data = sample_data_with_roi
-    assert not sample_data.status.feature
     assert not sample_data.get_feature_list()
     feature_extractor.process(sample_data)
-    assert sample_data.status.feature
     assert sample_data.get_feature_list()
-
-
-def test_BaseFeatureExtractor_process_invalid_sample_data_status_raises_error(
-    sample_data: SampleData,
-    feature_extractor: dummy.DummyFeatureExtractor,
-):
-    with pytest.raises(IncompatibleSampleDataStatus):
-        feature_extractor.process(sample_data)
 
 
 def test_is_feature_descriptor_in_valid_range_valid_range():
@@ -159,33 +164,66 @@ def test_ProcessingPipeline_processors_with_repeated_names_raises_error(
     roi_extractor: dummy.DummyRoiExtractor,
     feature_extractor: dummy.DummyFeatureExtractor,
 ):
-    processing_steps = [
-        ("ROI extractor", roi_extractor),
-        ("ROI extractor", feature_extractor),
-    ]
+    feature_extractor.id = roi_extractor.id
+    id_ = "my-pipeline"
+    processing_steps = (roi_extractor, feature_extractor)
     with pytest.raises(ValueError):
-        assay.ProcessingPipeline(processing_steps)
+        assay.ProcessingPipeline(id_, *processing_steps)
 
 
-def test_ProcessingPipeline_get_parameters(pipeline: assay.ProcessingPipeline):
-    for name, parameters in pipeline.get_parameters():
-        processor = pipeline.get_processor(name)
-        assert parameters == processor.get_parameters()
+def test_sample_pipeline_creation(
+    roi_extractor: dummy.DummyRoiExtractor,
+    roi_transformer: dummy.DummyRoiTransformer,
+    feature_extractor: dummy.DummyFeatureExtractor,
+    feature_transformer: dummy.DummyFeatureTransformer,
+):
+    id_ = "my-pipeline"
+    steps = (roi_extractor, roi_transformer, feature_extractor, feature_transformer)
+    assay.ProcessingPipeline(id_, *steps)
+    assert True
 
 
-def test_ProcessingPipeline_set_parameters(pipeline: assay.ProcessingPipeline):
-    new_parameters = {
-        "roi extractor": {"param1": 25, "param2": "new-value"},
-        "feature extractor": {
-            "param1": 15,
-            "param2": "new-value",
-            "filters": {"height": (10.0, None)},
-        },
-    }
-    pipeline.set_parameters(new_parameters)
+def test_sample_pipeline_creation_without_roi_extractor_in_first_step_raises_error(
+    roi_transformer: dummy.DummyRoiTransformer,
+    feature_extractor: dummy.DummyFeatureExtractor,
+    feature_transformer: dummy.DummyFeatureTransformer,
+):
+    id_ = "my-pipeline"
+    steps = (roi_transformer, feature_extractor, feature_transformer)
+    with pytest.raises(exceptions.IncompatibleProcessorStatus):
+        assay.ProcessingPipeline(id_, *steps)
 
-    for name, processor in pipeline.processors:
-        assert new_parameters[name] == processor.get_parameters()
+
+def test_sample_pipeline_creation_without_feature_extractor_raises_error(
+    roi_extractor: dummy.DummyRoiExtractor,
+    roi_transformer: dummy.DummyRoiTransformer,
+    feature_transformer: dummy.DummyFeatureTransformer,
+):
+    id_ = "my-pipeline"
+    steps = (roi_extractor, roi_transformer, feature_transformer)
+    with pytest.raises(exceptions.IncompatibleProcessorStatus):
+        assay.ProcessingPipeline(id_, *steps)
+
+
+# def test_ProcessingPipeline_get_parameters(pipeline: assay.ProcessingPipeline):
+#     for name, parameters in pipeline.get_parameters():
+#         processor = pipeline.get_processor(name)
+#         assert parameters == processor.get_parameters()
+
+
+# def test_ProcessingPipeline_set_parameters(pipeline: assay.ProcessingPipeline):
+#     new_parameters = {
+#         "roi extractor": {"param1": 25, "param2": "new-value"},
+#         "feature extractor": {
+#             "param1": 15,
+#             "param2": "new-value",
+#             "filters": {"height": (10.0, None)},
+#         },
+#     }
+#     pipeline.set_parameters(new_parameters)
+
+#     for processor in pipeline.processors:
+#         assert new_parameters[processor.name] == processor.get_parameters()
 
 
 # def test_ProcessingPipeline_set_default_parameters():

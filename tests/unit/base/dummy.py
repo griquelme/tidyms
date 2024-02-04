@@ -10,6 +10,7 @@ from typing import Sequence
 
 from tidyms.base import assay, base
 from tidyms.base import constants as c
+from tidyms.base.base import Feature, Roi
 
 
 class ConcreteRoi(base.Roi):
@@ -78,8 +79,24 @@ class DummyRoiExtractor(assay.BaseRoiExtractor):
     param1: int = 10
     param2: str = "default"
 
-    def _func(self, data: base.SampleData):
-        data.roi = [create_dummy_roi() for _ in range(5)]
+    def _extract_roi_func(self, sample: base.Sample) -> list[ConcreteRoi]:
+        return [create_dummy_roi() for _ in range(5)]
+
+    def get_default_parameters(
+        self,
+        instrument: c.MSInstrument = c.MSInstrument.QTOF,
+        separation: c.SeparationMode = c.SeparationMode.UPLC,
+        polarity: c.Polarity = c.Polarity.POSITIVE,
+    ):
+        return dict()
+
+
+class DummyRoiTransformer(assay.BaseRoiTransformer):
+    param1: float = 10.0
+    param2: bool = False
+
+    def _transform_roi(self, roi: Roi):
+        pass
 
     def get_default_parameters(
         self,
@@ -101,6 +118,22 @@ class DummyFeatureExtractor(assay.BaseFeatureExtractor):
             ft = create_dummy_feature(roi, ann)
             feature_list.append(ft)
         return feature_list
+
+    def get_default_parameters(
+        self,
+        instrument: c.MSInstrument = c.MSInstrument.QTOF,
+        separation: c.SeparationMode = c.SeparationMode.UPLC,
+        polarity: c.Polarity = c.Polarity.POSITIVE,
+    ):
+        return dict()
+
+
+class DummyFeatureTransformer(assay.BaseFeatureTransformer):
+    param1: float = 10.0
+    param2: bool = False
+
+    def _transform_feature(self, feature: Feature):
+        pass
 
     def get_default_parameters(
         self,
