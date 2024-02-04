@@ -2,12 +2,13 @@
 
 from typing import Optional
 from . import create_annotation_tools, annotate
-from ..base import SampleData, SingleSampleProcessor
+from ..base.base import SampleData
+from ..base.assay import BaseSampleProcessor
 from ..chem import get_chnops_bounds
 from ..validation import ValidatorWithLowerThan, validate
 
 
-class IsotopologueAnnotator(SingleSampleProcessor):
+class IsotopologueAnnotator(BaseSampleProcessor):
     """
     Annotates isotopologues in a sample.
 
@@ -76,7 +77,7 @@ class IsotopologueAnnotator(SingleSampleProcessor):
 
     def _func(self, sample_data: SampleData):
         annotate(
-            sample_data.get_feature_list(),
+            sample_data.get_feature_list_snapshot(),
             self._mmi_finder,
             self._envelope_finder,
             self._envelope_validator,

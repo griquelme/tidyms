@@ -4,7 +4,7 @@ from typing import Sequence
 from .annotation_data import AnnotationData
 from .envelope_finder import EnvelopeFinder
 from .mmi_finder import MMIFinder
-from ..base import Feature
+from ..base.base import Feature
 from ..chem import EnvelopeValidator
 from ..chem.atoms import EM, PeriodicTable
 from ..base import constants as c
@@ -88,7 +88,9 @@ def create_annotation_tools(
         p_tol,
         min_similarity,
     )
-    envelope_finder = EnvelopeFinder(elements, max_M_tol, max_length, min_p, min_similarity)
+    envelope_finder = EnvelopeFinder(
+        elements, max_M_tol, max_length, min_p, min_similarity
+    )
     envelope_validator = EnvelopeValidator(
         bounds,
         max_M=max_mass,

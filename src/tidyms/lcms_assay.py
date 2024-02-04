@@ -1,16 +1,10 @@
 """Tools to process LC-MS-based datasets."""
 
-
 import numpy as np
 from typing import Any, Optional
-from .base import (
-    AssayData,
-    FeatureExtractor,
-    FeatureMatcher,
-    Sample,
-    SampleData,
-    SingleSampleProcessor,
-)
+from .base.base import Sample, SampleData
+from .base.db import AssayData
+from .base.assay import BaseFeatureExtractor, BaseSampleProcessor, FeatureMatcher
 from .base import constants as c
 from . import peaks
 from .correspondence import match_features
@@ -20,7 +14,7 @@ from .raw_data_utils import make_roi
 from .validation import is_all_positive, ValidatorWithLowerThan, validate
 
 
-class LCTraceExtractor(SingleSampleProcessor):
+class LCTraceExtractor(BaseSampleProcessor):
     """
     Extracts regions-of-interest (ROI) from raw data represented as m/z traces.
 
@@ -86,7 +80,7 @@ class LCTraceExtractor(SingleSampleProcessor):
         # TODO: fix this after refactoring MSData
         ms_data = MSData_from_file(sample.path)
         params = self.get_parameters()
-        sample_data.roi = make_roi(
+        sample_data._roi_snapshots = make_roi(
             ms_data,
             ms_level=sample.ms_level,
             start_time=sample.start_time,
@@ -97,7 +91,10 @@ class LCTraceExtractor(SingleSampleProcessor):
     def set_default_parameters(self, instrument: str, separation: str):
         """Set the default parameters."""
         defaults: dict[str, Any] = {"max_missing": 1, "pad": 2, "min_intensity": 250}
-        instrument_parameters = {c.QTOF: {"tolerance": 0.01}, c.ORBITRAP: {"tolerance": 0.005}}
+        instrument_parameters = {
+            c.QTOF: {"tolerance": 0.01},
+            c.ORBITRAP: {"tolerance": 0.005},
+        }
         separation_parameters = {c.UPLC: {"min_length": 10}, c.HPLC: {"min_length": 20}}
         defaults.update(instrument_parameters[instrument])
         defaults.update(separation_parameters[separation])
@@ -112,13 +109,17 @@ class LCTraceExtractor(SingleSampleProcessor):
             "min_intensity": {"type": "number", "min": 0.0},
             "min_length": {"type": "integer", "min": 2},
             "pad": {"type": "integer", "min": 0},
-            "smoothing_strength": {"type": "number", "nullable": True, "is_positive": True},
+            "smoothing_strength": {
+                "type": "number",
+                "nullable": True,
+                "is_positive": True,
+            },
         }
         validator = ValidatorWithLowerThan(schema)
         validate(parameters, validator)
 
 
-class LCFeatureExtractor(FeatureExtractor):
+class LCFeatureExtractor(BaseFeatureExtractor):
     """
     Detect peaks in LC m/z traces.
 
@@ -129,7 +130,8 @@ class LCFeatureExtractor(FeatureExtractor):
     """
 
     def __init__(
-        self, filters: Optional[dict[str, tuple[Optional[float], Optional[float]]]] = None
+        self,
+        filters: Optional[dict[str, tuple[Optional[float], Optional[float]]]] = None,
     ):
         super().__init__(filters)
 
@@ -148,7 +150,9 @@ class LCFeatureExtractor(FeatureExtractor):
 
     @staticmethod
     def _extract_features_func(roi: LCTrace, **params):
-        start, apex, end = peaks.detect_peaks(roi.spint, roi.noise, roi.baseline, **params)
+        start, apex, end = peaks.detect_peaks(
+            roi.spint, roi.noise, roi.baseline, **params
+        )
         roi.features = [Peak(s, a, e, roi) for s, a, e in zip(start, apex, end)]
 
     @staticmethod
@@ -319,7 +323,9 @@ def _create_group_code_array(
     unique_groups = {x.group for x in dataset_samples}
     group_to_code = {name: k for k, name in enumerate(unique_groups)}
     sample_to_group = {x.id: x.group for x in dataset_samples}
-    sample_to_group_code = {k: group_to_code[sample_to_group[k]] for k in unique_samples}
+    sample_to_group_code = {
+        k: group_to_code[sample_to_group[k]] for k in unique_samples
+    }
     return np.array([sample_to_group_code[x] for x in sample_names])
 
 

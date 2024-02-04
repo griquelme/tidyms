@@ -19,190 +19,24 @@ get_find_centroid_params
 
 """
 
+from __future__ import annotations
+
 import bisect
 import bokeh.plotting
 import json
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
-from typing import Any, Optional, Tuple, TypeVar
+from typing import Any, cast, Optional, Tuple
 from scipy.interpolate import interp1d
 from scipy.integrate import trapz
 from scipy.integrate import cumtrapz
 
-from .base import Annotation, Feature, Roi
+from .base.base import Annotation, Feature, Roi
 from . import peaks
 from . import _plot_bokeh
 from .base import constants as c
+from .base.spectrum import MSSpectrum
 from .utils import array_to_json_str, json_str_to_array
-
-
-class MSSpectrum:
-    """
-    Representation of a Mass Spectrum. Manages conversion to
-    centroid and plotting of data.
-
-    Attributes
-    ----------
-    mz : array
-        m/z data
-    spint : array
-        Intensity data
-    time : float or None
-        Time at which the spectrum was acquired
-    ms_level : int
-        MS level of the scan
-    polarity : int or None
-        Polarity used to acquire the data.
-    instrument : {"qtof", "orbitrap"}, default="qtof"
-        MS instrument type. Used to set default values in methods.
-    is_centroid : bool
-        True if the data is in centroid mode.
-
-    """
-
-    def __init__(
-        self,
-        mz: np.ndarray,
-        spint: np.ndarray,
-        time: float = 0.0,
-        ms_level: int = 1,
-        polarity: Optional[int] = None,
-        instrument: str = c.QTOF,
-        is_centroid: bool = True,
-    ):
-        self.mz = mz
-        self.spint = spint
-        self.time = time
-        self.ms_level = ms_level
-        self.polarity = polarity
-        self.instrument = instrument
-        self.is_centroid = is_centroid
-
-    @property
-    def instrument(self) -> str:
-        return self._instrument
-
-    @instrument.setter
-    def instrument(self, value):
-        valid_values = c.MS_INSTRUMENTS
-        if value in valid_values:
-            self._instrument = value
-        else:
-            msg = "{} is not a valid instrument. Valid values are: {}."
-            raise ValueError(msg.format(value, c.MS_INSTRUMENTS))
-
-    def find_centroids(
-        self, min_snr: float = 10.0, min_distance: Optional[float] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        r"""
-        Find centroids in the spectrum.
-
-        Parameters
-        ----------
-        min_snr : positive number, default=10.0
-            Minimum signal-to-noise ratio of the peaks.
-        min_distance : positive number or None, default=None
-            Minimum distance between consecutive peaks. If ``None``, the value
-            is set to 0.01 if ``self.instrument`` is ``"qtof"`` or to 0.005 if
-            ``self.instrument`` is ``"orbitrap"``.
-
-        Returns
-        -------
-        centroid : array
-            m/z centroids. If ``self.is_centroid`` is ``True``, returns
-            ``self.mz``.
-        area : array
-            peak area. If ``self.is_centroid`` is ``True``, returns
-            ``self.spint``.
-
-        """
-        if self.is_centroid:
-            centroid, area = self.mz, self.spint
-        else:
-            params = get_find_centroid_params(self.instrument)
-            if min_distance is not None:
-                params["min_distance"] = min_distance
-
-            if min_snr is not None:
-                params["min_snr"] = min_snr
-
-            centroid, area = peaks.find_centroids(self.mz, self.spint, **params)
-            ord = np.argsort(centroid)
-            centroid = centroid[ord]
-            area = area[ord]
-        return centroid, area
-
-    def get_closest_mz(
-        self, mz: float = 100.0, max_offset_absolute=0.001
-    ) -> Tuple[int, float, float, float, float]:
-        ind = np.argmin(np.abs(self.mz - mz))
-        if abs(self.mz[ind] - mz) <= max_offset_absolute:
-            return (
-                ind,
-                self.mz[ind],
-                self.mz[ind] - mz,
-                (self.mz[ind] - mz) / mz * 1e6,
-                self.spint[ind],
-            )
-        return None, None, None, None, None
-
-    def get_most_abundant_signal_in_range(
-        self, mz: float = 100.0, max_offset_absolute=0.001
-    ) -> Tuple[int, float, float, float, float]:
-        inds = np.abs(self.mz - mz) <= max_offset_absolute
-        if np.sum(inds) > 0:
-            inds = np.argwhere(inds)[:, 0]
-            maxIntInd = np.argmax(self.spint[inds])
-            ind = inds[maxIntInd]
-            return (
-                ind,
-                self.mz[ind],
-                self.mz[ind] - mz,
-                (self.mz[ind] - mz) / mz * 1e6,
-                self.spint[ind],
-            )
-        return None, None, None, None, None
-
-    def plot(
-        self,
-        fig_params: Optional[dict] = None,
-        line_params: Optional[dict] = None,
-        show: bool = True,
-    ) -> bokeh.plotting.figure:  # pragma: no cover
-        """
-        Plot the spectrum using Bokeh.
-
-        Parameters
-        ----------
-        fig_params : dict or None, default=None
-            key-value parameters to pass to ``bokeh.plotting.figure``.
-        line_params : dict, or None, default=None
-            key-value parameters to pass to ``bokeh.plotting.figure.line``.
-        show : bool, default=True
-            If True calls ``bokeh.plotting.show`` on the Figure.
-
-        Returns
-        -------
-        bokeh.plotting.figure
-
-        """
-        default_fig_params = _plot_bokeh.get_spectrum_figure_params()
-        if fig_params:
-            default_fig_params.update(fig_params)
-            fig_params = default_fig_params
-        else:
-            fig_params = default_fig_params
-        fig = bokeh.plotting.figure(**fig_params)
-
-        if self.is_centroid:
-            plotter = _plot_bokeh.add_stems
-        else:
-            plotter = _plot_bokeh.add_line
-        plotter(fig, self.mz, self.spint, line_params=line_params)
-        _plot_bokeh.set_ms_spectrum_axis_params(fig)
-        if show:
-            bokeh.plotting.show(fig)
-        return fig
 
 
 class MZTrace(Roi):
@@ -214,14 +48,15 @@ class MZTrace(Roi):
 
     Attributes
     ----------
-    time : array
-        time in each scan.
-    spint : array
-        intensity in each scan.
-    mz : array
-        m/z in each scan.
-    scan : array
-        scan numbers where the ROI is defined.
+    time : array[float]
+        time in each scan. All values are assumed to be non-negative.
+    spint : array[float]
+        intensity in each scan. All values are assumed to be non-negative.
+    mz : array[float]
+        m/z in each scan. All values are assumed to be non-negative.
+    scan : array[int]
+        scan numbers where the ROI is defined. All values are assumed to be
+        non-negative.
     features : OptionalList[Feature]]
 
     """
@@ -241,7 +76,8 @@ class MZTrace(Roi):
         self.mz = mz
         self.scan = scan
         self.features: Optional[list[Feature]] = None
-        self.fill_nan(fill_value="extrapolate")
+        self.fill_nan()
+
         if noise is None:
             noise = peaks.estimate_noise(self.spint)
         self.noise = noise
@@ -263,9 +99,9 @@ class MZTrace(Roi):
         )
         return d
 
-    def to_string(self) -> str:
+    def to_str(self) -> str:
         """
-        Serializes the LCRoi into a JSON str.
+        Serialize the LCRoi into a JSON str.
 
         Returns
         -------
@@ -281,16 +117,10 @@ class MZTrace(Roi):
             None if self.baseline is None else array_to_json_str(self.baseline)
         )
         d[c.NOISE] = None if self.noise is None else array_to_json_str(self.noise)
-        # TODO: DELETE THIS BLOCK
-        if self.features is None:
-            d[c.ROI_FEATURE_LIST] = None
-        else:
-            d[c.ROI_FEATURE_LIST] = [x.to_str() for x in self.features]
-
         d_json = json.dumps(d)
         return d_json
 
-    def fill_nan(self, **kwargs):
+    def fill_nan(self):
         """
         Fill missing values in the trace.
 
@@ -298,21 +128,14 @@ class MZTrace(Roi):
         values are filled using linear interpolation. Missing values on the boundaries
         are filled by extrapolation. Negative values are set to 0.
 
-        Parameters
-        ----------
-        kwargs:
-            Parameters to pass to :func:`scipy.interpolate.interp1d`
-
         """
-
-        # if the first or last values are missing, assign an intensity value
-        # of zero. This prevents errors in the interpolation and makes peak
-        # picking work better.
-
         missing = np.isnan(self.spint)
         if missing.any():
             interpolator = interp1d(
-                self.time[~missing], self.spint[~missing], assume_sorted=True, **kwargs
+                self.time[~missing],
+                self.spint[~missing],
+                assume_sorted=True,
+                fill_value="extrapolate",
             )
             sp_max = np.nanmax(self.spint)
             sp_min = np.nanmin(self.spint)
@@ -337,8 +160,9 @@ class MZTrace(Roi):
 
 class LCTrace(MZTrace):
     """
-    m/z traces where chromatographic peaks may be found. m/z information
-    is stored besides time and intensity information.
+    m/z traces where chromatographic peaks may be found.
+
+    m/z information is stored besides time and intensity information.
 
     Subclassed from Roi. Used for feature detection in LCMS data.
 
@@ -355,18 +179,7 @@ class LCTrace(MZTrace):
 
     """
 
-    features: list["Peak"]
-
-    def __init__(
-        self,
-        time: np.ndarray[Any, np.dtype[np.floating]],
-        spint: np.ndarray[Any, np.dtype[np.floating]],
-        mz: np.ndarray[Any, np.dtype[np.floating]],
-        scan: np.ndarray[Any, np.dtype[np.integer]],
-        noise: Optional[np.ndarray] = None,
-        baseline: Optional[np.ndarray] = None,
-    ):
-        super().__init__(time, spint, mz, scan, noise, baseline)
+    features: Optional[list[Peak]]
 
     def extract_features(self, **kwargs):
         """
@@ -457,10 +270,6 @@ class LCTrace(MZTrace):
         )
         return is_eq
 
-    @staticmethod
-    def _get_feature_type():
-        return Peak
-
 
 class Chromatogram(LCTrace):
     """
@@ -482,11 +291,7 @@ class Chromatogram(LCTrace):
 
 
 class InvalidPeakException(ValueError):
-    """
-    Exception raised when invalid indices are used in the construction of
-    Peak objects.
-
-    """
+    """Exception raised when invalid indices are passed to the Peak constructor."""
 
     pass
 
@@ -534,6 +339,7 @@ class Peak(Feature):
         self.apex = int(apex)
 
     def to_str(self) -> str:
+        """Serialize the peak into a string representation."""
         d = {c.START: self.start, c.APEX: self.apex, c.END: self.end}
         s = json.dumps(d)
         return s
@@ -547,6 +353,7 @@ class Peak(Feature):
         return f"{name}(start={self.start}, apex={self.apex}, end={self.end})"
 
     def plot(self, figure: bokeh.plotting.figure, color: str, **varea_params):
+        """Plot the LC trace."""
         _plot_bokeh.fill_area(
             figure,
             self.roi.time,
@@ -559,7 +366,7 @@ class Peak(Feature):
 
     def get_rt_start(self) -> float:
         """
-        Computes the start of the peak, in time units
+        Compute the start of the peak, in time units.
 
         Returns
         -------
@@ -570,7 +377,7 @@ class Peak(Feature):
 
     def get_rt_end(self) -> float:
         """
-        Computes the end of the peak, in time units
+        Compute the end of the peak, in time units.
 
         Returns
         -------
@@ -581,7 +388,7 @@ class Peak(Feature):
 
     def get_rt(self) -> float:
         """
-        Finds the peak location in the ROI rt, using spint as weights.
+        Find the peak location in the ROI rt, using spint as weights.
 
         Returns
         -------
@@ -597,8 +404,10 @@ class Peak(Feature):
 
     def get_height(self) -> float:
         """
-        Computes the height of the peak, defined as the difference between the
-        value of intensity in the ROI and the baseline at the peak apex.
+        Compute the height of the peak.
+
+        The height is defined as the difference between the value of intensity
+        in the ROI and the baseline at the peak apex.
 
         Returns
         -------
@@ -613,7 +422,7 @@ class Peak(Feature):
 
     def get_area(self) -> float:
         """
-        Computes the area in the region defined by the peak.
+        Compute the peak area.
 
         If the baseline area is greater than the peak area, the area is set
         to zero.
@@ -632,8 +441,10 @@ class Peak(Feature):
 
     def get_width(self) -> float:
         """
-        Computes the peak width, defined as the region where the 95 % of the
-        total peak area is distributed.
+        Compute the peak width.
+
+        The peak width is defined as the region where the 95 % of the total peak
+        area is distributed.
 
         Returns
         -------
@@ -656,7 +467,9 @@ class Peak(Feature):
 
     def get_extension(self) -> float:
         """
-        Computes the peak extension, defined as the length of the peak region.
+        Compute the peak extension.
+
+        The peak extension is defined as the length of the peak region.
 
         Returns
         -------
@@ -667,15 +480,16 @@ class Peak(Feature):
 
     def get_snr(self) -> float:
         """
-        Computes the peak signal-to-noise ratio, defined as the quotient
-        between the peak height and the noise level at the apex.
+        Compute the peak signal-to-noise ratio (SNR).
+
+        The SNR is defined as the quotient between the peak height and the noise
+        level at the apex.
 
         Returns
         -------
         snr : float
 
         """
-
         peak_noise = self.roi.noise[self.apex]
         if np.isclose(peak_noise, 0):
             snr = np.inf
@@ -685,7 +499,7 @@ class Peak(Feature):
 
     def get_mz(self) -> float:
         """
-        Computes the weighted average m/z of the peak.
+        Compute the weighted average m/z of the peak.
 
         Returns
         -------
@@ -696,7 +510,7 @@ class Peak(Feature):
             msg = "mz not specified for ROI."
             raise ValueError(msg)
         else:
-            weights = self.roi.spint[self.start : self.end]
+            weights = cast(np.ndarray, self.roi.spint[self.start : self.end])
             weights[weights < 0.0] = 0
             mz_mean = np.average(self.roi.mz[self.start : self.end], weights=weights)
             mz_mean = max(0.0, mz_mean.item())
@@ -704,11 +518,11 @@ class Peak(Feature):
 
     def get_mz_std(self) -> Optional[float]:
         """
-        Computes the standard deviation of the m/z in the peak
+        Compute the standard deviation of the peak m/z.
 
         Returns
         -------
-        mz_std : float
+        float
 
         """
         if self.roi.mz is None:
@@ -717,15 +531,33 @@ class Peak(Feature):
             mz_std = self.roi.mz[self.start : self.end].std()
         return mz_std
 
-    def compare(self, other: "Peak") -> float:
+    def compare(self, other: Peak) -> float:
+        """
+        Compute the similarity between a pair of peaks.
+
+        The similarity is defined as the cosine distance between the overlapping
+        region of two peaks.
+
+        """
         return _compare_features_lc(self, other)
 
     @staticmethod
     def compute_isotopic_envelope(
-        features: list["Peak"],
+        features: list[Peak],
     ) -> Tuple[list[float], list[float]]:
         """
-        Computes a m/z and relative abundance for a list of features.
+        Compute the isotopic envelope (m/z and abundance) of a list of peaks.
+
+        Parameters
+        ----------
+        features : list[Peak]
+
+        Returns
+        -------
+        mz : np.ndarray
+            The mean m/z of each peak.
+        abundance : np.ndarray
+            The abundance of each peak (normalized to 1).
 
         """
         scan_start = 0
@@ -752,32 +584,8 @@ class Peak(Feature):
         return mz, p
 
 
-def get_find_centroid_params(instrument: str) -> dict:
-    """
-    Set default parameters to find_centroid method using instrument information.
-
-    Parameters
-    ----------
-    instrument : {"qtof", "orbitrap"}
-
-    Returns
-    -------
-    params : dict
-
-    """
-    params = {"min_snr": 10.0}
-    if instrument == c.QTOF:
-        md = 0.01
-    else:  # orbitrap
-        md = 0.005
-    params["min_distance"] = md
-    return params
-
-
 def _compare_features_lc(ft1: Peak, ft2: Peak) -> float:
-    """
-    Feature similarity function used in LC-MS data.
-    """
+    """Feature similarity function used in LC-MS data."""
     start1 = ft1.roi.scan[ft1.start]
     start2 = ft2.roi.scan[ft2.start]
     if start1 > start2:
@@ -788,8 +596,8 @@ def _compare_features_lc(ft1: Peak, ft2: Peak) -> float:
         os1, oe1, os2, oe2 = _get_overlap_index(ft1, ft2)
         norm1 = np.linalg.norm(ft1.roi.spint[ft1.start : ft1.end])
         norm2 = np.linalg.norm(ft2.roi.spint[ft2.start : ft2.end])
-        x1 = ft1.roi.spint[os1:oe1] / norm1
-        x2 = ft2.roi.spint[os2:oe2] / norm2
+        x1 = cast(np.ndarray, ft1.roi.spint[os1:oe1]) / norm1
+        x2 = cast(np.ndarray, ft2.roi.spint[os2:oe2]) / norm2
         similarity = np.dot(x1, x2)
     else:
         similarity = 0.0
@@ -798,8 +606,10 @@ def _compare_features_lc(ft1: Peak, ft2: Peak) -> float:
 
 def _overlap_ratio(ft1: Peak, ft2: Peak) -> float:
     """
-    Computes the overlap ratio, defined as the quotient between the overlap
-    region and the extension of the longest feature.
+    Compute the overlap ratio, between a pair of peaks.
+
+    The overlap ratio is the quotient between the overlap region and the
+    maximum value of the extension.
 
     `ft1` must start before `ft2`
 
@@ -836,7 +646,7 @@ def _overlap_ratio(ft1: Peak, ft2: Peak) -> float:
 
 def _get_overlap_index(ft1: Peak, ft2: Peak) -> Tuple[int, int, int, int]:
     """
-    Computes the overlap indices for ft1 and ft2.
+    Compute the overlap indices for ft1 and ft2.
 
     `ft1` must start before `ft2`
 
