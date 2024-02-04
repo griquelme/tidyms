@@ -1,10 +1,10 @@
 """
 Data models used by TidyMS.
 
-Annotation : Stores annotation data from a feature.
-Feature : A region associated with a ROI that contains a chemical species.
-Roi : A Region of Interest extracted from raw data. Usually a subset of raw data.
-Sample : Stores metadata from a measurement.
+Annotation : Annotation data from a feature.
+Feature : A ROI region that may contain chemical species information.
+Roi : A Region of Interest extracted from raw data.
+Sample : Contains metadata from a measurement.
 SampleData : Container class for a Sample and the ROIs detected.
 
 """
@@ -15,9 +15,10 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 from copy import deepcopy
 import json
+from math import isnan, nan
 from pathlib import Path
 
-from typing import Any, Sequence, Type
+from typing import Any, Sequence
 
 import pydantic
 from typing_extensions import Annotated
@@ -26,7 +27,7 @@ from pydantic.functional_validators import AfterValidator
 from . import validation_utils as validation
 
 
-class Roi(ABC):
+class Roi(pydantic.BaseModel):
     """
     Base class for Regions of Interest (ROI) extracted from raw MS data.
 
@@ -40,29 +41,11 @@ class Roi(ABC):
 
     """
 
-    def __init__(self, *, id_: int = -1):
-        self.id = id_
-        self.features = list()
-
-    def copy(self) -> Roi:
-        """Create an independent copy of the ROI instance."""
-        return deepcopy(self)
-
-    @property
-    def features(self) -> list[Feature]:
-        return self._features
-
-    @features.setter
-    def features(self, value: list[Feature]):
-        self._features = value
-
-    @property
-    def id(self) -> int:
-        return self._id
-
-    @id.setter
-    def id(self, value: int):
-        self._id = value
+    model_config = pydantic.ConfigDict(
+        validate_assignment=True, arbitrary_types_allowed=True
+    )
+    id: int = -1
+    features: list[Feature] = list()
 
     def add_feature(self, feature: Feature):
         self.features.append(feature)
@@ -72,14 +55,13 @@ class Roi(ABC):
         self.features.remove(feature)
 
     @classmethod
-    def from_str(cls: Type[Roi], s: str) -> Roi:
+    def from_str(cls: type[Roi], s: str) -> Roi:
         """Load a ROI from a JSON string."""
-        ...
+        return cls(**json.loads(s))
 
-    @abstractmethod
     def to_str(self) -> str:
         """Serialize a ROI into a string."""
-        ...
+        return self.model_dump_json(exclude={"features"})
 
 
 class Annotation(pydantic.BaseModel):
@@ -107,7 +89,7 @@ class Annotation(pydantic.BaseModel):
     charge: int = -1
 
 
-class Feature(ABC):
+class Feature(pydantic.BaseModel):
     """
     Base class to represent a feature.
 
@@ -122,89 +104,51 @@ class Feature(ABC):
 
     """
 
-    def __init__(
-        self, roi: Roi, *, id_: int = -1, annotation: Annotation | None = None
-    ):
-        self.id = id_
-        self.roi = roi
-        self._descriptors = dict()
-        if annotation is None:
-            annotation = Annotation()
-        self._annotation = annotation
-
-    @property
-    def id(self) -> int:
-        return self._id
-
-    @id.setter
-    def id(self, value: int):
-        self._id = value
-
-    @property
-    def roi(self) -> Roi:
-        return self._roi
-
-    @roi.setter
-    def roi(self, value: Roi):
-        self._roi = value
-
-    @property
-    def annotation(self) -> Annotation:
-        return self._annotation
-
-    @property
-    def mz(self) -> float:
-        """Wrapper for get_mz."""
-        return self.get_mz()
-
-    @property
-    def area(self) -> float:
-        """Wrapper fot get_area."""
-        return self.get_area()
-
-    @property
-    def height(self) -> float:
-        """Wrapper for get_height."""
-        return self.get_height()
+    id: int = -1
+    roi: Roi
+    annotation: Annotation = Annotation()
+    mz: float = nan
+    height: float = nan
+    area: float = nan
 
     def __lt__(self: Feature, other: Feature | float):
         if isinstance(other, float):
-            return self.mz < other
+            return self.get("mz") < other
         elif isinstance(other, Feature):
-            return self.mz < other.mz
+            return self.get("mz") < other.get("mz")
 
     def __le__(self, other: Feature | float):
         if isinstance(other, float):
-            return self.mz <= other
+            return self.get("mz") <= other
         elif isinstance(other, Feature):
-            return self.mz <= other.mz
+            return self.get("mz") <= other.get("mz")
 
     def __gt__(self, other: Feature | float):
         if isinstance(other, float):
-            return self.mz > other
+            return self.get("mz") > other
         elif isinstance(other, Feature):
-            return self.mz > other.mz
+            return self.get("mz") > other.get("mz")
 
     def __ge__(self, other: Feature | float):
         if isinstance(other, float):
-            return self.mz >= other
+            return self.get("mz") >= other
         elif isinstance(other, Feature):
-            return self.mz >= other.mz
+            return self.get("mz") >= other.get("mz")
 
-    @abstractmethod
-    def get_mz(self) -> float:
+    def _set_mz(self):
         """Get the feature m/z."""
-        ...
+        if isnan(self.mz):
+            self.mz = 100.0
 
-    @abstractmethod
-    def get_area(self) -> float:
+    def _set_area(self):
         """Get the feature area."""
-        ...
+        if isnan(self.area):
+            self.area = 100.0
 
-    @abstractmethod
-    def get_height(self) -> float:
+    def _set_height(self):
         """Get the feature height."""
-        ...
+        if isnan(self.height):
+            self.height = 100.0
 
     def describe(self) -> dict[str, float]:
         """
@@ -218,7 +162,6 @@ class Feature(ABC):
             descriptors[descriptor] = self.get(descriptor)
         return descriptors
 
-    @abstractmethod
     def to_str(self) -> str:
         """
         Serialize the feature data into a string.
@@ -226,10 +169,10 @@ class Feature(ABC):
         ROI data must not be serialized. See Peak implementation as an example.
 
         """
-        ...
+        exclude = self.descriptor_names() | {"roi", "annotation"}
+        return self.model_dump_json(exclude=exclude)
 
     @classmethod
-    @abstractmethod
     def from_str(cls, s: str, roi: Roi, annotation: Annotation) -> Feature:
         """
         Create a feature instance from a string.
@@ -243,7 +186,8 @@ class Feature(ABC):
         annotation : Annotation
 
         """
-        ...
+        d = json.loads(s)
+        return cls(roi=roi, annotation=annotation, **d)
 
     def get(self, descriptor: str) -> float:
         """
@@ -262,20 +206,19 @@ class Feature(ABC):
             If an non existent descriptor name is passed.
 
         """
-        value = self._descriptors.get(descriptor)
-        if value is not None:
-            return value
-
         try:
-            value = getattr(self, f"get_{descriptor}")()
-            return self._descriptors.setdefault(descriptor, value)
+            val = getattr(self, descriptor)
+            if isnan(val):
+                getattr(self, f"_set_{descriptor}")()
+                val = getattr(self, descriptor)
+            return val
         except AttributeError as e:
             msg = f"{descriptor} is not a valid descriptor."
             raise ValueError(msg) from e
 
     @classmethod
     @lru_cache
-    def descriptor_names(cls) -> list[str]:
+    def descriptor_names(cls) -> set[str]:
         """
         List all descriptor names.
 
@@ -286,10 +229,11 @@ class Feature(ABC):
         list [str]
 
         """
-        return [x.split("_", 1)[-1] for x in dir(cls) if x.startswith("get_")]
+        # trim _get_ from function name
+        return {x[5:] for x in dir(cls) if x.startswith("_set_")}
 
 
-class AnnotableFeature(Feature):
+class AnnotableFeature(Feature, ABC):
     """Base feature with also implements methods for feature annotation."""
 
     @abstractmethod
@@ -382,7 +326,7 @@ class SampleData:
         self._roi_snapshots: list[list[Roi]] = list()
         self._roi_snapshots.append(self._latest_roi)
         self._processing_steps: list[ProcessorInformation] = list()
-        self._snapshots_id = set()
+        self._snapshots_id: set[str] = set()
 
     @property
     def processing_steps(self) -> list[ProcessorInformation]:
@@ -453,7 +397,7 @@ class SampleData:
 
     def _snapshot_data(self, info: ProcessorInformation):
         if self._snapshot:
-            roi_list = [x.copy() for x in self._latest_roi]
+            roi_list = [x.model_copy(deep=True) for x in self._latest_roi]
         else:
             roi_list = self._latest_roi
 

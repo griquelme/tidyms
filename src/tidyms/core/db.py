@@ -7,6 +7,8 @@ AssayData:
 
 """
 
+from __future__ import annotations
+
 import json
 import sqlalchemy as sa
 import sqlalchemy.orm as orm
@@ -752,7 +754,7 @@ class AssayData:
 
         """
         if descriptors is None:
-            descriptors = self.feature.descriptor_names()
+            descriptors = list(self.feature.descriptor_names())
         else:
             for d in descriptors:
                 valid_descriptors = self.feature.descriptor_names()
