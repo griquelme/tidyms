@@ -4,7 +4,7 @@ import pathlib
 import pydantic
 import pytest
 
-from tidyms.core import assay
+from tidyms.core import processors
 from tidyms.core.models import Annotation, SampleData
 from tidyms.core import exceptions
 
@@ -46,7 +46,7 @@ def pipeline(
 ):
     id_ = "my-pipeline"
     steps = (roi_extractor, roi_transformer, feature_extractor, feature_transformer)
-    return assay.ProcessingPipeline(id_, *steps)
+    return processors.ProcessingPipeline(id_, *steps)
 
 
 @pytest.fixture
@@ -139,19 +139,19 @@ def test_is_feature_descriptor_in_valid_range_valid_range():
     filters = {"height": (50.0, 150.0)}
     roi = utils.create_dummy_roi()
     ft = utils.create_dummy_feature(roi, Annotation())
-    assert assay._is_feature_descriptor_in_valid_range(ft, filters)
+    assert processors._is_feature_descriptor_in_valid_range(ft, filters)
 
 
 def test_is_feature_descriptor_in_valid_range_invalid_range():
     filters = {"height": (50.0, 75.0)}
     roi = utils.create_dummy_roi()
     ft = utils.create_dummy_feature(roi, Annotation())
-    assert not assay._is_feature_descriptor_in_valid_range(ft, filters)
+    assert not processors._is_feature_descriptor_in_valid_range(ft, filters)
 
 
 def test__fill_filter_boundaries():
     filters = {"param1": (0, 10.0), "param2": (None, 5.0), "param3": (10.0, None)}
-    filled = assay._fill_filter_boundaries(filters)
+    filled = processors._fill_filter_boundaries(filters)
     expected = {
         "param1": (0, 10.0),
         "param2": (-math.inf, 5.0),
@@ -168,7 +168,7 @@ def test_ProcessingPipeline_processors_with_repeated_names_raises_error(
     id_ = "my-pipeline"
     processing_steps = (roi_extractor, feature_extractor)
     with pytest.raises(ValueError):
-        assay.ProcessingPipeline(id_, *processing_steps)
+        processors.ProcessingPipeline(id_, *processing_steps)
 
 
 def test_sample_pipeline_creation(
@@ -179,7 +179,7 @@ def test_sample_pipeline_creation(
 ):
     id_ = "my-pipeline"
     steps = (roi_extractor, roi_transformer, feature_extractor, feature_transformer)
-    assay.ProcessingPipeline(id_, *steps)
+    processors.ProcessingPipeline(id_, *steps)
     assert True
 
 
@@ -191,7 +191,7 @@ def test_sample_pipeline_creation_without_roi_extractor_in_first_step_raises_err
     id_ = "my-pipeline"
     steps = (roi_transformer, feature_extractor, feature_transformer)
     with pytest.raises(exceptions.IncompatibleProcessorStatus):
-        assay.ProcessingPipeline(id_, *steps)
+        processors.ProcessingPipeline(id_, *steps)
 
 
 def test_sample_pipeline_creation_without_feature_extractor_raises_error(
@@ -202,7 +202,7 @@ def test_sample_pipeline_creation_without_feature_extractor_raises_error(
     id_ = "my-pipeline"
     steps = (roi_extractor, roi_transformer, feature_transformer)
     with pytest.raises(exceptions.IncompatibleProcessorStatus):
-        assay.ProcessingPipeline(id_, *steps)
+        processors.ProcessingPipeline(id_, *steps)
 
 
 # def test_ProcessingPipeline_get_parameters(pipeline: assay.ProcessingPipeline):

@@ -8,7 +8,7 @@ from pathlib import Path
 from random import random, randint
 from typing import Sequence
 
-from tidyms.core import assay, models
+from tidyms.core import models, processors
 from tidyms.core import constants as c
 from tidyms.core.models import Feature, Roi
 
@@ -75,7 +75,7 @@ class ConcreteFeature(models.Feature):
         )
 
 
-class DummyRoiExtractor(assay.BaseRoiExtractor):
+class DummyRoiExtractor(processors.BaseRoiExtractor):
     param1: int = 10
     param2: str = "default"
 
@@ -91,7 +91,7 @@ class DummyRoiExtractor(assay.BaseRoiExtractor):
         return dict()
 
 
-class DummyRoiTransformer(assay.BaseRoiTransformer):
+class DummyRoiTransformer(processors.BaseRoiTransformer):
     param1: float = 10.0
     param2: bool = False
 
@@ -107,7 +107,7 @@ class DummyRoiTransformer(assay.BaseRoiTransformer):
         return dict()
 
 
-class DummyFeatureExtractor(assay.BaseFeatureExtractor):
+class DummyFeatureExtractor(processors.BaseFeatureExtractor):
     param1: int = 2
     param2: str = "default"
 
@@ -128,7 +128,7 @@ class DummyFeatureExtractor(assay.BaseFeatureExtractor):
         return dict()
 
 
-class DummyFeatureTransformer(assay.BaseFeatureTransformer):
+class DummyFeatureTransformer(processors.BaseFeatureTransformer):
     param1: float = 10.0
     param2: bool = False
 

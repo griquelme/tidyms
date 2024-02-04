@@ -4,7 +4,7 @@ import numpy as np
 from typing import Any, Optional
 from .core.models import Sample, SampleData
 from .core.db import AssayData
-from .core.assay import BaseFeatureExtractor, BaseSampleProcessor, FeatureMatcher
+from .core.processors import BaseFeatureExtractor, BaseSampleProcessor, FeatureMatcher
 from .core import constants as c
 from . import peaks
 from .correspondence import match_features
