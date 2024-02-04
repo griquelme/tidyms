@@ -9,7 +9,7 @@ from tidyms.core.models import Annotation, SampleData
 from tidyms.core import exceptions
 
 
-import tests.unit.base.utils as utils
+from . import utils
 
 
 @pytest.fixture

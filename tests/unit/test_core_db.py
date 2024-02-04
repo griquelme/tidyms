@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from typing import cast
 
-from tests.unit.base.utils import (
+from .utils import (
     ConcreteFeature,
     ConcreteRoi,
     add_dummy_features,
@@ -456,7 +456,7 @@ def test_AssayData_get_descriptors_descriptors_subset(
 
     all_descriptors = assay_data_with_features.feature.descriptor_names()
     base_descriptor_names = ["sample_id", "roi_id", "id", "label"]
-    requested_descriptors = all_descriptors[:2]
+    requested_descriptors = list(all_descriptors)[:2]
     descriptors = assay_data_with_features.get_descriptors(
         sample=sample, descriptors=requested_descriptors
     )
@@ -496,7 +496,7 @@ def test_AssayData_get_descriptors_subset_no_descriptors(
 
     all_descriptors = assay_data_with_features.feature.descriptor_names()
     base_descriptor_names = ["sample_id", "roi_id", "id", "label"]
-    requested_descriptors = all_descriptors[:2]
+    requested_descriptors = list(all_descriptors)[:2]
 
     descriptors = assay_data_with_features.get_descriptors(
         sample, descriptors=requested_descriptors

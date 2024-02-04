@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-
+from math import nan
 from pathlib import Path
 from random import random, randint
 from typing import Sequence
@@ -14,58 +13,22 @@ from tidyms.core.models import Feature, Roi
 
 
 class ConcreteRoi(models.Roi):
-    def __init__(self, data: list[float], *, id_: int = -1):
-        self.data = data
-        super().__init__(id_=id_)
-
-    def to_str(self) -> str:
-        return json.dumps({"data": self.data, "id": self.id})
-
-    @classmethod
-    def from_str(cls, s: str) -> ConcreteRoi:
-        d = json.loads(s)
-        roi = cls(d["data"], id_=d["id"])
-        return roi
+    data: list[float] = list()
 
     def __eq__(self, other: ConcreteRoi) -> bool:
         return (self.data == other.data) and (self.id == other.id)
 
 
 class ConcreteFeature(models.Feature):
-    def __init__(
-        self,
-        roi: models.Roi,
-        data: int,
-        id_: int = -1,
-        annotation: models.Annotation | None = None,
-    ):
-        super().__init__(roi, id_=id_, annotation=annotation)
-        self.data = data
+    data: int
+    custom_descriptor: float = nan
 
-    def get_mz(self):
-        return 100.0 * self.data
+    def _set_custom_descriptor(self):
+        self.custom_descriptor = 100.0
 
-    def get_area(self):
-        return 100.0
-
-    def get_height(self) -> float:
-        return 100.0
-
-    def get_my_custom_descriptor(self) -> float:
-        return 100.0
-
-    def to_str(self) -> str:
-        return json.dumps({"data": self.data, "id": self.id})
-
-    @classmethod
-    def from_str(
-        cls, s: str, roi: models.Roi, annotation: models.Annotation
-    ) -> ConcreteFeature:
-        d = json.loads(s)
-        ft = cls(roi, data=d["data"], id_=d["id"], annotation=annotation)
-        ft.roi = roi
-        ft.id = d["id"]
-        return ft
+    def _set_mz(self):
+        # make mz depend on data field to test equal method
+        self.mz = 100.0 * self.data
 
     def equal(self, other: ConcreteFeature) -> bool:
         return (
@@ -153,14 +116,14 @@ def create_dummy_sample(path: Path, suffix: int, group: str = "") -> models.Samp
 
 def create_dummy_roi() -> ConcreteRoi:
     data = [random() for _ in range(5)]
-    return ConcreteRoi(data)
+    return ConcreteRoi(data=data)
 
 
 def create_dummy_feature(
     roi: ConcreteRoi, annotation: models.Annotation
 ) -> ConcreteFeature:
     data = randint(0, 10)
-    return ConcreteFeature(roi, data, annotation=annotation)
+    return ConcreteFeature(roi=roi, data=data, annotation=annotation)
 
 
 def add_dummy_features(roi_list: list[ConcreteRoi], n: int):
