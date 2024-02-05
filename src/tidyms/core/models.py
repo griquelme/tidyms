@@ -1,5 +1,4 @@
-"""
-Data models used by TidyMS.
+"""Data models used by TidyMS.
 
 Annotation : Annotation data from a feature.
 Feature : A ROI region that may contain chemical species information.
@@ -11,17 +10,16 @@ SampleData : Container class for a Sample and the ROIs detected.
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from functools import lru_cache
-import json
 from math import isnan, nan
 from pathlib import Path
-
 from typing import Any, Sequence
 
 import pydantic
-from typing_extensions import Annotated
 from pydantic.functional_validators import AfterValidator
+from typing_extensions import Annotated
 
 from . import validation_utils as validation
 
@@ -60,6 +58,14 @@ class Roi(pydantic.BaseModel):
     features: list[Feature] = list()
 
     def add_feature(self, feature: Feature):
+        """Associate a feature with the ROI.
+
+        Parameters
+        ----------
+        feature : Feature
+            The feature to associate with the ROI.
+
+        """
         self.features.append(feature)
 
     def remove_feature(self, feature: Feature):
@@ -68,11 +74,30 @@ class Roi(pydantic.BaseModel):
 
     @classmethod
     def from_str(cls: type[Roi], s: str) -> Roi:
-        """Load a ROI from a JSON string."""
+        """Create a ROI instance from a JSON string.
+
+        Parameters
+        ----------
+        s : str
+            A serialized ROI obtained using the `to_str` method.
+
+        Returns
+        -------
+        Roi
+            A new ROI instance.
+
+        """
         return cls(**json.loads(s))
 
     def to_str(self) -> str:
-        """Serialize a ROI into a string."""
+        """Serialize a ROI into a string.
+
+        Returns
+        -------
+        str
+            A string serialization of the ROI.
+
+        """
         return self.model_dump_json(exclude={"features"})
 
 
@@ -116,9 +141,9 @@ class Feature(pydantic.BaseModel):
     peak. Descriptors are set in the same way as data fields, but two
     additional restriction apply. First, the type of a descriptor must be `float`
     and the default value of the descriptor must be ``nan``. Second, a method
-    called `_set_descriptor_name` must be created for each feature, which
-    computes the corresponding descriptor value and stores in the corresponding
-    instance attribute. As an example:
+    called `_set_descriptor_name` must be created for each descriptor, which
+    computes the corresponding descriptor value and stores it in the
+    corresponding instance attribute. As an example:
 
     .. code-block: python
 
@@ -128,8 +153,8 @@ class Feature(pydantic.BaseModel):
         class MyFeature(Feature):
             custom_descriptor: float = nan
 
-        def _set_custom_descriptor(self):
-            self.custom_descriptor = 100.0
+            def _set_custom_descriptor(self):
+                self.custom_descriptor = 100.0
 
     Three descriptors are defined by default: mz, area and height. Those
     descriptors must be defined for each subclass defined.
@@ -199,10 +224,14 @@ class Feature(pydantic.BaseModel):
             self.height = 100.0
 
     def describe(self) -> dict[str, float]:
-        """
-        Compute all available descriptors for the feature.
+        """Compute all available descriptors for the feature.
 
         A descriptor is any method that starts with get_.
+
+        Returns
+        -------
+        dict[str, float]
+            A dictionary that maps descriptor names to descriptor values.
 
         """
         descriptors = dict()
@@ -211,10 +240,12 @@ class Feature(pydantic.BaseModel):
         return descriptors
 
     def to_str(self) -> str:
-        """
-        Serialize the feature data into a string.
+        """Serialize the feature data into a string.
 
-        ROI data must not be serialized. See Peak implementation as an example.
+        Returns
+        -------
+        str
+            A string serialization of the feature.
 
         """
         exclude = self.descriptor_names() | {"roi", "annotation"}
@@ -233,25 +264,32 @@ class Feature(pydantic.BaseModel):
             ROI where the feature was detected.
         annotation : Annotation
 
+        Returns
+        -------
+        Feature
+            A new feature instance.
+
         """
         d = json.loads(s)
         return cls(roi=roi, annotation=annotation, **d)
 
     def get(self, descriptor: str) -> float:
-        """
-        Compute descriptor using its name.
+        """Compute a descriptor value.
 
-        A descriptor is a method that starts with `get_`.
+        Parameters
+        ----------
+        descriptor : str
+            The descriptor name.
 
         Returns
         -------
         float
-            The value of the requested descriptor
+            The descriptor value.
 
         Raises
         ------
         ValueError
-            If an non existent descriptor name is passed.
+            If an invalid descriptor name is passed.
 
         """
         try:
@@ -267,14 +305,12 @@ class Feature(pydantic.BaseModel):
     @classmethod
     @lru_cache
     def descriptor_names(cls) -> set[str]:
-        """
-        List all descriptor names.
-
-        A descriptor is a method that starts with `get_`.
+        """Retrieve the available descriptor names.
 
         Returns
         -------
-        list [str]
+        set[str]
+            The descriptor names.
 
         """
         # trim _get_ from function name
@@ -292,12 +328,19 @@ class AnnotableFeature(Feature, ABC):
 
     @abstractmethod
     def compare(self, other: Feature) -> float:
-        """
-        Compare the similarity between two features.
+        """Compare the similarity between two features.
 
-        Must return a number between 0.0 and 1.0.
+        Must be a symmetric function that returns a number between 0.0 and 1.0.
 
-        Used by annotation methods to group features.
+        Parameters
+        ----------
+        other : Feature
+            Feature to compare with.
+
+        Returns
+        -------
+        float
+            The similarity between the feature pair.
 
         """
         ...
@@ -310,12 +353,17 @@ class AnnotableFeature(Feature, ABC):
         """
         Compute the isotopic envelope from a list of isotopologue features.
 
-        Must return two lists:
+        Parameters
+        ----------
+        features : Sequence[Feature]
+            The Collection of features used to compute the envelope.
 
-        - The sorted m/z values of the envelope.
-        - The abundance associated to each isotopologue. Normalized to 1.
-
-        Used by annotation algorithms to annotate isotopologues.
+        Returns
+        -------
+        mz : list[float]
+            The m/z of each feature in the envelope, sorted.
+        abundance list[float]
+            The abundance of each feature. The total abundance is normalized to 1.
 
         """
         ...
@@ -357,6 +405,7 @@ class Sample(pydantic.BaseModel):
 
     @pydantic.field_serializer("path")
     def serialize_path(self, path: Path, _info) -> str:
+        """Serialize path into a string."""
         return str(path)
 
 
@@ -384,9 +433,11 @@ class SampleData:
 
     @property
     def processing_steps(self) -> list[ProcessorInformation]:
+        """Processing steps getter."""
         return self._processing_steps
 
     def get_feature_list(self) -> list[Feature]:
+        """Create a list of features in the sample."""
         feature_list = list()
         for roi in self.get_roi_list():
             feature_list.extend(roi.features)
@@ -400,7 +451,7 @@ class SampleData:
         return feature_list
 
     def set_roi_list(self, roi_list: list[Roi], step: ProcessorInformation):
-
+        """Set the ROIs associated with a processing step."""
         if step.id in self._snapshots_id:
             msg = f"A snapshot with id={step.id} already exists for sample={self.sample.id}."
             raise ValueError(msg)
@@ -409,6 +460,7 @@ class SampleData:
         self._snapshot_data(step)
 
     def get_roi_list(self) -> list[Roi]:
+        """Get the latest ROI list."""
         return self._roi_snapshots[-1]
 
     def get_roi_list_snapshot(self, step: ProcessorInformation) -> list[Roi]:
@@ -461,6 +513,7 @@ class SampleData:
         self._snapshots_id.add(info.id)
 
     def delete_latest_snapshot(self):
+        """Delete the ROI latest snapshot."""
         if self._processing_steps:
             self._processing_steps.pop()
             self._roi_snapshots.pop()
@@ -468,7 +521,7 @@ class SampleData:
 
 
 class ProcessorInformation(pydantic.BaseModel):
-    """Stores sample processing step name and parameters"""
+    """Stores sample processing step name and parameters."""
 
     id: str
     pipeline: str | None
@@ -477,4 +530,5 @@ class ProcessorInformation(pydantic.BaseModel):
 
     @pydantic.field_serializer("parameters")
     def serialize_parameters(self, parameters: dict[str, Any], _info) -> str:
+        """Serialize parameters field into a JSON string."""
         return json.dumps(parameters)
