@@ -157,7 +157,7 @@ class Feature(pydantic.BaseModel):
                 self.custom_descriptor = 100.0
 
     Three descriptors are defined by default: mz, area and height. Those
-    descriptors must be defined for each subclass defined.
+    descriptors must be redefined for each new subclass.
 
     Finally, three attributes are defined for the Feature class: `id`, `roi` and
     `annotation`. These parameters are managed by other components and should
@@ -409,115 +409,19 @@ class Sample(pydantic.BaseModel):
         return str(path)
 
 
-class SampleData:
-    """
-    Container class for sample data.
+class SampleData(pydantic.BaseModel):
+    """Stores data state during a sample processing pipeline."""
 
-    Attributes
-    ----------
-    sample : Sample
-    copy : bool
-        If ``True``, create an independent copy of the data for each processing
-        step.
+    sample: Sample
+    roi: list[Roi] = list()
+    processing_info: list[ProcessorInformation] = list()
 
-    """
-
-    def __init__(self, sample: Sample, snapshot: bool = False) -> None:
-        self.sample = sample
-        self._snapshot = snapshot
-        self._latest_roi: list[Roi] = list()
-        self._roi_snapshots: list[list[Roi]] = list()
-        self._roi_snapshots.append(self._latest_roi)
-        self._processing_steps: list[ProcessorInformation] = list()
-        self._snapshots_id: set[str] = set()
-
-    @property
-    def processing_steps(self) -> list[ProcessorInformation]:
-        """Processing steps getter."""
-        return self._processing_steps
-
-    def get_feature_list(self) -> list[Feature]:
-        """Create a list of features in the sample."""
-        feature_list = list()
-        for roi in self.get_roi_list():
-            feature_list.extend(roi.features)
-        return feature_list
-
-    def get_feature_list_snapshot(self, step: ProcessorInformation) -> list[Feature]:
+    def get_features(self) -> list[Feature]:
         """Update the feature attribute using feature data from ROIs."""
         feature_list = list()
-        for roi in self.get_roi_list_snapshot(step):
+        for roi in self.roi:
             feature_list.extend(roi.features)
         return feature_list
-
-    def set_roi_list(self, roi_list: list[Roi], step: ProcessorInformation):
-        """Set the ROIs associated with a processing step."""
-        if step.id in self._snapshots_id:
-            msg = f"A snapshot with id={step.id} already exists for sample={self.sample.id}."
-            raise ValueError(msg)
-
-        self._latest_roi = roi_list
-        self._snapshot_data(step)
-
-    def get_roi_list(self) -> list[Roi]:
-        """Get the latest ROI list."""
-        return self._roi_snapshots[-1]
-
-    def get_roi_list_snapshot(self, step: ProcessorInformation) -> list[Roi]:
-        """
-        Retrieve the list of ROIs stored.
-
-        Parameters
-        ----------
-        step: str
-            The id of processing step applied to the sample. If the SampleData
-            instance was created with the `copy` parameter set to ``False``,
-            this parameter is ignored.
-
-        Raises
-        ------
-        ValueError
-            If an invalid processing step id is passed.
-
-        """
-        if step.id not in self._snapshots_id:
-            self._snapshot_data(step)
-
-        if self._snapshot:
-            step_index = self._processing_steps.index(step)
-            roi_list = self._roi_snapshots[step_index]
-        else:
-            roi_list = self._latest_roi
-        return roi_list
-
-    def delete_empty_roi(self, step: ProcessorInformation):
-        """Delete ROI with no features."""
-        if step.id not in self._snapshots_id:
-            msg = f"No snapshot taken for processor with id={step.id} for sample={self.sample.id}."
-            raise ValueError(msg)
-
-        index = self._processing_steps.index(step)
-        self._roi_snapshots[index] = [
-            x for x in self.get_roi_list_snapshot(step) if x.features
-        ]
-
-    def _snapshot_data(self, info: ProcessorInformation):
-        if self._snapshot:
-            roi_list = [x.model_copy(deep=True) for x in self._latest_roi]
-        else:
-            roi_list = self._latest_roi
-
-        self._roi_snapshots.append(roi_list)
-        self._latest_roi = roi_list
-        self._processing_steps.append(info)
-        self._snapshots_id.add(info.id)
-
-    def delete_latest_snapshot(self):
-        """Delete the ROI latest snapshot."""
-        if self._processing_steps:
-            self._processing_steps.pop()
-            self._roi_snapshots.pop()
-            self._latest_roi = self._roi_snapshots[-1]
 
 
 class ProcessorInformation(pydantic.BaseModel):
