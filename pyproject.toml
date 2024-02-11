@@ -49,12 +49,12 @@ files = ["src/tidyms"]
 pythonpath = [".", "./src"]
 
 [tool.ruff]
-line-length = 100
+line-length = 119
 select = ["F", "W", "E", "I", "D"]
 ignore = ["D105", "D107", "D203", "D213"]
 
 [tool.ruff.extend-per-file-ignores]
-"tests/*" = ["D100", "D103"]
+"tests/*" = ["D100", "D101", "D102", "D103"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
