@@ -10,13 +10,15 @@ AssayData:
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Sequence, Type, cast
+
 import sqlalchemy as sa
 import sqlalchemy.orm as orm
-from sqlalchemy.orm import Mapped, mapped_column, relationship, Session
-from sqlalchemy import delete, select, Column, Float, ForeignKey, Integer, String
+from sqlalchemy import Column, Float, ForeignKey, Integer, String, delete, select
 from sqlalchemy.exc import IntegrityError
-from pathlib import Path
-from typing import cast, Sequence, Type
+from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
+
 from .models import Annotation, Feature, Roi, Sample, SampleData
 
 Base = orm.declarative_base()
@@ -803,7 +805,7 @@ class AssayData:
         """Retrieve a SampleData instance."""
         sample = self.search_sample(sample_id)
         # roi_list = self.get_roi_list(sample)
-        return SampleData(sample)
+        return SampleData(sample=sample)
 
     def search_sample(self, sample_id: str) -> Sample:
         """
@@ -833,8 +835,8 @@ class AssayData:
 
     def store_sample_data(self, data: SampleData):
         """Store a SampleData instance."""
-        self.add_roi_list(data.sample, *data.get_roi_list())
-        self.add_features(data.sample, *data.get_feature_list())
+        self.add_roi_list(data.sample, *data.roi)
+        self.add_features(data.sample, *data.get_features())
 
     def update_feature_labels(self, labels: dict[int, int]):
         """
