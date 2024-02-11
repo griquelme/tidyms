@@ -17,6 +17,7 @@ from math import isnan, nan
 from pathlib import Path
 from typing import Any, Sequence
 
+import numpy as np
 import pydantic
 from pydantic.functional_validators import AfterValidator
 from typing_extensions import Annotated
@@ -436,3 +437,40 @@ class ProcessorInformation(pydantic.BaseModel):
     def serialize_parameters(self, parameters: dict[str, Any], _info) -> str:
         """Serialize parameters field into a JSON string."""
         return json.dumps(parameters)
+
+
+class MSSpectrum(pydantic.BaseModel):
+    """Representation of a Mass Spectrum.
+
+    Attributes
+    ----------
+    mz : array
+        m/z data
+    spint : array
+        Intensity data
+    time : float or None
+        Time at which the spectrum was acquired
+    ms_level : int
+        MS level of the scan
+    polarity : int or None
+        Polarity used to acquire the data.
+    centroid : bool
+        True if the data is in centroid mode.
+
+    """
+
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+    index: int = -1
+    mz: np.ndarray = pydantic.Field(repr=False)
+    int: np.ndarray = pydantic.Field(repr=False)
+    ms_level: pydantic.PositiveInt = 1
+    time: pydantic.NonNegativeFloat = 0.0
+    centroid: bool = True
+
+
+class Chromatogram(pydantic.BaseModel):
+    """Chromatogram representation."""
+
+    index: int = -1
+    time: np.ndarray = pydantic.Field(repr=False)
+    int: np.ndarray = pydantic.Field(repr=False)
