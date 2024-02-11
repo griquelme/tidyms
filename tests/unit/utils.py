@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from math import nan
 from pathlib import Path
-from random import random, randint
+from random import randint, random
 from typing import Sequence
 
-from tidyms.core import models, processors
 from tidyms.core import constants as c
+from tidyms.core import models, processors
 from tidyms.core.models import Feature, Roi
 
 
@@ -38,7 +38,7 @@ class ConcreteFeature(models.Feature):
         )
 
 
-class DummyRoiExtractor(processors.BaseRoiExtractor):
+class DummyRoiExtractor(processors.RoiExtractor):
     param1: int = 10
     param2: str = "default"
 
@@ -54,7 +54,7 @@ class DummyRoiExtractor(processors.BaseRoiExtractor):
         return dict()
 
 
-class DummyRoiTransformer(processors.BaseRoiTransformer):
+class DummyRoiTransformer(processors.RoiTransformer):
     param1: float = 10.0
     param2: bool = False
 
@@ -70,7 +70,7 @@ class DummyRoiTransformer(processors.BaseRoiTransformer):
         return dict()
 
 
-class DummyFeatureExtractor(processors.BaseFeatureExtractor):
+class DummyFeatureExtractor(processors.FeatureExtractor):
     param1: int = 2
     param2: str = "default"
 
@@ -91,7 +91,7 @@ class DummyFeatureExtractor(processors.BaseFeatureExtractor):
         return dict()
 
 
-class DummyFeatureTransformer(processors.BaseFeatureTransformer):
+class DummyFeatureTransformer(processors.FeatureTransformer):
     param1: float = 10.0
     param2: bool = False
 
