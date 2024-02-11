@@ -1,8 +1,6 @@
 """
 Tools to process datasets.
 
-Assay :
-    Manages processing of complete datasets.
 SingleSampleProcessor :
     Base class to process data from a single sample.
 FeatureExtractor :
@@ -19,270 +17,125 @@ ProcessingPipeline :
 from __future__ import annotations
 
 import logging
-
 from abc import ABC, abstractmethod
-from copy import deepcopy
-from pathlib import Path
+from collections import OrderedDict
 from math import inf
-from multiprocessing.pool import Pool
-from typing import Mapping, Sequence, Type
-
-from ..utils import get_progress_bar
-from .models import (
-    Feature,
-    Roi,
-    Sample,
-    SampleData,
-    ProcessorInformation,
-)
-from .db import AssayData
-from . import exceptions
-from . import constants as c
+from typing import ClassVar, Literal, Mapping, Sequence, overload
 
 import pydantic
+
+from . import constants as c
+from . import exceptions
+from .db import AssayData
+from .models import Feature, ProcessorInformation, Roi, Sample, SampleData
 
 logger = logging.getLogger(__file__)
 
 
-# TODO: don't process multiple times the same sample.
-
-
-class Assay:
+class SampleDataSnapshots:
     """
-    Manage data processing and storage of datasets.
+    Store sample data snapshots down a processing pipeline.
 
-    See HERE for a tutorial on how to work with Assay objects.
-
-    Parameters
+    Attributes
     ----------
-    path : str or Path
-        Path to store the assay data. If ``None``, the assay data is stored
-        on memory. If a Path is passed, the processed data from each sample is
-        stored on disk.
-    sample_pipeline: ProcessingPipeline
-        A processing pipeline to process each sample.
-    roi_type: Type[Roi]
-        The Roi Type generated during sample processing. This value is passed
-        to :py:class:`tidyms.base.AssayData` to enable retrieval of data stored
-        on disk.
-    feature_type: Type[Feature]
-        The Feature Type generated during sample processing. This value is
-        passed to :py:class:`tidyms.base.AssayData` to enable retrieval of data
-        stored on disk.
+    sample : Sample
+    copy : bool
+        If ``True``, create an independent copy of the data for each processing
+        step.
 
     """
 
-    def __init__(
-        self,
-        path: str | Path,
-        sample_pipeline: ProcessingPipeline,
-        roi_type: Type[Roi],
-        feature_type: Type[Feature],
-    ):
-        if isinstance(path, str):
-            path = Path(path)
+    def __init__(self, sample: Sample) -> None:
+        self.sample = sample
+        self._snapshots: OrderedDict[str, SampleData] = OrderedDict()
+        self.add_snapshot(SampleData(sample=sample), "initial")
 
-        self._data = AssayData(path, roi_type, feature_type)
-        self._sample_pipeline = sample_pipeline
-        self._multiple_sample_pipeline = list()
-        self._data_matrix_pipeline = list()
-
-    @property
-    def data(self):
-        """Get the Assay data instance."""
-        return self._data
-
-    def add_samples(self, samples: list[Sample]):
+    def add_snapshot(self, data: SampleData, snapshot_id: str) -> None:
         """
-        Add samples to the Assay.
+        Store a new snapshot.
 
         Parameters
         ----------
-        samples : list[Sample]
-
-        """
-        self.data.add_samples(samples)
-
-    def get_samples(self) -> list[Sample]:
-        """List all samples in the assay."""
-        return self.data.get_samples()
-
-    def get_parameters(self) -> dict:
-        """Get the processing parameters of each processing pipeline."""
-        parameters = dict()
-        parameters["sample pipeline"] = self._sample_pipeline.get_parameters()
-        return parameters
-
-    def get_feature_descriptors(
-        self, sample_id: str | None = None, descriptors: list[str] | None = None
-    ) -> dict[str, list]:
-        """
-        Get descriptors for features detected in the assay.
-
-        Parameters
-        ----------
-        sample_id : str or None, default=None
-            Retrieves descriptors for the selected sample. If ``None``,
-            descriptors for all samples are returned.
-        descriptors : list[str] or None, default=None
-            Feature  descriptors to retrieve. By default, all available
-            descriptors are retrieved.
-
-        Returns
-        -------
-        dict[str, list]
-            A dictionary where each key is a descriptor and values are list of
-            values for each feature. Beside all descriptors, four additional
-            entries are provided: `id` is an unique identifier for the feature.
-            `roi_id` identifies the ROI where the feature was detected.
-            `sample_id` identifies the sample where the feature was detected.
-            `label` identifies the feature group obtained from feature
-            correspondence.
-
-        """
-        sample = None if sample_id is None else self.data.search_sample(sample_id)
-        return self.data.get_descriptors(descriptors=descriptors, sample=sample)
-
-    def get_features(
-        self, key, by: str, groups: list[str] | None = None
-    ) -> list[Feature]:
-        """
-        Retrieve features from the assay.
-
-        Features can be retrieved by sample, feature label or id.
-
-        Parameters
-        ----------
-        key : str or int
-            Key used to search features. If `by` is set
-            to ``"id"`` or ``"label"`` an integer must be provided. If `by` is
-            set to ``"sample"`` a string with the corresponding sample id must
-            be passed.
-        by : {"sample", "id", "label"}
-            Criteria to select features. ``"sample"`` returns all features from
-            a given sample, ``"id"``, retrieves a feature by id and ``"label"``
-            retrieves features labelled by a correspondence algorithm.
-        groups : list[str] or None, default=None
-            Select features from these sample groups. Applied only if `by` is
-            set to ``"label"``.
-
-        Returns
-        -------
-        list[Feature]
-
-        """
-        if by == "sample":
-            sample = self.data.search_sample(key)
-            features = self.data.get_features_by_sample(sample)
-        elif by == "label":
-            features = self.data.get_features_by_label(key, groups=groups)
-        elif by == "id":
-            features = [self.data.get_features_by_id(key)]
-        else:
-            msg = f"`by` must be one of 'sample', 'label' or 'id'. Got {by}."
-            raise ValueError(msg)
-
-        return features
-
-    def get_roi(self, key, by: str) -> Sequence[Roi]:
-        """
-        Retrieve ROIs from the assay. ROIs can be retrieved by sample, or id.
-
-        Parameters
-        ----------
-        key : str or int
-            Key used to search ROIs. If `by` is set
-            to ``"id"`` an integer must be provided. If `by` is set to
-            ``"sample"`` a string with the corresponding sample id must be
-            provided.
-        by : {"sample", "id"}
-            Criteria to select features.
-        groups : list[str] or None, default=None
-            Select features from these sample groups. Applied only if `by` is
-            set to ``"label"``.
-
-        Returns
-        -------
-        list[Feature]
+        data : SampleData
+        snapshot_id: str
 
         Raises
         ------
         ValueError
-            If an invalid value is passed to `by`.
-            If an non-existent sample is passed to `key`.
-            If an non-existent ROI id is passed to `key`.
+            If an existing `snapshot_id` is used.
 
         """
-        if by == "sample":
-            sample = self._data.search_sample(key)
-            roi_list = self._data.get_roi_list(sample)
-        elif by == "id":
-            roi_list = [self._data.get_roi_by_id(key)]
-        else:
-            msg = f"`by` must be one of 'sample' or 'id'. Got {by}."
+        if snapshot_id in self._snapshots:
+            msg = f"Snapshot with id={snapshot_id} already exists."
             raise ValueError(msg)
-        return roi_list
 
-    def process_samples(
-        self,
-        samples: list[str] | None = None,
-        n_jobs: int | None = 1,
-        delete_empty_roi: bool = True,
-        silent: bool = True,
-    ):
+        self._snapshots[snapshot_id] = data
+
+    def delete_snapshot(self, snapshot_id: str):
         """
-        Apply individual samples processing steps.
-
-        See HERE for a detailed explanation of how assay-based sample processing
-        works.
+        Delete a snapshot.
 
         Parameters
         ----------
-        samples : list[str] or None, default=None
-            List of sample ids to process. If ``None``, process all samples in
-            the assay.
-        n_jobs : int or None, default=1
-            Number of cores to use to process sample in parallel. If ``None``,
-            uses all available cores.
-        delete_empty_roi: bool, default=True
-            Deletes ROI where no feature was detected.
-        silent : bool, default=True
-            Process samples silently. If set to ``False``, displays a progress
-            bar.
+        snapshot_id : str
 
-        See Also
-        --------
-        tidyms.base.Assay.get_parameters: returns parameters for all processing steps.
-        tidyms.base.Assay.set_parameters: set parameters for all processing steps.
+        Raises
+        ------
+        ValueError
+            If a non-existing `snapshot_id` is provided.
 
         """
-        if samples is None:
-            samples = [x.id for x in self.get_samples()]
+        try:
+            self._snapshots.pop(snapshot_id)
+        except KeyError as e:
+            msg = f"Snapshot with id={snapshot_id} not found."
+            raise ValueError(msg) from e
 
-        def iterator():
-            for sample_id in samples:
-                sample_data = self._data.get_sample_data(sample_id)
-                pipeline = self._sample_pipeline.copy()
-                yield pipeline, sample_data
+    def fetch_initial_snapshot(self) -> SampleData:
+        """Fetch the initial sample data."""
+        initial_id = self.list_snapshots()[0]
+        return self.fetch_snapshot(initial_id)
 
-        if not silent:
-            tqdm_func = get_progress_bar()
-            bar = tqdm_func()
-            bar.total = len(samples)
-        else:
-            bar = None
+    def fetch_latest_snapshot(self) -> SampleData:
+        """Fetch the latest sample data."""
+        latest_id = self.list_snapshots()[-1]
+        return self.fetch_snapshot(latest_id)
 
-        with Pool(n_jobs) as pool:
-            for sample_data in pool.imap_unordered(_process_sample_worker, iterator()):
-                if delete_empty_roi:
-                    sample_data.delete_empty_roi()
-                self.data.store_sample_data(sample_data)
-                if not silent and bar is not None:
-                    bar.set_description(f"Processing {sample_data.sample.id}")
-                    bar.update()
+    def fetch_snapshot(self, snapshot_id: str) -> SampleData:
+        """
+        Create an independent copy of a snapshot.
+
+        Parameters
+        ----------
+        snapshot_id : str
+            The id of the snapshot to retrieve.
+
+        Raises
+        ------
+        ValueError
+            If a non-existing `snapshot_id` is provided.
+
+        """
+        try:
+            return self._snapshots[snapshot_id].model_copy(deep=True)
+        except KeyError as e:
+            msg = f"Snapshot with id={snapshot_id} not found."
+            raise ValueError(msg) from e
+
+    def get_features(self, snapshot_id: str) -> list[Feature]:
+        """Create a list of features in the specified snapshot."""
+        return self.fetch_snapshot(snapshot_id).get_features()
+
+    def get_roi(self, snapshot_id: str) -> list[Roi]:
+        """Create a list of ROI in the specified snapshot."""
+        return self.fetch_snapshot(snapshot_id).roi
+
+    def list_snapshots(self) -> list[str]:
+        """List snapshots in the order they were created."""
+        return list(self._snapshots)
 
 
-class _Processor(ABC, pydantic.BaseModel):
+class Processor(ABC, pydantic.BaseModel):
     """
     The base class for data processors.
 
@@ -295,11 +148,54 @@ class _Processor(ABC, pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(validate_assignment=True)
     id: str = ""
+    type: ClassVar[c.ProcessorType]
     order: int | None = None
     pipeline: str | None = None
 
-    @abstractmethod
-    def process(self, data): ...
+    def get_processor_info(self) -> ProcessorInformation:
+        """Create a ProcessingStepInfo instance."""
+        return ProcessorInformation(
+            id=self.id, pipeline=self.pipeline, order=self.order, parameters=self.get_parameters()
+        )
+
+    @overload
+    def process(self, data: SampleData) -> SampleData:
+        ...
+
+    @overload
+    def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots:
+        ...
+
+    @overload
+    def process(self, data: AssayData) -> AssayData:
+        ...
+
+    def process(
+        self, data: SampleData | SampleDataSnapshots | AssayData
+    ) -> SampleData | SampleDataSnapshots | AssayData:
+        """Apply processor function to data."""
+        info = self.get_processor_info()
+        if isinstance(data, SampleDataSnapshots):
+            process_data = data.fetch_latest_snapshot()
+            id_ = process_data.sample.id
+        elif isinstance(data, SampleData):
+            process_data = data
+            id_ = process_data.sample.id
+        else:
+            process_data = data
+            id_ = "dummy_id"  # FIXME: add id to AssayData
+
+        msg = f"Applying {info.id} with parameters={info.parameters} to sample={id_}."
+        self._func(process_data)
+        logger.info(msg)
+
+        if isinstance(process_data, SampleData):
+            process_data.processing_info.append(info)
+
+        if isinstance(data, SampleDataSnapshots) and isinstance(process_data, SampleData):
+            data.add_snapshot(process_data, info.id)
+
+        return data
 
     @abstractmethod
     def get_default_parameters(
@@ -341,59 +237,126 @@ class _Processor(ABC, pydantic.BaseModel):
 
     def get_parameters(self):
         """Get instance parameters."""
-        return self.model_dump(exclude={"id"})
+        return self.model_dump(exclude={"id", "type"})
 
     def set_parameters(self, **kwargs):
         """Set instance parameters."""
         self.__dict__.update(kwargs)
 
-    @staticmethod
     @abstractmethod
-    def get_expected_process_status_in() -> BaseProcessStatus: ...
-
-    @staticmethod
-    @abstractmethod
-    def update_status_out(status_in: BaseProcessStatus) -> BaseProcessStatus: ...
-
-
-class BaseSampleProcessor(_Processor):
-    """
-    Base class to process independent samples.
-
-    MUST implement _get_expected_sample_data_status to check if the sample
-    data status allows applying the processing function.
-
-    MUST implement _update_sample_data_status to update the sample data status
-    after applying the processing function.
-
-    MUST implement _func to process the sample data.
-
-    """
-
-    def process(self, sample_data: SampleData):
-        """Apply processor function to a sample."""
-        info = self.get_processor_info()
-        msg = f"Applying {info.id} with parameters={info.parameters} to sample={sample_data.sample.id}."
-        logger.info(msg)
-        self._func(sample_data)
-        sample_data._snapshot_data(info)
-
-    @abstractmethod
-    def _func(self, sample_data: SampleData):
-        """Processing function that modifies sample data."""
+    def get_expected_process_status_in(self) -> ProcessStatus:
+        """Get the expected process status of the sample data."""
         ...
+
+    @staticmethod
+    @abstractmethod
+    def update_status_out(status_in: ProcessStatus) -> ProcessStatus:
+        """Set output process status."""
+        ...
+
+    @abstractmethod
+    def _func(self, data: SampleData | SampleDataSnapshots | AssayData):
+        """Process data function."""
+        ...
+
+
+class ChainedProcessor(pydantic.BaseModel):
+    """Concatenate multiple processors into a single unit."""
+
+    id: str
+    type: ClassVar[Literal[c.ProcessorType.PIPELINE]] = c.ProcessorType.PIPELINE
+    processors: Sequence[Processor]
+    order: int | None = None
+    pipeline: str | None = None
+
+    @abstractmethod
+    def get_default_parameters(
+        self,
+        instrument: c.MSInstrument = c.MSInstrument.QTOF,
+        separation: c.SeparationMode = c.SeparationMode.UPLC,
+        polarity: c.Polarity = c.Polarity.POSITIVE,
+    ) -> dict:
+        """Get default parameters using instrument, separation type and polarity."""
+        ...
+
+    def get_expected_process_status_in(self) -> ProcessStatus:
+        """Get the expected process status of the sample data."""
+        return self.processors[0].get_expected_process_status_in()
+
+    def get_parameters(self):
+        """Get instance parameters."""
+        return self.model_dump(exclude={"id", "type"})
 
     def get_processor_info(self) -> ProcessorInformation:
         """Create a ProcessingStepInfo instance."""
-        return ProcessorInformation(
-            id=self.id,
-            pipeline=self.pipeline,
-            order=self.order,
-            parameters=self.get_parameters(),
-        )
+        info = ProcessorInformation(id=self.id, pipeline=self.pipeline, order=self.order, parameters=dict())
+        for proc in self.processors:
+            proc_info = proc.get_processor_info()
+            info.parameters.update(proc_info.parameters)
+        return info
+
+    @overload
+    def process(self, data: SampleData) -> SampleData:
+        ...
+
+    @overload
+    def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots:
+        ...
+
+    @overload
+    def process(self, data: AssayData) -> AssayData:
+        ...
+
+    def process(
+        self, data: SampleData | SampleDataSnapshots | AssayData
+    ) -> SampleData | SampleDataSnapshots | AssayData:
+        """Apply processor function to data."""
+        for proc in self.processors:
+            data = proc.process(data)
+        return data
+
+    def set_default_parameters(
+        self,
+        instrument: c.MSInstrument = c.MSInstrument.QTOF,
+        separation: c.SeparationMode = c.SeparationMode.UPLC,
+        polarity: c.Polarity = c.Polarity.POSITIVE,
+    ):
+        """
+        Set parameters using instrument type separation type and polarity.
+
+        Parameters
+        ----------
+        instrument : MSInstrument, default=MSInstrument.QTOF
+            The instrument type.
+        separation : SeparationMode, default=SeparationMode.UPLC
+            The separation analytical platform.
+        polarity : Polarity, default=Polarity.POSITIVE
+            The measurement polarity.
+
+        See Also
+        --------
+        get_default_parameters
+            Retrieve default parameters using instrument type, separation type
+            and polarity mode.
+
+        """
+        defaults = self.get_default_parameters(instrument, separation, polarity)
+        self.set_parameters(**defaults)
+
+    def set_parameters(self, **kwargs):
+        """Set instance parameters."""
+        for proc in self.processors:
+            proc_params = {k: v for k, v in kwargs.items() if k in proc.__dict__}
+            proc.set_parameters(**proc_params)
+
+    def update_status_out(self, status_in: ProcessStatus) -> ProcessStatus:
+        """Set output process status."""
+        for proc in self.processors:
+            proc.update_status_out(status_in)
+        return status_in
 
 
-class BaseRoiExtractor(BaseSampleProcessor):
+class RoiExtractor(Processor):
     """
     Base class to extract ROIs from raw data.
 
@@ -401,28 +364,28 @@ class BaseRoiExtractor(BaseSampleProcessor):
 
     """
 
-    @staticmethod
-    def get_expected_process_status_in() -> SampleDataProcessStatus:
-        return SampleDataProcessStatus()
+    type: ClassVar[Literal[c.ProcessorType.SAMPLE]] = c.ProcessorType.SAMPLE
+
+    def get_expected_process_status_in(self) -> ProcessStatus:
+        """Get the expected status of the sample data."""
+        return ProcessStatus(id=self.id)
 
     def _func(self, sample_data: SampleData):
         """Add extracted ROIs to sample data."""
-        info = self.get_processor_info()
-        roi_list = self._extract_roi_func(sample_data.sample)
-        sample_data.set_roi_list(roi_list, info)
+        sample_data.roi = self._extract_roi_func(sample_data.sample)
 
     @abstractmethod
-    def _extract_roi_func(self, sample: Sample) -> list[Roi]: ...
+    def _extract_roi_func(self, sample: Sample) -> list[Roi]:
+        ...
 
     @staticmethod
-    def update_status_out(
-        status_in: SampleDataProcessStatus,
-    ) -> SampleDataProcessStatus:
-        status_in.roi = True
+    def update_status_out(status_in: ProcessStatus) -> ProcessStatus:
+        """Retrieve output status of sample data."""
+        status_in.sample_roi_extracted = True
         return status_in
 
 
-class BaseRoiTransformer(BaseSampleProcessor):
+class RoiTransformer(Processor):
     """
     Base class to transform ROIs.
 
@@ -430,26 +393,27 @@ class BaseRoiTransformer(BaseSampleProcessor):
 
     """
 
-    def _func(self, sample_data: SampleData):
-        info = self.get_processor_info()
-        for roi in sample_data.get_roi_list_snapshot(info):
+    type: ClassVar[Literal[c.ProcessorType.SAMPLE]] = c.ProcessorType.SAMPLE
+
+    def _func(self, sample_data: SampleData) -> None:
+        for roi in sample_data.roi:
             self._transform_roi(roi)
 
-    @staticmethod
-    def get_expected_process_status_in() -> SampleDataProcessStatus:
-        return SampleDataProcessStatus(roi=True)
+    def get_expected_process_status_in(self) -> ProcessStatus:
+        """Get the expected status of the sample data."""
+        return ProcessStatus(id=self.id, sample_roi_extracted=True)
 
     @staticmethod
-    def update_status_out(
-        status_in: SampleDataProcessStatus,
-    ) -> SampleDataProcessStatus:
+    def update_status_out(status_in: ProcessStatus) -> ProcessStatus:
+        """Retrieve output status of sample data."""
         return status_in
 
     @abstractmethod
-    def _transform_roi(self, roi: Roi): ...
+    def _transform_roi(self, roi: Roi):
+        ...
 
 
-class BaseFeatureTransformer(BaseSampleProcessor):
+class FeatureTransformer(Processor):
     """
     Base class to transform features.
 
@@ -457,27 +421,27 @@ class BaseFeatureTransformer(BaseSampleProcessor):
 
     """
 
+    type: ClassVar[Literal[c.ProcessorType.SAMPLE]] = c.ProcessorType.SAMPLE
+
     def _func(self, sample_data: SampleData):
-        info = self.get_processor_info()
-        for roi in sample_data.get_roi_list_snapshot(info):
-            for ft in roi.features:
-                self._transform_feature(ft)
+        for feature in sample_data.get_features():
+            self._transform_feature(feature)
+
+    def get_expected_process_status_in(self) -> ProcessStatus:
+        """Get the expected status of the sample data."""
+        return ProcessStatus(id=self.id, sample_roi_extracted=True, sample_feature_extracted=True)
 
     @staticmethod
-    def get_expected_process_status_in() -> SampleDataProcessStatus:
-        return SampleDataProcessStatus(roi=True, feature=True)
-
-    @staticmethod
-    def update_status_out(
-        status_in: SampleDataProcessStatus,
-    ) -> SampleDataProcessStatus:
+    def update_status_out(status_in: ProcessStatus) -> ProcessStatus:
+        """Retrieve output status of sample data."""
         return status_in
 
     @abstractmethod
-    def _transform_feature(self, feature: Feature): ...
+    def _transform_feature(self, feature: Feature):
+        ...
 
 
-class BaseFeatureExtractor(BaseSampleProcessor):
+class FeatureExtractor(Processor):
     """
     Base class to extract features from ROIs.
 
@@ -493,16 +457,16 @@ class BaseFeatureExtractor(BaseSampleProcessor):
     """
 
     filters: Mapping[str, tuple[float | None, float | None]] = dict()
+    type: ClassVar[Literal[c.ProcessorType.SAMPLE]] = c.ProcessorType.SAMPLE
+
+    def get_expected_process_status_in(self) -> ProcessStatus:
+        """Get the expected status of the sample data."""
+        return ProcessStatus(id=self.id, sample_roi_extracted=True)
 
     @staticmethod
-    def get_expected_process_status_in() -> BaseProcessStatus:
-        return SampleDataProcessStatus(roi=True)
-
-    @staticmethod
-    def update_status_out(
-        status_in: SampleDataProcessStatus,
-    ) -> SampleDataProcessStatus:
-        status_in.feature = True
+    def update_status_out(status_in: ProcessStatus) -> ProcessStatus:
+        """Set output status of process status."""
+        status_in.sample_feature_extracted = True
         return status_in
 
     def _func(self, sample_data: SampleData):
@@ -515,17 +479,17 @@ class BaseFeatureExtractor(BaseSampleProcessor):
 
         """
         filters = _fill_filter_boundaries(self.filters)
-        processor_info = self.get_processor_info()
-        for roi in sample_data.get_roi_list_snapshot(processor_info):
+        for roi in sample_data.roi:
             for ft in self._extract_features_func(roi):
                 if _is_feature_descriptor_in_valid_range(ft, filters):
                     roi.add_feature(ft)
 
     @abstractmethod
-    def _extract_features_func(self, roi: Roi) -> Sequence[Feature]: ...
+    def _extract_features_func(self, roi: Roi) -> Sequence[Feature]:
+        ...
 
 
-class MultipleSampleProcessor(_Processor):
+class MultipleSampleProcessor(Processor):
     """
     Base class for multiple class process.
 
@@ -562,7 +526,7 @@ class FeatureMatcher(MultipleSampleProcessor):
         ...
 
 
-class ProcessingPipeline:
+class ProcessingPipeline(pydantic.BaseModel):
     """
     Combines Processor objects into a data processing pipeline.
 
@@ -578,45 +542,49 @@ class ProcessingPipeline:
 
     """
 
-    def __init__(self, id_: str, *steps: _Processor):
-        _validate_processors(*steps)
-        self.id = id_
-        self._processors = steps
-        name_to_processor = dict()
-        for k, processor in enumerate(steps):
-            processor.order = k
-            processor.pipeline = self.id
-            name_to_processor[processor.id] = processor
+    id: str
+    processors: Sequence[Processor | ChainedProcessor]
 
-        self._name_to_processor = name_to_processor
+    def validate(self) -> None:
+        """
+        Validate the pipeline.
 
-    @property
-    def processors(self) -> Sequence[_Processor]:
-        return self._processors
+        Raises
+        ------
+        InvalidPipelineConfiguration
+            If an empty pipeline is created or if multiple processors have the
+            same id.
+        IncompatibleProcessorStatus
+            If processors with incompatible status are chained together.
 
-    def copy(self):
-        """Create a deep copy of the pipeline."""
-        return deepcopy(self)
+        """
+        if len(self.processors) == 0:
+            msg = f"No processor provided to pipeline with id={self.id}"
+            raise exceptions.InvalidPipelineConfiguration(msg)
 
-    def get_processor(self, name: str) -> _Processor:
+        unique_processor_id = {x.id for x in self.processors}
+        if len(unique_processor_id) < len(self.processors):
+            msg = f"Found multiple processors with same id in pipeline {self.id}."
+            raise exceptions.InvalidPipelineConfiguration(msg)
+
+        expected_processor_type = self.processors[0].type
+        status = _get_expected_initial_status(expected_processor_type)
+        for proc in self.processors:
+            assert proc.type == expected_processor_type
+            proc_status_in = proc.get_expected_process_status_in()
+            check_process_status(status, proc_status_in)
+            proc.update_status_out(status)
+
+        expected_final_status = _get_expected_final_status(expected_processor_type)
+        check_process_status(status, expected_final_status)
+
+    def get_processor(self, id_: str) -> Processor | ChainedProcessor:
         """Get pipeline processors based on name."""
-        processor = self._name_to_processor[name]
-        return processor
-
-    def get_parameters(self) -> list[tuple[str, dict]]:
-        """
-        Get parameters from all processors.
-
-        Returns
-        -------
-        parameters : list[tuple[str, dict]]
-
-        """
-        parameters = list()
         for processor in self.processors:
-            params = processor.get_parameters()
-            parameters.append((processor.id, params))
-        return parameters
+            if processor.id == id_:
+                return processor
+
+        raise exceptions.ProcessorNotFound(id_)
 
     def set_parameters(self, parameters: dict[str, dict]):
         """
@@ -631,6 +599,17 @@ class ProcessingPipeline:
         for name, param in parameters.items():
             processor = self.get_processor(name)
             processor.set_parameters(**param)
+
+    def get_configuration(self) -> dict:
+        """Get the pipeline default parameters."""
+        configuration = self.model_dump(exclude={"processors"})
+        processors = list()
+        for proc in self.processors:
+            proc_params = proc.model_dump()
+            proc_params["class"] = proc.__class__.__name__
+            processors.append(proc_params)
+        configuration["processors"] = processors
+        return configuration
 
     def set_default_parameters(
         self,
@@ -652,7 +631,21 @@ class ProcessingPipeline:
         for processor in self.processors:
             processor.set_default_parameters(instrument, separation, polarity)
 
-    def process(self, data):
+    @overload
+    def process(self, data: AssayData) -> AssayData:
+        ...
+
+    @overload
+    def process(self, data: SampleData) -> SampleData:
+        ...
+
+    @overload
+    def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots:
+        ...
+
+    def process(
+        self, data: SampleData | SampleDataSnapshots | AssayData
+    ) -> SampleData | SampleDataSnapshots | AssayData:
         """
         Apply the processing pipeline.
 
@@ -669,55 +662,37 @@ class ProcessingPipeline:
         return data
 
 
-class BaseProcessStatus(ABC):
-    """Base class to define the status of samples through a processing pipeline."""
-
-    def check(self, other: BaseProcessStatus):
-        for attr in self.__dict__:
-            actual = getattr(self, attr)
-            expected = getattr(other, attr)
-            status = _compare_process_status(actual, expected)
-            if not status:
-                msg = f"Expected status={expected} for {attr}. Got status={actual}."
-                raise exceptions.IncompatibleProcessorStatus(msg)
-
-
-class SampleDataProcessStatus(BaseProcessStatus):
+class ProcessStatus(pydantic.BaseModel):
     """
-    Report sample data process status.
+    Report data process status.
 
-    Each attribute stores a boolean representing the sample data stored.
-
-    Attributes
-    ----------
-    roi : bool, default=False
-        set to ``True`` if a :py:class:`tidyms.base.assay.RoiExtractor` was
-        used to process the sample.
-    feature : bool, default=False
-        set to ``True`` if a :py:class:`tidyms.base.assay.FeatureExtractor` was
-        used to process the sample.
-    isotopologue_annotation: bool, default=False
-        set to ``True`` if isotopologue annotation was performed on the sample.
-    adduct_annotation: bool, default=False
-        set to ``True`` if adduct annotation was performed on the sample.
-    correspondence: bool, default=False
-        set to ``True`` if feature matching was applied to this sample.
+    Each attribute is a flag representing the current status of the data through
+    a processing pipeline.
 
     """
 
-    def __init__(
-        self,
-        roi: bool = False,
-        feature: bool = False,
-        isotopologue_annotation: bool = False,
-        adduct_annotation: bool = False,
-        correspondence: bool = False,
-    ):
-        self.roi = roi
-        self.feature = feature
-        self.isotopologue_annotation = isotopologue_annotation
-        self.adduct_annotation = adduct_annotation
-        self.correspondence = correspondence
+    id: str | None = None
+    sample_roi_extracted: bool = False
+    sample_feature_extracted: bool = False
+    sample_isotopologue_annotated: bool = False
+    sample_adduct_annotated: bool = False
+    all_roi_extracted: bool = False
+    all_feature_feature_extracted: bool = False
+    all_isotopologue_annotated: bool = False
+    all_adduct_annotated: bool = False
+    all_feature_matched: bool = False
+    all_missing_imputed: bool = False
+
+
+def check_process_status(status1: ProcessStatus, status2: ProcessStatus) -> None:
+    """Check if two process status are compatible."""
+    for attr, actual in status1.model_dump(exclude={"id"}).items():
+        expected = getattr(status2, attr)
+        check_ok = _compare_process_status(actual, expected)
+        if not check_ok:
+            status = " ".join(attr.split("_"))
+            msg = f"Expected {status} to be {expected} in step {status2.id}. Got {actual}."
+            raise exceptions.IncompatibleProcessorStatus(msg)
 
 
 def _compare_process_status(actual: bool, expected: bool) -> bool:
@@ -727,9 +702,7 @@ def _compare_process_status(actual: bool, expected: bool) -> bool:
         return True
 
 
-def _is_feature_descriptor_in_valid_range(
-    ft: Feature, filters: dict[str, tuple[float, float]]
-) -> bool:
+def _is_feature_descriptor_in_valid_range(ft: Feature, filters: dict[str, tuple[float, float]]) -> bool:
     """
     Check if a feature descriptors are inside bounds defined by filters.
 
@@ -752,13 +725,8 @@ def _is_feature_descriptor_in_valid_range(
     return is_valid
 
 
-def _process_sample_worker(args: tuple[ProcessingPipeline, SampleData]):
-    pipeline, sample_data = args
-    return pipeline.process(sample_data)
-
-
 def _fill_filter_boundaries(
-    filters: Mapping[str, tuple[float | None, float | None]]
+    filters: Mapping[str, tuple[float | None, float | None]],
 ) -> dict[str, tuple[float, float]]:
     """Replace ``None`` values in lower and upper bounds of feature extractor filter."""
     d = dict()
@@ -769,60 +737,18 @@ def _fill_filter_boundaries(
     return d
 
 
-def _validate_processors(*steps: _Processor):
-    """Validate the processor list provided to the Pipeline constructor."""
-    if not steps:
-        msg = "`steps` cannot be an empty list."
-        raise ValueError(msg)
-
-    unique_names = {x.id for x in steps}
-
-    if len(steps) > len(unique_names):
-        msg = "Processor names must be unique."
-        raise ValueError(msg)
-
-    processor_type = _get_pipeline_processor_type(steps)
-    _check_all_same_base_processor_type(steps, processor_type)
-
-    status = _get_expected_initial_status(processor_type)
-    for proc in steps:
-        proc_status_in = proc.get_expected_process_status_in()
-        status.check(proc_status_in)
-        proc.update_status_out(status)
-
-    expected_final_status = _get_expected_final_status(processor_type)
-    status.check(expected_final_status)
-
-
-def _get_pipeline_processor_type(processors: Sequence[_Processor]) -> Type[_Processor]:
-    p = processors[0]
-
-    if isinstance(p, BaseSampleProcessor):
-        processor_type = BaseSampleProcessor
-    else:
-        # TODO: add other base processors
-        raise NotImplementedError
-    return processor_type
-
-
-def _check_all_same_base_processor_type(
-    processors: Sequence[_Processor], processor_type: Type[_Processor]
-) -> None:
-    all_same_base_type = all(isinstance(p, processor_type) for p in processors)
-    if not all_same_base_type:
-        msg = "All Processors in a pipeline must be of the same base processor type."
-        raise exceptions.InvalidProcessingPipeline(msg)
-
-
-def _get_expected_initial_status(processor_type: Type[_Processor]) -> BaseProcessStatus:
-    if processor_type is BaseSampleProcessor:
-        return SampleDataProcessStatus()
+def _get_expected_initial_status(processor_type: c.ProcessorType) -> ProcessStatus:
+    if processor_type == c.ProcessorType.SAMPLE:
+        return ProcessStatus()
+    elif processor_type == c.ProcessorType.ASSAY:
+        return ProcessStatus(all_roi_extracted=True, all_feature_feature_extracted=True)
     else:
         raise NotImplementedError
 
 
-def _get_expected_final_status(processor_type: Type[_Processor]) -> BaseProcessStatus:
-    if processor_type is BaseSampleProcessor:
-        return SampleDataProcessStatus(roi=True, feature=True)
+def _get_expected_final_status(processor_type: c.ProcessorType) -> ProcessStatus:
+    id_ = "final"
+    if processor_type is c.ProcessorType.SAMPLE:
+        return ProcessStatus(id=id_, sample_roi_extracted=True, sample_feature_extracted=True)
     else:
         raise NotImplementedError
