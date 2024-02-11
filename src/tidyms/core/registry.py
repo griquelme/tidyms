@@ -5,6 +5,7 @@ from typing import TypeVar
 from . import exceptions
 from .models import Feature, Roi
 from .processors import Processor
+from .reader import Reader
 
 FeatureType = TypeVar("FeatureType", bound=Feature)
 RoiType = TypeVar("RoiType", bound=Roi)
@@ -14,6 +15,7 @@ ProcessorType = TypeVar("ProcessorType", bound=Processor)
 _REGISTERED_FEATURES: dict[str, type[Feature]] = dict()
 _REGISTERED_PROCESSORS: dict[str, type[Processor]] = dict()
 _REGISTERED_ROIS: dict[str, type[Roi]] = dict()
+_REGISTERED_READERS: dict[str, type[Reader]] = dict()
 
 
 def get_roi_type(type_: str) -> type[Roi]:
@@ -41,7 +43,7 @@ def get_roi_type(type_: str) -> type[Roi]:
         raise exceptions.RoiTypeNotRegistered(type_) from e
 
 
-def list_roi_types():
+def list_roi_types() -> list[str]:
     """Retrieve the list of registered ROI types."""
     return list(_REGISTERED_ROIS)
 
@@ -88,7 +90,7 @@ def get_feature_type(type_: str) -> type[Feature]:
         raise exceptions.FeatureTypeNotRegistered(type_) from e
 
 
-def list_feature_types():
+def list_feature_types() -> list[str]:
     """Retrieve the list of Feature types."""
     return list(_REGISTERED_FEATURES)
 
@@ -135,12 +137,60 @@ def get_processor_type(type_: str) -> type[Processor]:
         raise exceptions.ProcessorTypeNotRegistered(type_) from e
 
 
-def list_processor_types():
+def list_processor_types() -> list[str]:
     """Retrieve the list of Feature types."""
     return list(_REGISTERED_PROCESSORS)
 
 
 def register_processor(processor: type[ProcessorType]) -> type[ProcessorType]:
+    """
+    Register a Processor into the registry.
+
+    Parameters
+    ----------
+    processor : type[Processor]
+
+    Returns
+    -------
+    type[Processor]
+
+    """
+    _REGISTERED_PROCESSORS[processor.__name__] = processor
+    return processor
+
+
+def get_reader_type(type_: str) -> type[Reader]:
+    """
+    Retrieve a Reader type from the registry.
+
+    Parameters
+    ----------
+    type_ : str
+        The name of the Processor to retrieve.
+
+    Returns
+    -------
+    type[Processor]
+
+    Raises
+    ------
+    ProcessorTypeNotRegistered
+        If a non-registered Processor name is requested
+
+    """
+    try:
+        type_str = f"{type_.upper()}Reader"
+        return _REGISTERED_READERS[type_str]
+    except KeyError as e:
+        raise exceptions.ReaderNotFound(type_) from e
+
+
+def list_reader_types() -> list[str]:
+    """Retrieve the list of Feature types."""
+    return list(_REGISTERED_READERS)
+
+
+def register_reader(processor: type[ProcessorType]) -> type[ProcessorType]:
     """
     Register a Processor into the registry.
 
