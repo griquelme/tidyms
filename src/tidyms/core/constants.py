@@ -11,6 +11,14 @@ SEPARATION_MODES: Final[List[str]] = LC_MODES + []
 
 # instruments
 
+class ProcessorType(enum.Enum):
+    """Available processor types."""
+
+    SAMPLE = "sample"
+    ASSAY = "assay"
+    MATRIX = "matrix"
+    PIPELINE = "pipeline"
+
 
 class SeparationMode(enum.Enum):
     """Analytical method separation platform."""
