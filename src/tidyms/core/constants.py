@@ -1,15 +1,8 @@
-from typing import Final, List
+"""TidyMS constants."""
+
 import enum
+from typing import Final, List
 
-
-# separation modes
-HPLC: Final[str] = "hplc"
-UPLC: Final[str] = "uplc"
-DART: Final[str] = "None/DART"
-LC_MODES: Final[List[str]] = [UPLC, HPLC, DART]
-SEPARATION_MODES: Final[List[str]] = LC_MODES + []
-
-# instruments
 
 class ProcessorType(enum.Enum):
     """Available processor types."""
@@ -47,23 +40,6 @@ class MSDataMode(enum.Enum):
 
     PROFILE = 1
     CENTROID = 2
-
-
-QTOF: Final[str] = "qtof"
-ORBITRAP: Final[str] = "orbitrap"
-MS_INSTRUMENTS: Final[List[str]] = [QTOF, ORBITRAP]
-
-# MS mode
-CENTROID: Final[str] = "centroid"
-PROFILE: Final[str] = "profile"
-MS_MODES: Final[List[str]] = [CENTROID, PROFILE]
-
-# Data loading
-MEMORY: Final[str] = "memory"
-INFILE: Final[str] = "file"
-SIMULATED: Final[str] = "simulated"
-DATA_LOAD_MODES: Final[List[str]] = [MEMORY, INFILE, SIMULATED]
-DEFAULT_DATA_LOAD_MODE = INFILE
 
 # feature descriptors
 FEATURE: Final[str] = "feature"
