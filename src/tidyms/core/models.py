@@ -1,10 +1,24 @@
-"""Data models used by TidyMS.
+"""TidyMS core data models.
 
-Annotation : Annotation data from a feature.
-Feature : A ROI region that may contain chemical species information.
-Roi : A Region of Interest extracted from raw data.
-Sample : Contains metadata from a measurement.
-SampleData : Container class for a Sample and the ROIs detected.
+Annotation :
+    Feature annotation data.
+Chromatogram :
+    Container for chromatogram data stored on raw data.
+Feature :
+    A region extracted from a ROI that may contain chemical species information.
+IsotopicEnvelope :
+    A sorted pair of m/z and relative abundance created from a collection of
+    isotopologue features.
+MSSpectrum :
+    Container for MS data from a single scan stored on raw data.
+ProcessorInformation :
+    Store processor configuration.
+Roi :
+    A Region of Interest extracted from raw data.
+Sample :
+    Store metadata from an independent measurement.
+SampleData :
+    Container for ROI and features from a sample.
 
 """
 
@@ -369,6 +383,57 @@ class AnnotableFeature(Feature, ABC):
         """
         ...
 
+
+class FeatureGroup(pydantic.BaseModel):
+    """
+    Represent a collection of features associated to the same chemical species.
+
+    Attributes
+    ----------
+    id : int
+        An identifier for the Feature group.
+    mz : float
+        The feature group m/z.
+    isotopologue_index: int or None, default=None
+        The position of the feature in an envelope. Only defined if an
+        isotopologue annotation algorithm was applied to the dataset.
+        group was annotated.
+    isotopologue_label: int or None, default=None
+        Label shared between isotopologue features. Only defined if an
+        isotopologue annotation algorithm was applied to the dataset.
+    envelope: IsotopicEnvelope or None, default=None
+        The feature group envelope. Only defined if an isotopologue annotation
+        algorithm was applied to the dataset and `isotopologue_index` is ``0``.
+    charge : int or None, default=None
+        The numerical charge of the feature. Only defined if an isotopologue
+        annotation algorithm was applied to the dataset.
+    adduct_label : int or None, default=None
+        Label shared between adducts originated from the same chemical species.
+        Only defined if an adduct annotation algorithm was applied to the
+        dataset.
+    adduct : str or None, default=None
+        A representation of the adduct type. Only defined if an adduct
+        annotation algorithm was applied to the dataset.
+
+    """
+
+    id: int
+    isotopologue_index: int | None = pydantic.Field(None, repr=False)
+    isotopologue_group: int | None = pydantic.Field(None, repr=False)
+    envelope: IsotopicEnvelope | None = pydantic.Field(None, repr=False)
+    charge: int | None = pydantic.Field(None, repr=False)
+    adduct: str | None = pydantic.Field(None, repr=False)
+
+    mz: float
+    height: float = pydantic.Field(repr=False)
+    area: float = pydantic.Field(repr=False)
+
+
+class IsotopicEnvelope(pydantic.BaseModel):
+    """Represent a sorted collection of m/z and normalized abundance."""
+
+    mz: list[float]
+    p: list[float]
 
 class Sample(pydantic.BaseModel):
     """
