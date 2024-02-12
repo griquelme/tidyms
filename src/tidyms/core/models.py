@@ -392,6 +392,8 @@ class Sample(pydantic.BaseModel):
         Measurement order of sample in an assay.
     batch : int, default=0
         Analytical batch of sample in an assay.
+    extra : dict[str, Any] or None, default=None
+        Extra sample information
 
     """
 
@@ -403,6 +405,7 @@ class Sample(pydantic.BaseModel):
     group: str = ""
     order: pydantic.NonNegativeInt = 0
     batch: pydantic.NonNegativeInt = 0
+    extra: dict[str, Any] | None = None
 
     @pydantic.field_serializer("path")
     def serialize_path(self, path: Path, _info) -> str:
