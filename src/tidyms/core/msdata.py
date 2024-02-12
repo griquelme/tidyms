@@ -16,8 +16,7 @@ class MSData:
     """
     Provide access to raw MS data.
 
-    Data is read from disk in a lazy manner and cached in memory for fast
-    retrieval.
+    Data is read from disk in a lazy manner and cached in memory.
 
     Parameters
     ----------
@@ -27,9 +26,11 @@ class MSData:
         The Reader class to read raw data. If ``None``, the reader is inferred
         using the file extension.
     centroid : MSDataMode, default=MSDataMode.CENTROID
+        The mode in which the data is stored.
     cache : int, default=-1
-        The maximum size of the cache, in bytes. If ``-1``, the cache can grow
-        indefinitely.
+        The maximum size of the cache, in bytes. The cache will store spectrum
+        data until it surpasses this value. At this point, old entries will be
+        deleted from the cache. If set ``-1``, the cache can grow indefinitely.
 
     """
 
@@ -49,16 +50,22 @@ class MSData:
                 msg = "Reader must be specified for file objects."
                 raise ValueError(msg)
         self._reader = reader
-        self._ = centroid
+        self._centroid = centroid
         self._cache = MSDataCache(max_size=cache)
+        self._n_spectra: int | None = None
+        self._n_chromatogram: int | None = None
 
     def get_n_chromatograms(self) -> int:
         """Retrieve the total number of chromatograms stored in the source."""
-        return self._reader.get_n_chromatograms()
+        if self._n_chromatogram is None:
+            self._n_chromatogram = self._reader.get_n_chromatograms()
+        return self._n_chromatogram
 
     def get_n_spectra(self) -> int:
         """Retrieve the total number of spectra stored in the source."""
-        return self._reader.get_n_spectra()
+        if self._n_spectra is None:
+            self._n_spectra = self._reader.get_n_spectra()
+        return self._n_spectra
 
     def get_chromatogram(self, index: int) -> Chromatogram:
         """Retrieve a chromatogram by index."""
@@ -69,7 +76,7 @@ class MSData:
         spectrum = self._cache.get(index)
         if spectrum is None:
             spectrum = self._reader.get_spectrum(index)
-            spectrum.centroid = self._ == MSDataMode.CENTROID
+            spectrum.centroid = self._centroid == MSDataMode.CENTROID
             self._cache.add(spectrum)
         return spectrum
 
@@ -83,6 +90,8 @@ class MSData:
     ) -> Generator[MSSpectrum, None, None]:
         """
         Iterate over all spectra in the data.
+
+        Generated spectra are sorted by index.
 
         Parameters
         ----------

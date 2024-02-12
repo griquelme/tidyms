@@ -1,16 +1,27 @@
-"""
-Tools to process datasets.
+"""TidyMS core processors and utilities to process raw data datasets.
 
-SingleSampleProcessor :
-    Base class to process data from a single sample.
+ChainedProcessor :
+    Concatenate a sequence of processors into a single unit.
 FeatureExtractor :
-    Base class to extract feature from ROI.
+    Base class to extract features from ROI data.
+FeatureTransformer :
+    Base class to transform feature data.
 MultipleSampleProcessor :
     Base class to process multiple samples.
 MultipleSampleProcessor :
     Process data from multiple samples stored in an AssayData instance.
 ProcessingPipeline :
-    Apply several processing steps to data.
+    Apply a sequence of processors to data.
+Processor :
+    Base class to process data.
+ProcessStatus :
+    Store the expected status from data through a processing pipeline.
+RoiExtractor :
+    Base class to extract ROIs from raw data.
+RoiTransformer :
+    Base class to transform ROI data.
+SampleDataSnapshot :
+    Store independent sample data snapshots through a processing pipeline.
 
 """
 

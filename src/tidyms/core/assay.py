@@ -1,4 +1,11 @@
-"""Assay implementation."""
+"""Utility to process datasets.
+
+Assay :
+    Provide functionality to process and store data from complete datasets.
+AssayConfiguration :
+    Store assay configuration.
+
+"""
 
 from __future__ import annotations
 

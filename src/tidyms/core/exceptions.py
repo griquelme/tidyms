@@ -1,4 +1,4 @@
-"""Exceptions raised by tidyms."""
+"""TidyMS custom exceptions."""
 
 
 class FeatureTypeNotRegistered(ValueError):
