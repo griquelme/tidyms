@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Sequence, Type, cast
+from typing import Generic, Sequence, TypeVar, cast
 
 import sqlalchemy as sa
 import sqlalchemy.orm as orm
@@ -22,6 +22,9 @@ from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 from .models import Annotation, Feature, Roi, Sample, SampleData
 
 Base = orm.declarative_base()
+
+RoiType = TypeVar("RoiType", bound=Roi)
+FeatureType = TypeVar("FeatureType", bound=Feature)
 
 
 class ProcessParameterModel(Base):
@@ -96,7 +99,7 @@ class AnnotationModel(Base):
     feature: Mapped["FeatureModel"] = relationship(back_populates="annotation")
 
 
-class AssayData:
+class AssayData(Generic[FeatureType, RoiType]):
     """
     Storage class for Assay data.
 
@@ -106,7 +109,7 @@ class AssayData:
     ----------
     name : Path or None.
         Path to SQLite DB. If ``None``, uses an in-memory database.
-    roi : Type[Roi]
+    roi : type[Roi]
         ROI type of :term:`ROI` stored in the DB.
     feature : Type[Feature]
         Feature type of :term:`feature` stored in the DB.
@@ -115,13 +118,13 @@ class AssayData:
 
     """
 
-    DescriptorModel: Type
+    DescriptorModel: type
 
     def __init__(
         self,
         path: Path | None,
-        roi: Type[Roi],
-        feature: Type[Feature],
+        roi: type[RoiType],
+        feature: type[FeatureType],
         echo: bool = False,
     ):
         self.roi = roi
@@ -163,7 +166,7 @@ class AssayData:
             self._feature_id = feature_id
 
     @classmethod
-    def _create_descriptor_model(cls, feature_type: Type):
+    def _create_descriptor_model(cls, feature_type: type[FeatureType]):
         """
         Create the DescriptorModel table using descriptors available in the Feature class.
 
@@ -432,13 +435,13 @@ class AssayData:
             session.execute(sa.update(ProcessParameterModel), update)
             session.commit()
 
-    def _label_roi_list(self, *rois: Roi):
+    def _label_roi_list(self, *rois: RoiType):
         """Add a id label to ROIs."""
         for k_roi, roi in enumerate(rois, start=self._roi_id):
             roi.id = k_roi
         self._roi_id += len(rois)
 
-    def add_roi_list(self, sample: Sample, *rois: Roi):
+    def add_roi_list(self, sample: Sample, *rois: RoiType):
         """
         Store a list of ROI extracted from a sample.
 
@@ -458,7 +461,7 @@ class AssayData:
             session.add_all(roi_model_list)
             session.commit()
 
-    def get_roi_list(self, sample: Sample, load_features: bool = True) -> list[Roi]:
+    def get_roi_list(self, sample: Sample, load_features: bool = True) -> list[RoiType]:
         """
         Retrieve a list of ROI detected in a sample.
 
@@ -491,7 +494,7 @@ class AssayData:
                 roi_list.append(roi)
         return roi_list
 
-    def get_roi_by_id(self, roi_id: int, load_features: bool = True) -> Roi:
+    def get_roi_by_id(self, roi_id: int, load_features: bool = True) -> RoiType:
         """
         Retrieve a ROI by id.
 
@@ -543,13 +546,13 @@ class AssayData:
             session.execute(stmt)
             session.commit()
 
-    def _label_feature_list(self, feature_list: Sequence[Feature]):
+    def _label_feature_list(self, feature_list: Sequence[FeatureType]):
         """Add an id label for each feature."""
         for k, ft in enumerate(feature_list, start=self._feature_id):
             ft.id = k
         self._feature_id += len(feature_list)
 
-    def _add_feature_data(self, feature_list: Sequence[Feature], session: Session):
+    def _add_feature_data(self, feature_list: Sequence[FeatureType], session: Session):
         """Add feature data to a Session."""
         feature_model_list = list()
         for ft in feature_list:
@@ -558,7 +561,7 @@ class AssayData:
         session.add_all(feature_model_list)
 
     def _add_feature_annotation_data(
-        self, feature_list: Sequence[Feature], sample: Sample, session: Session
+        self, feature_list: Sequence[FeatureType], sample: Sample, session: Session
     ):
         """Add feature annotation data to session."""
         feature_annotation_model_list = list()
@@ -576,7 +579,7 @@ class AssayData:
         session.add_all(feature_annotation_model_list)
 
     def _add_feature_descriptors_data(
-        self, feature_list: Sequence[Feature], sample: Sample, session: Session
+        self, feature_list: Sequence[FeatureType], sample: Sample, session: Session
     ):
         """Add descriptor information to session."""
         feature_annotation_model_list = list()
@@ -592,7 +595,7 @@ class AssayData:
             feature_annotation_model_list.append(model)
         session.add_all(feature_annotation_model_list)
 
-    def add_features(self, sample: Sample, *features: Feature):
+    def add_features(self, sample: Sample, *features: FeatureType):
         """
         Store a list of features in the DB.
 
@@ -609,7 +612,7 @@ class AssayData:
             self._add_feature_descriptors_data(features, sample, session)
             session.commit()
 
-    def get_features_by_sample(self, sample: Sample) -> list[Feature]:
+    def get_features_by_sample(self, sample: Sample) -> list[FeatureType]:
         """
         Retrieve all features detected in a sample.
 
@@ -639,7 +642,7 @@ class AssayData:
 
     def get_features_by_label(
         self, label: int, groups: list[str] | None = None
-    ) -> list[Feature]:
+    ) -> list[FeatureType]:
         """
         Retrieve all samples with an specific feature label.
 
@@ -678,7 +681,7 @@ class AssayData:
                 feature_list.append(feature)
         return feature_list
 
-    def get_features_by_id(self, ft_id: int) -> Feature:
+    def get_features_by_id(self, ft_id: int) -> FeatureType:
         """
         Retrieve all samples with an specific feature label.
 
@@ -835,8 +838,9 @@ class AssayData:
 
     def store_sample_data(self, data: SampleData):
         """Store a SampleData instance."""
-        self.add_roi_list(data.sample, *data.roi)
-        self.add_features(data.sample, *data.get_features())
+        # TODO: Fix type hints
+        self.add_roi_list(data.sample, *cast(Sequence[RoiType], data.roi))
+        self.add_features(data.sample, *cast(Sequence[FeatureType], data.get_features()))
 
     def update_feature_labels(self, labels: dict[int, int]):
         """
@@ -858,7 +862,7 @@ class AssayData:
             session.commit()
 
 
-def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData):
+def _create_descriptor_table(feature_type: type[Feature], metadata: sa.MetaData):
     """
     Create a Model for descriptors of features.
 
@@ -897,10 +901,10 @@ def _create_descriptor_table(feature_type: Type[Feature], metadata: sa.MetaData)
 
 def _roi_model_to_roi(
     model: RoiModel,
-    roi_type: Type[Roi],
-    feature_type: Type[Feature],
+    roi_type: type[RoiType],
+    feature_type: type[FeatureType],
     load_features: bool = False,
-) -> Roi:
+) -> RoiType:
     """Create a ROI instance."""
     roi = roi_type.from_str(model.data)
     roi.id = model.id
@@ -912,8 +916,8 @@ def _roi_model_to_roi(
 
 
 def _feature_model_to_feature(
-    model: FeatureModel, feature_type: Type[Feature], roi: Roi
-) -> Feature:
+    model: FeatureModel, feature_type: type[FeatureType], roi: Roi
+) -> FeatureType:
     """Create a Feature instance from a FeatureModel instance."""
     ann_model = model.annotation
     annotation = _annotation_model_to_annotation(ann_model)
