@@ -31,9 +31,10 @@ import logging
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from math import inf
-from typing import ClassVar, Literal, Mapping, Sequence, overload
+from typing import Literal, Mapping, Sequence, Union, overload
 
 import pydantic
+from typing_extensions import Annotated
 
 from . import constants as c
 from . import exceptions
@@ -102,17 +103,17 @@ class SampleDataSnapshots:
             msg = f"Snapshot with id={snapshot_id} not found."
             raise ValueError(msg) from e
 
-    def fetch_initial_snapshot(self) -> SampleData:
-        """Fetch the initial sample data."""
+    def fetch_initial(self) -> SampleData:
+        """Fetch a copy of the initial sample data snapshot."""
         initial_id = self.list_snapshots()[0]
-        return self.fetch_snapshot(initial_id)
+        return self.fetch(initial_id)
 
-    def fetch_latest_snapshot(self) -> SampleData:
-        """Fetch the latest sample data."""
+    def fetch_latest(self) -> SampleData:
+        """Fetch a copy of the latest sample data snapshot."""
         latest_id = self.list_snapshots()[-1]
-        return self.fetch_snapshot(latest_id)
+        return self.fetch(latest_id)
 
-    def fetch_snapshot(self, snapshot_id: str) -> SampleData:
+    def fetch(self, snapshot_id: str) -> SampleData:
         """
         Create an independent copy of a snapshot.
 
@@ -135,11 +136,11 @@ class SampleDataSnapshots:
 
     def get_features(self, snapshot_id: str) -> list[Feature]:
         """Create a list of features in the specified snapshot."""
-        return self.fetch_snapshot(snapshot_id).get_features()
+        return self.fetch(snapshot_id).get_features()
 
     def get_roi(self, snapshot_id: str) -> list[Roi]:
         """Create a list of ROI in the specified snapshot."""
-        return self.fetch_snapshot(snapshot_id).roi
+        return self.fetch(snapshot_id).roi
 
     def list_snapshots(self) -> list[str]:
         """List snapshots in the order they were created."""
@@ -159,14 +160,14 @@ class Processor(ABC, pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(validate_assignment=True)
     id: str = ""
-    type: ClassVar[c.ProcessorType]
-    order: int | None = None
+    order: int = 0
     pipeline: str | None = None
 
     def get_processor_info(self) -> ProcessorInformation:
         """Create a ProcessingStepInfo instance."""
+        type_ = getattr(self, "accepts").value
         return ProcessorInformation(
-            id=self.id, pipeline=self.pipeline, order=self.order, parameters=self.get_parameters()
+            id=self.id, pipeline=self.pipeline, order=self.order, parameters=self.get_parameters(), type=type_
         )
 
     @overload
@@ -187,7 +188,7 @@ class Processor(ABC, pydantic.BaseModel):
         """Apply processor function to data."""
         info = self.get_processor_info()
         if isinstance(data, SampleDataSnapshots):
-            process_data = data.fetch_latest_snapshot()
+            process_data = data.fetch_latest()
             id_ = process_data.sample.id
         elif isinstance(data, SampleData):
             process_data = data
@@ -201,7 +202,7 @@ class Processor(ABC, pydantic.BaseModel):
         logger.info(msg)
 
         if isinstance(process_data, SampleData):
-            process_data.processing_info.append(info)
+            process_data.add_processor(info)
 
         if isinstance(data, SampleDataSnapshots) and isinstance(process_data, SampleData):
             data.add_snapshot(process_data, info.id)
@@ -248,7 +249,10 @@ class Processor(ABC, pydantic.BaseModel):
 
     def get_parameters(self):
         """Get instance parameters."""
-        return self.model_dump(exclude={"id", "type"})
+        params = self.model_dump()
+        params["type"] = params["type"].value
+        params["accepts"] = params["accepts"].value
+        return params
 
     def set_parameters(self, **kwargs):
         """Set instance parameters."""
@@ -275,9 +279,10 @@ class ChainedProcessor(pydantic.BaseModel):
     """Concatenate multiple processors into a single unit."""
 
     id: str
-    type: ClassVar[Literal[c.ProcessorType.PIPELINE]] = c.ProcessorType.PIPELINE
+    type: Literal[c.ProcessorType.CHAINED_PROCESSOR] = c.ProcessorType.CHAINED_PROCESSOR
+    accepts: c.DataType
     processors: Sequence[Processor]
-    order: int | None = None
+    order: int = 0
     pipeline: str | None = None
 
     @abstractmethod
@@ -300,7 +305,9 @@ class ChainedProcessor(pydantic.BaseModel):
 
     def get_processor_info(self) -> ProcessorInformation:
         """Create a ProcessingStepInfo instance."""
-        info = ProcessorInformation(id=self.id, pipeline=self.pipeline, order=self.order, parameters=dict())
+        info = ProcessorInformation(
+            id=self.id, pipeline=self.pipeline, order=self.order, parameters=dict(), type=self.accepts.value
+        )
         for proc in self.processors:
             proc_info = proc.get_processor_info()
             info.parameters.update(proc_info.parameters)
@@ -375,7 +382,8 @@ class RoiExtractor(Processor):
 
     """
 
-    type: ClassVar[Literal[c.ProcessorType.SAMPLE]] = c.ProcessorType.SAMPLE
+    type: Literal[c.ProcessorType.ROI_EXTRACTOR] = c.ProcessorType.ROI_EXTRACTOR
+    accepts: Literal[c.DataType.SAMPLE] = c.DataType.SAMPLE
 
     def get_expected_process_status_in(self) -> ProcessStatus:
         """Get the expected status of the sample data."""
@@ -404,7 +412,8 @@ class RoiTransformer(Processor):
 
     """
 
-    type: ClassVar[Literal[c.ProcessorType.SAMPLE]] = c.ProcessorType.SAMPLE
+    type: Literal[c.ProcessorType.ROI_TRANSFORMER] = c.ProcessorType.ROI_TRANSFORMER
+    accepts: Literal[c.DataType.SAMPLE] = c.DataType.SAMPLE
 
     def _func(self, sample_data: SampleData) -> None:
         for roi in sample_data.roi:
@@ -432,7 +441,8 @@ class FeatureTransformer(Processor):
 
     """
 
-    type: ClassVar[Literal[c.ProcessorType.SAMPLE]] = c.ProcessorType.SAMPLE
+    type: Literal[c.ProcessorType.FEATURE_TRANSFORMER] = c.ProcessorType.FEATURE_TRANSFORMER
+    accepts: Literal[c.DataType.SAMPLE] = c.DataType.SAMPLE
 
     def _func(self, sample_data: SampleData):
         for feature in sample_data.get_features():
@@ -468,7 +478,8 @@ class FeatureExtractor(Processor):
     """
 
     filters: Mapping[str, tuple[float | None, float | None]] = dict()
-    type: ClassVar[Literal[c.ProcessorType.SAMPLE]] = c.ProcessorType.SAMPLE
+    type: Literal[c.ProcessorType.FEATURE_EXTRACTOR] = c.ProcessorType.FEATURE_EXTRACTOR
+    accepts: Literal[c.DataType.SAMPLE] = c.DataType.SAMPLE
 
     def get_expected_process_status_in(self) -> ProcessStatus:
         """Get the expected status of the sample data."""
@@ -537,6 +548,12 @@ class FeatureMatcher(MultipleSampleProcessor):
         ...
 
 
+ProcessorItem = Annotated[
+    Union[RoiExtractor, RoiTransformer, FeatureExtractor, FeatureTransformer, ChainedProcessor],
+    pydantic.Field(discriminator="type"),
+]
+
+
 class ProcessingPipeline(pydantic.BaseModel):
     """
     Combines Processor objects into a data processing pipeline.
@@ -554,40 +571,64 @@ class ProcessingPipeline(pydantic.BaseModel):
     """
 
     id: str
-    processors: Sequence[Processor | ChainedProcessor]
+    processors: Sequence[ProcessorItem]
 
-    def validate(self) -> None:
-        """
-        Validate the pipeline.
-
-        Raises
-        ------
-        InvalidPipelineConfiguration
-            If an empty pipeline is created or if multiple processors have the
-            same id.
-        IncompatibleProcessorStatus
-            If processors with incompatible status are chained together.
-
-        """
-        if len(self.processors) == 0:
-            msg = f"No processor provided to pipeline with id={self.id}"
+    @pydantic.field_validator("processors")
+    @classmethod
+    def check_non_empty_processor(cls, processors: Sequence[ProcessorItem]) -> Sequence[ProcessorItem]:
+        """Check that the list of processors is not empty."""
+        if len(processors) == 0:
+            msg = "Pipelines must contain at least one processor."
             raise exceptions.InvalidPipelineConfiguration(msg)
+        return processors
 
-        unique_processor_id = {x.id for x in self.processors}
-        if len(unique_processor_id) < len(self.processors):
-            msg = f"Found multiple processors with same id in pipeline {self.id}."
+    @pydantic.field_validator("processors")
+    @classmethod
+    def check_unique_processor_ids(cls, processors: Sequence[ProcessorItem]) -> Sequence[ProcessorItem]:
+        """Check that the id of each processor is unique."""
+        unique_processor_id = {x.id for x in processors}
+        if len(unique_processor_id) < len(processors):
+            msg = "Found multiple processors with same id."
             raise exceptions.InvalidPipelineConfiguration(msg)
+        return processors
 
-        expected_processor_type = self.processors[0].type
-        status = _get_expected_initial_status(expected_processor_type)
-        for proc in self.processors:
-            assert proc.type == expected_processor_type
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def attach_pipeline_metadata(cls, data):
+        """Attach order value and pipeline id to each processor."""
+        for k, proc in enumerate(data["processors"]):
+            proc.order = k
+            proc.pipeline = data["id"]
+        return data
+
+    @pydantic.field_validator("processors")
+    @classmethod
+    def check_processors_accept_same_data_type(cls, processors: Sequence[ProcessorItem]) -> Sequence[ProcessorItem]:
+        """Check that all processors accept the same data type as input."""
+        expected = processors[0].accepts
+        for proc in processors:
+            if proc.accepts != expected:
+                msg = (
+                    f"Expected all processors to accept data type = {expected.value}. Processor with id={proc.id} "
+                    f"accepts data type = {proc.accepts.value}."
+                )
+                raise exceptions.IncompatibleProcessorStatus(msg)
+        return processors
+
+    @pydantic.field_validator("processors")
+    @classmethod
+    def check_compatible_processors(cls, processors: Sequence[ProcessorItem]) -> Sequence[ProcessorItem]:
+        """Check that the Output of a processor matches the expected input of the next processor."""
+        accepts = processors[0].accepts
+        status = _get_expected_initial_status(accepts)
+        for proc in processors:
             proc_status_in = proc.get_expected_process_status_in()
             check_process_status(status, proc_status_in)
             proc.update_status_out(status)
 
-        expected_final_status = _get_expected_final_status(expected_processor_type)
+        expected_final_status = _get_expected_final_status(accepts)
         check_process_status(status, expected_final_status)
+        return processors
 
     def get_processor(self, id_: str) -> Processor | ChainedProcessor:
         """Get pipeline processors based on name."""
@@ -748,18 +789,18 @@ def _fill_filter_boundaries(
     return d
 
 
-def _get_expected_initial_status(processor_type: c.ProcessorType) -> ProcessStatus:
-    if processor_type == c.ProcessorType.SAMPLE:
+def _get_expected_initial_status(data_type: c.DataType) -> ProcessStatus:
+    if data_type == c.DataType.SAMPLE:
         return ProcessStatus()
-    elif processor_type == c.ProcessorType.ASSAY:
+    elif data_type == c.DataType.ASSAY:
         return ProcessStatus(all_roi_extracted=True, all_feature_feature_extracted=True)
     else:
         raise NotImplementedError
 
 
-def _get_expected_final_status(processor_type: c.ProcessorType) -> ProcessStatus:
+def _get_expected_final_status(data_type: c.DataType) -> ProcessStatus:
     id_ = "final"
-    if processor_type is c.ProcessorType.SAMPLE:
+    if data_type is c.DataType.SAMPLE:
         return ProcessStatus(id=id_, sample_roi_extracted=True, sample_feature_extracted=True)
     else:
         raise NotImplementedError
