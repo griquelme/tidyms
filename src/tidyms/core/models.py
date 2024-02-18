@@ -29,14 +29,12 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 from math import isnan, nan
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Generic, Sequence, TypeVar
 
-import numpy as np
 import pydantic
-from pydantic.functional_validators import AfterValidator
+from numpy.typing import NDArray
+from pydantic.functional_validators import BeforeValidator
 from typing_extensions import Annotated
-
-from . import validation_utils as validation
 
 
 class Roi(pydantic.BaseModel):
@@ -51,8 +49,8 @@ class Roi(pydantic.BaseModel):
     checking for arrays and efficient serialization/deserialization.
 
     Two attributes are defined for the Roi class: `id` and `features`. Both
-    are managed by other components and should never be set directly by the
-    user.
+    are managed by other library components and should never be set directly by
+    the user.
 
     TODO: add link
     See THIS GUIDE for an example on how to create a new Roi class.
@@ -462,30 +460,36 @@ class Sample(pydantic.BaseModel):
 
     """
 
-    path: Annotated[Path, AfterValidator(validation.is_file)]
+    path: Annotated[Path, BeforeValidator(lambda x: Path(x))]
     id: str
-    ms_level: pydantic.PositiveInt = 1
-    start_time: pydantic.NonNegativeFloat = 0.0
-    end_time: pydantic.NonNegativeFloat | None = None
+    ms_level: pydantic.PositiveInt = pydantic.Field(1, repr=False)
+    start_time: pydantic.NonNegativeFloat = pydantic.Field(0.0, repr=False)
+    end_time: pydantic.NonNegativeFloat | None = pydantic.Field(None, repr=False)
     group: str = ""
     order: pydantic.NonNegativeInt = 0
-    batch: pydantic.NonNegativeInt = 0
-    extra: dict[str, Any] | None = None
+    batch: pydantic.NonNegativeInt = pydantic.Field(0, repr=False)
+    extra: dict[str, Any] | None = pydantic.Field(None, repr=False)
 
     @pydantic.field_serializer("path")
     def serialize_path(self, path: Path, _info) -> str:
         """Serialize path into a string."""
         return str(path)
 
+FeatureType = TypeVar("FeatureType", bound=Feature)
+RoiType = TypeVar("RoiType", bound=Roi)
 
-class SampleData(pydantic.BaseModel):
+class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
     """Stores data state during a sample processing pipeline."""
 
     sample: Sample
-    roi: list[Roi] = list()
+    roi: list[RoiType] = list()
     processing_info: list[ProcessorInformation] = list()
 
-    def get_features(self) -> list[Feature]:
+    def add_processor(self, processor: ProcessorInformation) -> None:
+        """Add a processor information step."""
+        self.processing_info.append(processor)
+
+    def get_features(self) -> list[FeatureType]:
         """Update the feature attribute using feature data from ROIs."""
         feature_list = list()
         for roi in self.roi:
@@ -497,8 +501,9 @@ class ProcessorInformation(pydantic.BaseModel):
     """Stores sample processing step name and parameters."""
 
     id: str
-    pipeline: str | None
-    order: int | None
+    pipeline: str | None = None
+    order: int
+    type: str
     parameters: dict[str, Any]
 
     @pydantic.field_serializer("parameters")
@@ -529,8 +534,8 @@ class MSSpectrum(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
     index: int = -1
-    mz: np.ndarray = pydantic.Field(repr=False)
-    int: np.ndarray = pydantic.Field(repr=False)
+    mz: NDArray
+    int: NDArray
     ms_level: pydantic.PositiveInt = 1
     time: pydantic.NonNegativeFloat = 0.0
     centroid: bool = True
@@ -539,6 +544,7 @@ class MSSpectrum(pydantic.BaseModel):
 class Chromatogram(pydantic.BaseModel):
     """Chromatogram representation."""
 
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
     index: int = -1
-    time: np.ndarray = pydantic.Field(repr=False)
-    int: np.ndarray = pydantic.Field(repr=False)
+    time: NDArray
+    int: NDArray
