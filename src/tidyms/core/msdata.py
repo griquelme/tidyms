@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pathlib
 from collections import OrderedDict
-from typing import IO, Generator
+from typing import Generator
 
 from .constants import MSDataMode
 from .models import Chromatogram, MSSpectrum
@@ -20,7 +20,7 @@ class MSData:
 
     Parameters
     ----------
-    src : pathlib.Path or IO
+    src : pathlib.Path
         Raw data source.
     reader : Reader or None, default=None
         The Reader class to read raw data. If ``None``, the reader is inferred
@@ -30,18 +30,19 @@ class MSData:
     cache : int, default=-1
         The maximum size of the cache, in bytes. The cache will store spectrum
         data until it surpasses this value. At this point, old entries will be
-        deleted from the cache. If set ``-1``, the cache can grow indefinitely.
+        deleted from the cache. If set to``-1``, the cache can grow
+        indefinitely.
 
     """
 
     def __init__(
         self,
-        src: pathlib.Path | IO,
+        src: pathlib.Path,
         reader: Reader | None = None,
         centroid: MSDataMode = MSDataMode.CENTROID,
         cache: int = -1
     ):
-
+        # TODO: add file-like type hint
         if isinstance(src, pathlib.Path):
             ext = src.suffix
             reader_type = get_reader_type(ext)
