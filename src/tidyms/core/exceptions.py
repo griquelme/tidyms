@@ -26,4 +26,12 @@ class ReaderNotFound(ValueError):
 
 
 class RoiTypeNotRegistered(ValueError):
-    """"Exception raised when trying to fetch a non-registered ROI type."""
+    """Exception raised when trying to fetch a non-registered ROI type."""
+
+
+class SampleAlreadyInAssay(ValueError):
+    """Exception raised when trying to add a sample with an existing id."""
+
+
+class SampleDataNotFound(ValueError):
+    """Exception raised when trying to retrieve data from a non-existing sample."""
