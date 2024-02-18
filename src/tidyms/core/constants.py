@@ -7,11 +7,19 @@ from typing import Final, List
 class ProcessorType(enum.Enum):
     """Available processor types."""
 
+    ROI_EXTRACTOR = "RoiExtractor"
+    ROI_TRANSFORMER = "RoiTransformer"
+    FEATURE_EXTRACTOR = "FeatureExtractor"
+    FEATURE_TRANSFORMER = "FeatureTransformer"
+    CHAINED_PROCESSOR = "ChainedProcessor"
+
+
+class DataType(enum.Enum):
+    """Data types that processors operates on."""
+
     SAMPLE = "sample"
     ASSAY = "assay"
     MATRIX = "matrix"
-    PIPELINE = "pipeline"
-
 
 class SeparationMode(enum.Enum):
     """Analytical method separation platform."""
