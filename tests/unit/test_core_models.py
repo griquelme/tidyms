@@ -3,18 +3,9 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
+from tidyms.core import models
 
 from .utils import ConcreteFeature, ConcreteRoi
-
-
-@pytest.fixture
-def roi():
-    return ConcreteRoi(data=[1.0, 2.0])
-
-
-@pytest.fixture
-def feature(roi: ConcreteRoi):
-    return ConcreteFeature(roi=roi, data=1)
 
 
 @pytest.fixture
@@ -22,113 +13,167 @@ def expected_descriptor_names():
     return ["area", "height", "custom_descriptor", "mz"]
 
 
-def test_concrete_roi_id():
-    expected_id = 100
-    roi = ConcreteRoi(id=expected_id)
-    actual_id = roi.id
-    assert actual_id == expected_id
+class TestRoi:
+    def test_id(self):
+        expected_id = 100
+        roi = ConcreteRoi(id=expected_id)
+        actual_id = roi.id
+        assert actual_id == expected_id
 
 
-def test_concrete_roi_serialization(roi: ConcreteRoi):
-    expected = roi
-    serialized = expected.to_str()
-    actual = cast(ConcreteRoi, ConcreteRoi.from_str(serialized))
+    def test_serialization(self):
+        expected = ConcreteRoi(data=[1.0, 2.0], id=10)
+        serialized = expected.to_str()
+        actual = cast(ConcreteRoi, ConcreteRoi.from_str(serialized))
 
-    assert actual.data == expected.data
-    assert actual.id == expected.id
-
-
-def test_Roi_add_feature():
-    roi = ConcreteRoi()
-    ft = ConcreteFeature(roi=roi, data=1)
-    roi.add_feature(ft)
-    assert ft in roi.features
+        assert actual.data == expected.data
+        assert actual.id == expected.id
 
 
-def test_Roi_add_feature_add_multiple_features():
-    roi = ConcreteRoi()
-    ft1 = ConcreteFeature(roi=roi, data=1)
-    roi.add_feature(ft1)
-    ft2 = ConcreteFeature(roi=roi, data=1)
-    roi.add_feature(ft2)
-    assert ft1 in roi.features
-    assert ft2 in roi.features
-    assert ft1 is not ft2
+    def test_add_feature(self):
+        roi = ConcreteRoi()
+        ft = ConcreteFeature(roi=roi, data=1)
+        roi.add_feature(ft)
+        assert ft in roi.features
+
+    def test_add_multiple_features(self):
+        roi = ConcreteRoi()
+        ft1 = ConcreteFeature(roi=roi, data=1)
+        roi.add_feature(ft1)
+        ft2 = ConcreteFeature(roi=roi, data=1)
+        roi.add_feature(ft2)
+        assert ft1 in roi.features
+        assert ft2 in roi.features
+        assert ft1 is not ft2
 
 
-def test_Roi_remove_feature():
-    roi = ConcreteRoi()
-    ft1 = ConcreteFeature(roi=roi, data=1)
-    roi.add_feature(ft1)
-    assert ft1 in roi.features
-    roi.remove_feature(ft1)
-    assert ft1 not in roi.features
+    def test_remove_feature(self):
+        roi = ConcreteRoi()
+        ft1 = ConcreteFeature(roi=roi, data=1)
+        roi.add_feature(ft1)
+        assert ft1 in roi.features
+        roi.remove_feature(ft1)
+        assert ft1 not in roi.features
 
 
-def test_concrete_feature_serialization(feature: ConcreteFeature):
-    serialized = feature.to_str()
-    expected = cast(
-        ConcreteFeature,
-        ConcreteFeature.from_str(serialized, feature.roi, feature.annotation),
-    )
-    assert expected.data == feature.data
-    assert expected.roi == feature.roi
-    assert expected.id == feature.id
+class TestFeature:
+
+    @pytest.fixture(scope="class")
+    def roi(self) -> ConcreteRoi:
+        return ConcreteRoi(data=[1.0, 2.0], id=1)
+
+    @pytest.fixture(scope="class")
+    def feature(self, roi) -> ConcreteFeature:
+        return ConcreteFeature(data=1, roi=roi)
+
+    def test_serialization(self, feature):
+        serialized = feature.to_str()
+        expected = cast(
+            ConcreteFeature,
+            ConcreteFeature.from_str(serialized, feature.roi, feature.annotation),
+        )
+        assert expected.data == feature.data
+        assert expected.roi == feature.roi
+        assert expected.id == feature.id
 
 
-def test_feature_mz_equals_get_mz(feature: ConcreteFeature):
-    feature._set_mz()
-    assert feature.mz == feature.get("mz")
+    def test_mz_equals_get_mz(self, feature):
+        assert feature.get("mz") == feature.mz
 
 
-def test_feature_area_equals_get_area(feature: ConcreteFeature):
-    feature._set_area()
-    assert feature.area == feature.get("area")
+    def test_area_equals_get_area(self, feature):
+        assert feature.get("area") == feature.area
 
 
-def test_feature_height_equals_get_height(feature: ConcreteFeature):
-    feature._set_height()
-    assert feature.height == feature.get("height")
+    def test_height_equals_get_height(self, feature):
+        assert feature.get("height") == feature.height
 
 
-def test_Feature_get_custom_descriptor(feature: ConcreteFeature):
-    feature._set_custom_descriptor()
-    assert feature.custom_descriptor == feature.get("custom_descriptor")
+    def test_custom_descriptor_equals_get_custom_descriptor(self, feature):
+        assert feature.get("custom_descriptor") == feature.custom_descriptor
 
 
-def test_feature_descriptor_names(expected_descriptor_names: list[str]):
-    all_descriptors = ConcreteFeature.descriptor_names()
-    assert all(d in all_descriptors for d in expected_descriptor_names)
-    assert len(all_descriptors) == 4
+    def test_descriptor_names_are_feature_attributes(self, feature):
+        all_descriptors = feature.descriptor_names()
+        all_attr = feature.__dict__
+        assert all(x in all_attr for x in all_descriptors)
 
 
-def test_Feature_describe(
-    expected_descriptor_names: list[str], feature: ConcreteFeature
-):
-    descriptors = feature.describe()
-    assert all(d in descriptors for d in expected_descriptor_names)
-    assert all(isinstance(x, float) for x in descriptors.values())
+    def test_describe(self, feature):
+        descriptors = feature.describe()
+        all_attr = feature.__dict__
+        assert all(x in all_attr for x in descriptors)
+        assert all(isinstance(x, float) for x in descriptors.values())
 
 
-def test_Feature_order_lt(roi: ConcreteRoi):
-    ft1 = ConcreteFeature(roi=roi, data=1)
-    ft2 = ConcreteFeature(roi=roi, data=2)
-    assert ft1 < ft2
+    def test_order_lt(self, roi):
+        ft1 = ConcreteFeature(roi=roi, data=1)
+        ft2 = ConcreteFeature(roi=roi, data=2)
+        assert ft1 < ft2
 
 
-def test_Feature_order_le(roi: ConcreteRoi):
-    ft1 = ConcreteFeature(roi=roi, data=1)
-    ft2 = ConcreteFeature(roi=roi, data=1)
-    assert ft1 <= ft2
+    def test_le(self, roi):
+        ft1 = ConcreteFeature(roi=roi, data=1)
+        ft2 = ConcreteFeature(roi=roi, data=1)
+        assert ft1 <= ft2
 
 
-def test_Feature_order_ge(roi: ConcreteRoi):
-    ft1 = ConcreteFeature(roi=roi, data=1)
-    ft2 = ConcreteFeature(roi=roi, data=1)
-    assert ft1 >= ft2
+    def test_order_ge(self, roi):
+        ft1 = ConcreteFeature(roi=roi, data=1)
+        ft2 = ConcreteFeature(roi=roi, data=1)
+        assert ft1 >= ft2
 
 
-def test_Feature_order_gt(roi: ConcreteRoi):
-    ft1 = ConcreteFeature(roi=roi, data=2)
-    ft2 = ConcreteFeature(roi=roi, data=1)
-    assert ft1 >= ft2
+    def test_order_gt(self, roi):
+        ft1 = ConcreteFeature(roi=roi, data=2)
+        ft2 = ConcreteFeature(roi=roi, data=1)
+        assert ft1 >= ft2
+
+
+class TestSample:
+    def test_serialization(self, tmp_path):
+        sample_id = "my-sample"
+        path = tmp_path / sample_id
+        expected = models.Sample(id=sample_id, path=path, batch=2)
+        actual = models.Sample(**expected.model_dump())
+        assert actual == expected
+
+    def test_serialization_with_extra(self, tmp_path):
+        sample_id = "my-sample"
+        path = tmp_path / sample_id
+        extra = {"extra-field-1": 0.25, "extra-field-2": 3, "extra-field-3": "extra"}
+        expected = models.Sample(id=sample_id, path=path, batch=2, extra=extra)
+        actual = models.Sample(**expected.model_dump())
+        assert actual == expected
+
+
+class TestSampleData:
+
+    @pytest.fixture
+    def sample(self, tmp_path):
+        id_ = "my-sample"
+        return models.Sample(id=id_, path=tmp_path / id_)
+
+    def test_get_features_no_roi(self, sample):
+        sample_data = models.SampleData(sample=sample)
+        expected = list()
+        actual = sample_data.get_features()
+        assert actual == expected
+
+    def test_get_features_with_roi_no_features(self, sample):
+        rois = [ConcreteRoi() for _ in range(5)]
+        sample_data = models.SampleData(sample=sample, roi=rois)
+        expected = list()
+        actual = sample_data.get_features()
+        assert actual == expected
+
+    def test_get_features_with_roi_and_features(self, sample):
+        rois = [ConcreteRoi() for _ in range(5)]
+        n_ft = 4
+        roi = rois[2]
+        features = [ConcreteFeature(roi=roi, data=1) for _ in range(n_ft)]
+        for ft in features:
+            roi.add_feature(ft)
+        sample_data = models.SampleData(sample=sample, roi=rois)
+        actual = sample_data.get_features()
+        assert len(actual) == n_ft

@@ -61,17 +61,26 @@ def sample_data_with_roi(
 
 
 class TestRoiExtractor:
-    def test_get_parameters(self, roi_extractor, proc_params):
+    def test_get_parameters(self, roi_extractor):
 
-        expected = {"param1": 10, "param2": "default"}
-        expected.update(proc_params)
+        expected = {
+            "param1": roi_extractor.param1,
+            "param2": roi_extractor.param2,
+            "id": roi_extractor.id,
+            "type": roi_extractor.type.value,
+            "accepts": roi_extractor.accepts.value,
+            "order": roi_extractor.order,
+            "pipeline": None,
+        }
         actual = roi_extractor.get_parameters()
         assert actual == expected
 
-    def test_set_parameters(self, roi_extractor, proc_params):
-        expected = {"param1": 20, "param2": "new_value"}
-        expected.update(proc_params)
-        roi_extractor.set_parameters(**expected)
+    def test_set_parameters(self, roi_extractor):
+        expected = roi_extractor.get_parameters()
+        new_values = {"param1": 20, "param2": "new_value"}
+        expected.update(new_values)
+
+        roi_extractor.set_parameters(**new_values)
         actual = roi_extractor.get_parameters()
         assert actual == expected
 
@@ -106,9 +115,8 @@ class TestProcessingPipeline:
         feature_extractor.id = roi_extractor.id
         id_ = "my-pipeline"
         processing_steps = (roi_extractor, feature_extractor)
-        pipeline = processors.ProcessingPipeline(id=id_, processors=processing_steps)
-        with pytest.raises(exceptions.InvalidPipelineConfiguration):
-            pipeline.validate()
+        with pytest.raises(pydantic.ValidationError):
+            processors.ProcessingPipeline(id=id_, processors=processing_steps)
 
     def test_validate_without_roi_extractor_in_first_step_raises_error(
         self,
@@ -118,9 +126,8 @@ class TestProcessingPipeline:
     ):
         id_ = "my-pipeline"
         steps = (roi_transformer, feature_extractor, feature_transformer)
-        pipeline = processors.ProcessingPipeline(id=id_, processors=steps)
-        with pytest.raises(exceptions.IncompatibleProcessorStatus):
-            pipeline.validate()
+        with pytest.raises(pydantic.ValidationError):
+            processors.ProcessingPipeline(id=id_, processors=steps)
 
     def test_validate_feature_transformer_without_previous_feature_extractor_raises_error(
         self,
@@ -130,9 +137,9 @@ class TestProcessingPipeline:
     ):
         id_ = "my-pipeline"
         steps = (roi_extractor, roi_transformer, feature_transformer)
-        pipeline = processors.ProcessingPipeline(id=id_, processors=steps)
-        with pytest.raises(exceptions.IncompatibleProcessorStatus):
-            pipeline.validate()
+
+        with pytest.raises(pydantic.ValidationError):
+            processors.ProcessingPipeline(id=id_, processors=steps)
 
     def test_validate_feature_transformer_with_previous_feature_extractor_ok(
         self,
@@ -143,8 +150,7 @@ class TestProcessingPipeline:
     ):
         id_ = "my-pipeline"
         steps = (roi_extractor, roi_transformer, feature_extractor, feature_transformer)
-        pipeline = processors.ProcessingPipeline(id=id_, processors=steps)
-        pipeline.validate()
+        processors.ProcessingPipeline(id=id_, processors=steps)
         assert True
 
     def test_get_processor(self, pipeline: processors.ProcessingPipeline):
