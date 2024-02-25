@@ -13,7 +13,6 @@ ProcessorType = TypeVar("ProcessorType", bound=Processor)
 
 
 _REGISTERED_FEATURES: dict[str, type[Feature]] = dict()
-_REGISTERED_PROCESSORS: dict[str, type[Processor]] = dict()
 _REGISTERED_ROIS: dict[str, type[Roi]] = dict()
 _REGISTERED_READERS: dict[str, type[Reader]] = dict()
 
@@ -112,53 +111,6 @@ def register_feature(feature: type[FeatureType]) -> type[FeatureType]:
     return feature
 
 
-def get_processor_type(type_: str) -> type[Processor]:
-    """
-    Retrieve a Processor type from the registry.
-
-    Parameters
-    ----------
-    type_ : str
-        The name of the Processor to retrieve.
-
-    Returns
-    -------
-    type[Processor]
-
-    Raises
-    ------
-    ProcessorTypeNotRegistered
-        If a non-registered Processor name is requested
-
-    """
-    try:
-        return _REGISTERED_PROCESSORS[type_]
-    except KeyError as e:
-        raise exceptions.ProcessorTypeNotRegistered(type_) from e
-
-
-def list_processor_types() -> list[str]:
-    """Retrieve the list of Feature types."""
-    return list(_REGISTERED_PROCESSORS)
-
-
-def register_processor(processor: type[ProcessorType]) -> type[ProcessorType]:
-    """
-    Register a Processor into the registry.
-
-    Parameters
-    ----------
-    processor : type[Processor]
-
-    Returns
-    -------
-    type[Processor]
-
-    """
-    _REGISTERED_PROCESSORS[processor.__name__] = processor
-    return processor
-
-
 def get_reader_type(type_: str) -> type[Reader]:
     """
     Retrieve a Reader type from the registry.
@@ -188,20 +140,3 @@ def get_reader_type(type_: str) -> type[Reader]:
 def list_reader_types() -> list[str]:
     """Retrieve the list of Feature types."""
     return list(_REGISTERED_READERS)
-
-
-def register_reader(processor: type[ProcessorType]) -> type[ProcessorType]:
-    """
-    Register a Processor into the registry.
-
-    Parameters
-    ----------
-    processor : type[Processor]
-
-    Returns
-    -------
-    type[Processor]
-
-    """
-    _REGISTERED_PROCESSORS[processor.__name__] = processor
-    return processor
