@@ -27,18 +27,19 @@ SampleDataSnapshot :
 
 from __future__ import annotations
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from math import inf
-from typing import Generic, Literal, Mapping, Protocol, Sequence, TypedDict, TypeVar, Union, overload
+from typing import Any, Generic, Literal, Mapping, Protocol, Sequence, TypedDict, TypeVar, Union, cast, overload
 
 import pydantic
 from typing_extensions import Annotated
 
 from . import constants as c
 from . import exceptions
-from .models import Feature, ProcessorInformation, Roi, Sample
+from .models import Feature, Roi, Sample
 
 logger = logging.getLogger(__file__)
 
@@ -125,11 +126,7 @@ class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
 
     sample: Sample
     roi: list[RoiType] = list()
-    processing_info: list[ProcessorInformation] = list()
-
-    def add_processor(self, processor: ProcessorInformation) -> None:
-        """Add a processor information step."""
-        self.processing_info.append(processor)
+    pipeline: str | None = None
 
     def get_features(self) -> list[FeatureType]:
         """Update the feature attribute using feature data from ROIs."""
@@ -258,13 +255,6 @@ class Processor(ABC, pydantic.BaseModel):
     order: int = 0
     pipeline: str | None = None
 
-    def get_processor_info(self) -> ProcessorInformation:
-        """Create a ProcessingStepInfo instance."""
-        type_ = getattr(self, "accepts").value
-        return ProcessorInformation(
-            id=self.id, pipeline=self.pipeline, order=self.order, parameters=self.get_parameters(), type=type_
-        )
-
     @overload
     def process(self, data: SampleData) -> SampleData:
         ...
@@ -281,7 +271,7 @@ class Processor(ABC, pydantic.BaseModel):
         self, data: SampleData | SampleDataSnapshots | AssayDataInterface
     ) -> SampleData | SampleDataSnapshots | AssayDataInterface:
         """Apply processor function to data."""
-        info = self.get_processor_info()
+        config = self.to_config()
         if isinstance(data, SampleDataSnapshots):
             process_data = data.fetch_latest()
             id_ = process_data.sample.id
@@ -292,15 +282,12 @@ class Processor(ABC, pydantic.BaseModel):
             process_data = data
             id_ = "dummy_id"  # FIXME: add id to AssayData
 
-        msg = f"Applying {info.id} with parameters={info.parameters} to sample={id_}."
+        msg = f"Applying {config.id} with parameters={config.parameters} to sample={id_}."
         self._func(process_data)
         logger.info(msg)
 
-        if isinstance(process_data, SampleData):
-            process_data.add_processor(info)
-
         if isinstance(data, SampleDataSnapshots) and isinstance(process_data, SampleData):
-            data.add_snapshot(process_data, info.id)
+            data.add_snapshot(process_data, config.id)
 
         return data
 
@@ -353,6 +340,16 @@ class Processor(ABC, pydantic.BaseModel):
         """Set instance parameters."""
         self.__dict__.update(kwargs)
 
+    def to_config(self) -> ProcessorConfiguration:
+        """Convert processor into a configuration dictionary."""
+        return ProcessorConfiguration(
+            id=self.id,
+            type=self.__class__.__name__,
+            order=self.order,
+            pipeline=self.pipeline,
+            parameters=self.model_dump(exclude={"type", "accepts"}),
+        )
+
     @abstractmethod
     def get_expected_process_status_in(self) -> ProcessStatus:
         """Get the expected process status of the sample data."""
@@ -375,10 +372,14 @@ class ChainedProcessor(pydantic.BaseModel):
 
     id: str
     type: Literal[c.ProcessorType.CHAINED_PROCESSOR] = c.ProcessorType.CHAINED_PROCESSOR
-    accepts: c.DataType
-    processors: Sequence[Processor]
+    processors: Sequence[ChainedProcessorUnit] = list()
     order: int = 0
     pipeline: str | None = None
+
+    @property
+    def accepts(self) -> c.DataType:
+        """Accepts getter."""
+        return self.processors[0].accepts
 
     @abstractmethod
     def get_default_parameters(
@@ -398,15 +399,15 @@ class ChainedProcessor(pydantic.BaseModel):
         """Get instance parameters."""
         return self.model_dump(exclude={"id", "type"})
 
-    def get_processor_info(self) -> ProcessorInformation:
-        """Create a ProcessingStepInfo instance."""
-        info = ProcessorInformation(
-            id=self.id, pipeline=self.pipeline, order=self.order, parameters=dict(), type=self.accepts.value
+    def to_config(self) -> ProcessorConfiguration:
+        """Create a processor configuration object."""
+        return ProcessorConfiguration(
+            id=self.id,
+            type=self.__class__.__name__,
+            pipeline=self.pipeline,
+            order=self.order,
+            parameters={"processors": [x.to_config() for x in self.processors]}
         )
-        for proc in self.processors:
-            proc_info = proc.get_processor_info()
-            info.parameters.update(proc_info.parameters)
-        return info
 
     @overload
     def process(self, data: SampleData) -> SampleData:
@@ -643,10 +644,105 @@ class FeatureMatcher(MultipleSampleProcessor):
         ...
 
 
+ChainedProcessorUnit = Annotated[
+    Union[RoiExtractor, RoiTransformer, FeatureExtractor, FeatureTransformer],
+    pydantic.Field(discriminator="type"),
+]
+
 ProcessorItem = Annotated[
     Union[RoiExtractor, RoiTransformer, FeatureExtractor, FeatureTransformer, ChainedProcessor],
     pydantic.Field(discriminator="type"),
 ]
+
+
+class ProcessorConfiguration(pydantic.BaseModel):
+    """Stores sample processing step name and parameters."""
+
+    id: str
+    pipeline: str | None = None
+    order: int
+    type: str
+    parameters: dict[str, Any]
+
+    @pydantic.field_serializer("parameters")
+    def serialize_parameters(self, parameters: dict[str, Any], _info) -> str:
+        """Serialize parameters field into a JSON string."""
+        return json.dumps(parameters)
+
+    @pydantic.field_validator("parameters", mode="before")
+    @classmethod
+    def deserialize_json_str(cls, processors: dict[str, Any] | str) -> dict[str, Any]:
+        """Deserialize a parameter JSON string into a dictionary."""
+        if isinstance(processors, str):
+            processors = cast(dict[str, Any], json.loads(processors))
+        return processors
+
+
+class ProcessorRegistry:
+    """Maintain a registry of available processors."""
+
+    _PROCESSORS = dict()
+
+    @classmethod
+    def list_available(cls) -> list[str]:
+        """Retrieve name of all available processors."""
+        return list(cls._PROCESSORS)
+
+    @classmethod
+    def create_from_config(cls, config: ProcessorConfiguration) -> ProcessorItem:
+        """Create a processor instance from a processor configuration."""
+        proc_cls = cls.get_processor(config.type)
+        if isinstance(proc_cls, ChainedProcessor):
+            config.parameters["processors"] = [cls.create_from_config(x) for x in config.parameters["processors"]]
+            return ChainedProcessor(**config.parameters)
+        return proc_cls(**config.parameters)
+
+
+    @classmethod
+    def get_processor(cls, type_: str) -> type[ProcessorItem]:
+        """
+        Retrieve a Processor type from the registry.
+
+        Parameters
+        ----------
+        type_ : str
+            The name of the Processor to retrieve.
+
+        Returns
+        -------
+        type[Processor]
+
+        Raises
+        ------
+        ProcessorTypeNotRegistered
+            If a non-registered Processor name is requested
+
+        """
+        try:
+            return cls._PROCESSORS[type_]
+        except KeyError as e:
+            raise exceptions.ProcessorTypeNotRegistered(type_) from e
+
+    @classmethod
+    def register(cls, processor: type[ProcessorItem]) -> type[ProcessorItem]:
+        """
+        Add a processor to the registry.
+
+        Parameters
+        ----------
+        processor : type[Processor]
+
+        Returns
+        -------
+        type[Processor]
+
+        """
+        name = processor.__name__
+        if name in cls._PROCESSORS:
+            raise exceptions.RegisteredProcessorError(name)
+
+        cls._PROCESSORS[name] = processor
+        return processor
 
 
 class ProcessingPipeline(pydantic.BaseModel):
@@ -692,15 +788,23 @@ class ProcessingPipeline(pydantic.BaseModel):
     def attach_pipeline_metadata(cls, data):
         """Attach order value and pipeline id to each processor."""
         for k, proc in enumerate(data["processors"]):
-            proc.order = k
-            proc.pipeline = data["id"]
+            if isinstance(proc, Processor):
+                proc.order = k
+                proc.pipeline = data["id"]
+            else:
+                proc["order"] = k
+                proc["pipeline"] = data["id"]
         return data
 
     @pydantic.field_validator("processors")
     @classmethod
     def check_processors_accept_same_data_type(cls, processors: Sequence[ProcessorItem]) -> Sequence[ProcessorItem]:
         """Check that all processors accept the same data type as input."""
-        expected = processors[0].accepts
+        first = processors[0]
+        if isinstance(first, ChainedProcessor) and first.processors:
+            expected = first.processors[0].accepts
+        else:
+            expected = first.accepts
         for proc in processors:
             if proc.accepts != expected:
                 msg = (
@@ -777,6 +881,16 @@ class ProcessingPipeline(pydantic.BaseModel):
         """
         for processor in self.processors:
             processor.set_default_parameters(instrument, separation, polarity)
+
+    def to_dict(self) -> dict:
+        """Create a dictionary with pipeline configuration."""
+        return {"id": self.id, "processors": [x.to_config() for x in self.processors]}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ProcessingPipeline:
+        """Create a new pipeline instance from a configuration dictionary."""
+        processors = [ProcessorRegistry.create_from_config(x) for x in d["processors"]]
+        return ProcessingPipeline(id=d["id"], processors=processors)
 
     @overload
     def process(self, data: AssayDataInterface) -> AssayDataInterface:
