@@ -21,6 +21,10 @@ class ProcessorTypeNotRegistered(ValueError):
     """Exception raised when trying to fetch a non-registered Processor type."""
 
 
+class RegisteredProcessorError(ValueError):
+    """Exception raised when trying to register a processor with an existing name."""
+
+
 class ReaderNotFound(ValueError):
     """Exception raised when a reader is not found for a specific format."""
 
