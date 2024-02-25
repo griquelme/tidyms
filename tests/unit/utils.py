@@ -37,7 +37,7 @@ class ConcreteFeature(models.Feature):
             and (self.annotation == other.annotation)
         )
 
-
+@processors.ProcessorRegistry.register
 class DummyRoiExtractor(processors.RoiExtractor):
     param1: int = 10
     param2: str = "default"
@@ -54,6 +54,7 @@ class DummyRoiExtractor(processors.RoiExtractor):
         return dict()
 
 
+@processors.ProcessorRegistry.register
 class DummyRoiTransformer(processors.RoiTransformer):
     param1: float = 10.0
     param2: bool = False
@@ -70,6 +71,7 @@ class DummyRoiTransformer(processors.RoiTransformer):
         return dict()
 
 
+@processors.ProcessorRegistry.register
 class DummyFeatureExtractor(processors.FeatureExtractor):
     param1: int = 2
     param2: str = "default"
@@ -91,6 +93,7 @@ class DummyFeatureExtractor(processors.FeatureExtractor):
         return dict()
 
 
+@processors.ProcessorRegistry.register
 class DummyFeatureTransformer(processors.FeatureTransformer):
     param1: float = 10.0
     param2: bool = False
