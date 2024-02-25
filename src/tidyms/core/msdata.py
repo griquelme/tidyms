@@ -140,7 +140,7 @@ class MSDataCache:
         """Store a spectrum."""
         self.cache[spectrum.index] = spectrum
         self.size += _get_spectrum_size(spectrum)
-        self.clean()
+        self.trim_cache()
 
     def get(self, index: int) -> MSSpectrum | None:
         """Retrieve a spectrum from the cache. If not found, returns ``None``."""
@@ -149,7 +149,7 @@ class MSDataCache:
              self.cache.move_to_end(index)
         return spectrum
 
-    def clean(self) -> None:
+    def trim_cache(self) -> None:
         """Delete entries until the cache size is lower than max_size."""
         if self.max_size > -1:
             while self.size > self.max_size:
