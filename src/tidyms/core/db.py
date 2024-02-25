@@ -19,7 +19,9 @@ from sqlalchemy import Column, Float, ForeignKey, Integer, String, delete, selec
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
-from .models import Annotation, Feature, Roi, Sample, SampleData
+from . import exceptions
+from .models import Annotation, Feature, Roi, Sample
+from .processors import ProcessingPipeline, ProcessorConfiguration, ProcessorRegistry, SampleData
 
 Base = orm.declarative_base()
 
@@ -27,13 +29,14 @@ RoiType = TypeVar("RoiType", bound=Roi)
 FeatureType = TypeVar("FeatureType", bound=Feature)
 
 
-class ProcessParameterModel(Base):
+class ProcessorModel(Base):
     """Stores model parameters, step name and pipeline name."""
 
     __tablename__ = "processors"
     id: Mapped[str] = mapped_column(sa.String, primary_key=True)
     order: Mapped[int] = mapped_column(Integer)
     parameters: Mapped[str] = mapped_column(sa.String)
+    type: Mapped[str] = mapped_column(sa.String)
     pipeline: Mapped[str] = mapped_column(sa.String)
 
 
@@ -49,6 +52,7 @@ class SampleModel(Base):
     group: Mapped[str] = mapped_column(String, nullable=True)
     order: Mapped[int] = mapped_column(Integer, unique=True)
     batch: Mapped[int] = mapped_column(Integer)
+    extra: Mapped[str] = mapped_column(String, nullable=True)
 
 
 class ProcessedSampleModel(Base):
@@ -179,13 +183,13 @@ class AssayData(Generic[FeatureType, RoiType]):
         if not hasattr(cls, "DescriptorModel"):
             cls.DescriptorModel = _create_descriptor_table(feature_type, Base.metadata)
 
-    def add_samples(self, samples: list[Sample]):
+    def _add_samples(self, *samples: Sample) -> None:
         """
         Add samples into the DB.
 
         Parameters
         ----------
-        samples : list[Sample]
+        samples : Sample
 
         Raises
         ------
@@ -197,9 +201,9 @@ class AssayData(Generic[FeatureType, RoiType]):
             try:
                 session.add_all([SampleModel(**x.model_dump()) for x in samples])
                 session.commit()
-            except IntegrityError:
+            except IntegrityError as e:
                 msg = "Trying to insert a sample with an existing ID"
-                raise ValueError(msg)
+                raise exceptions.SampleAlreadyInAssay(msg) from e
 
     def flag_processed(self, samples: list[Sample], pipeline: str):
         """
@@ -286,7 +290,7 @@ class AssayData(Generic[FeatureType, RoiType]):
                 processed_samples.append(sample)
         return processed_samples
 
-    def delete_samples(self, sample_ids: list[str]) -> None:
+    def _delete_sample(self, sample_id: str) -> None:
         """
         Delete samples stored in the DB.
 
@@ -297,22 +301,17 @@ class AssayData(Generic[FeatureType, RoiType]):
 
         """
         with self.SessionFactory() as session:
-            stmt = delete(SampleModel).where(SampleModel.id.in_(sample_ids))
+            stmt = delete(SampleModel).where(SampleModel.id == sample_id)
             session.execute(stmt)
             session.commit()
 
-    def set_processing_parameters(self, step: str, pipeline: str, parameters: dict):
+    def add_pipeline(self, pipeline: ProcessingPipeline):
         """
         Store preprocessing parameters of a processing step in the DB.
 
         Parameters
         ----------
-        step : str
-            Preprocessing step name.
-        pipeline : str
-            Name of the pipeline that the preprocessing step is part of.
-        parameters : dict
-            Parameters used in the preprocessing step.
+        proc: ProcessorInformation
 
         Raises
         ------
@@ -321,47 +320,37 @@ class AssayData(Generic[FeatureType, RoiType]):
             are defined by `PREPROCESSING_STEPS` in the `_constants` module.
 
         """
-        param_str = json.dumps(parameters)
+        processors = [ProcessorModel(**x.to_config().model_dump()) for x in pipeline.processors]
         with self.SessionFactory() as session:
-            params_model = ProcessParameterModel(
-                step=step, parameters=param_str, pipeline=pipeline
-            )
-            session.add(params_model)
+            session.add_all(processors)
             session.commit()
 
-    def get_processing_parameters(self, step: str) -> dict:
+    def fetch_pipeline(self, pipeline_id: str) -> ProcessingPipeline:
         """
-        Retrieve preprocessing parameters of a step from the DB.
+        Retrieve processing parameter information from a given pipeline.
 
         Parameters
         ----------
-        step : str
-            Preprocessing step name.
-
-        Returns
-        -------
-        parameters : dict
-            Parameters used in the preprocessing step.
-
-        Raises
-        ------
-        ValueError
-            If the preprocessing step name is not a valid name. Valid names
-            are defined by `PREPROCESSING_STEPS` in the `_constants` module.
+        pipeline_id : str
 
         """
         with self.SessionFactory() as session:
-            stmt = select(ProcessParameterModel).where(ProcessParameterModel.id == step)
+            stmt = select(ProcessorModel).where(ProcessorModel.pipeline == pipeline_id)
             results = session.execute(stmt)
-            param_model = results.scalar()
-            if param_model is None:
-                params = None
-            else:
-                params = json.loads(param_model.parameters)
-        if params is None:
-            msg = f"{step} not found in assay data."
-            raise ValueError(msg)
-        return params
+            config_list = list()
+            for row in results:
+                proc = row.ProcessorModel
+                proc_info = ProcessorConfiguration(
+                    id=proc.id,
+                    pipeline=proc.pipeline,
+                    order=proc.order,
+                    parameters=proc.parameters,
+                    type=proc.type,
+                    )
+                config_list.append(proc_info)
+            config_list = sorted(config_list, key=lambda x: x.order)
+            processors = [ProcessorRegistry.create_from_config(x) for x in config_list]
+        return ProcessingPipeline(id=pipeline_id, processors=processors)
 
     def get_pipeline_parameters(self, name: str) -> dict[str, dict]:
         """
@@ -380,8 +369,8 @@ class AssayData(Generic[FeatureType, RoiType]):
 
         """
         with self.SessionFactory() as session:
-            stmt = select(ProcessParameterModel).where(
-                ProcessParameterModel.pipeline == name
+            stmt = select(ProcessorModel).where(
+                ProcessorModel.pipeline == name
             )
             parameters = dict()
             for row in session.execute(stmt):
@@ -404,7 +393,7 @@ class AssayData(Generic[FeatureType, RoiType]):
         parameter_model_list = list()
         for step, param in parameters.items():
             param_str = json.dumps(param)
-            model = ProcessParameterModel(
+            model = ProcessorModel(
                 step=step, parameters=param_str, pipeline=name
             )
             parameter_model_list.append(model)
@@ -432,7 +421,7 @@ class AssayData(Generic[FeatureType, RoiType]):
             )
 
         with self.SessionFactory() as session:
-            session.execute(sa.update(ProcessParameterModel), update)
+            session.execute(sa.update(ProcessorModel), update)
             session.commit()
 
     def _label_roi_list(self, *rois: RoiType):
@@ -804,12 +793,6 @@ class AssayData(Generic[FeatureType, RoiType]):
                     annotation_dict[c].append(val)
         return annotation_dict
 
-    def get_sample_data(self, sample_id: str) -> SampleData:
-        """Retrieve a SampleData instance."""
-        sample = self.search_sample(sample_id)
-        # roi_list = self.get_roi_list(sample)
-        return SampleData(sample=sample)
-
     def search_sample(self, sample_id: str) -> Sample:
         """
         Search a sample in the DB.
@@ -836,11 +819,32 @@ class AssayData(Generic[FeatureType, RoiType]):
             raise ValueError(msg)
         return _sample_model_to_sample(result)
 
-    def store_sample_data(self, data: SampleData):
+    def add_sample_data(self, data: SampleData[FeatureType, RoiType]) -> None:
         """Store a SampleData instance."""
-        # TODO: Fix type hints
-        self.add_roi_list(data.sample, *cast(Sequence[RoiType], data.roi))
-        self.add_features(data.sample, *cast(Sequence[FeatureType], data.get_features()))
+        if data.sample.id in [x.id for x in self.get_samples()]:
+            raise exceptions.SampleAlreadyInAssay(data.sample.id)
+
+        self._add_samples(data.sample)
+        self.add_roi_list(data.sample, *data.roi)
+        self.add_features(data.sample, *data.get_features())
+
+    def fetch_sample_data(self, sample: Sample) -> SampleData:
+        """Store a SampleData instance."""
+        if sample.id not in [x.id for x in self.get_samples()]:
+            raise exceptions.SampleDataNotFound(sample.id)
+        rois = self.get_roi_list(sample, load_features=True)
+        return SampleData(sample=sample, roi=rois)
+
+    def delete_sample_data(self, sample: Sample) -> None:
+        """Delete a sample data."""
+        with self.SessionFactory() as session:
+            stmt = delete(SampleModel).where(SampleModel.id == sample.id)
+            session.execute(stmt)
+
+            stmt = delete(RoiModel).where(RoiModel.sample_id == sample.id)
+            session.execute(stmt)
+
+            session.commit()
 
     def update_feature_labels(self, labels: dict[int, int]):
         """
@@ -936,13 +940,5 @@ def _annotation_model_to_annotation(model: AnnotationModel) -> Annotation:
 
 def _sample_model_to_sample(model: SampleModel) -> Sample:
     """Convert to a Sample object."""
-    return Sample(
-        path=Path(model.path),
-        id=model.id,
-        ms_level=model.ms_level,
-        start_time=model.start_time,
-        end_time=model.end_time,
-        group=model.group,
-        order=model.order,
-        batch=model.batch,
-    )
+    model_dict = {field.name: getattr(model, field.name) for field in model.__table__.c}
+    return Sample(**model_dict)
