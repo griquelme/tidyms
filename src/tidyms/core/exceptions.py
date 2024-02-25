@@ -39,3 +39,7 @@ class SampleAlreadyInAssay(ValueError):
 
 class SampleDataNotFound(ValueError):
     """Exception raised when trying to retrieve data from a non-existing sample."""
+
+
+class PipelineNotFound(ValueError):
+    """Exception raised when a pipeline is not found in the DB."""
