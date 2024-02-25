@@ -4,7 +4,7 @@ import pathlib
 import pydantic
 import pytest
 from tidyms.core import exceptions, processors
-from tidyms.core.models import Annotation, SampleData
+from tidyms.core.models import Annotation, Sample
 
 from . import utils
 
@@ -42,27 +42,55 @@ def pipeline(
     feature_transformer: utils.DummyFeatureTransformer,
 ):
     id_ = "my-pipeline"
-    steps = (roi_extractor, roi_transformer, feature_extractor, feature_transformer)
+    steps = [roi_extractor, roi_transformer, feature_extractor, feature_transformer]
     return processors.ProcessingPipeline(id=id_, processors=steps)
 
 
 @pytest.fixture
 def sample_data(tmp_path: pathlib.Path):
     sample = utils.create_dummy_sample(tmp_path, 1)
-    return SampleData(sample=sample)
+    return processors.SampleData(sample=sample)
 
 
 @pytest.fixture
-def sample_data_with_roi(
-    sample_data: SampleData, roi_extractor: utils.DummyRoiExtractor
-):
+def sample_data_with_roi(sample_data: processors.SampleData, roi_extractor: utils.DummyRoiExtractor):
     roi_extractor.process(sample_data)
     return sample_data
 
 
+class TestSampleData:
+    @pytest.fixture
+    def sample(self, tmp_path):
+        id_ = "my-sample"
+        return Sample(id=id_, path=tmp_path / id_)
+
+    def test_get_features_no_roi(self, sample):
+        sample_data = processors.SampleData(sample=sample)
+        expected = list()
+        actual = sample_data.get_features()
+        assert actual == expected
+
+    def test_get_features_with_roi_no_features(self, sample):
+        rois = [utils.ConcreteRoi() for _ in range(5)]
+        sample_data = processors.SampleData(sample=sample, roi=rois)
+        expected = list()
+        actual = sample_data.get_features()
+        assert actual == expected
+
+    def test_get_features_with_roi_and_features(self, sample):
+        rois = [utils.ConcreteRoi() for _ in range(5)]
+        n_ft = 4
+        roi = rois[2]
+        features = [utils.ConcreteFeature(roi=roi, data=1) for _ in range(n_ft)]
+        for ft in features:
+            roi.add_feature(ft)
+        sample_data = processors.SampleData(sample=sample, roi=rois)
+        actual = sample_data.get_features()
+        assert len(actual) == n_ft
+
+
 class TestRoiExtractor:
     def test_get_parameters(self, roi_extractor):
-
         expected = {
             "param1": roi_extractor.param1,
             "param2": roi_extractor.param2,
@@ -93,13 +121,20 @@ class TestRoiExtractor:
         roi_extractor.process(sample_data)
         assert sample_data.roi
 
+    def test_to_config(self, roi_extractor: utils.DummyRoiExtractor):
+        config = roi_extractor.to_config()
+        roi_extractor_from_config = processors.ProcessorRegistry.create_from_config(config)
+        assert roi_extractor == roi_extractor_from_config
+
 
 class TestFeatureExtractor:
     def test_set_invalid_filter_range_None_normalizes_to_inf(self, feature_extractor: utils.DummyFeatureExtractor):
         filters = {"height": (None, 10.0)}
         feature_extractor.filters = filters
 
-    def test_process(self, sample_data_with_roi: SampleData, feature_extractor: utils.DummyFeatureExtractor):
+    def test_process(
+        self, sample_data_with_roi: processors.SampleData, feature_extractor: utils.DummyFeatureExtractor
+    ):
         sample_data = sample_data_with_roi
         assert not sample_data.get_features()
         feature_extractor.process(sample_data)
@@ -162,6 +197,11 @@ class TestProcessingPipeline:
         processor_id = "invalid processor id"
         with pytest.raises(exceptions.ProcessorNotFound):
             pipeline.get_processor(processor_id)
+
+    def test_to_dict(self, pipeline: processors.ProcessingPipeline):
+        d = pipeline.to_dict()
+        pipeline_from_dict = processors.ProcessingPipeline.from_dict(d)
+        assert pipeline_from_dict == pipeline
 
 
 def test_is_feature_descriptor_in_valid_range_valid_range():

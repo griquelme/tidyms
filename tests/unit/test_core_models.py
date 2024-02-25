@@ -145,35 +145,3 @@ class TestSample:
         expected = models.Sample(id=sample_id, path=path, batch=2, extra=extra)
         actual = models.Sample(**expected.model_dump())
         assert actual == expected
-
-
-class TestSampleData:
-
-    @pytest.fixture
-    def sample(self, tmp_path):
-        id_ = "my-sample"
-        return models.Sample(id=id_, path=tmp_path / id_)
-
-    def test_get_features_no_roi(self, sample):
-        sample_data = models.SampleData(sample=sample)
-        expected = list()
-        actual = sample_data.get_features()
-        assert actual == expected
-
-    def test_get_features_with_roi_no_features(self, sample):
-        rois = [ConcreteRoi() for _ in range(5)]
-        sample_data = models.SampleData(sample=sample, roi=rois)
-        expected = list()
-        actual = sample_data.get_features()
-        assert actual == expected
-
-    def test_get_features_with_roi_and_features(self, sample):
-        rois = [ConcreteRoi() for _ in range(5)]
-        n_ft = 4
-        roi = rois[2]
-        features = [ConcreteFeature(roi=roi, data=1) for _ in range(n_ft)]
-        for ft in features:
-            roi.add_feature(ft)
-        sample_data = models.SampleData(sample=sample, roi=rois)
-        actual = sample_data.get_features()
-        assert len(actual) == n_ft
