@@ -4860,7 +4860,7 @@ class DartMSAssay:
             p9.ggplot(data=temp, mapping=p9.aes(x="pc1", y="pc2", colour="group", group="group", label="file"))
             + p9.stat_ellipse(data=temp, alpha=0.5, level=0.95)
             + p9.geom_point(alpha=0.8)
-            + p9.xlab(comp2_title)
+            + p9.xlab(comp1_title)
             + p9.ylab(comp2_title)
             + p9.ggtitle("%s with %s imputation and %s scaling" % (embedding, imputation, scaling))
         )
