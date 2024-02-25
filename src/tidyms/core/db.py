@@ -159,6 +159,77 @@ class AssayData(Generic[FeatureType, RoiType]):
         """Get the first feature id available."""
         return self._feature_id
 
+    def add_sample_data(self, data: SampleData[FeatureType, RoiType]) -> None:
+        """Store a SampleData instance."""
+        if data.sample.id in [x.id for x in self.get_samples()]:
+            raise exceptions.SampleAlreadyInAssay(data.sample.id)
+
+        self._add_samples(data.sample)
+        self.add_roi_list(data.sample, *data.roi)
+        self.add_features(data.sample, *data.get_features())
+
+    def fetch_sample_data(self, sample: Sample) -> SampleData:
+        """Store a SampleData instance."""
+        if sample.id not in [x.id for x in self.get_samples()]:
+            raise exceptions.SampleDataNotFound(sample.id)
+        rois = self.get_roi_list(sample, load_features=True)
+        return SampleData(sample=sample, roi=rois)
+
+    def delete_sample_data(self, sample: Sample) -> None:
+        """Delete a sample data."""
+        with self.SessionFactory() as session:
+            stmt = delete(SampleModel).where(SampleModel.id == sample.id)
+            session.execute(stmt)
+
+            stmt = delete(RoiModel).where(RoiModel.sample_id == sample.id)
+            session.execute(stmt)
+
+            session.commit()
+
+    def add_pipeline(self, pipeline: ProcessingPipeline):
+        """
+        Store pipeline processing parameters.
+
+        Parameters
+        ----------
+        pipeline : ProcessingPipeline
+
+        """
+        # TODO: check multiple pipelines with same id
+        processors = [ProcessorModel(**x.to_config().model_dump()) for x in pipeline.processors]
+        with self.SessionFactory() as session:
+            session.add_all(processors)
+            session.commit()
+
+    def fetch_pipeline(self, pipeline_id: str) -> ProcessingPipeline:
+        """
+        Retrieve a processing pipeline.
+
+        Parameters
+        ----------
+        pipeline_id : str
+
+        """
+        with self.SessionFactory() as session:
+            stmt = select(ProcessorModel).where(ProcessorModel.pipeline == pipeline_id)
+            results = session.execute(stmt)
+            config_list = list()
+            for row in results:
+                proc = row.ProcessorModel
+                proc_info = ProcessorConfiguration(
+                    id=proc.id,
+                    pipeline=proc.pipeline,
+                    order=proc.order,
+                    parameters=proc.parameters,
+                    type=proc.type,
+                    )
+                config_list.append(proc_info)
+            config_list = sorted(config_list, key=lambda x: x.order)
+        if not config_list:
+            raise exceptions.PipelineNotFound(pipeline_id)
+        processors = [ProcessorRegistry.create_from_config(x) for x in config_list]
+        return ProcessingPipeline(id=pipeline_id, processors=processors)
+
     def _set_id_values(self):
         """Set roi and feature id to index new data."""
         with self.SessionFactory() as session:
@@ -304,53 +375,6 @@ class AssayData(Generic[FeatureType, RoiType]):
             stmt = delete(SampleModel).where(SampleModel.id == sample_id)
             session.execute(stmt)
             session.commit()
-
-    def add_pipeline(self, pipeline: ProcessingPipeline):
-        """
-        Store preprocessing parameters of a processing step in the DB.
-
-        Parameters
-        ----------
-        proc: ProcessorInformation
-
-        Raises
-        ------
-        ValueError
-            If the preprocessing step name is not a valid name. Valid names
-            are defined by `PREPROCESSING_STEPS` in the `_constants` module.
-
-        """
-        processors = [ProcessorModel(**x.to_config().model_dump()) for x in pipeline.processors]
-        with self.SessionFactory() as session:
-            session.add_all(processors)
-            session.commit()
-
-    def fetch_pipeline(self, pipeline_id: str) -> ProcessingPipeline:
-        """
-        Retrieve processing parameter information from a given pipeline.
-
-        Parameters
-        ----------
-        pipeline_id : str
-
-        """
-        with self.SessionFactory() as session:
-            stmt = select(ProcessorModel).where(ProcessorModel.pipeline == pipeline_id)
-            results = session.execute(stmt)
-            config_list = list()
-            for row in results:
-                proc = row.ProcessorModel
-                proc_info = ProcessorConfiguration(
-                    id=proc.id,
-                    pipeline=proc.pipeline,
-                    order=proc.order,
-                    parameters=proc.parameters,
-                    type=proc.type,
-                    )
-                config_list.append(proc_info)
-            config_list = sorted(config_list, key=lambda x: x.order)
-            processors = [ProcessorRegistry.create_from_config(x) for x in config_list]
-        return ProcessingPipeline(id=pipeline_id, processors=processors)
 
     def get_pipeline_parameters(self, name: str) -> dict[str, dict]:
         """
@@ -818,33 +842,6 @@ class AssayData(Generic[FeatureType, RoiType]):
             msg = f"No sample with id={sample_id} was found."
             raise ValueError(msg)
         return _sample_model_to_sample(result)
-
-    def add_sample_data(self, data: SampleData[FeatureType, RoiType]) -> None:
-        """Store a SampleData instance."""
-        if data.sample.id in [x.id for x in self.get_samples()]:
-            raise exceptions.SampleAlreadyInAssay(data.sample.id)
-
-        self._add_samples(data.sample)
-        self.add_roi_list(data.sample, *data.roi)
-        self.add_features(data.sample, *data.get_features())
-
-    def fetch_sample_data(self, sample: Sample) -> SampleData:
-        """Store a SampleData instance."""
-        if sample.id not in [x.id for x in self.get_samples()]:
-            raise exceptions.SampleDataNotFound(sample.id)
-        rois = self.get_roi_list(sample, load_features=True)
-        return SampleData(sample=sample, roi=rois)
-
-    def delete_sample_data(self, sample: Sample) -> None:
-        """Delete a sample data."""
-        with self.SessionFactory() as session:
-            stmt = delete(SampleModel).where(SampleModel.id == sample.id)
-            session.execute(stmt)
-
-            stmt = delete(RoiModel).where(RoiModel.sample_id == sample.id)
-            session.execute(stmt)
-
-            session.commit()
 
     def update_feature_labels(self, labels: dict[int, int]):
         """
