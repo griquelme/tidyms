@@ -29,7 +29,7 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 from math import isnan, nan
 from pathlib import Path
-from typing import Any, Generic, Sequence, TypeVar
+from typing import Any, Sequence
 
 import pydantic
 from numpy.typing import NDArray
@@ -462,39 +462,18 @@ class Sample(pydantic.BaseModel):
 
     path: Annotated[Path, BeforeValidator(lambda x: Path(x))]
     id: str
-    ms_level: pydantic.PositiveInt = pydantic.Field(1, repr=False)
-    start_time: pydantic.NonNegativeFloat = pydantic.Field(0.0, repr=False)
-    end_time: pydantic.NonNegativeFloat | None = pydantic.Field(None, repr=False)
+    ms_level: pydantic.PositiveInt = pydantic.Field(default=1, repr=False)
+    start_time: pydantic.NonNegativeFloat = pydantic.Field(default=0.0, repr=False)
+    end_time: pydantic.NonNegativeFloat | None = pydantic.Field(default=None, repr=False)
     group: str = ""
     order: pydantic.NonNegativeInt = 0
-    batch: pydantic.NonNegativeInt = pydantic.Field(0, repr=False)
-    extra: dict[str, Any] | None = pydantic.Field(None, repr=False)
+    batch: pydantic.NonNegativeInt = pydantic.Field(default=0, repr=False)
+    extra: dict[str, Any] | None = pydantic.Field(default=None, repr=False)
 
     @pydantic.field_serializer("path")
     def serialize_path(self, path: Path, _info) -> str:
         """Serialize path into a string."""
         return str(path)
-
-FeatureType = TypeVar("FeatureType", bound=Feature)
-RoiType = TypeVar("RoiType", bound=Roi)
-
-class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
-    """Stores data state during a sample processing pipeline."""
-
-    sample: Sample
-    roi: list[RoiType] = list()
-    processing_info: list[ProcessorInformation] = list()
-
-    def add_processor(self, processor: ProcessorInformation) -> None:
-        """Add a processor information step."""
-        self.processing_info.append(processor)
-
-    def get_features(self) -> list[FeatureType]:
-        """Update the feature attribute using feature data from ROIs."""
-        feature_list = list()
-        for roi in self.roi:
-            feature_list.extend(roi.features)
-        return feature_list
 
 
 class ProcessorInformation(pydantic.BaseModel):
