@@ -31,17 +31,112 @@ import logging
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from math import inf
-from typing import Literal, Mapping, Sequence, Union, overload
+from typing import Generic, Literal, Mapping, Protocol, Sequence, TypedDict, TypeVar, Union, overload
 
 import pydantic
 from typing_extensions import Annotated
 
 from . import constants as c
 from . import exceptions
-from .db import AssayData
-from .models import Feature, ProcessorInformation, Roi, Sample, SampleData
+from .models import Feature, ProcessorInformation, Roi, Sample
 
 logger = logging.getLogger(__file__)
+
+
+FeatureType = TypeVar("FeatureType", bound=Feature)
+RoiType = TypeVar("RoiType", bound=Roi)
+
+
+class DescriptorPatch(TypedDict):
+    """Store a descriptor patch."""
+
+    id: int
+    descriptor: str
+    value: float
+
+
+class AnnotationPatch(TypedDict):
+    """Store an annotation patch."""
+
+    id: int
+    field: str
+    value: int
+
+
+class MissingData(TypedDict):
+    """Store missing feature data."""
+
+    sample_id: str
+    feature_id: int
+    value: float
+
+
+class AssayDataInterface(Protocol, Generic[FeatureType, RoiType]):
+    """Public interface of AssayData."""
+
+    def add_sample_data(self, sample_data: SampleData[FeatureType, RoiType]) -> None:
+        """Store sample data in DB."""
+        ...
+
+    def fetch_sample_data(self, sample_id: str) -> SampleData[FeatureType, RoiType]:
+        """Fetch sample data from DB."""
+        ...
+
+    def delete_sample_data(self, sample_id: str) -> None:
+        """Delete sample data stored in DB."""
+        ...
+
+    def add_pipeline(self, pipeline: ProcessingPipeline) -> None:
+        """Store pipeline in DB."""
+        ...
+
+    def fetch_pipeline(self, pipeline_id: str) -> ProcessingPipeline:
+        """Fetch pipeline from DB."""
+        ...
+
+    def delete_pipeline(self, sample_id: str) -> None:
+        """Delete pipeline stored in DB."""
+        ...
+
+    def fetch_descriptors(
+        self, samples: str | None = None, descriptors: list[str] | None = None
+    ) -> dict[str, list[float]]:
+        """Fetch the descriptor table."""
+        ...
+
+    def fetch_annotations(self, samples: str | None = None) -> dict[str, list[int]]:
+        """Retrieve the annotation table."""
+        ...
+
+    def patch_annotations(self, *patches: AnnotationPatch) -> None:
+        """Patch feature annotations."""
+        ...
+
+    def patch_descriptors(self, *patches: DescriptorPatch) -> None:
+        """Patch feature descriptors."""
+        ...
+
+    def add_missing(self, *missing: MissingData) -> None:
+        """Add missing feature values."""
+        ...
+
+class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
+    """Stores data state during a sample processing pipeline."""
+
+    sample: Sample
+    roi: list[RoiType] = list()
+    processing_info: list[ProcessorInformation] = list()
+
+    def add_processor(self, processor: ProcessorInformation) -> None:
+        """Add a processor information step."""
+        self.processing_info.append(processor)
+
+    def get_features(self) -> list[FeatureType]:
+        """Update the feature attribute using feature data from ROIs."""
+        feature_list = list()
+        for roi in self.roi:
+            feature_list.extend(roi.features)
+        return feature_list
 
 
 class SampleDataSnapshots:
@@ -179,12 +274,12 @@ class Processor(ABC, pydantic.BaseModel):
         ...
 
     @overload
-    def process(self, data: AssayData) -> AssayData:
+    def process(self, data: AssayDataInterface) -> AssayDataInterface:
         ...
 
     def process(
-        self, data: SampleData | SampleDataSnapshots | AssayData
-    ) -> SampleData | SampleDataSnapshots | AssayData:
+        self, data: SampleData | SampleDataSnapshots | AssayDataInterface
+    ) -> SampleData | SampleDataSnapshots | AssayDataInterface:
         """Apply processor function to data."""
         info = self.get_processor_info()
         if isinstance(data, SampleDataSnapshots):
@@ -270,7 +365,7 @@ class Processor(ABC, pydantic.BaseModel):
         ...
 
     @abstractmethod
-    def _func(self, data: SampleData | SampleDataSnapshots | AssayData):
+    def _func(self, data: SampleData | SampleDataSnapshots | AssayDataInterface):
         """Process data function."""
         ...
 
@@ -322,12 +417,12 @@ class ChainedProcessor(pydantic.BaseModel):
         ...
 
     @overload
-    def process(self, data: AssayData) -> AssayData:
+    def process(self, data: AssayDataInterface) -> AssayDataInterface:
         ...
 
     def process(
-        self, data: SampleData | SampleDataSnapshots | AssayData
-    ) -> SampleData | SampleDataSnapshots | AssayData:
+        self, data: SampleData | SampleDataSnapshots | AssayDataInterface
+    ) -> SampleData | SampleDataSnapshots | AssayDataInterface:
         """Apply processor function to data."""
         for proc in self.processors:
             data = proc.process(data)
@@ -522,7 +617,7 @@ class MultipleSampleProcessor(Processor):
     """
 
     @abstractmethod
-    def process(self, data: AssayData):
+    def process(self, data: AssayDataInterface):
         """Apply processor to assay data."""
         ...
 
@@ -537,13 +632,13 @@ class FeatureMatcher(MultipleSampleProcessor):
 
     """
 
-    def process(self, data: AssayData):
+    def process(self, data: AssayDataInterface):
         """Group features across samples based on their chemical identity."""
-        labels = self._func(data)
-        data.update_feature_labels(labels)
+        patches = self._func(data)
+        data.patch_annotations(*patches)
 
     @abstractmethod
-    def _func(self, data: AssayData) -> dict[int, int]:
+    def _func(self, data: AssayDataInterface) -> list[AnnotationPatch]:
         """Create a label for each feature based on their chemical identity."""
         ...
 
@@ -684,7 +779,7 @@ class ProcessingPipeline(pydantic.BaseModel):
             processor.set_default_parameters(instrument, separation, polarity)
 
     @overload
-    def process(self, data: AssayData) -> AssayData:
+    def process(self, data: AssayDataInterface) -> AssayDataInterface:
         ...
 
     @overload
@@ -696,8 +791,8 @@ class ProcessingPipeline(pydantic.BaseModel):
         ...
 
     def process(
-        self, data: SampleData | SampleDataSnapshots | AssayData
-    ) -> SampleData | SampleDataSnapshots | AssayData:
+        self, data: SampleData | SampleDataSnapshots | AssayDataInterface
+    ) -> SampleData | SampleDataSnapshots | AssayDataInterface:
         """
         Apply the processing pipeline.
 
