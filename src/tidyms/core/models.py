@@ -476,21 +476,6 @@ class Sample(pydantic.BaseModel):
         return str(path)
 
 
-class ProcessorInformation(pydantic.BaseModel):
-    """Stores sample processing step name and parameters."""
-
-    id: str
-    pipeline: str | None = None
-    order: int
-    type: str
-    parameters: dict[str, Any]
-
-    @pydantic.field_serializer("parameters")
-    def serialize_parameters(self, parameters: dict[str, Any], _info) -> str:
-        """Serialize parameters field into a JSON string."""
-        return json.dumps(parameters)
-
-
 class MSSpectrum(pydantic.BaseModel):
     """Representation of a Mass Spectrum.
 
