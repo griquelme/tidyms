@@ -11,16 +11,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Generic, Sequence, TypeVar, cast
+from typing import Generic, Sequence, TypeVar
 
 import sqlalchemy as sa
 import sqlalchemy.orm as orm
 from sqlalchemy import Column, Float, ForeignKey, Integer, String, delete, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from . import exceptions
-from .models import Annotation, Feature, Roi, Sample
+from .constants import IDFeatureDescriptors
+from .models import Annotation, Feature, FeatureGroupMap, Roi, Sample
 from .processors import ProcessingPipeline, ProcessorConfiguration, ProcessorRegistry, SampleData
 
 Base = orm.declarative_base()
@@ -81,11 +82,10 @@ class FeatureModel(Base):
     __tablename__ = "features"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     roi_id: Mapped[int] = mapped_column(ForeignKey("rois.id"))
+    sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"), index=True)
     data: Mapped[str] = mapped_column(String)
     roi: Mapped["RoiModel"] = relationship(back_populates="features")
-    annotation: Mapped["AnnotationModel"] = relationship(
-        back_populates="feature", lazy="immediate"
-    )
+    annotation: Mapped["AnnotationModel"] = relationship(back_populates="feature", lazy="immediate")
 
 
 class AnnotationModel(Base):
@@ -95,12 +95,39 @@ class AnnotationModel(Base):
     id: Mapped[int] = mapped_column(ForeignKey("features.id"), primary_key=True)
     sample_id: Mapped[str] = mapped_column(ForeignKey("samples.id"))
     roi_id: Mapped[int] = mapped_column(ForeignKey("rois.id"))
-    label: Mapped[int] = mapped_column(Integer)
+    group: Mapped[int] = mapped_column(Integer)
     isotopologue_label: Mapped[int] = mapped_column(Integer)
     isotopologue_index: Mapped[int] = mapped_column(Integer)
     charge: Mapped[int] = mapped_column(Integer)
     roi: Mapped["RoiModel"] = relationship(back_populates="annotations")
-    feature: Mapped["FeatureModel"] = relationship(back_populates="annotation")
+    feature: Mapped["FeatureModel"] = relationship(back_populates="annotation", lazy="immediate")
+
+
+class AnnotationPatchModel(Base):
+    """Store patched annotation data."""
+
+    __tablename__ = "annotation_patches"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    field: Mapped[str] = mapped_column(String)
+    value: Mapped[int] = mapped_column(Integer)
+
+
+class DescriptorPatchModel(Base):
+    """Store patched descriptor data."""
+
+    __tablename__ = "descriptor_patches"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    descriptor: Mapped[str] = mapped_column(String)
+    value: Mapped[float] = mapped_column(Float)
+
+
+class MissingDataModel(Base):
+    """Store data matrix inputted missing data."""
+
+    __tablename__ = "missing_data"
+    sample_id: Mapped[str] = mapped_column(String, primary_key=True)
+    group: Mapped[int] = mapped_column(Integer, primary_key=True)
+    value: Mapped[float] = mapped_column(Float)
 
 
 class AssayData(Generic[FeatureType, RoiType]):
@@ -159,29 +186,50 @@ class AssayData(Generic[FeatureType, RoiType]):
         """Get the first feature id available."""
         return self._feature_id
 
-    def add_sample_data(self, data: SampleData[FeatureType, RoiType]) -> None:
+    def add_sample_data(
+        self,
+        data: SampleData[FeatureType, RoiType],
+        descriptors: list[dict] | None = None,
+        annotations: list[dict] | None = None,
+    ) -> None:
         """Store a SampleData instance."""
-        if data.sample.id in [x.id for x in self.get_samples()]:
+        if data.sample.id in self.list_samples():
             raise exceptions.SampleAlreadyInAssay(data.sample.id)
 
-        self._add_samples(data.sample)
-        self.add_roi_list(data.sample, *data.roi)
-        self.add_features(data.sample, *data.get_features())
+        self._label_sample_data(data)
+        features = data.get_features()
 
-    def fetch_sample_data(self, sample: Sample) -> SampleData:
+        if descriptors is None:
+            descriptors = data.get_feature_descriptors()
+            self._fix_descriptor_labels(features, descriptors)
+
+        if annotations is None:
+            annotations = data.get_feature_annotations()
+            self._fix_annotation_labels(features, annotations)
+
+        with self.SessionFactory() as session:
+            self._add_samples(session, data.sample)
+            self._add_roi_list(data.sample, session, *data.roi)
+            self._add_features(session, data.sample.id, descriptors, annotations, *features)
+            session.commit()
+
+
+    def fetch_sample_data(self, sample_id: str) -> SampleData[FeatureType, RoiType]:
         """Store a SampleData instance."""
-        if sample.id not in [x.id for x in self.get_samples()]:
-            raise exceptions.SampleDataNotFound(sample.id)
-        rois = self.get_roi_list(sample, load_features=True)
+        sample = self._fetch_sample(sample_id)
+        rois = self.get_roi_list(sample_id, load_features=True)
         return SampleData(sample=sample, roi=rois)
 
-    def delete_sample_data(self, sample: Sample) -> None:
+    def delete_sample_data(self, sample_id: str) -> None:
         """Delete a sample data."""
         with self.SessionFactory() as session:
-            stmt = delete(SampleModel).where(SampleModel.id == sample.id)
+            stmt = delete(SampleModel).where(SampleModel.id == sample_id)
             session.execute(stmt)
 
-            stmt = delete(RoiModel).where(RoiModel.sample_id == sample.id)
+            stmt = delete(RoiModel).where(RoiModel.sample_id == sample_id)
+            session.execute(stmt)
+
+            stmt = delete(FeatureModel).where(FeatureModel.sample_id == sample_id)
             session.execute(stmt)
 
             session.commit()
@@ -230,6 +278,115 @@ class AssayData(Generic[FeatureType, RoiType]):
         processors = [ProcessorRegistry.create_from_config(x) for x in config_list]
         return ProcessingPipeline(id=pipeline_id, processors=processors)
 
+    def delete_pipeline(self, pipeline_id: str) -> None:
+        """
+        Delete a pipeline from the DB.
+
+        Parameters
+        ----------
+        pipeline_id : str
+            The pipeline id to delete.
+
+        """
+        with self.SessionFactory() as session:
+            stmt = delete(ProcessorModel).where(ProcessorModel.pipeline == pipeline_id)
+            session.execute(stmt)
+            session.commit()
+
+    def fetch_descriptors(
+        self, sample_id: str | None = None, descriptors: Sequence[str] | None = None
+    ) -> dict:
+        """
+        Retrieve the feature descriptors.
+
+        Parameters
+        ----------
+        sample_id : str or None, default=None
+            If provided, retrieves descriptors from specified sample. If ``None``,
+            retrieves descriptors from features in all samples.
+        descriptors : list[str] or None, default=None
+            A list of descriptors to retrieve. If ``None``, retrieves all stored
+            descriptors.
+
+        Returns
+        -------
+        dict
+            A dictionary that maps descriptor names to a list of values for each
+            feature. Besides descriptors, `id` provides the feature id
+            associated with each descriptor, `roi_id` is the ROI id where
+            the feature was extracted from and `sample_id` is the sample id
+            where the ROI was extracted from.
+
+        Raises
+        ------
+        ValueError
+            If an invalid descriptor name is provided.
+
+        """
+        valid_descriptors = self.feature.descriptor_names()
+
+        if descriptors is None:
+            requested_descriptors = list(valid_descriptors)
+        else:
+            requested_descriptors = list(descriptors)
+
+        for d in requested_descriptors:
+            if d not in valid_descriptors:
+                msg = f"{d} is not a valid descriptor of feature type {self.feature.__name__}."
+                raise ValueError(msg)
+
+        requested_descriptors.extend([x.value for x in IDFeatureDescriptors])
+        descriptor_dict = {x: list() for x in requested_descriptors}
+
+        with self.SessionFactory() as session:
+            stmt = select(self.DescriptorModel)
+            if sample_id is not None:
+                stmt = stmt.where(self.DescriptorModel.sample_id == sample_id)  # type: ignore
+            result = session.execute(stmt)
+            for row in result:
+                for d in requested_descriptors:
+                    descriptor_dict[d].append(row.DescriptorModel.__dict__[d])
+        return descriptor_dict
+
+    def fetch_annotations(self, sample_id: str | None = None, has_feature_group: bool = False) -> dict[str, list[int]]:
+        """Get annotations of features."""
+        stmt = select(AnnotationModel)
+        if has_feature_group:
+            where_clause = AnnotationModel.group != -1
+            if sample_id is not None:
+                where_clause = where_clause & (AnnotationModel.sample_id == sample_id)
+            stmt = stmt.where(where_clause)
+        elif sample_id is not None:
+            stmt = stmt.where(AnnotationModel.sample_id == sample_id)
+
+        columns = [x.key for x in AnnotationModel.__table__.columns]
+        with self.SessionFactory() as session:
+            result = session.execute(stmt)
+            annotations = dict()
+            for row in result:
+                for col in columns:
+                    col_list = annotations.setdefault(col, list())
+                    col_list.append(row.AnnotationModel.__dict__[col])
+        return annotations
+
+    def set_feature_groups(self, groups: list[FeatureGroupMap]):
+        """
+        Set feature group of features.
+
+        No check is done on the correctness of the annotation. The user must
+        check that a unique feature label per sample was assigned.
+
+        Parameters
+        ----------
+        labels : dict[int, int]
+            A mapping from feature ids to group labels.
+
+        """
+        with self.SessionFactory() as session:
+            session.execute(sa.update(AnnotationModel), groups)
+            session.execute(sa.update(self.DescriptorModel), groups)
+            session.commit()
+
     def _set_id_values(self):
         """Set roi and feature id to index new data."""
         with self.SessionFactory() as session:
@@ -254,7 +411,7 @@ class AssayData(Generic[FeatureType, RoiType]):
         if not hasattr(cls, "DescriptorModel"):
             cls.DescriptorModel = _create_descriptor_table(feature_type, Base.metadata)
 
-    def _add_samples(self, *samples: Sample) -> None:
+    def _add_samples(self, session: Session, *samples: Sample) -> None:
         """
         Add samples into the DB.
 
@@ -268,13 +425,11 @@ class AssayData(Generic[FeatureType, RoiType]):
             If a sample with the same id already exists in the DB.
 
         """
-        with self.SessionFactory() as session:
-            try:
-                session.add_all([SampleModel(**x.model_dump()) for x in samples])
-                session.commit()
-            except IntegrityError as e:
-                msg = "Trying to insert a sample with an existing ID"
-                raise exceptions.SampleAlreadyInAssay(msg) from e
+        try:
+            session.add_all([SampleModel(**x.model_dump()) for x in samples])
+        except IntegrityError as e:
+            msg = "Trying to insert a sample with an existing ID"
+            raise exceptions.SampleAlreadyInAssay(msg) from e
 
     def flag_processed(self, samples: list[Sample], pipeline: str):
         """
@@ -318,7 +473,7 @@ class AssayData(Generic[FeatureType, RoiType]):
             session.execute(stmt)
             session.commit()
 
-    def get_samples(self) -> list[Sample]:
+    def list_samples(self) -> list[str]:
         """
         Retrieve samples stored in the DB.
 
@@ -332,7 +487,7 @@ class AssayData(Generic[FeatureType, RoiType]):
             result = session.execute(stmt)
             samples = list()
             for row in result:
-                samples.append(_sample_model_to_sample(row.SampleModel))
+                samples.append(row.SampleModel.id)
         return samples
 
     def get_processed_samples(self, pipeline: str) -> list[Sample]:
@@ -448,13 +603,23 @@ class AssayData(Generic[FeatureType, RoiType]):
             session.execute(sa.update(ProcessorModel), update)
             session.commit()
 
+    def _fetch_sample(self, sample_id: str) -> Sample:
+        """Fetch a sample from the db."""
+        with self.SessionFactory() as session:
+            stmt = select(SampleModel).where(SampleModel.id == sample_id)
+            try:
+                model = session.scalars(stmt).one()
+                return _sample_model_to_sample(model)
+            except NoResultFound as e:
+                raise exceptions.SampleDataNotFound(sample_id) from e
+
     def _label_roi_list(self, *rois: RoiType):
         """Add a id label to ROIs."""
         for k_roi, roi in enumerate(rois, start=self._roi_id):
             roi.id = k_roi
         self._roi_id += len(rois)
 
-    def add_roi_list(self, sample: Sample, *rois: RoiType):
+    def _add_roi_list(self, sample: Sample, session: Session, *rois: RoiType):
         """
         Store a list of ROI extracted from a sample.
 
@@ -465,16 +630,13 @@ class AssayData(Generic[FeatureType, RoiType]):
 
         """
         roi_model_list = list()
-        self._label_roi_list(*rois)
         for roi in rois:
             roi_model = RoiModel(sample_id=sample.id, data=roi.to_str(), id=roi.id)
             roi_model_list.append(roi_model)
 
-        with self.SessionFactory() as session:
-            session.add_all(roi_model_list)
-            session.commit()
+        session.add_all(roi_model_list)
 
-    def get_roi_list(self, sample: Sample, load_features: bool = True) -> list[RoiType]:
+    def get_roi_list(self, sample_id: str, load_features: bool = True) -> list[RoiType]:
         """
         Retrieve a list of ROI detected in a sample.
 
@@ -492,11 +654,11 @@ class AssayData(Generic[FeatureType, RoiType]):
             if load_features:
                 stmt = (
                     select(RoiModel)
-                    .where(RoiModel.sample_id == sample.id)
+                    .where(RoiModel.sample_id == sample_id)
                     .options(orm.immediateload(RoiModel.features))
                 )
             else:
-                stmt = select(RoiModel).where(RoiModel.sample_id == sample.id)
+                stmt = select(RoiModel).where(RoiModel.sample_id == sample_id)
             result = session.execute(stmt)
             roi_list = list()
             for row in result:
@@ -559,56 +721,69 @@ class AssayData(Generic[FeatureType, RoiType]):
             session.execute(stmt)
             session.commit()
 
+    def _label_sample_data(self, data: SampleData) -> None:
+        """Label ROIs and features in sample data."""
+        roi_id_list = list()
+        ft_id_list = list()
+        for roi in data.roi:
+            roi.id = self._roi_id
+            roi_id_list.append(roi.id)
+            self._roi_id += 1
+            for ft in roi.features:
+                ft.id = self._feature_id
+                ft_id_list.append(ft.id)
+                self._feature_id += 1
+
+    def _fix_annotation_labels(self, features: list[FeatureType], annotations: list[dict]):
+        """Add annotation labels provided by DB."""
+        for ft, ann in zip(features, annotations):
+            ann[IDFeatureDescriptors.ROI_ID] = ft.roi.id
+            ann[IDFeatureDescriptors.ID] = ft.id
+
+    def _fix_descriptor_labels(self, features: list[FeatureType], descriptors: list[dict]):
+        """Add annotation labels provided by DB."""
+        for ft, d in zip(features, descriptors):
+            d[IDFeatureDescriptors.ROI_ID] = ft.roi.id
+            d[IDFeatureDescriptors.ID] = ft.id
+
     def _label_feature_list(self, feature_list: Sequence[FeatureType]):
         """Add an id label for each feature."""
         for k, ft in enumerate(feature_list, start=self._feature_id):
             ft.id = k
         self._feature_id += len(feature_list)
 
-    def _add_feature_data(self, feature_list: Sequence[FeatureType], session: Session):
+    def _add_feature_data(self, feature_list: Sequence[FeatureType], session: Session, sample_id: str):
         """Add feature data to a Session."""
         feature_model_list = list()
         for ft in feature_list:
-            model = FeatureModel(roi_id=ft.roi.id, data=ft.to_str(), id=ft.id)
+            model = FeatureModel(roi_id=ft.roi.id, data=ft.to_str(), id=ft.id, sample_id=sample_id)
             feature_model_list.append(model)
         session.add_all(feature_model_list)
 
-    def _add_feature_annotation_data(
-        self, feature_list: Sequence[FeatureType], sample: Sample, session: Session
-    ):
+    def _add_feature_annotation_data(self, annotations: list[dict], session: Session):
         """Add feature annotation data to session."""
         feature_annotation_model_list = list()
-        for ft in feature_list:
-            model = AnnotationModel(
-                id=ft.id,
-                sample_id=sample.id,
-                roi_id=ft.roi.id,
-                label=ft.annotation.label,
-                charge=ft.annotation.charge,
-                isotopologue_label=ft.annotation.isotopologue_label,
-                isotopologue_index=ft.annotation.isotopologue_index,
-            )
+        for annotation in annotations:
+            model = AnnotationModel(**annotation)
             feature_annotation_model_list.append(model)
         session.add_all(feature_annotation_model_list)
 
-    def _add_feature_descriptors_data(
-        self, feature_list: Sequence[FeatureType], sample: Sample, session: Session
-    ):
+    def _add_feature_descriptors_data(self, descriptors: list[dict], session: Session):
         """Add descriptor information to session."""
         feature_annotation_model_list = list()
-        for ft in feature_list:
-            ft_descriptors = ft.describe()
-            model = self.DescriptorModel(
-                id=ft.id,
-                sample_id=sample.id,
-                roi_id=ft.roi.id,
-                label=ft.annotation.label,
-                **ft_descriptors,
-            )
+        for descriptor in descriptors:
+            model = self.DescriptorModel(**descriptor)
             feature_annotation_model_list.append(model)
         session.add_all(feature_annotation_model_list)
 
-    def add_features(self, sample: Sample, *features: FeatureType):
+    def _add_features(
+        self,
+        session: Session,
+        sample_id: str,
+        descriptors: list[dict],
+        annotations: list[dict],
+        *features: FeatureType,
+    ):
         """
         Store a list of features in the DB.
 
@@ -618,14 +793,11 @@ class AssayData(Generic[FeatureType, RoiType]):
         *features: Feature
 
         """
-        self._label_feature_list(features)
-        with self.SessionFactory() as session:
-            self._add_feature_data(features, session)
-            self._add_feature_annotation_data(features, sample, session)
-            self._add_feature_descriptors_data(features, sample, session)
-            session.commit()
+        self._add_feature_data(features, session, sample_id)
+        self._add_feature_annotation_data(annotations, session)
+        self._add_feature_descriptors_data(descriptors, session)
 
-    def get_features_by_sample(self, sample: Sample) -> list[FeatureType]:
+    def get_features_by_sample(self, sample_id: str) -> list[FeatureType]:
         """
         Retrieve all features detected in a sample.
 
@@ -638,20 +810,8 @@ class AssayData(Generic[FeatureType, RoiType]):
         list[Feature]
 
         """
-        with self.SessionFactory() as session:
-            stmt = (
-                select(RoiModel)
-                .where(RoiModel.sample_id == sample.id)
-                .options(orm.immediateload(RoiModel.features))
-            )
-            result = session.execute(stmt)
-            feature_list = list()
-            for row in result:
-                rm = row.RoiModel
-                roi = _roi_model_to_roi(rm, self.roi, self.feature, load_features=True)
-                for ft in roi.features:
-                    feature_list.append(ft)
-        return feature_list
+        sample_data = self.fetch_sample_data(sample_id)
+        return sample_data.get_features()
 
     def get_features_by_label(
         self, label: int, groups: list[str] | None = None
@@ -744,79 +904,6 @@ class AssayData(Generic[FeatureType, RoiType]):
             session.execute(stmt)
             session.commit()
 
-    def get_descriptors(
-        self, sample: Sample | None = None, descriptors: list[str] | None = None
-    ):
-        """
-        Retrieve the descriptors associated with each feature.
-
-        Parameters
-        ----------
-        sample : Sample or None, default=None
-            If provided, retrieves descriptors for features detected in this sample.
-            If ``None``, retrieves the descriptors for all samples.
-
-        descriptors : list[str] or None, default=None
-            A list of descriptors to retrieve. If ``None``, retrieves all stored
-            descriptors.
-
-        Returns
-        -------
-        dict[str, list]
-            A dictionary that maps descriptor names to a list of values for each feature.
-
-        Raises
-        ------
-        ValueError
-            If an invalid descriptor name is provided.
-
-        """
-        if descriptors is None:
-            descriptors = list(self.feature.descriptor_names())
-        else:
-            for d in descriptors:
-                valid_descriptors = self.feature.descriptor_names()
-                if d not in valid_descriptors:
-                    valid_str = ", ".join(valid_descriptors)
-                    msg = f"{d} is not a valid descriptor. Valid descriptors are: {valid_str}."
-                    raise ValueError(msg)
-
-        descriptors = descriptors + ["id", "roi_id", "sample_id", "label"]
-        descriptor_dict = {x: list() for x in descriptors}
-
-        with self.SessionFactory() as session:
-            if sample is None:
-                stmt = select(self.DescriptorModel)
-            else:
-                stmt = select(self.DescriptorModel).where(
-                    self.DescriptorModel.sample_id == sample.id  # type: ignore
-                )
-            result = session.execute(stmt)
-            for row in result:
-                for d in descriptors:
-                    descriptor_dict[d].append(row.DescriptorModel.__dict__[d])
-        return descriptor_dict
-
-    def get_annotations(self) -> dict[str, list[int]]:
-        """Get annotations of features."""
-        columns = [
-            "id",
-            "label",
-            "sample_id",
-            "isotopologue_index",
-            "isotopologue_label",
-            "charge",
-        ]
-        annotation_dict: dict[str, list[int]] = {x: list() for x in columns}
-        with self.SessionFactory() as session:
-            stmt = select(AnnotationModel).where(AnnotationModel.label != -1)
-            result = session.execute(stmt)
-            for row in result:
-                for c in columns:
-                    val = cast(int, row.AnnotationModel.__dict__[c])
-                    annotation_dict[c].append(val)
-        return annotation_dict
-
     def search_sample(self, sample_id: str) -> Sample:
         """
         Search a sample in the DB.
@@ -843,25 +930,6 @@ class AssayData(Generic[FeatureType, RoiType]):
             raise ValueError(msg)
         return _sample_model_to_sample(result)
 
-    def update_feature_labels(self, labels: dict[int, int]):
-        """
-        Update group label of features.
-
-        No check is done on the correctness of the annotation. The user must
-        check that a unique feature label per sample was assigned.
-
-        Parameters
-        ----------
-        labels : dict[int, int]
-            A mapping from feature ids to group labels.
-
-        """
-        update = [{"id": k, "label": v} for k, v in labels.items()]
-        with self.SessionFactory() as session:
-            session.execute(sa.update(AnnotationModel), update)
-            session.execute(sa.update(self.DescriptorModel), update)
-            session.commit()
-
 
 def _create_descriptor_table(feature_type: type[Feature], metadata: sa.MetaData):
     """
@@ -884,10 +952,10 @@ def _create_descriptor_table(feature_type: type[Feature], metadata: sa.MetaData)
     table_name = "descriptors"
 
     columns: list[Column] = [
-        Column("id", Integer, ForeignKey("features.id"), primary_key=True),
-        Column("sample_id", String, ForeignKey("samples.id")),
-        Column("roi_id", Integer, ForeignKey("rois.id")),
-        Column("label", Integer, ForeignKey("annotations.label")),
+        Column(IDFeatureDescriptors.ID.value, Integer, ForeignKey("features.id"), primary_key=True),
+        Column(IDFeatureDescriptors.SAMPLE_ID.value, String, ForeignKey("samples.id")),
+        Column(IDFeatureDescriptors.ROI_ID.value, Integer, ForeignKey("rois.id")),
+        Column(IDFeatureDescriptors.FEATURE_GROUP.value, Integer, ForeignKey("annotations.group")),
     ]
 
     descriptors = [Column(x, Float) for x in feature_type.descriptor_names()]
@@ -908,7 +976,6 @@ def _roi_model_to_roi(
 ) -> RoiType:
     """Create a ROI instance."""
     roi = roi_type.from_str(model.data)
-    roi.id = model.id
     if load_features:
         for ft_model in model.features:
             ft = _feature_model_to_feature(ft_model, feature_type, roi)
@@ -928,7 +995,7 @@ def _feature_model_to_feature(
 def _annotation_model_to_annotation(model: AnnotationModel) -> Annotation:
     """Create an Annotation instance from an AnnotationModel instance."""
     return Annotation(
-        label=model.label,
+        group=model.group,
         isotopologue_label=model.isotopologue_label,
         isotopologue_index=model.isotopologue_index,
         charge=model.charge,
