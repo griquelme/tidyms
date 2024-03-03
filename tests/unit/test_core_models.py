@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 from tidyms.core import models
 
@@ -24,7 +22,7 @@ class TestRoi:
     def test_serialization(self):
         expected = ConcreteRoi(data=[1.0, 2.0], id=10)
         serialized = expected.to_str()
-        actual = cast(ConcreteRoi, ConcreteRoi.from_str(serialized))
+        actual = ConcreteRoi.from_str(serialized)
 
         assert actual.data == expected.data
         assert actual.id == expected.id
@@ -68,10 +66,7 @@ class TestFeature:
 
     def test_serialization(self, feature):
         serialized = feature.to_str()
-        expected = cast(
-            ConcreteFeature,
-            ConcreteFeature.from_str(serialized, feature.roi, feature.annotation),
-        )
+        expected = ConcreteFeature.from_str(serialized, feature.roi, feature.annotation)
         assert expected.data == feature.data
         assert expected.roi == feature.roi
         assert expected.id == feature.id
