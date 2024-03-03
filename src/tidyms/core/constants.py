@@ -49,6 +49,16 @@ class MSDataMode(enum.Enum):
     PROFILE = 1
     CENTROID = 2
 
+
+class IDFeatureDescriptors(str, enum.Enum):
+    """ID related Feature descriptors added to a feature table."""
+
+    ID = "id"
+    ROI_ID = "roi_id"
+    SAMPLE_ID = "sample_id"
+    FEATURE_GROUP = "group"
+
+
 # feature descriptors
 FEATURE: Final[str] = "feature"
 MZ: Final[str] = "mz"
