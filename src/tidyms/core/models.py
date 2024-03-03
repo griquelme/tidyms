@@ -29,12 +29,12 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 from math import isnan, nan
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Generic, Sequence, TypedDict, TypeVar
 
 import pydantic
 from numpy.typing import NDArray
 from pydantic.functional_validators import BeforeValidator
-from typing_extensions import Annotated
+from typing_extensions import Annotated, Self
 
 
 class Roi(pydantic.BaseModel):
@@ -86,7 +86,7 @@ class Roi(pydantic.BaseModel):
         self.features.remove(feature)
 
     @classmethod
-    def from_str(cls: type[Roi], s: str) -> Roi:
+    def from_str(cls, s: str) -> Self:
         """Create a ROI instance from a JSON string.
 
         Parameters
@@ -122,7 +122,7 @@ class Annotation(pydantic.BaseModel):
 
     Attributes
     ----------
-    label : int, default=-1
+    group : int, default=-1
         Feature group id. Groups features from different samples based
         their chemical identity. Used to create a data matrix.
     isotopologue_label : int, default=-1
@@ -133,13 +133,14 @@ class Annotation(pydantic.BaseModel):
         Feature charge state.
     """
 
-    label: int = -1
+    group: int = -1
     isotopologue_label: int = -1
     isotopologue_index: int = -1
     charge: int = -1
 
+RoiType = TypeVar("RoiType", bound=Roi)
 
-class Feature(pydantic.BaseModel):
+class Feature(pydantic.BaseModel, Generic[RoiType]):
     """
     Base class to represent a feature extracted from a ROI.
 
@@ -191,34 +192,34 @@ class Feature(pydantic.BaseModel):
     """
 
     id: int = -1
-    roi: Roi
+    roi: RoiType
     annotation: Annotation = Annotation()
     mz: float = nan
     height: float = nan
     area: float = nan
 
-    def __lt__(self: Feature, other: Feature | float):
+    def __lt__(self, other: Self | float):
         if isinstance(other, float):
             return self.get("mz") < other
-        elif isinstance(other, Feature):
+        elif isinstance(other, self.__class__):
             return self.get("mz") < other.get("mz")
 
-    def __le__(self, other: Feature | float):
+    def __le__(self, other: Self | float):
         if isinstance(other, float):
             return self.get("mz") <= other
-        elif isinstance(other, Feature):
+        elif isinstance(other, self.__class__):
             return self.get("mz") <= other.get("mz")
 
-    def __gt__(self, other: Feature | float):
+    def __gt__(self, other: Self | float):
         if isinstance(other, float):
             return self.get("mz") > other
-        elif isinstance(other, Feature):
+        elif isinstance(other, self.__class__):
             return self.get("mz") > other.get("mz")
 
-    def __ge__(self, other: Feature | float):
+    def __ge__(self, other: Self | float):
         if isinstance(other, float):
             return self.get("mz") >= other
-        elif isinstance(other, Feature):
+        elif isinstance(other, self.__class__):
             return self.get("mz") >= other.get("mz")
 
     def _set_mz(self):
@@ -265,7 +266,7 @@ class Feature(pydantic.BaseModel):
         return self.model_dump_json(exclude=exclude)
 
     @classmethod
-    def from_str(cls, s: str, roi: Roi, annotation: Annotation) -> Feature:
+    def from_str(cls, s: str, roi: RoiType, annotation: Annotation) -> Self:
         """
         Create a feature instance from a string.
 
@@ -340,7 +341,7 @@ class AnnotableFeature(Feature, ABC):
     """
 
     @abstractmethod
-    def compare(self, other: Feature) -> float:
+    def compare(self, other: Self) -> float:
         """Compare the similarity between two features.
 
         Must be a symmetric function that returns a number between 0.0 and 1.0.
@@ -512,3 +513,34 @@ class Chromatogram(pydantic.BaseModel):
     index: int = -1
     time: NDArray
     int: NDArray
+
+
+class FeatureGroupMap(TypedDict):
+    """Map a feature id to a feature group."""
+
+    id: int
+    group: int
+
+
+class DescriptorPatch(TypedDict):
+    """Store a descriptor patch."""
+
+    id: int
+    descriptor: str
+    value: float
+
+
+class AnnotationPatch(TypedDict):
+    """Store an annotation patch."""
+
+    id: int
+    field: str
+    value: int
+
+
+class MissingData(TypedDict):
+    """Store missing feature data."""
+
+    sample_id: str
+    feature_group: int
+    value: float
