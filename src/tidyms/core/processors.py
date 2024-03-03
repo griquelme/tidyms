@@ -32,44 +32,20 @@ import logging
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from math import inf
-from typing import Any, Generic, Literal, Mapping, Protocol, Sequence, TypedDict, TypeVar, Union, cast, overload
+from typing import Any, Generic, Literal, Mapping, Protocol, Sequence, TypeVar, Union, cast, overload
 
 import pydantic
 from typing_extensions import Annotated
 
 from . import constants as c
 from . import exceptions
-from .models import Feature, Roi, Sample
+from .models import AnnotationPatch, DescriptorPatch, Feature, FeatureGroupMap, MissingData, Roi, Sample
 
 logger = logging.getLogger(__file__)
 
 
 FeatureType = TypeVar("FeatureType", bound=Feature)
 RoiType = TypeVar("RoiType", bound=Roi)
-
-
-class DescriptorPatch(TypedDict):
-    """Store a descriptor patch."""
-
-    id: int
-    descriptor: str
-    value: float
-
-
-class AnnotationPatch(TypedDict):
-    """Store an annotation patch."""
-
-    id: int
-    field: str
-    value: int
-
-
-class MissingData(TypedDict):
-    """Store missing feature data."""
-
-    sample_id: str
-    feature_id: int
-    value: float
 
 
 class AssayDataInterface(Protocol, Generic[FeatureType, RoiType]):
@@ -109,6 +85,9 @@ class AssayDataInterface(Protocol, Generic[FeatureType, RoiType]):
         """Retrieve the annotation table."""
         ...
 
+    def set_feature_groups(self, groups: list[FeatureGroupMap]) -> None:
+        """Set feature groups."""
+
     def patch_annotations(self, *patches: AnnotationPatch) -> None:
         """Patch feature annotations."""
         ...
@@ -119,6 +98,10 @@ class AssayDataInterface(Protocol, Generic[FeatureType, RoiType]):
 
     def add_missing(self, *missing: MissingData) -> None:
         """Add missing feature values."""
+        ...
+
+    def list_samples(self) -> list[str]:
+        """Retrieve a list of sample ids in the database."""
         ...
 
 class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
@@ -134,6 +117,39 @@ class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
         for roi in self.roi:
             feature_list.extend(roi.features)
         return feature_list
+
+    def get_feature_descriptors(self) -> list[dict]:
+        """Create a list of feature descriptors."""
+        descriptors = list()
+        for ft in self.get_features():
+            descriptor: dict = ft.describe()
+            descriptor[c.IDFeatureDescriptors.SAMPLE_ID.value] = self.sample.id
+            descriptor[c.IDFeatureDescriptors.FEATURE_GROUP.value] = ft.annotation.group
+            descriptor[c.IDFeatureDescriptors.ROI_ID.value] = ft.roi.id
+            descriptor[c.IDFeatureDescriptors.ID.value] = ft.id
+            descriptors.append(descriptor)
+        return descriptors
+
+    def get_feature_annotations(self) -> list[dict]:
+        """Create a list of feature annotations."""
+        annotations = list()
+        for ft in self.get_features():
+            annotation = ft.annotation.model_dump()
+            annotation[c.IDFeatureDescriptors.SAMPLE_ID.value] = self.sample.id
+            annotation[c.IDFeatureDescriptors.FEATURE_GROUP.value] = ft.annotation.group
+            annotation[c.IDFeatureDescriptors.ROI_ID.value] = ft.roi.id
+            annotation[c.IDFeatureDescriptors.ID.value] = ft.id
+            annotations.append(annotation)
+        return annotations
+
+
+    def remove_empty_roi(self) -> None:
+        """Delete empty ROI from sample data."""
+        roi_with_ft = list()
+        for roi in self.roi:
+            if roi.features:
+                roi_with_ft.append(roi)
+        self.roi = roi_with_ft
 
 
 class SampleDataSnapshots:
