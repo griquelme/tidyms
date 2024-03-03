@@ -1,8 +1,12 @@
 from pathlib import Path
 
 import pytest
-from tidyms.core import exceptions
+from sqlalchemy import select
+from sqlalchemy.exc import NoResultFound
+from tidyms.core import db, exceptions
+from tidyms.core.constants import IDFeatureDescriptors
 from tidyms.core.db import AssayData
+from tidyms.core.models import Annotation
 from tidyms.core.processors import ProcessingPipeline, SampleData
 
 from . import utils
@@ -37,34 +41,6 @@ class TestAssayDataCreate:
         assert path.exists()
 
 
-class TestAssayDataSample:
-    """test add_sample and get_sample methods."""
-
-    def test_add_samples_empty_tuple(self, assay_data: AssayData):
-        expected = list()
-        assay_data._add_samples(*expected)
-        actual = assay_data.get_samples()
-        assert actual == expected
-
-    def test_add_samples_single_sample(self, assay_data: AssayData, tmp_path: Path):
-        expected = [utils.create_dummy_sample(tmp_path, 1)]
-        assay_data._add_samples(*expected)
-        actual = assay_data.get_samples()
-        assert actual == expected
-
-    def test_add_samples_multiple_samples(self, assay_data: AssayData, tmp_path: Path):
-        expected = [utils.create_dummy_sample(tmp_path, x) for x in range(10, 20)]
-        assay_data._add_samples(*expected)
-        actual = assay_data.get_samples()
-        assert actual == expected
-
-    def test_add_samples_add_existing_sample_raises_error(self, assay_data: AssayData, tmp_path: Path):
-        sample = utils.create_dummy_sample(tmp_path, 1)
-        assay_data._add_samples(sample)
-        with pytest.raises(exceptions.SampleAlreadyInAssay):
-            assay_data._add_samples(sample)
-
-
 class TestAssayDataProcessingPipeline:
     """Test add_pipeline, fetch_pipeline, and delete_pipeline methods."""
 
@@ -75,10 +51,15 @@ class TestAssayDataProcessingPipeline:
         assert actual == expected
 
     def test_fetch_non_existing_pipeline_raises_error(self, assay_data):
-        pass
+        invalid_id = "invalid-id"
+        with pytest.raises(exceptions.PipelineNotFound):
+            assay_data.fetch_pipeline(invalid_id)
 
-    def delete_pipeline(self, assay_data, pipeline):
-        pass
+    def test_delete_pipeline(self, assay_data, pipeline):
+        assay_data.add_pipeline(pipeline)
+        assay_data.delete_pipeline(pipeline.id)
+        with pytest.raises(exceptions.PipelineNotFound):
+            assay_data.fetch_pipeline(pipeline.id)
 
 
 class TestAssayDataSampleData:
@@ -87,82 +68,73 @@ class TestAssayDataSampleData:
     @pytest.fixture(scope="class")
     def sample_data(self, tmp_path_factory) -> SampleData:
         tmp_path = tmp_path_factory.mktemp("data")
-        sample = utils.create_dummy_sample(tmp_path, 1)
-        return SampleData(sample=sample)
+        return utils.create_dummy_sample_data(tmp_path, 1)
 
     @pytest.fixture(scope="class")
-    def sample_data_roi(self, sample_data) -> SampleData:
-        sample_data = sample_data.model_copy(deep=True)
-        sample_data.roi = [utils.create_dummy_roi() for _ in range(5)]
-        return sample_data
+    def sample_data_roi(self, tmp_path_factory) -> SampleData:
+        tmp_path = tmp_path_factory.mktemp("data")
+        return utils.create_dummy_sample_data(tmp_path, 1, with_roi=True)
 
     @pytest.fixture(scope="class")
-    def sample_data_features(self, sample_data_roi) -> SampleData:
-        sample_data = sample_data_roi.model_copy(deep=True)
-        utils.add_dummy_features(sample_data.roi, 3)
-        return sample_data
+    def sample_data_features(self, tmp_path_factory) -> SampleData:
+        tmp_path = tmp_path_factory.mktemp("data")
+        return utils.create_dummy_sample_data(tmp_path, 1, with_roi=True, with_feature=True)
 
     def test_add_sample_data_no_roi(self, sample_data, assay_data):
         expected = sample_data
         assay_data.add_sample_data(expected)
-        actual = assay_data.fetch_sample_data(expected.sample)
+        actual = assay_data.fetch_sample_data(expected.sample.id)
         assert actual == expected
 
     def test_add_sample_data_with_roi(self, sample_data_roi, assay_data):
         expected = sample_data_roi
         assay_data.add_sample_data(expected)
-        actual = assay_data.fetch_sample_data(expected.sample)
+        actual = assay_data.fetch_sample_data(expected.sample.id)
         assert actual == expected
 
     def test_add_sample_data_with_features(self, sample_data_features, assay_data):
         expected = sample_data_features
         assay_data.add_sample_data(expected)
-        actual = assay_data.fetch_sample_data(expected.sample)
+        actual = assay_data.fetch_sample_data(expected.sample.id)
         assert actual == expected
 
     def test_delete_sample_data(self, sample_data, assay_data):
         expected = sample_data
         assay_data.add_sample_data(expected)
 
-        all_samples_before_delete = assay_data.get_samples()
-        assert expected.sample in all_samples_before_delete
+        all_samples_before_delete = assay_data.list_samples()
+        assert expected.sample.id in all_samples_before_delete
 
-        assay_data.delete_sample_data(sample_data.sample)
-        all_samples_after_delete = assay_data.get_samples()
-        assert expected.sample not in all_samples_after_delete
+        assay_data.delete_sample_data(sample_data.sample.id)
+        all_samples_after_delete = assay_data.list_samples()
+        assert expected.sample.id not in all_samples_after_delete
 
         with pytest.raises(exceptions.SampleDataNotFound):
-            assay_data.fetch_sample_data(sample_data.sample)
+            assay_data.fetch_sample_data(sample_data.sample.id)
 
     def test_delete_data_roi(self, sample_data_roi, assay_data):
-        expected = sample_data_roi
-        assay_data.add_sample_data(expected)
+        assay_data.add_sample_data(sample_data_roi)
+        sample_id = sample_data_roi.sample.id
+        assay_data.delete_sample_data(sample_id)
 
-        actual_roi_before_delete = assay_data.get_roi_list(sample_data_roi.sample)
-        assert expected.roi == actual_roi_before_delete
-
-        assay_data.delete_sample_data(sample_data_roi.sample)
-
-        actual_roi_after_delete = assay_data.get_roi_list(sample_data_roi.sample)
-        assert not actual_roi_after_delete
+        with pytest.raises(NoResultFound), assay_data.SessionFactory() as session:
+            stmt = select(db.RoiModel).where(db.RoiModel.sample_id == sample_id)
+            session.scalars(stmt).one()
 
         with pytest.raises(exceptions.SampleDataNotFound):
-            assay_data.fetch_sample_data(sample_data_roi.sample)
+            assay_data.fetch_sample_data(sample_data_roi.sample.id)
 
-    def test_delete_data_feature(self, sample_data_roi, assay_data):
-        expected = sample_data_roi
-        assay_data.add_sample_data(expected)
+    def test_delete_data_feature(self, sample_data_features, assay_data: AssayData):
+        assay_data.add_sample_data(sample_data_features)
+        sample_id = sample_data_features.sample.id
+        assay_data.delete_sample_data(sample_id)
 
-        actual_features_before_delete = assay_data.get_features_by_sample(sample_data_roi.sample)
-        assert expected.get_features() == actual_features_before_delete
-
-        assay_data.delete_sample_data(sample_data_roi.sample)
-
-        actual_features_after_delete = assay_data.get_features_by_sample(sample_data_roi.sample)
-        assert not actual_features_after_delete
+        with pytest.raises(NoResultFound), assay_data.SessionFactory() as session:
+            stmt = select(db.FeatureModel).where(db.FeatureModel.sample_id == sample_id)
+            session.scalars(stmt).one()
 
         with pytest.raises(exceptions.SampleDataNotFound):
-            assay_data.fetch_sample_data(sample_data_roi.sample)
+            assay_data.fetch_sample_data(sample_id)
 
     def test_add_sample_data_with_same_id_raises_error(self, sample_data, assay_data):
         assay_data.add_sample_data(sample_data)
@@ -170,6 +142,106 @@ class TestAssayDataSampleData:
             assay_data.add_sample_data(sample_data)
 
 
+@pytest.fixture(scope="module")
+def sample_data_list(tmp_path_factory) -> list[SampleData]:
+    tmp_path = tmp_path_factory.mktemp("data")
+    samples = list()
+    for k in range(5):
+        sample_data = utils.create_dummy_sample_data(tmp_path, k, with_roi=True, with_feature=True)
+        samples.append(sample_data)
+    return samples
+
+@pytest.fixture(scope="module")
+def assay_data_with_sample_data(sample_data_list):
+    assay_data = AssayData(None, ConcreteRoi, ConcreteFeature)
+    for sample_data in sample_data_list:
+        assay_data.add_sample_data(sample_data)
+    return assay_data
+
+
+class TestAssayDataFetchDescriptors:
+    def test_all_samples(self, assay_data_with_sample_data, sample_data_list):
+        actual = assay_data_with_sample_data.fetch_descriptors()
+        expected_all_samples = {x.sample.id for x in sample_data_list}
+        actual_all_samples = set(actual["sample_id"])
+        assert actual_all_samples == expected_all_samples
+
+    def test_fetch_single_sample(self, assay_data_with_sample_data, sample_data_list):
+        sample_data = sample_data_list[3]
+        sample_id = sample_data.sample.id
+        actual = assay_data_with_sample_data.fetch_descriptors(sample_id)
+
+        # adapt sample descriptors to format return by AssayData
+        sample_descriptors = sample_data.get_feature_descriptors()
+        expected = dict()
+        for d in sample_descriptors:
+            for k, v in d.items():
+                k_descriptor_list = expected.setdefault(k, list())
+                k_descriptor_list.append(v)
+        assert actual == expected
+
+    def test_fetch_invalid_sample_returns_dict_with_empty_lists(self, assay_data_with_sample_data):
+        sample_id = "invalid_sample_id"
+        actual = assay_data_with_sample_data.fetch_descriptors(sample_id)
+        all_descriptors = assay_data_with_sample_data.feature.descriptor_names()
+        all_descriptors.update([x.value for x in IDFeatureDescriptors])
+        for descriptor, values in actual.items():
+            assert descriptor in all_descriptors
+            assert values == list()
+
+
+class TestAssayDataFetchAnnotations:
+    def test_all_samples(self, assay_data_with_sample_data, sample_data_list):
+        actual = assay_data_with_sample_data.fetch_annotations()
+        expected_all_samples = {x.sample.id for x in sample_data_list}
+        actual_all_samples = set(actual["sample_id"])
+        assert actual_all_samples == expected_all_samples
+
+    def test_fetch_single_sample(self, assay_data_with_sample_data, sample_data_list):
+        sample_data = sample_data_list[3]
+        sample_id = sample_data.sample.id
+        actual = assay_data_with_sample_data.fetch_annotations(sample_id)
+
+        # adapt sample descriptors to format return by AssayData
+        sample_annotations = sample_data.get_feature_annotations()
+        expected = dict()
+        for d in sample_annotations:
+            for k, v in d.items():
+                k_descriptor_list = expected.setdefault(k, list())
+                k_descriptor_list.append(v)
+        assert actual == expected
+
+    def test_fetch_invalid_sample_returns_dict_with_empty_lists(self, assay_data_with_sample_data):
+        sample_id = "invalid_sample_id"
+        actual = assay_data_with_sample_data.fetch_annotations(sample_id)
+        annotation_fields = list(Annotation.model_fields)
+        annotation_fields.extend([x.value for x in IDFeatureDescriptors])
+        for descriptor, values in actual.items():
+            assert descriptor in annotation_fields
+            assert values == list()
+
+    def test_fetch_has_feature_group(self, assay_data_with_sample_data):
+        actual = assay_data_with_sample_data.fetch_annotations(has_feature_group=True)
+        feature_group = actual[IDFeatureDescriptors.FEATURE_GROUP]
+        assert feature_group
+        for group in feature_group:
+            assert group > -1
+
+
+def test_set_feature_groups(assay_data_with_sample_data: AssayData):
+    samples = assay_data_with_sample_data.list_samples()
+    sample_id = samples[3]
+    sample_data_before_update = assay_data_with_sample_data.fetch_sample_data(sample_id)
+    new_groups = list()
+    for k, ft in enumerate(sample_data_before_update.get_features(), start=10000):
+        group = {IDFeatureDescriptors.ID.value: ft.id, IDFeatureDescriptors.FEATURE_GROUP.value: k}
+        ft.annotation.group = k
+        new_groups.append(group)
+    assay_data_with_sample_data.set_feature_groups(new_groups)
+    sample_data_after_update = assay_data_with_sample_data.fetch_sample_data(sample_id)
+    assert sample_data_before_update == sample_data_after_update
+
+    
 # def test_AssayData_delete_samples(assay_data: AssayData, tmp_path: Path):
 #     sample_list = [create_dummy_sample(tmp_path, x) for x in range(10, 20)]
 #     assay_data.add_samples(sample_list)
