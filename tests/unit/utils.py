@@ -10,6 +10,7 @@ from typing import Sequence
 from tidyms.core import constants as c
 from tidyms.core import models, processors
 from tidyms.core.models import Feature, Roi
+from tidyms.core.processors import SampleData
 
 
 class ConcreteRoi(models.Roi):
@@ -133,7 +134,7 @@ def add_dummy_features(roi_list: list[ConcreteRoi], n: int):
     label_counter = 0
     for roi in roi_list:
         for _ in range(n):
-            annotation = models.Annotation(label=label_counter)
+            annotation = models.Annotation(group=label_counter)
             ft = create_dummy_feature(roi, annotation)
             roi.add_feature(ft)
             label_counter += 1
@@ -144,3 +145,40 @@ def get_feature_list(roi_list: list[ConcreteRoi]) -> list[ConcreteFeature]:
     for roi in roi_list:
         feature_list.extend(roi.features)
     return feature_list
+
+
+def create_dummy_sample_data(
+    path: Path, suffix: int, group: str = "", with_roi: bool = False, with_feature: bool = False
+) -> SampleData:
+    """
+    Create a dummy sample data instance.
+
+    Parameters
+    ----------
+    path : Path
+        dummy path pointing to raw data.
+    suffix : int
+        numeric suffix appended to sample id.
+    group : str, optional
+        The group where the sample belongs to., by default ""
+    with_roi : bool, optional
+        If ``True``, adds dummy ROIs to sample, by default False
+    with_feature : bool, optional
+        If ``True`` add dummy features to ROI, by default False
+
+    Returns
+    -------
+    SampleData
+
+    """
+    sample = create_dummy_sample(path, suffix, group)
+
+    if with_roi:
+        roi_list = [create_dummy_roi() for _ in range(5)]
+    else:
+        roi_list = list()
+
+    if with_roi and with_feature:
+        add_dummy_features(roi_list, 5)
+
+    return SampleData(sample=sample, roi=roi_list)
