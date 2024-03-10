@@ -45,8 +45,9 @@ class Roi(pydantic.BaseModel):
     New Rois subclasses are created by inheritance of this class and setting
     data fields using Pydantic's standard approach.
 
-    For Numpy array fields, check out the `NumpyArray` type which provides type
-    checking for arrays and efficient serialization/deserialization.
+    For Numpy array fields, check out the `tidyms.core.numpy.FloatingArray` and
+    `tidyms.core.numpy.IntArray` types which provide type checking for arrays
+    and efficient serialization/deserialization.
 
     Two attributes are defined for the Roi class: `id` and `features`. Both
     are managed by other library components and should never be set directly by
@@ -331,7 +332,7 @@ class Feature(pydantic.BaseModel, Generic[RoiType]):
         return {x[5:] for x in dir(cls) if x.startswith("_set_")}
 
 
-class AnnotableFeature(Feature, ABC):
+class AnnotableFeature(Feature[RoiType], ABC):
     """
     Abstract feature class which inherits from Feature.
 
