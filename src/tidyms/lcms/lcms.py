@@ -32,8 +32,8 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import Self
 
-from .core.models import AnnotableFeature, Roi
-from .core.numpy import FloatingArray, IntArray
+from ..core.models import AnnotableFeature, Roi
+from ..core.numpy import FloatingArray, IntArray
 
 
 class MZTrace(Roi):
