@@ -22,29 +22,26 @@ get_find_centroid_params
 from __future__ import annotations
 
 import bisect
-import bokeh.plotting
-import json
-import numpy as np
-from scipy.ndimage import gaussian_filter1d
-from typing import Any, cast, Optional, Tuple
-from scipy.interpolate import interp1d
-from scipy.integrate import trapz
-from scipy.integrate import cumtrapz
+from math import nan
 
-from .core.models import Annotation, Feature, Roi
-from . import peaks
-from . import _plot_bokeh
-from .core import constants as c
-from .core.spectrum import MSSpectrum
-from .utils import array_to_json_str, json_str_to_array
+import numpy as np
+import pydantic
+from pydantic.functional_validators import model_validator
+from scipy.integrate import cumtrapz, trapz
+from scipy.interpolate import interp1d
+from scipy.ndimage import gaussian_filter1d
+from typing_extensions import Self
+
+from .core.models import AnnotableFeature, Roi
+from .core.numpy import FloatingArray, IntArray
 
 
 class MZTrace(Roi):
     """
-    ROI Implementation using MZ traces.
+    ROI implementation using m/z traces.
 
-    MZ traces are 1D traces containing time, intensity and m/z associated with
-    each scan.
+    An m/z trace is a 1D trace containing m/z, time and intensity information
+    across scans.
 
     Attributes
     ----------
@@ -61,64 +58,45 @@ class MZTrace(Roi):
 
     """
 
-    def __init__(
-        self,
-        time: np.ndarray[Any, np.dtype[np.floating]],
-        spint: np.ndarray[Any, np.dtype[np.floating]],
-        mz: np.ndarray[Any, np.dtype[np.floating]],
-        scan: np.ndarray[Any, np.dtype[np.integer]],
-        noise: Optional[np.ndarray] = None,
-        baseline: Optional[np.ndarray] = None,
-    ):
-        super().__init__()
-        self.time = time
-        self.spint = spint
-        self.mz = mz
-        self.scan = scan
-        self.features: Optional[list[Feature]] = None
-        self.fill_nan()
+    mz: FloatingArray
+    spint: FloatingArray
+    time: FloatingArray
+    scan: IntArray
+    noise: FloatingArray | None = None
+    baseline: FloatingArray | None = None
 
-        if noise is None:
-            noise = peaks.estimate_noise(self.spint)
-        self.noise = noise
+    @model_validator(mode="after")
+    def check_noise_all_non_negative(self) -> Self:
+        """Validate noise."""
+        if self.noise is not None:
+            msg = "All noise array elements must be non-negative."
+            assert np.all(self.noise >= 0.0), msg
+        return self
 
-        if baseline is None:
-            baseline = peaks.estimate_baseline(self.spint, self.noise)
-        self.baseline = baseline
+    @model_validator(mode="after")
+    def check_baseline_lower_or_equal_than_intensity(self) -> Self:
+        """Validate baseline."""
+        if self.baseline is not None:
+            msg = "All baseline elements must be lower than their corresponding trace intensity."
+            assert np.all(self.spint >= self.baseline), msg
+        return self
 
-    @staticmethod
-    def _deserialize(s: str) -> dict[str, Any]:
-        d = json.loads(s)
-        d[c.SPINT] = json_str_to_array(d[c.SPINT])
-        d[c.MZ] = None if d[c.MZ] is None else json_str_to_array(d[c.MZ])
-        d[c.TIME] = json_str_to_array(d[c.TIME])
-        d[c.SCAN] = None if d[c.SCAN] is None else json_str_to_array(d[c.SCAN])
-        d[c.NOISE] = None if d[c.NOISE] is None else json_str_to_array(d[c.NOISE])
-        d[c.BASELINE] = (
-            None if d[c.BASELINE] is None else json_str_to_array(d[c.BASELINE])
-        )
-        return d
-
-    def to_str(self) -> str:
+    def get_slice_height(self, start: int, end: int) -> FloatingArray:
         """
-        Serialize the LCRoi into a JSON str.
+        Compute the trace height in a slice.
 
-        Returns
-        -------
-        str
+        Parameters
+        ----------
+        start : int
+            slice start index.
+        end : int
+            slice end index.
 
         """
-        d = dict()
-        d[c.TIME] = array_to_json_str(self.time)
-        d[c.SPINT] = array_to_json_str(self.spint)
-        d[c.SCAN] = None if self.scan is None else array_to_json_str(self.scan)
-        d[c.MZ] = None if self.mz is None else array_to_json_str(self.mz)
-        d[c.BASELINE] = (
-            None if self.baseline is None else array_to_json_str(self.baseline)
-        )
-        d[c.NOISE] = None if self.noise is None else array_to_json_str(self.noise)
-        d_json = json.dumps(d)
-        return d_json
+        height = self.spint[start:end]
+        if self.baseline is not None:
+            height = height - self.baseline[start:end]
+        return np.maximum(height, 0.0)
 
     def fill_nan(self):
         """
@@ -135,8 +113,9 @@ class MZTrace(Roi):
                 self.time[~missing],
                 self.spint[~missing],
                 assume_sorted=True,
-                fill_value="extrapolate",
+                fill_value="extrapolate", # type: ignore
             )
+
             sp_max = np.nanmax(self.spint)
             sp_min = np.nanmin(self.spint)
             self.spint[missing] = interpolator(self.time[missing])
@@ -156,6 +135,15 @@ class MZTrace(Roi):
             Standard deviation of the gaussian kernel.
         """
         self.spint = gaussian_filter1d(self.spint, smoothing_strength)
+
+    def __eq__(self, other: Self) -> bool:
+        return (
+            np.array_equal(self.mz, other.mz)
+            and np.array_equal(self.time, other.time)
+            and np.array_equal(self.spint, other.spint)
+            and np.array_equal(self.scan, other.scan)
+            and self.id == other.id
+        )
 
 
 class LCTrace(MZTrace):
@@ -179,116 +167,7 @@ class LCTrace(MZTrace):
 
     """
 
-    features: Optional[list[Peak]]
-
-    def extract_features(self, **kwargs):
-        """
-        Detect chromatographic peaks.
-
-        Peaks are stored in the `features` attribute.
-
-        Parameters
-        ----------
-        **kwargs :
-            Parameters to pass to :py:func:`tidyms.peaks.detect_peaks`.
-
-        Notes
-        -----
-        Peak detection is done in five steps:
-
-        1. Estimate the noise level.
-        2. Apply a gaussian smoothing to the chromatogram.
-        3. Estimate the baseline.
-        4. Detect peaks in the chromatogram.
-
-        A complete description can be found :ref:`here <feature-extraction>`.
-
-        See Also
-        --------
-        tidyms.peaks.estimate_noise : noise estimation of 1D signals
-        tidyms.peaks.estimate_baseline : baseline estimation of 1D signals
-        tidyms.peaks.detect_peaks : peak detection of 1D signals.
-
-        """
-        if self.noise is None:
-            self.noise = peaks.estimate_noise(self.spint)
-
-        if self.baseline is None:
-            self.baseline = peaks.estimate_baseline(self.spint, self.noise)
-
-        start, apex, end = peaks.detect_peaks(
-            self.spint, self.noise, self.baseline, **kwargs
-        )
-        self.features = [Peak(s, a, e, self) for s, a, e in zip(start, apex, end)]
-
-    def plot(
-        self, figure: Optional[bokeh.plotting.figure] = None, show: bool = True
-    ) -> bokeh.plotting.figure:  # pragma: no cover
-        """
-        Plot the ROI.
-
-        Parameters
-        ----------
-        figure : bokeh.plotting.figure or None, default=None
-            Figure to add the plot. If None, a new figure is created.
-        show : bool, default=True
-            If True calls ``bokeh.plotting.show`` on the Figure.
-
-        Returns
-        -------
-        bokeh.plotting.figure
-
-        """
-        if figure is None:
-            fig_params = _plot_bokeh.get_chromatogram_figure_params()
-            figure = bokeh.plotting.figure(**fig_params)
-
-        _plot_bokeh.add_line(figure, self.time, self.spint)
-        if self.features:
-            palette = _plot_bokeh.get_palette()
-            palette_cycler = _plot_bokeh.palette_cycler(palette)
-            for f, color in zip(self.features, palette_cycler):
-                _plot_bokeh.fill_area(
-                    figure,
-                    self.time,
-                    self.spint,
-                    f.start,
-                    f.end,
-                    color,
-                )
-        _plot_bokeh.set_chromatogram_axis_params(figure)
-        if show:
-            bokeh.plotting.show(figure)
-        return figure
-
-    def __eq__(self, other: "LCTrace") -> bool:
-        is_eq = (
-            np.array_equal(self.mz, other.mz)
-            and np.array_equal(self.time, other.time)
-            and np.array_equal(self.spint, other.spint)
-            and np.array_equal(self.scan, other.scan)
-        )
-        return is_eq
-
-
-class Chromatogram(LCTrace):
-    """
-    Representation of a chromatogram. Manages plotting and peak detection.
-
-    Subclassed from LCRoi.
-
-    Attributes
-    ----------
-    time : array
-        Retention time data.
-    spint : array
-        Intensity data.
-
-    """
-
-    def __init__(self, time: np.ndarray, spint: np.ndarray):
-        super(Chromatogram, self).__init__(time, spint, spint, spint)
-
+    pass
 
 class InvalidPeakException(ValueError):
     """Exception raised when invalid indices are passed to the Peak constructor."""
@@ -296,7 +175,7 @@ class InvalidPeakException(ValueError):
     pass
 
 
-class Peak(Feature):
+class Peak(AnnotableFeature[MZTrace]):
     """
     Representation of a chromatographic peak. Computes peak descriptors.
 
@@ -313,133 +192,90 @@ class Peak(Feature):
         ROI associated with the Peak.
     index: int
         Unique index for features detected a ROI.
+    mz: float
+        Peak m/z, defined as the weighted average of the trace m/z in the peak
+        region. The trace height is used as weights.
+    rt : float
+        Peak retention time, defined as the weighted average of the trace time
+        in the peak region. The trace height is used as weights.
+    rt_start : float
+        Peak start time.
+    rt_end : float
+        Peak end time.
+    height: float
+        Peak height, defined as the difference between the peak intensity
+        and the peak baseline at the apex.
+    area: float
+        Peak area.
+    snr: float
+        The peak signal-to-noise ratio, defined as the quotient between the
+        peak height and the noise level at the apex. If the noise level is not
+        available, the SNR is set to ``nan``.
+    mz_std: float
+        The peak m/z standard deviation.
+    width: float
+        The peak width, defined as the time window comprised by the 2.5 % and
+        97.5 % of the cumulative peak area.
+    extension : float
+        The peak extension, defined as the length of the peak region.
 
     """
 
-    roi: LCTrace
+    start: pydantic.PositiveInt
+    apex: pydantic.PositiveInt
+    end: pydantic.PositiveInt
 
-    def __init__(
-        self,
-        start: int,
-        apex: int,
-        end: int,
-        roi: LCTrace,
-        annotation: Optional[Annotation] = None,
-    ):
+    area: float = nan
+    extension: float = nan
+    height: float = nan
+    mz_std: float = nan
+    rt: float = nan
+    rt_start: float = nan
+    rt_end: float = nan
+    snr: float = nan
+    width: float = nan
+
+    @model_validator(mode="after")
+    def check_peak_definition(self) -> Self:
+        """
+        Perform peak sanity check.
+
+        Check that start, apex and end indices are strictly sorted. Check that
+        peak end index is lower than trace length.
+
+        """
+        msg = "start must be lower than loc and loc must be lower than end"
+        assert (self.start < self.apex < self.end), msg
+
+        msg = "peak end must be lower than m/z trace length."
+        assert (self.end < self.roi.scan.size), msg
+
+        return self
+
+    def _set_rt_start(self) -> None:
+        self.rt_start = self.roi.time[self.start].item()
+
+    def _set_rt_end(self) -> None:
+        self.rt_end = self.roi.time[self.end - 1].item()
+
+    def _set_rt(self) -> None:
         try:
-            assert start < end
-            assert start < apex
-            assert apex < end
-        except AssertionError:
-            msg = "start must be lower than loc and loc must be lower than end"
-            raise InvalidPeakException(msg)
-        super().__init__(roi, annotation)
-        self.start = int(start)
-        self.end = int(end)
-        self.apex = int(apex)
+            weights = self.roi.get_slice_height(self.start, self.end)
+            self.rt = np.average(self.roi.time[self.start : self.end], weights=weights).item()
+        except ZeroDivisionError:
+            self.rt = nan
 
-    def to_str(self) -> str:
-        """Serialize the peak into a string representation."""
-        d = {c.START: self.start, c.APEX: self.apex, c.END: self.end}
-        s = json.dumps(d)
-        return s
-
-    @staticmethod
-    def _deserialize(s: str) -> dict:
-        return json.loads(s)
-
-    def __repr__(self):
-        name = self.__class__.__name__
-        return f"{name}(start={self.start}, apex={self.apex}, end={self.end})"
-
-    def plot(self, figure: bokeh.plotting.figure, color: str, **varea_params):
-        """Plot the LC trace."""
-        _plot_bokeh.fill_area(
-            figure,
-            self.roi.time,
-            self.roi.spint,
-            self.start,
-            self.end,
-            color,
-            **varea_params,
-        )
-
-    def get_rt_start(self) -> float:
-        """
-        Compute the start of the peak, in time units.
-
-        Returns
-        -------
-        float
-
-        """
-        return self.roi.time[self.start]
-
-    def get_rt_end(self) -> float:
-        """
-        Compute the end of the peak, in time units.
-
-        Returns
-        -------
-        float
-
-        """
-        return self.roi.time[self.end - 1]
-
-    def get_rt(self) -> float:
-        """
-        Find the peak location in the ROI rt, using spint as weights.
-
-        Returns
-        -------
-        rt : float
-
-        """
-        weights = self.roi.spint[self.start : self.end]
+    def _set_height(self) -> None:
+        height = self.roi.spint[self.apex].item()
         if self.roi.baseline is not None:
-            weights = weights - self.roi.baseline[self.start : self.end]
-        weights = np.maximum(weights, 0)
-        loc = np.abs(np.average(self.roi.time[self.start : self.end], weights=weights))
-        return loc
+            height = height - self.roi.baseline[self.apex].item()
+        self.height = height
 
-    def get_height(self) -> float:
-        """
-        Compute the height of the peak.
+    def _set_area(self) -> None:
+        peak_extension = self.roi.get_slice_height(self.start, self.end)
+        self.area = trapz(peak_extension, self.roi.time[self.start : self.end]).item()
 
-        The height is defined as the difference between the value of intensity
-        in the ROI and the baseline at the peak apex.
-
-        Returns
-        -------
-        height : non-negative number. If the baseline estimation is greater
-        than y, the height is set to zero.
-
-        """
-        height = self.roi.spint[self.apex]
-        if self.roi.baseline is not None:
-            height -= self.roi.baseline[self.apex]
-        return max(0.0, height)
-
-    def get_area(self) -> float:
-        """
-        Compute the peak area.
-
-        If the baseline area is greater than the peak area, the area is set
-        to zero.
-
-        Returns
-        -------
-        area : positive number.
-
-        """
-        peak_extension = self.roi.spint[self.start : self.end]
-        if self.roi.baseline is not None:
-            peak_extension = peak_extension - self.roi.baseline[self.start : self.end]
-
-        area = trapz(peak_extension, self.roi.time[self.start : self.end])
-        return max(0.0, area)
-
-    def get_width(self) -> float:
+    def _set_width(self) -> None:
         """
         Compute the peak width.
 
@@ -451,10 +287,8 @@ class Peak(Feature):
         width : positive number.
 
         """
-        height = (
-            self.roi.spint[self.start : self.end]
-            - self.roi.baseline[self.start : self.end]
-        )
+        height = self.roi.get_slice_height(self.start, self.end)
+
         area = cumtrapz(height, self.roi.time[self.start : self.end])
         if area[-1] > 0:
             relative_area = area / area[-1]
@@ -462,76 +296,31 @@ class Peak(Feature):
             start, end = self.start + np.searchsorted(relative_area, percentile)
             width = float(self.roi.time[end] - self.roi.time[start])
         else:
-            width = 0.0
-        return max(0.0, width)
+            width = nan
+        self.width = width
 
-    def get_extension(self) -> float:
-        """
-        Compute the peak extension.
+    def _set_extension(self) -> None:
+        self.extension = self.roi.time[self.end - 1] - self.roi.time[self.start]
 
-        The peak extension is defined as the length of the peak region.
-
-        Returns
-        -------
-        extension : positive number
-
-        """
-        return self.roi.time[self.end - 1] - self.roi.time[self.start]
-
-    def get_snr(self) -> float:
-        """
-        Compute the peak signal-to-noise ratio (SNR).
-
-        The SNR is defined as the quotient between the peak height and the noise
-        level at the apex.
-
-        Returns
-        -------
-        snr : float
-
-        """
-        peak_noise = self.roi.noise[self.apex]
-        if np.isclose(peak_noise, 0):
-            snr = np.inf
+    def _set_snr(self) -> None:
+        if self.roi.noise is None or np.allclose(self.roi.noise[self.apex], 0.0):
+            self.snr = nan
         else:
-            snr = self.get_height() / peak_noise
-        return snr
+            self.snr = self.get("height") / self.roi.noise[self.apex]
 
-    def get_mz(self) -> float:
-        """
-        Compute the weighted average m/z of the peak.
 
-        Returns
-        -------
-        mz_mean : float
-
-        """
-        if self.roi.mz is None:
-            msg = "mz not specified for ROI."
-            raise ValueError(msg)
-        else:
-            weights = cast(np.ndarray, self.roi.spint[self.start : self.end])
-            weights[weights < 0.0] = 0
+    def _set_mz(self) -> None:
+        weights = self.roi.get_slice_height(self.start, self.end)
+        try:
             mz_mean = np.average(self.roi.mz[self.start : self.end], weights=weights)
-            mz_mean = max(0.0, mz_mean.item())
-        return mz_mean
+            self.mz = max(0.0, mz_mean.item())
+        except ZeroDivisionError:
+            self.mz = nan
 
-    def get_mz_std(self) -> Optional[float]:
-        """
-        Compute the standard deviation of the peak m/z.
+    def _set_mz_std(self) -> None:
+        self.mz_std = self.roi.mz[self.start : self.end].std()
 
-        Returns
-        -------
-        float
-
-        """
-        if self.roi.mz is None:
-            mz_std = None
-        else:
-            mz_std = self.roi.mz[self.start : self.end].std()
-        return mz_std
-
-    def compare(self, other: Peak) -> float:
+    def compare(self, other: Self) -> float:
         """
         Compute the similarity between a pair of peaks.
 
@@ -544,7 +333,7 @@ class Peak(Feature):
     @staticmethod
     def compute_isotopic_envelope(
         features: list[Peak],
-    ) -> Tuple[list[float], list[float]]:
+    ) -> tuple[list[float], list[float]]:
         """
         Compute the isotopic envelope (m/z and abundance) of a list of peaks.
 
@@ -562,6 +351,7 @@ class Peak(Feature):
         """
         scan_start = 0
         scan_end = 10000000000  # dummy value
+        # TODO: refactor this.
         for ft in features:
             scan_start = max(scan_start, ft.roi.scan[ft.start])
             scan_end = min(scan_end, ft.roi.scan[ft.end - 1])
@@ -573,7 +363,7 @@ class Peak(Feature):
                 start = bisect.bisect(ft.roi.scan, scan_start)
                 end = bisect.bisect(ft.roi.scan, scan_end)
                 apex = (start + end) // 2  # dummy value
-                tmp_peak = Peak(start, apex, end, ft.roi)
+                tmp_peak = Peak(start=start, apex=apex, end=end, roi=ft.roi)
                 p_area = trapz(
                     tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end]
                 )
@@ -596,8 +386,8 @@ def _compare_features_lc(ft1: Peak, ft2: Peak) -> float:
         os1, oe1, os2, oe2 = _get_overlap_index(ft1, ft2)
         norm1 = np.linalg.norm(ft1.roi.spint[ft1.start : ft1.end])
         norm2 = np.linalg.norm(ft2.roi.spint[ft2.start : ft2.end])
-        x1 = cast(np.ndarray, ft1.roi.spint[os1:oe1]) / norm1
-        x2 = cast(np.ndarray, ft2.roi.spint[os2:oe2]) / norm2
+        x1 = ft1.roi.spint[os1:oe1] / norm1
+        x2 = ft2.roi.spint[os2:oe2] / norm2
         similarity = np.dot(x1, x2)
     else:
         similarity = 0.0
@@ -644,7 +434,7 @@ def _overlap_ratio(ft1: Peak, ft2: Peak) -> float:
     return res
 
 
-def _get_overlap_index(ft1: Peak, ft2: Peak) -> Tuple[int, int, int, int]:
+def _get_overlap_index(ft1: Peak, ft2: Peak) -> tuple[int, int, int, int]:
     """
     Compute the overlap indices for ft1 and ft2.
 
