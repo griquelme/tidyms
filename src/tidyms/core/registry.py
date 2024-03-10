@@ -5,7 +5,6 @@ from typing import TypeVar
 from . import exceptions
 from .models import Feature, Roi
 from .processors import Processor
-from .reader import Reader
 
 FeatureType = TypeVar("FeatureType", bound=Feature)
 RoiType = TypeVar("RoiType", bound=Roi)
@@ -14,7 +13,6 @@ ProcessorType = TypeVar("ProcessorType", bound=Processor)
 
 _REGISTERED_FEATURES: dict[str, type[Feature]] = dict()
 _REGISTERED_ROIS: dict[str, type[Roi]] = dict()
-_REGISTERED_READERS: dict[str, type[Reader]] = dict()
 
 
 def get_roi_type(type_: str) -> type[Roi]:
@@ -111,32 +109,4 @@ def register_feature(feature: type[FeatureType]) -> type[FeatureType]:
     return feature
 
 
-def get_reader_type(type_: str) -> type[Reader]:
-    """
-    Retrieve a Reader type from the registry.
 
-    Parameters
-    ----------
-    type_ : str
-        The name of the Processor to retrieve.
-
-    Returns
-    -------
-    type[Processor]
-
-    Raises
-    ------
-    ProcessorTypeNotRegistered
-        If a non-registered Processor name is requested
-
-    """
-    try:
-        type_str = f"{type_.upper()}Reader"
-        return _REGISTERED_READERS[type_str]
-    except KeyError as e:
-        raise exceptions.ReaderNotFound(type_) from e
-
-
-def list_reader_types() -> list[str]:
-    """Retrieve the list of Feature types."""
-    return list(_REGISTERED_READERS)

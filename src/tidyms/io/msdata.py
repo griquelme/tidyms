@@ -6,10 +6,10 @@ import pathlib
 from collections import OrderedDict
 from typing import Generator
 
-from .constants import MSDataMode
-from .models import Chromatogram, MSSpectrum
-from .reader import Reader
-from .registry import get_reader_type
+from ..core.constants import MSDataMode
+from ..core.models import Chromatogram, MSSpectrum
+from .readers.interface import Reader
+from .readers.registry import get_reader_type
 
 
 class MSData:

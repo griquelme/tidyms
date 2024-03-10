@@ -3,7 +3,7 @@
 import pathlib
 from typing import IO, Protocol
 
-from .models import Chromatogram, MSSpectrum
+from ...core.models import Chromatogram, MSSpectrum
 
 
 class Reader(Protocol):
