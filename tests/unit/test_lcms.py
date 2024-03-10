@@ -3,7 +3,7 @@ from math import isclose
 import numpy as np
 import pydantic
 import pytest
-from tidyms.lcms import MZTrace, Peak
+from tidyms.lcms.lcms import MZTrace, Peak
 
 
 class TestMZTrace:
