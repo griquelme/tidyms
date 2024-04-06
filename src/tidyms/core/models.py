@@ -363,7 +363,7 @@ class AnnotableFeature(Feature[RoiType], ABC):
     @staticmethod
     @abstractmethod
     def compute_isotopic_envelope(
-        feature: Sequence[Feature],
+        features: Sequence[Feature],
     ) -> tuple[list[float], list[float]]:
         """
         Compute the isotopic envelope from a list of isotopologue features.
@@ -545,3 +545,7 @@ class MissingData(TypedDict):
     sample_id: str
     feature_group: int
     value: float
+
+
+FeatureType = TypeVar("FeatureType", bound=Feature)
+AnnotableFeatureType = TypeVar("AnnotableFeatureType", bound=AnnotableFeature)
