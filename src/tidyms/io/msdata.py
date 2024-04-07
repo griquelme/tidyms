@@ -9,7 +9,7 @@ from typing import Generator
 from ..core.constants import MSDataMode
 from ..core.models import Chromatogram, MSSpectrum
 from .readers.interface import Reader
-from .readers.registry import get_reader_type
+from .readers.registry import get_reader
 
 
 class MSData:
@@ -38,19 +38,18 @@ class MSData:
     def __init__(
         self,
         src: pathlib.Path,
-        reader: Reader | None = None,
+        reader: type[Reader] | None = None,
         centroid: MSDataMode = MSDataMode.CENTROID,
         cache: int = -1
     ):
         # TODO: add file-like type hint
-        if isinstance(src, pathlib.Path):
+        if isinstance(src, pathlib.Path) and reader is None:
             ext = src.suffix
-            reader_type = get_reader_type(ext)
-            reader = reader_type(src)
+            reader = get_reader(ext)
         elif reader is None:
                 msg = "Reader must be specified for file objects."
                 raise ValueError(msg)
-        self._reader = reader
+        self._reader = reader(src)
         self._centroid = centroid
         self._cache = MSDataCache(max_size=cache)
         self._n_spectra: int | None = None
@@ -74,6 +73,10 @@ class MSData:
 
     def get_spectrum(self, index: int) -> MSSpectrum:
         """Retrieve a spectrum by index."""
+        n_sp = self.get_n_spectra()
+        if (index < 0) or (index >= n_sp):
+            msg = f"`index` must be integer in the interval [0:{n_sp}). Got {index}."
+            raise ValueError(msg)
         spectrum = self._cache.get(index)
         if spectrum is None:
             spectrum = self._reader.get_spectrum(index)
