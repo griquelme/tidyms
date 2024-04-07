@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+from typing import Literal, TypeVar
 
 from numpy import floating, frombuffer, integer
 from numpy.typing import NDArray
@@ -61,15 +62,25 @@ def validate_serializable_array(arr: NDArray) -> NDArray:
         arr = json_str_to_array(arr)
     return arr
 
+FloatDtype = TypeVar("FloatDtype", bound=floating)
+IntDtype = TypeVar("IntDtype", bound=integer)
+
 
 FloatingArray = Annotated[
-    NDArray[floating],
+    NDArray[FloatDtype],
     BeforeValidator(validate_serializable_array),
     PlainSerializer(array_to_json_str, return_type=str),
 ]
 
 IntArray = Annotated[
-    NDArray[integer],
+    NDArray[IntDtype],
+    BeforeValidator(validate_serializable_array),
+    PlainSerializer(array_to_json_str, return_type=str),
+]
+
+FloatArray1D = Annotated[
+    NDArray[FloatDtype],
+    Literal["N"],
     BeforeValidator(validate_serializable_array),
     PlainSerializer(array_to_json_str, return_type=str),
 ]
