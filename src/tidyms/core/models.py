@@ -223,6 +223,9 @@ class Feature(pydantic.BaseModel, Generic[RoiType]):
         elif isinstance(other, self.__class__):
             return self.get("mz") >= other.get("mz")
 
+    def __hash__(self) -> int:
+        return self.id.__hash__()
+
     def _set_mz(self):
         """Get the feature m/z."""
         if isnan(self.mz):
