@@ -20,17 +20,13 @@ from scipy.interpolate import interp1d
 from scipy.signal import find_peaks
 from scipy.special import erfc
 from scipy.stats import median_abs_deviation as mad
-from typing import List, Optional, Tuple
 
 
 def detect_peaks(
-        x: np.ndarray,
-        noise: np.ndarray,
-        baseline: np.ndarray,
-        find_peaks_params: Optional[dict] = None
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    x: np.ndarray, noise: np.ndarray, baseline: np.ndarray, find_peaks_params: dict | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     r"""
-    Finds peaks in a 1D signal.
+    Find peaks in a 1D signal.
 
     Parameters
     ----------
@@ -81,7 +77,6 @@ def detect_peaks(
     get_peak_descriptors : computes descriptors on a list of Peak objects
 
     """
-
     baseline_index = np.where((x - baseline) < noise)[0]
     if baseline_index.size == 0:
         baseline_index = np.array([0, x.size - 1], dtype=int)
@@ -103,12 +98,7 @@ def detect_peaks(
     return start, peaks, end
 
 
-def estimate_noise(
-        x: np.ndarray,
-        min_slice_size: int = 200,
-        n_slices: int = 5,
-        robust: bool = True
-) -> np.ndarray:
+def estimate_noise(x: np.ndarray, min_slice_size: int = 200, n_slices: int = 5, robust: bool = True) -> np.ndarray:
     """
     Estimates the noise level in a signal.
 
@@ -150,13 +140,9 @@ def estimate_noise(
     return noise
 
 
-def estimate_baseline(
-        x: np.ndarray,
-        noise: np.ndarray,
-        min_proba: float = 0.05
-) -> np.ndarray:
+def estimate_baseline(x: np.ndarray, noise: np.ndarray, min_proba: float = 0.05) -> np.ndarray:
     """
-    Computes the baseline of a 1D signal.
+    Compute the baseline of a 1D signal.
 
     The baseline is estimated by classifying each point in the signal as either
     signal or baseline. The baseline is obtained by interpolation of baseline
@@ -187,11 +173,11 @@ def estimate_baseline(
     return baseline
 
 
-def find_centroids(mz: np.ndarray, spint: np.ndarray, min_snr: float,
-                   min_distance: float
-                   ) -> Tuple[np.ndarray, np.ndarray]:
+def find_centroids(
+    mz: np.ndarray, spint: np.ndarray, min_snr: float, min_distance: float
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Finds the centroid of a mass spectrum in profile mode.
+    Find the centroid of a mass spectrum in profile mode.
 
     Parameters
     ----------
@@ -257,10 +243,9 @@ def find_centroids(mz: np.ndarray, spint: np.ndarray, min_snr: float,
     return centroid, total_spint
 
 
-def _find_peak_extension(peaks: np.array, baseline_index: np.array
-                         ) -> Tuple[np.ndarray, np.ndarray]:
+def _find_peak_extension(peaks: np.array, baseline_index: np.array) -> tuple[np.ndarray, np.ndarray]:
     """
-    Finds the closest baseline points to the left and right of each peak.
+    Find the closest baseline points to the left and right of each peak.
 
     aux function of detect_peaks
 
@@ -282,8 +267,9 @@ def _find_peak_extension(peaks: np.array, baseline_index: np.array
     return start, end
 
 
-def _fix_peak_overlap(y: np.ndarray, start: np.ndarray, peaks: np.ndarray,
-                      end: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def _fix_peak_overlap(
+    y: np.ndarray, start: np.ndarray, peaks: np.ndarray, end: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Fix boundaries of overlapping peaks.
 
@@ -318,9 +304,9 @@ def _fix_peak_overlap(y: np.ndarray, start: np.ndarray, peaks: np.ndarray,
     return start, end
 
 
-def _normalize_peaks(y: np.ndarray, start: np.ndarray, peaks: np.ndarray,
-                     end: np.ndarray
-                     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _normalize_peaks(
+    y: np.ndarray, start: np.ndarray, peaks: np.ndarray, end: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Sanity check of peaks.
 
@@ -352,7 +338,7 @@ def _normalize_peaks(y: np.ndarray, start: np.ndarray, peaks: np.ndarray,
     valid_peaks = np.zeros(peaks.size, dtype=bool)
     for k in range(peaks.size):
         # search local min in the region defined by the overlapping peaks
-        local_max_slice = y[local_max[start_index[k]:end_index[k]]]
+        local_max_slice = y[local_max[start_index[k] : end_index[k]]]
         if local_max_slice.size > 0:
             k_max = np.argmax(local_max_slice)
             new_peak = local_max[start_index[k] + k_max]
@@ -394,7 +380,7 @@ def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
     # lower than its standard deviation.
     # start at 90th percentile and decrease it in each iteration.
     # The loop stops at the 20th percentile even if this condition is not meet
-    n_deviations = 3    # dummy values to initialize the loop
+    n_deviations = 3  # dummy values to initialize the loop
     percentile_counter = 9  # start at 90th percentile
     noise_std = 0
 
@@ -405,7 +391,7 @@ def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
         mean_func = np.mean
         std_func = np.std
 
-    if d2x.size >= 2:   # we need at least 2 points to compute the std
+    if d2x.size >= 2:  # we need at least 2 points to compute the std
         while (n_deviations > 1.0) and (percentile_counter > 2):
             percentile_index = percentile_counter * d2x.size // 10
             # the minimum number of elements required to compute the MAD
@@ -430,10 +416,9 @@ def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
     return noise
 
 
-def _find_baseline_points(x: np.ndarray, noise: np.ndarray,
-                          min_proba: float) -> np.ndarray:
+def _find_baseline_points(x: np.ndarray, noise: np.ndarray, min_proba: float) -> np.ndarray:
     """
-    Finds points flagged as baseline.
+    Find points flagged as baseline.
 
     Aux function of estimate_baseline.
 
@@ -459,7 +444,7 @@ def _find_baseline_points(x: np.ndarray, noise: np.ndarray,
 
 def _find_local_extrema(x: np.ndarray) -> np.ndarray:
     """
-    Finds all local minima and maxima in an 1D array.
+    Find all local minima and maxima in an 1D array.
 
     aux function of _find_baseline_points.
 
@@ -482,11 +467,9 @@ def _find_local_extrema(x: np.ndarray) -> np.ndarray:
     return np.unique(extrema)
 
 
-def _estimate_noise_probability(noise: np.ndarray, x: np.ndarray,
-                                extrema: np.ndarray) -> np.ndarray:
+def _estimate_noise_probability(noise: np.ndarray, x: np.ndarray, extrema: np.ndarray) -> np.ndarray:
     """
-    Computes the probability that the variation observed in each slice is
-    due to noise only.
+    Compute the probability that the variation observed in each slice is due to noise only.
 
     Aux function of _find_baseline_points.
 
@@ -501,7 +484,6 @@ def _estimate_noise_probability(noise: np.ndarray, x: np.ndarray,
     noise_probability : array
 
     """
-
     if extrema.size:
         noise_slice = _get_noise_slice_sum_std(noise, extrema[:-1])
         # The difference between maximum and minimum in each slice
@@ -516,10 +498,9 @@ def _estimate_noise_probability(noise: np.ndarray, x: np.ndarray,
     return noise_probability
 
 
-def _get_noise_slice_sum_std(noise: np.ndarray,
-                             extrema: np.ndarray) -> np.ndarray:
+def _get_noise_slice_sum_std(noise: np.ndarray, extrema: np.ndarray) -> np.ndarray:
     """
-    Computes the standard deviation of the sum of slices between local maxima.
+    Compute the standard deviation of the sum of slices between local maxima.
 
     aux function of _estimate_noise_probability.
 
@@ -540,9 +521,8 @@ def _get_noise_slice_sum_std(noise: np.ndarray,
     # consecutive slices, i.e: the sum between of y between extrema[0] and
     # extrema[1], extrema[1] and extrema[2]...
     # The last element is not used
-    reduce_ind = (np.vstack([extrema, np.roll(extrema + 1, -1)])
-                    .T.reshape(extrema.size * 2)[:-1])
-    return np.sqrt(np.add.reduceat(noise ** 2, reduce_ind)[::2])
+    reduce_ind = np.vstack([extrema, np.roll(extrema + 1, -1)]).T.reshape(extrema.size * 2)[:-1]
+    return np.sqrt(np.add.reduceat(noise**2, reduce_ind)[::2])
 
 
 def _get_signal_sum(x, extrema):
@@ -550,7 +530,7 @@ def _get_signal_sum(x, extrema):
     # consecutive local maxima indices. if X is the cumulative sum of x, then
     # the sum between a and b is X[b] - X[a - 1]. The sum must also be relative
     # to the minimum between a and b. Because we are comparing intervals
-    # between loca extrema, the intervals are monotonic, and we just need to
+    # between local extrema, the intervals are monotonic, and we just need to
     # subtract the min(x[a], x[b]) multiplied by the length of the interval.
     # this code achieves this in a vectorized way
     cum_x = np.cumsum(x)
@@ -566,10 +546,9 @@ def _get_signal_sum(x, extrema):
     return res
 
 
-def _build_baseline_index(x: np.ndarray, noise_probability: np.ndarray,
-                          min_p: float, extrema: np.ndarray):
+def _build_baseline_index(x: np.ndarray, noise_probability: np.ndarray, min_p: float, extrema: np.ndarray):
     """
-    builds an array with indices of points flagged as baseline.
+    Build an array with indices of points flagged as baseline.
 
     aux function of _find_baseline_points
 
@@ -593,11 +572,9 @@ def _build_baseline_index(x: np.ndarray, noise_probability: np.ndarray,
     return baseline_index
 
 
-def _include_first_and_last_index(x: np.ndarray,
-                                  baseline_index: List[np.ndarray]
-                                  ) -> np.ndarray:
+def _include_first_and_last_index(x: np.ndarray, baseline_index: list[np.ndarray]) -> np.ndarray:
     """
-    adds first and last indices of x to the baseline indices.
+    Add first and last indices of x to the baseline indices.
 
     aux function of _build_baseline_index
 
@@ -625,19 +602,17 @@ def _include_first_and_last_index(x: np.ndarray,
     return baseline_index
 
 
-def _merge_close_peaks(mz: np.ndarray, spint: np.ndarray,
-                       min_distance: float) -> Tuple[np.ndarray, np.ndarray]:
+def _merge_close_peaks(mz: np.ndarray, spint: np.ndarray, min_distance: float) -> tuple[np.ndarray, np.ndarray]:
     if mz.shape[0] < 2:
         return mz, spint
     dmz = np.diff(mz)
     is_close_mask = (dmz < min_distance) & (np.roll(dmz, -1) > min_distance)
-    is_close_mask[-1] = (mz[-1] - mz[-2]) < min_distance    # boundary case
+    is_close_mask[-1] = (mz[-1] - mz[-2]) < min_distance  # boundary case
     close_index = np.where(is_close_mask)[0]
     while close_index.size > 0:
         # merge close centroids
         new_spint = spint[close_index] + spint[close_index + 1]
-        new_mz = (mz[close_index] * spint[close_index] +
-                  mz[close_index + 1] * spint[close_index + 1])
+        new_mz = mz[close_index] * spint[close_index] + mz[close_index + 1] * spint[close_index + 1]
         new_mz /= new_spint
         spint[close_index] = new_spint
         mz[close_index] = new_mz
