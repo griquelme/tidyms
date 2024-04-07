@@ -1,11 +1,15 @@
 """Maintain a runtime registry of readers."""
 
+from typing import TypeVar
+
 from ...core.exceptions import ReaderNotFound
 from .interface import Reader
 
+ReaderType = TypeVar("ReaderType", bound=Reader)
+
 _REGISTERED_READERS: dict[str, type[Reader]] = dict()
 
-def get_reader_type(type_: str) -> type[Reader]:
+def get_reader(type_: str) -> type[Reader]:
     """
     Retrieve a Reader type from the registry.
 
@@ -25,8 +29,7 @@ def get_reader_type(type_: str) -> type[Reader]:
 
     """
     try:
-        type_str = f"{type_.upper()}Reader"
-        return _REGISTERED_READERS[type_str]
+        return _REGISTERED_READERS[type_]
     except KeyError as e:
         raise ReaderNotFound(type_) from e
 
@@ -34,3 +37,9 @@ def get_reader_type(type_: str) -> type[Reader]:
 def list_reader_types() -> list[str]:
     """Retrieve the list of Feature types."""
     return list(_REGISTERED_READERS)
+
+
+def register(reader: type[ReaderType]) -> type[ReaderType]:
+    """Add a reader to the registry."""
+    _REGISTERED_READERS[reader.__name__] = reader
+    return reader
