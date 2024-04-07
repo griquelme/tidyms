@@ -32,9 +32,10 @@ from pathlib import Path
 from typing import Any, Generic, Sequence, TypedDict, TypeVar
 
 import pydantic
-from numpy.typing import NDArray
 from pydantic.functional_validators import BeforeValidator
 from typing_extensions import Annotated, Self
+
+from .numpy import FloatArray1D
 
 
 class Roi(pydantic.BaseModel):
@@ -503,8 +504,8 @@ class MSSpectrum(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
     index: int = -1
-    mz: NDArray
-    int: NDArray
+    mz: FloatArray1D
+    int: FloatArray1D
     ms_level: pydantic.PositiveInt = 1
     time: pydantic.NonNegativeFloat = 0.0
     centroid: bool = True
@@ -515,8 +516,8 @@ class Chromatogram(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
     index: int = -1
-    time: NDArray
-    int: NDArray
+    time: FloatArray1D
+    int: FloatArray1D
 
 
 class FeatureGroupMap(TypedDict):
