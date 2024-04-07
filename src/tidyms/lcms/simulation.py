@@ -1,9 +1,19 @@
-"""Reader class for simulated LC-MS data."""
+"""Utilities to simulate LC-MS data.
+
+Provides:
+
+SimulatedLCMSDataReader
+    A Reader that can be plugged into MSData to generate simulated LC-MS data files.
+SimulatedLCMSSampleFactory
+    A pydantic model that creates simulated sample data configuration.
+
+"""
 
 from __future__ import annotations
 
 import pathlib
-from typing import IO
+from io import StringIO
+from typing import BinaryIO, TextIO
 
 import numpy as np
 import pydantic
@@ -19,10 +29,13 @@ from ..io.readers.registry import register
 class SimulatedLCMSDataReader:
     """Read simulated LC-MS data files."""
 
-    def __init__(self, src: pathlib.Path | IO) -> None:
-        if not isinstance(src, pathlib.Path):
+    def __init__(self, src: pathlib.Path | TextIO | BinaryIO) -> None:
+        if isinstance(src, StringIO):
+            self.sample = SimulatedLCMSSample.model_validate_json(src.read())
+        elif isinstance(src, pathlib.Path):
+            self.sample = SimulatedLCMSSample.from_json(src)
+        else:
             raise NotImplementedError
-        self.sample = SimulatedLCMSSample.from_json(src)
         self.factory = MSSpectrumFactory(self.sample)
 
     def get_chromatogram(self, index: int) -> Chromatogram:
@@ -109,6 +122,10 @@ class SimulatedLCMSSampleFactory(pydantic.BaseModel):
     def make_file(self, path: pathlib.Path):
         """Create a new simulated sample file."""
         self.make().to_json(path)
+
+    def make_fileobj(self):
+        """Create a text file object."""
+        return StringIO(self.make().model_dump_json())
 
 
 class SimulatedLCMSSample(pydantic.BaseModel):

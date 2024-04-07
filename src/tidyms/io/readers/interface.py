@@ -1,7 +1,7 @@
 """Reader interface specification."""
 
 import pathlib
-from typing import IO, Protocol
+from typing import BinaryIO, Protocol, TextIO
 
 from ...core.models import Chromatogram, MSSpectrum
 
@@ -9,7 +9,7 @@ from ...core.models import Chromatogram, MSSpectrum
 class Reader(Protocol):
     """Reader interface for raw data."""
 
-    def __init__(self, src: pathlib.Path | IO):
+    def __init__(self, src: pathlib.Path | TextIO | BinaryIO):
         ...
 
     def get_chromatogram(self, index: int) -> Chromatogram:

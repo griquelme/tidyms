@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pathlib
 from collections import OrderedDict
-from typing import Generator
+from typing import BinaryIO, Generator, TextIO
 
 from ..core.constants import MSDataMode
 from ..core.models import Chromatogram, MSSpectrum
@@ -37,7 +37,7 @@ class MSData:
 
     def __init__(
         self,
-        src: pathlib.Path,
+        src: pathlib.Path | TextIO | BinaryIO,
         reader: type[Reader] | None = None,
         centroid: MSDataMode = MSDataMode.CENTROID,
         cache: int = -1

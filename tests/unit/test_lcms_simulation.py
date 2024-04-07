@@ -1,10 +1,7 @@
-import pathlib
-
 import numpy as np
 import pytest
 from tidyms.core.models import MSSpectrum
 from tidyms.io.msdata import MSData
-from tidyms.io.readers.registry import get_reader
 from tidyms.lcms import simulation
 from tidyms.utils import find_closest
 
@@ -52,11 +49,9 @@ class TestSimulatedLCMSSample:
 class TestSimulatedMSData:
 
     @pytest.fixture
-    def data(self, factory: simulation.SimulatedLCMSSampleFactory, tmp_path: pathlib.Path):
-        reader = get_reader("SimulatedLCMSDataReader")
-        file = tmp_path / "data.json"
-        factory.make_file(file)
-        return MSData(file, reader=reader)
+    def data(self, factory: simulation.SimulatedLCMSSampleFactory):
+        reader = simulation.SimulatedLCMSDataReader
+        return MSData(factory.make_fileobj(), reader=reader)
 
     def test_get_spectrum(self, data: MSData):
         index = 0
@@ -84,6 +79,9 @@ class TestSimulatedMSData:
                     check_cond = True
         assert check_cond
 
-
-
+    def test_multiple_calls_to_get_spectrum_retrieves_the_same_instance(self, data: MSData):
+        index = 10
+        sp1 = data.get_spectrum(index)
+        sp2 = data.get_spectrum(index)
+        assert sp1 is sp2
 
