@@ -4,7 +4,7 @@ Functions used to extract information from raw data.
 """
 
 import numpy as np
-from .lcms import Chromatogram, LCTrace, MSSpectrum
+from .lcms.lcms import Chromatogram, LCTrace, MSSpectrum
 from .fileio import MSData
 from .utils import find_closest
 from . import validation as val
