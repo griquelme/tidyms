@@ -21,6 +21,8 @@ from scipy.signal import find_peaks
 from scipy.special import erfc
 from scipy.stats import median_abs_deviation as mad
 
+from ..core.numpy import FloatArray1D, IntArray1D
+
 
 def detect_peaks(
     x: np.ndarray, noise: np.ndarray, baseline: np.ndarray, find_peaks_params: dict | None = None
@@ -98,13 +100,13 @@ def detect_peaks(
     return start, peaks, end
 
 
-def estimate_noise(x: np.ndarray, min_slice_size: int = 200, n_slices: int = 5, robust: bool = True) -> np.ndarray:
+def estimate_noise(x: FloatArray1D, min_slice_size: int = 200, n_slices: int = 5, robust: bool = True) -> np.ndarray:
     """
-    Estimates the noise level in a signal.
+    Estimate the noise level in a signal.
 
-    Splits x into several slices and estimates the noise assuming that the
-    noise is gaussian iid in each slice. See [ADD LINK] for a detailed
-    description of how the method works
+    `x` is split into chunks and a noise estimation is done assuming a gaussian
+    iid in each chunk. See [ADD LINK] for a detailed description of how the method
+    works.
 
     Parameters
     ----------
@@ -131,9 +133,11 @@ def estimate_noise(x: np.ndarray, min_slice_size: int = 200, n_slices: int = 5, 
     start = 0
     while start < x.size:
         end = min(start + slice_size, x.size)
+
+        # prevent short slices at the end of x
         if (x.size - end) < min_slice_size:
-            # prevent short slices at the end of x
             end = x.size
+
         slice_noise = _estimate_local_noise(x[start:end], robust=robust)
         noise[start:end] = slice_noise
         start = end
@@ -243,7 +247,7 @@ def find_centroids(
     return centroid, total_spint
 
 
-def _find_peak_extension(peaks: np.array, baseline_index: np.array) -> tuple[np.ndarray, np.ndarray]:
+def _find_peak_extension(peaks: IntArray1D, baseline_index: IntArray1D) -> tuple[IntArray1D, IntArray1D]:
     """
     Find the closest baseline points to the left and right of each peak.
 
@@ -350,9 +354,9 @@ def _normalize_peaks(
     return start, fixed_peaks, end
 
 
-def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
+def _estimate_local_noise(x: FloatArray1D, robust: bool = True) -> float:
     r"""
-    Estimates noise in a 1D signal. Assumes that the noise is gaussian iid.
+    Estimate noise in a 1D signal. Assumes that the noise is gaussian iid.
 
     aux function of estimate_noise
 
@@ -370,50 +374,44 @@ def _estimate_local_noise(x: np.ndarray, robust: bool = True) -> float:
     noise : non-negative number.
 
     """
-    d2x = np.diff(x, n=2)
-    sorted_index = np.argsort(np.abs(d2x))
-    d2x = d2x[sorted_index]
     # if d2x follows a normal distribution ~ N(0, 2*sigma), its sample mean
     # has a normal distribution ~ N(0,  2 * sigma / sqrt(n - 2)) where n is the
     # size of d2x.
     # d2x with high absolute values are removed until this the mean of d2x is
     # lower than its standard deviation.
-    # start at 90th percentile and decrease it in each iteration.
+    # start at 90th percentile and decrease the percentile by 10 in each iteration.
     # The loop stops at the 20th percentile even if this condition is not meet
-    n_deviations = 3  # dummy values to initialize the loop
-    percentile_counter = 9  # start at 90th percentile
-    noise_std = 0
 
-    if robust:
-        mean_func = np.median
-        std_func = lambda x: mad(x, scale="normal")
-    else:
-        mean_func = np.mean
-        std_func = np.std
+    d2x = np.diff(x, n=2)
+    d2x = d2x[np.argsort(np.abs(d2x))]
 
-    if d2x.size >= 2:  # we need at least 2 points to compute the std
-        while (n_deviations > 1.0) and (percentile_counter > 2):
-            percentile_index = percentile_counter * d2x.size // 10
-            # the minimum number of elements required to compute the MAD
-            if percentile_index <= 2:
-                break
-            noise_std = std_func(d2x[:percentile_index])
-            noise_mean = mean_func(d2x[:percentile_index])
+    # sizes at 20, 30, ..., 90 percentiles
+    # sizes must be > 2 to compute the standard deviation
+    chunk_sizes = [d2x.size * percentile // 100 for percentile in reversed(range(20, 100, 10))]
+    chunk_sizes = [x for x in chunk_sizes if x > 2]
 
-            # if all the values in d2x are equal, noise_std is equal to zero
-            if noise_std > 0:
-                n_deviations = abs(noise_mean / noise_std)
-            else:
-                break
-            percentile_counter -= 1
-        noise = noise_std / 2
-        if np.isclose(noise, 0):
-            noise = d2x.std()
-    else:
-        # in the case where d2x < 2 we cannot compute the std, the noise is
-        # defined as 0
-        noise = 0.0
-    return noise
+    for size in chunk_sizes:
+        noise_std = _compute_noise_std(d2x[:size], robust)
+
+        # if all the values in d2x are equal, noise_std is equal to zero
+        if noise_std == 0.0:
+            return 0.0
+
+        noise_mean = _compute_noise_mean(d2x[:size], robust)
+
+        if abs(noise_mean / noise_std) <= 1.0:
+            return noise_std / 2
+
+    # if there are no chunk with sizes greater than 2, fall back to zero
+    return 0.0
+
+
+def _compute_noise_mean(x: FloatArray1D, robust: bool) -> float:
+    return np.median(x).item() if robust else np.mean(x).item()
+
+
+def _compute_noise_std(x: FloatArray1D, robust: bool) -> float:
+    return mad(x, scale="normal") if robust else np.std(x).item() # type: ignore
 
 
 def _find_baseline_points(x: np.ndarray, noise: np.ndarray, min_proba: float) -> np.ndarray:
@@ -572,7 +570,7 @@ def _build_baseline_index(x: np.ndarray, noise_probability: np.ndarray, min_p: f
     return baseline_index
 
 
-def _include_first_and_last_index(x: np.ndarray, baseline_index: list[np.ndarray]) -> np.ndarray:
+def _include_first_and_last_index(x: FloatArray1D, fixed_baseline_index: list[IntArray1D]) -> IntArray1D:
     """
     Add first and last indices of x to the baseline indices.
 
@@ -588,18 +586,21 @@ def _include_first_and_last_index(x: np.ndarray, baseline_index: list[np.ndarray
     baseline_index : array of indices
 
     """
-    if len(baseline_index):
+    if len(fixed_baseline_index):
         stack = list()
         # include first and last indices
-        if baseline_index[0][0] != 0:
+        if fixed_baseline_index[0][0] != 0:
             stack.append([0])
-        stack.extend(baseline_index)
-        if baseline_index[-1][-1] != x.size - 1:
+
+        stack.extend(fixed_baseline_index)
+
+        if fixed_baseline_index[-1][-1] != x.size - 1:
             stack.append([x.size - 1])
-        baseline_index = np.hstack(stack)
+
+        fixed_baseline_index = np.hstack(stack) # type: ignore
     else:
-        baseline_index = np.array([0, x.size - 1], dtype=int)
-    return baseline_index
+        fixed_baseline_index = np.array([0, x.size - 1], dtype=int) # type: ignore
+    return fixed_baseline_index # type: ignore
 
 
 def _merge_close_peaks(mz: np.ndarray, spint: np.ndarray, min_distance: float) -> tuple[np.ndarray, np.ndarray]:
