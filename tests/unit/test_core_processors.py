@@ -205,7 +205,7 @@ class TestProcessingPipeline:
 
 
 def test_is_feature_descriptor_in_valid_range_valid_range():
-    filters = {"height": (50.0, 150.0)}
+    filters = {"height": (0.0, 15.0)}
     roi = utils.create_dummy_roi()
     ft = utils.create_dummy_feature(roi, Annotation())
     assert processors._is_feature_descriptor_in_valid_range(ft, filters)

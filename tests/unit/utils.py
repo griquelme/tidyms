@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from math import nan
+from math import isnan, nan
 from pathlib import Path
 from random import randint, random
 from typing import Sequence
@@ -11,6 +11,7 @@ from tidyms.core import constants as c
 from tidyms.core import models, processors
 from tidyms.core.models import Feature, Roi
 from tidyms.core.processors import SampleData
+from typing_extensions import Self
 
 
 class ConcreteRoi(models.Roi):
@@ -20,7 +21,7 @@ class ConcreteRoi(models.Roi):
         return (self.data == other.data) and (self.id == other.id)
 
 
-class ConcreteFeature(models.Feature):
+class ConcreteFeature(models.AnnotableFeature):
     data: int
     custom_descriptor: float = nan
 
@@ -29,7 +30,12 @@ class ConcreteFeature(models.Feature):
 
     def _set_mz(self):
         # make mz depend on data field to test equal method
-        self.mz = 100.0 * self.data
+        if isnan(self.mz):
+            self.mz = 100.0 * self.data
+
+    def _set_height(self):
+        if isnan(self.height):
+            self.height = self.area
 
     def equal(self, other: ConcreteFeature) -> bool:
         return (
@@ -37,6 +43,14 @@ class ConcreteFeature(models.Feature):
             and (self.id == other.id)
             and (self.annotation == other.annotation)
         )
+
+    def compare(self, other: Self) -> float:
+        return 1.0
+
+    @staticmethod
+    def compute_isotopic_envelope(features: list[Feature]) -> tuple[list[float], list[float]]:
+        total_area = sum([x.area for x in features])
+        return [x.mz for x in features], [x.area / total_area for x in features]
 
 @processors.ProcessorRegistry.register
 class DummyRoiExtractor(processors.RoiExtractor):
@@ -127,7 +141,7 @@ def create_dummy_feature(
     roi: ConcreteRoi, annotation: models.Annotation
 ) -> ConcreteFeature:
     data = randint(0, 10)
-    return ConcreteFeature(roi=roi, data=data, annotation=annotation)
+    return ConcreteFeature(roi=roi, data=data, annotation=annotation, height=float(data))
 
 
 def add_dummy_features(roi_list: list[ConcreteRoi], n: int):

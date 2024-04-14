@@ -124,7 +124,7 @@ class TestAssayDataSampleData:
         with pytest.raises(exceptions.SampleDataNotFound):
             assay_data.fetch_sample_data(sample_data_roi.sample.id)
 
-    def test_delete_data_feature(self, sample_data_features, assay_data: AssayData):
+    def test_delete_data_feature(self, sample_data_features, assay_data):
         assay_data.add_sample_data(sample_data_features)
         sample_id = sample_data_features.sample.id
         assay_data.delete_sample_data(sample_id)
@@ -241,7 +241,7 @@ def test_set_feature_groups(assay_data_with_sample_data: AssayData):
     sample_data_after_update = assay_data_with_sample_data.fetch_sample_data(sample_id)
     assert sample_data_before_update == sample_data_after_update
 
-    
+
 # def test_AssayData_delete_samples(assay_data: AssayData, tmp_path: Path):
 #     sample_list = [create_dummy_sample(tmp_path, x) for x in range(10, 20)]
 #     assay_data.add_samples(sample_list)

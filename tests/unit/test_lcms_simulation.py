@@ -7,27 +7,13 @@ from tidyms.utils import find_closest
 
 
 @pytest.fixture
-def factory():
-    config = simulation.SimulatedLCMSDataConfiguration(min_signal_intensity=1.0, n_scans=40)
-    formula_list = ["[C54H104O6]+", "[C27H40O2]+", "[C24H26O12]+"]
-    rt_list = [10.0, 20.0, 30.0]
-    int_list = [100.0, 200.0, 300.0]
-    adduct_list = list()
-    for rt, spint, formula in zip(rt_list, int_list, formula_list):
-        adduct = simulation.SimulatedLCMSAdductSpecification(
-            formula=formula, rt_mean=rt, base_intensity=spint, n_isotopologues=1
-        )
-        adduct_list.append(adduct)
-    return simulation.SimulatedLCMSSampleFactory(config=config, adducts=adduct_list)
-
-@pytest.fixture
-def factory_with_grid(factory: simulation.SimulatedLCMSSampleFactory):
-    factory.config.grid = simulation.MZGridSpecification()
-    return factory
+def factory_with_grid(lcms_sample_factory: simulation.SimulatedLCMSSampleFactory):
+    lcms_sample_factory.config.grid = simulation.MZGridSpecification()
+    return lcms_sample_factory
 
 class TestSimulatedLCMSSample:
-    def test_make_grid_no_spec_ok(self, factory: simulation.SimulatedLCMSSampleFactory):
-        sample = factory.make()
+    def test_make_grid_no_spec_ok(self, lcms_sample_factory: simulation.SimulatedLCMSSampleFactory):
+        sample = lcms_sample_factory.make()
         grid = sample.make_grid()
         assert grid.size == len(sample.features)
         assert np.all(np.diff(grid) > 0.0)
@@ -49,9 +35,9 @@ class TestSimulatedLCMSSample:
 class TestSimulatedMSData:
 
     @pytest.fixture
-    def data(self, factory: simulation.SimulatedLCMSSampleFactory):
+    def data(self, lcms_sample_factory: simulation.SimulatedLCMSSampleFactory):
         reader = simulation.SimulatedLCMSDataReader
-        return MSData(factory.make_fileobj(), reader=reader)
+        return MSData(lcms_sample_factory.make_fileobj(), reader=reader)
 
     def test_get_spectrum(self, data: MSData):
         index = 0
