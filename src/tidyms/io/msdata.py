@@ -6,6 +6,8 @@ import pathlib
 from collections import OrderedDict
 from typing import BinaryIO, Generator, TextIO
 
+from typing_extensions import Callable
+
 from ..core.constants import MSDataMode
 from ..core.models import Chromatogram, MSSpectrum
 from .readers.interface import Reader
@@ -27,11 +29,16 @@ class MSData:
         using the file extension.
     centroid : MSDataMode, default=MSDataMode.CENTROID
         The mode in which the data is stored.
+    centroider : Callable[[MSSpectrum], MSSpectrum] or None, default=None
+        A function that takes a spectrum in profile mode and converts it to
+        centroid mode.
     cache : int, default=-1
         The maximum size of the cache, in bytes. The cache will store spectrum
         data until it surpasses this value. At this point, old entries will be
         deleted from the cache. If set to``-1``, the cache can grow
-        indefinitely.
+        indefinitely. When working with data streams, the cache size is set
+        to ``-1``, as there is no guarantee that the `seek` method is implemented
+        in the file object.
 
     """
 
@@ -40,15 +47,17 @@ class MSData:
         src: pathlib.Path | TextIO | BinaryIO,
         reader: type[Reader] | None = None,
         centroid: MSDataMode = MSDataMode.CENTROID,
+        centroider: Callable[[MSSpectrum], MSSpectrum] | None = None,
         cache: int = -1
     ):
-        # TODO: add file-like type hint
         if isinstance(src, pathlib.Path) and reader is None:
             ext = src.suffix
             reader = get_reader(ext)
         elif reader is None:
                 msg = "Reader must be specified for file objects."
                 raise ValueError(msg)
+
+        self._centroider = centroider
         self._reader = reader(src)
         self._centroid = centroid
         self._cache = MSDataCache(max_size=cache)
@@ -80,6 +89,9 @@ class MSData:
         spectrum = self._cache.get(index)
         if spectrum is None:
             spectrum = self._reader.get_spectrum(index)
+            if self._centroid == MSDataMode.PROFILE and self._centroider is not None:
+                spectrum = self._centroider(spectrum)
+
             spectrum.centroid = self._centroid == MSDataMode.CENTROID
             self._cache.add(spectrum)
         return spectrum

@@ -1,5 +1,6 @@
 """Maintain a runtime registry of readers."""
 
+
 from typing import TypeVar
 
 from ...core.exceptions import ReaderNotFound
@@ -8,6 +9,18 @@ from .interface import Reader
 ReaderType = TypeVar("ReaderType", bound=Reader)
 
 _REGISTERED_READERS: dict[str, type[Reader]] = dict()
+_EXTENSION_TO_READER: dict[str, str] = dict()
+
+
+def get_reader_from_extension(ext: str) -> type[Reader]:
+    """Fetch a MS data reader from a file extension."""
+    type_ = _EXTENSION_TO_READER.get(ext)
+
+    if type_ is None:
+        msg = f"No reader associated with extension {ext}."
+        raise ValueError(msg)
+
+    return get_reader(type_)
 
 def get_reader(type_: str) -> type[Reader]:
     """
