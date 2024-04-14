@@ -5,7 +5,7 @@ import base64
 import json
 from typing import Literal, TypeVar
 
-from numpy import floating, frombuffer, integer
+from numpy import float_, frombuffer, int_
 from numpy.typing import NDArray
 from pydantic.functional_serializers import PlainSerializer
 from pydantic.functional_validators import BeforeValidator
@@ -62,8 +62,8 @@ def validate_serializable_array(arr: NDArray) -> NDArray:
         arr = json_str_to_array(arr)
     return arr
 
-FloatDtype = TypeVar("FloatDtype", bound=floating)
-IntDtype = TypeVar("IntDtype", bound=integer)
+FloatDtype = TypeVar("FloatDtype", bound=float_)
+IntDtype = TypeVar("IntDtype", bound=int_)
 
 
 FloatingArray = Annotated[
@@ -80,6 +80,13 @@ IntArray = Annotated[
 
 FloatArray1D = Annotated[
     NDArray[FloatDtype],
+    Literal["N"],
+    BeforeValidator(validate_serializable_array),
+    PlainSerializer(array_to_json_str, return_type=str),
+]
+
+IntArray1D = Annotated[
+    NDArray[IntDtype],
     Literal["N"],
     BeforeValidator(validate_serializable_array),
     PlainSerializer(array_to_json_str, return_type=str),

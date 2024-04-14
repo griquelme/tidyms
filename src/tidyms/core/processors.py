@@ -651,11 +651,11 @@ class FeatureMatcher(MultipleSampleProcessor):
 
     def process(self, data: AssayDataInterface):
         """Group features across samples based on their chemical identity."""
-        patches = self._func(data)
-        data.patch_annotations(*patches)
+        feature_group_mappings = self._func(data)
+        data.set_feature_groups(feature_group_mappings)
 
     @abstractmethod
-    def _func(self, data: AssayDataInterface) -> list[AnnotationPatch]:
+    def _func(self, data: AssayDataInterface) -> list[FeatureGroupMap]:
         """Create a label for each feature based on their chemical identity."""
         ...
 

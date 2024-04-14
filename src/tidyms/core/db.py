@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Generic, Sequence, TypeVar
+from typing import Generic, Sequence
 
 import sqlalchemy as sa
 import sqlalchemy.orm as orm
@@ -21,13 +21,10 @@ from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from . import exceptions
 from .constants import IDFeatureDescriptors
-from .models import Annotation, Feature, FeatureGroupMap, Roi, Sample
+from .models import Annotation, Feature, FeatureGroupMap, FeatureType, Roi, RoiType, Sample
 from .processors import ProcessingPipeline, ProcessorConfiguration, ProcessorRegistry, SampleData
 
 Base = orm.declarative_base()
-
-RoiType = TypeVar("RoiType", bound=Roi)
-FeatureType = TypeVar("FeatureType", bound=Feature)
 
 
 class ProcessorModel(Base):

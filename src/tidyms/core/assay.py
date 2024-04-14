@@ -12,19 +12,22 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import pathlib
-from typing import Generator, Sequence
+from typing import Generator, Generic, Sequence, TypeVar
 
 import pydantic
 import yaml
 
 from ..utils import get_progress_bar
-from . import registry
+from . import exceptions
 from .db import AssayData
-from .models import Feature, Roi, Sample, SampleData
-from .processors import ProcessingPipeline, SampleDataSnapshots
+from .models import Feature, Roi, Sample
+from .processors import ProcessingPipeline, ProcessorRegistry, SampleData, SampleDataSnapshots
 
 logger = logging.getLogger(__file__)
 
+
+FeatureType = TypeVar("FeatureType", bound=Feature)
+RoiType = TypeVar("RoiType", bound=Roi)
 
 class AssayConfiguration(pydantic.BaseModel):
     """
@@ -49,12 +52,12 @@ class AssayConfiguration(pydantic.BaseModel):
 
     roi: str
     feature: str
-    samples: list[Sample]
-    path: pathlib.Path | None
+    samples: list[Sample] = list()
+    path: pathlib.Path | None = None
     sample_pipeline: ProcessingPipeline
 
 
-class Assay:
+class Assay(Generic[FeatureType, RoiType]):
     """
     Manage data processing and storage of datasets.
 
@@ -62,12 +65,21 @@ class Assay:
 
     """
 
-    def __init__(self, config: AssayConfiguration):
-
-        roi_type = registry.get_roi_type(config.roi)
-        feature_type = registry.get_feature_type(config.feature)
-        self._config = config
-        self._data = AssayData(config.path, roi_type, feature_type)
+    def __init__(
+        self,
+        roi_type: type[RoiType],
+        feature_type: type[FeatureType],
+        sample_pipeline: ProcessingPipeline,
+        path: pathlib.Path | None = None,
+    ):
+        self._config = AssayConfiguration(
+            roi=roi_type.__name__,
+            feature=feature_type.__name__,
+            path=path,
+            sample_pipeline=sample_pipeline
+        )
+        self._data = AssayData(path, roi_type, feature_type)
+        self._staging: set[str]
 
 
     @property
@@ -80,16 +92,19 @@ class Assay:
         """AssayData getter."""
         return self._data
 
-    def add_samples(self, samples: list[Sample]):
+    def add_samples(self, *samples: Sample) -> None:
         """
-        Add samples to the Assay.
+        Add samples to the Assay staging area.
 
         Parameters
         ----------
         samples : list[Sample]
 
         """
-        self.data.add_samples(samples)
+        for sample in samples:
+            if sample.id in self._staging:
+                raise exceptions.SampleAlreadyInAssay(sample.id)
+            self.config.samples.append(sample)
 
     @classmethod
     def from_yaml(cls, yaml_path: pathlib.Path) -> Assay:
@@ -104,7 +119,7 @@ class Assay:
             proc_list = list()
             for proc_config in proc_config_list:
                 proc_type_str = proc_config.pop("class")
-                proc_type = registry.get_processor_type(proc_type_str)
+                proc_type = ProcessorRegistry.get_processor(proc_type_str)
                 proc = proc_type(**proc_config)
                 proc_list.append(proc)
             d[pipeline_id] = proc_list
@@ -112,9 +127,9 @@ class Assay:
         return cls(**d)
 
 
-    def get_samples(self) -> list[Sample]:
-        """List all samples in the assay."""
-        return self.data.get_samples()
+    def list_processed_samples(self) -> list[str]:
+        """List all samples processed by the single sample pipeline."""
+        return self.data.list_samples()
 
     def get_feature_descriptors(
         self, sample_id: str | None = None, descriptors: list[str] | None = None
@@ -143,10 +158,9 @@ class Assay:
             correspondence.
 
         """
-        sample = None if sample_id is None else self.data.search_sample(sample_id)
-        return self.data.get_descriptors(descriptors=descriptors, sample=sample)
+        return self.data.fetch_descriptors(descriptors=descriptors, sample_id=sample_id)
 
-    def get_features(self, key, by: str, groups: list[str] | None = None) -> list[Feature]:
+    def get_features(self, key, by: str, groups: list[str] | None = None) -> list[FeatureType]:
         """
         Retrieve features from the assay.
 
@@ -173,8 +187,7 @@ class Assay:
 
         """
         if by == "sample":
-            sample = self.data.search_sample(key)
-            features = self.data.get_features_by_sample(sample)
+            features = self.data.get_features_by_sample(key)
         elif by == "label":
             features = self.data.get_features_by_label(key, groups=groups)
         elif by == "id":
@@ -185,7 +198,7 @@ class Assay:
 
         return features
 
-    def get_roi(self, key, by: str) -> Sequence[Roi]:
+    def get_roi(self, key, by: str) -> Sequence[RoiType]:
         """
         Retrieve ROIs from the assay. ROIs can be retrieved by sample, or id.
 
@@ -215,8 +228,7 @@ class Assay:
 
         """
         if by == "sample":
-            sample = self._data.search_sample(key)
-            roi_list = self._data.get_roi_list(sample)
+            roi_list = self._data.get_roi_list(key)
         elif by == "id":
             roi_list = [self._data.get_roi_by_id(key)]
         else:
@@ -257,10 +269,11 @@ class Assay:
         tidyms.base.Assay.set_parameters: set parameters for all processing steps.
 
         """
-        sample_list = self.get_samples()
+        valid_samples = self._staging
         if samples is not None:
-            unique_samples = set(samples)
-            sample_list = [x for x in sample_list if x in unique_samples]
+            valid_samples  = valid_samples & set(samples)
+        sample_list = [x for x in self.config.samples if x.id in valid_samples]
+
 
         def iterator() -> Generator[tuple[ProcessingPipeline, Sample], None, None]:
             """Provide independent pipeline instances to subprocess worker."""
@@ -287,6 +300,7 @@ class Assay:
                 if bar is not None:
                     bar.set_description(f"Processing {data.sample.id}")
                     bar.update()
+        self._staging = self._staging - set(valid_samples)
 
     def to_yaml(self, yaml_path: pathlib.Path) -> None:
         """Dump model into a YAML file."""
