@@ -9,7 +9,7 @@ from ..core import constants as c
 from ..core.models import Sample
 from ..core.processors import RoiExtractor
 from ..io.msdata import MSData
-from ..raw_data_utils import make_roi
+from ..algorithms.raw_data_utils import make_roi
 from .lcms import MZTrace
 
 

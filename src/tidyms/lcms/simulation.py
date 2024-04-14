@@ -36,7 +36,7 @@ class SimulatedLCMSDataReader:
             self.sample = SimulatedLCMSSample.from_json(src)
         else:
             raise NotImplementedError
-        self.factory = MSSpectrumFactory(self.sample)
+        self.spectrum_factory = MSSpectrumFactory(self.sample)
 
     def get_chromatogram(self, index: int) -> Chromatogram:
         """Retrieve a chromatogram from file."""
@@ -44,10 +44,10 @@ class SimulatedLCMSDataReader:
 
     def get_spectrum(self, index: int) -> MSSpectrum:
         """Retrieve a spectrum from file."""
-        return self.factory.create(index)
+        return self.spectrum_factory.create(index)
 
     def get_n_chromatograms(self) -> int:
-        """Retrieve the total number of chromatogram."""
+        """Retrieve the total number of chromatograms."""
         raise NotImplementedError
 
     def get_n_spectra(self) -> int:
