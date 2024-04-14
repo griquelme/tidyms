@@ -1,33 +1,15 @@
-import numpy as np
-import pandas as pd
+"""Annotate function implementation."""
+
 from typing import Sequence
+
+import numpy as np
+
+from ..chem import EnvelopeValidator
+from ..chem.atoms import EM, PeriodicTable
+from ..core.models import AnnotableFeature, AnnotableFeatureType
 from .annotation_data import AnnotationData
 from .envelope_finder import EnvelopeFinder
 from .mmi_finder import MMIFinder
-from ..core.models import Feature
-from ..chem import EnvelopeValidator
-from ..chem.atoms import EM, PeriodicTable
-from ..core import constants as c
-
-
-def create_annotation_table(feature_list: list[Feature]) -> pd.DataFrame:
-    d: dict[str, list[int]] = {
-        c.ROI_INDEX: list(),
-        c.FT_INDEX: list(),
-        c.ENVELOPE_INDEX: list(),
-        c.ENVELOPE_LABEL: list(),
-        c.CHARGE: list(),
-    }
-
-    for ft in feature_list:
-        annotation = ft.annotation
-        d[c.CHARGE].append(annotation.charge)
-        d[c.ENVELOPE_INDEX].append(annotation.isotopologue_index)
-        d[c.ENVELOPE_LABEL].append(annotation.isotopologue_label)
-        d[c.ROI_INDEX].append(ft.roi.id)
-        d[c.FT_INDEX].append(ft.id)
-
-    return pd.DataFrame(d)
 
 
 def create_annotation_tools(
@@ -42,7 +24,7 @@ def create_annotation_tools(
     min_p: float,
 ) -> tuple[MMIFinder, EnvelopeFinder, EnvelopeValidator]:
     """
-    Create an annotator object. Auxiliary function to _annotate
+    Create an annotator object. Auxiliary function to _annotate.
 
     Parameters
     ----------
@@ -78,7 +60,7 @@ def create_annotation_tools(
 
     bin_size = 100
     elements = list(bounds)
-    mmi_finder = MMIFinder(
+    mmi_finder: MMIFinder = MMIFinder(
         bounds,
         max_mass,
         max_charge,
@@ -88,7 +70,7 @@ def create_annotation_tools(
         p_tol,
         min_similarity,
     )
-    envelope_finder = EnvelopeFinder(
+    envelope_finder: EnvelopeFinder = EnvelopeFinder(
         elements, max_M_tol, max_length, min_p, min_similarity
     )
     envelope_validator = EnvelopeValidator(
@@ -103,7 +85,7 @@ def create_annotation_tools(
 
 
 def annotate(
-    feature_list: Sequence[Feature],
+    feature_list: Sequence[AnnotableFeature],
     mmi_finder: MMIFinder,
     envelope_finder: EnvelopeFinder,
     envelope_validator: EnvelopeValidator,
@@ -140,13 +122,14 @@ def annotate(
 
 
 def find_best_envelope(
-    data: AnnotationData,
-    monoisotopologue: Feature,
+    data: AnnotationData[AnnotableFeatureType],
+    monoisotopologue: AnnotableFeatureType,
     polarity: int,
-    mmi_candidates: Sequence[tuple[Feature, int]],
+    mmi_candidates: Sequence[tuple[AnnotableFeatureType, int]],
     envelope_finder: EnvelopeFinder,
     envelope_validator: EnvelopeValidator,
-) -> tuple[Sequence[Feature], int]:
+) -> tuple[Sequence[AnnotableFeatureType], int]:
+    """Find the most fitting envelope candidate."""
     best_length = 1
     best_candidate = [monoisotopologue]
     best_charge = -1
@@ -169,8 +152,8 @@ def find_best_envelope(
 
 
 def _validate_candidate(
-    candidate: Sequence[Feature],
-    monoisotopologue: Feature,
+    candidate: Sequence[AnnotableFeatureType],
+    monoisotopologue: AnnotableFeatureType,
     charge: int,
     polarity: int,
     min_length: int,

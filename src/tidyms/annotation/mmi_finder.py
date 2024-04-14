@@ -1,13 +1,14 @@
 """Implementation of the Minimum Mass Finder."""
 
-import numpy as np
 import bisect
-from typing import Optional
-from .annotation_data import AnnotationData
-from ..chem.atoms import Element, PeriodicTable, EM
+
+import numpy as np
+
 from ..chem._formula_generator import FormulaCoefficientBounds
+from ..chem.atoms import EM, Element, PeriodicTable
 from ..chem.envelope_tools import make_formula_coefficients_envelopes
-from ..core.models import Feature
+from ..core.models import AnnotableFeatureType
+from .annotation_data import AnnotationData
 
 
 class MMIFinder:
@@ -51,7 +52,7 @@ class MMIFinder:
         mz_tol: float,
         p_tol: float,
         min_similarity: float,
-        custom_abundances: Optional[dict[str, np.ndarray]] = None,
+        custom_abundances: dict[str, np.ndarray] | None = None,
     ):
         self.rules = _create_rules_dict(
             bounds, max_mass, length, bin_size, p_tol, custom_abundances
@@ -64,7 +65,7 @@ class MMIFinder:
         self.p_tol = p_tol
         self.min_similarity = min_similarity
 
-    def find(self, data: AnnotationData) -> list[tuple[Feature, int]]:
+    def find(self, data: AnnotationData[AnnotableFeatureType]) -> list[tuple[AnnotableFeatureType, int]]:
         """
         Search MMI candidates using features m/z and area.
 
@@ -111,8 +112,8 @@ class MMIFinder:
 
 
 def _find_candidate(
-    data: AnnotationData,
-    mono: Feature,
+    data: AnnotationData[AnnotableFeatureType],
+    mono: AnnotableFeatureType,
     charge: int,
     i_rules: dict,
     mz_tol: float,
@@ -128,8 +129,8 @@ def _find_candidate(
     max_qp = i_rules["qp"][1] + p_tol
 
     if (mono.mz * charge) < max_mass:
-        start = bisect.bisect(data.features, min_mz)
-        end = bisect.bisect(data.features, max_mz)
+        start = bisect.bisect(data.features, min_mz, key=lambda x: x.mz)
+        end = bisect.bisect(data.features, max_mz, key=lambda x: x.mz)
     else:
         start, end = 0, 0  # dummy values
 
@@ -147,9 +148,9 @@ def _find_candidate(
 
 
 def _check_candidate(
-    data: AnnotationData,
-    mono: Feature,
-    candidate: Feature,
+    data: AnnotationData[AnnotableFeatureType],
+    mono: AnnotableFeatureType,
+    candidate: AnnotableFeatureType,
     min_similarity: float,
     min_qp: float,
     max_qp: float,
@@ -176,7 +177,7 @@ def _create_rules_dict(
     length: int,
     bin_size: int,
     p_tol: float,
-    custom_abundances: Optional[dict[str, np.ndarray]],
+    custom_abundances: dict[str, np.ndarray] | None,
 ) -> dict[int, list[dict[str, tuple[float, float]]]]:
     Ma, pa = _create_envelope_arrays(bounds, max_mass, length, custom_abundances)
     # find the monoisotopic index, its Mass difference with the MMI (dM) and
@@ -213,7 +214,7 @@ def _create_envelope_arrays(
     bounds: dict[str, tuple[int, int]],
     M_max: float,
     max_length: int,
-    custom_abundances: Optional[dict[str, np.ndarray]],
+    custom_abundances: dict[str, np.ndarray] | None,
 ) -> tuple[np.ndarray, np.ndarray]:
     elements = _select_elements(list(bounds), custom_abundances)
     isotopes = [x.get_mmi() for x in elements]
@@ -262,7 +263,7 @@ def _select_multiple_isotope_elements(e_list: list[str]) -> list[str]:
 
 
 def _select_elements(
-    e_list: list[str], custom_abundances: Optional[dict[str, np.ndarray]] = None
+    e_list: list[str], custom_abundances: dict[str, np.ndarray] | None = None
 ) -> list[Element]:
     if custom_abundances is None:
         custom_abundances = dict()

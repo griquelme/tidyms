@@ -1,11 +1,11 @@
 """Storage tools for the annotation algorithm."""
 
-from typing import Optional
-from ..core.models import Feature
-from collections.abc import Sequence
+from typing import Generic, Sequence
+
+from ..core.models import AnnotableFeatureType
 
 
-class AnnotationData:
+class AnnotationData(Generic[AnnotableFeatureType]):
     """
     Feature data.
 
@@ -20,14 +20,14 @@ class AnnotationData:
 
     """
 
-    def __init__(self, features: Sequence[Feature]):
-        self.features = sorted(features)
+    def __init__(self, features: Sequence[AnnotableFeatureType]):
+        self.features = sorted(features, key=lambda x: x.get("mz"))
         self.non_annotated = set(features)
-        self._monoisotopologues = sorted(features, key=lambda x: x.height)
+        self._monoisotopologues = sorted(features, key=lambda x: x.get("height"))
         self.similarity_cache = SimilarityCache()
         self._label_counter = 0
 
-    def get_monoisotopologue(self) -> Optional[Feature]:
+    def get_monoisotopologue(self) -> AnnotableFeatureType | None:
         """Get the current non-annotated feature with the greatest area."""
         if self._monoisotopologues:
             mono = self._monoisotopologues[-1]
@@ -41,7 +41,7 @@ class AnnotationData:
             mono = None
         return mono
 
-    def annotate(self, features: Sequence[Feature], charge: int):
+    def annotate(self, features: Sequence[AnnotableFeatureType], charge: int):
         """Labels a list of features as an isotopic envelope."""
         if len(features) > 1:
             for k, ft in enumerate(features):
@@ -53,20 +53,20 @@ class AnnotationData:
         else:
             self._flag_annotated(features[0])
 
-    def _flag_annotated(self, feature: Feature):
+    def _flag_annotated(self, feature: AnnotableFeatureType):
         """Flag features as annotated."""
         self.non_annotated.discard(feature)
         if self._monoisotopologues and (feature == self._monoisotopologues[-1]):
             self._monoisotopologues.pop()
 
 
-class SimilarityCache:
+class SimilarityCache(Generic[AnnotableFeatureType]):
     """Stores and retrieves the similarity between features in a sample."""
 
     def __init__(self):
-        self._cache: dict[Feature, dict[Feature, float]] = dict()
+        self._cache: dict[AnnotableFeatureType, dict[AnnotableFeatureType, float]] = dict()
 
-    def get_similarity(self, ft1: Feature, ft2: Feature):
+    def get_similarity(self, ft1: AnnotableFeatureType, ft2: AnnotableFeatureType):
         """Get the similarity between a pair of features."""
         ft1_sim = self._cache.setdefault(ft1, dict())
         ft2_sim = self._cache.setdefault(ft2, dict())

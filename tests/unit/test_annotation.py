@@ -2,10 +2,11 @@ import numpy as np
 import pytest
 
 from tidyms.annotation import annotation
-from tidyms.raw_data_utils import make_roi
-from tidyms.fileio import MSData_simulated
-from tidyms.lcms import Peak
-from tidyms.chem import Formula
+from tidyms.algorithms.raw_data_utils import make_roi
+from tidyms.io.msdata import MSData
+from tidyms.lcms import simulation
+
+from .utils import
 
 
 @pytest.fixture
@@ -40,17 +41,22 @@ def test__annotate_empty_feature_list(annotation_tools_params):
 
 @pytest.fixture
 def compound_data():
-    compounds = [
-        "[C10H20O2]-",
-        "[C10H20BO3]-",
-        "[C20H40BO5]2-",
-        "[C18H19N2O3]-",
-        "[C18H20N2O3Cl]-",
-        "[C10H20Cl]-",
-    ]
+
+    formulas = ["[C10H20O2]-", "[C10H20BO3]-", "[C20H40BO5]2-", "[C18H19N2O3]-", "[C18H20N2O3Cl]-", "[C10H20Cl]-"]
     rt_list = [50, 75, 150, 200, 200, 175]
     amp_list = [10000, 20000, 30000, 25000, 25000, 20000]
-    return compounds, rt_list, amp_list
+
+    adducts = list()
+    for formula, rt, amp in zip(formulas, rt_list, amp_list):
+        adduct = simulation.SimulatedLCMSAdductSpecification(
+            formula=formula, rt_mean=rt, base_intensity=amp, rt_width=3.0, n_isotopologues=4
+        )
+        adducts.append(adduct)
+
+    grid = simulation.MZGridSpecification(size=20000)
+    sample_config = simulation.SimulatedLCMSDataConfiguration(n_scans=300, grid=grid)
+
+    return formulas, rt_list, amp_list
 
 
 @pytest.fixture

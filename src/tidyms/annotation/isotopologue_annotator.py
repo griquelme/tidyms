@@ -2,7 +2,7 @@
 
 from typing import Optional
 from . import create_annotation_tools, annotate
-from ..core.models import SampleData
+from ..core.models import SampleDataSnapshots
 from ..core.processors import BaseSampleProcessor
 from ..chem import get_chnops_bounds
 from ..validation import ValidatorWithLowerThan, validate
@@ -75,7 +75,7 @@ class IsotopologueAnnotator(BaseSampleProcessor):
         self._envelope_finder = tools[1]
         self._envelope_validator = tools[2]
 
-    def _func(self, sample_data: SampleData):
+    def _func(self, sample_data: SampleDataSnapshots):
         annotate(
             sample_data.get_feature_list_snapshot(),
             self._mmi_finder,
@@ -84,7 +84,7 @@ class IsotopologueAnnotator(BaseSampleProcessor):
         )
 
     @staticmethod
-    def _check_data(sample_data: SampleData):
+    def _check_data(sample_data: SampleDataSnapshots):
         pass
 
     def set_default_parameters(self, instrument: str, separation: str):

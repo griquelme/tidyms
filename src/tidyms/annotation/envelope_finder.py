@@ -1,14 +1,11 @@
-"""
-Functions to find isotopic envelopes candidates in a list of m/z values.
-
-"""
+"""Functions to find isotopic envelopes candidates in a list of m/z values."""
 
 import bisect
-from typing import Tuple
-from ..chem.atoms import Element, PeriodicTable
-from ..core.models import Feature
-from .annotation_data import AnnotationData, SimilarityCache
 from collections.abc import Sequence
+
+from ..chem.atoms import Element, PeriodicTable
+from ..core.models import AnnotableFeatureType, Feature
+from .annotation_data import AnnotationData, SimilarityCache
 
 # name conventions
 # M is used for Molecular mass
@@ -16,16 +13,22 @@ from collections.abc import Sequence
 # p for abundances
 
 
-class EnvelopeFinder(object):
+class EnvelopeFinder:
     r"""
     Find isotopic envelopes candidates in a list of sorted m/z values.
 
-    Attributes
+    Parameters
     ----------
-    tolerance : float
-        tolerance used to extend the element based bounds
-    max_length : int
-        max length of the envelopes
+    elements : List[str]
+        List of elements used to compute mass difference windows.
+    mz_tolerance : float
+        m/z tolerance used to match candidates.
+    max_length : int, default=5
+        Maximum envelope length to search.
+    min_p : number between 0 and 1.
+        The minimum abundance of the isotopes of each element to be used for m/z estimation.
+    min_similarity : float, default=0.9
+        Minimum similarity to create candidates.
 
     Notes
     -----
@@ -57,23 +60,6 @@ class EnvelopeFinder(object):
         min_p: float = 0.01,
         min_similarity: float = 0.9,
     ):
-        """
-
-        Parameters
-        ----------
-        elements : List[str]
-            List of elements used to compute mass difference windows.
-        mz_tolerance : float
-            m/z tolerance used to match candidates.
-        max_length : int, default=5
-            Maximum envelope length to search.
-        min_p : number between 0 and 1.
-            The minimum abundance of the isotopes of each element to be used for m/z estimation.
-        min_similarity : float, default=0.9
-            Minimum similarity to create candidates.
-
-        """
-
         el_list = [PeriodicTable().get_element(x) for x in elements]
         self.tolerance = mz_tolerance
         self.max_length = max_length
@@ -82,13 +68,12 @@ class EnvelopeFinder(object):
 
     def find(
         self,
-        data: AnnotationData,
-        mmi: Feature,
-        charge: int,
-    ) -> list[Sequence[Feature]]:
+        data: AnnotationData[AnnotableFeatureType],
+        mmi: AnnotableFeatureType,
+        charge: int
+    ) -> list[Sequence[AnnotableFeatureType]]:
         """
-        Finds isotopic envelope candidates starting from the minimum mass
-        isotopologue (MMI).
+        Find isotopic envelope candidates starting from the minimum mass isotopologue (MMI).
 
         Parameters
         ----------
@@ -122,9 +107,7 @@ class EnvelopeFinder(object):
         return envelopes
 
 
-def _remove_sub_candidates(
-    candidates: list[Sequence[Feature]],
-) -> list[Sequence[Feature]]:
+def _remove_sub_candidates(candidates: list[Sequence[AnnotableFeatureType]]) -> list[Sequence[AnnotableFeatureType]]:
     """Remove candidates that are subsets of other candidates."""
     validated = list()
     while candidates:
@@ -139,19 +122,18 @@ def _remove_sub_candidates(
 
 
 def _find_envelopes(
-    features: Sequence[Feature],
-    mmi: Feature,
-    non_annotated: set[Feature],
+    features: Sequence[AnnotableFeatureType],
+    mmi: AnnotableFeatureType,
+    non_annotated: set[AnnotableFeatureType],
     cache: SimilarityCache,
     charge: int,
     max_length: int,
     mz_tolerance: float,
     min_similarity: float,
-    bounds: dict[int, Tuple[float, float]],
-) -> list[Sequence[Feature]]:
+    bounds: dict[int, tuple[float, float]],
+) -> list[Sequence[AnnotableFeatureType]]:
     """
-
-    Finds isotopic envelope candidates using multiple charge states.
+    Find isotopic envelope candidates using multiple charge states.
 
     Parameters
     ----------
@@ -188,8 +170,8 @@ def _find_envelopes(
         min_mz, max_mz = _get_next_mz_search_interval(
             candidate, bounds, charge, mz_tolerance
         )
-        start = bisect.bisect(features, min_mz)
-        end = bisect.bisect(features, max_mz)
+        start = bisect.bisect(features, min_mz, key=lambda x: x.mz)
+        end = bisect.bisect(features, max_mz, key=lambda x: x.mz)
         new_features = list()
         for k in range(start, end):
             k_ft = features[k]
@@ -211,13 +193,12 @@ def _find_envelopes(
 
 def _get_next_mz_search_interval(
     envelope: Sequence[Feature],
-    elements_mass_difference: dict[int, Tuple[float, float]],
+    elements_mass_difference: dict[int, tuple[float, float]],
     charge: int,
     mz_tolerance: float,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
-    Computes the valid m/z range for a k-th isotopologue using information from
-    m/z values from previous isotopologues.
+    Compute the valid m/z range for a k-th isotopologue using previous isotopologues information.
 
     Parameters
     ----------
@@ -234,7 +215,6 @@ def _get_next_mz_search_interval(
     max_mz: maximum mz value for the M + K isotopologue
 
     """
-
     # If the charge is 0 (neutral mass) the results are the same as using
     # charge = 1. There is no difference between positive and negative
     # charges
@@ -254,9 +234,9 @@ def _get_next_mz_search_interval(
 
 def _make_exact_mass_difference_bounds(
     elements: list[Element], min_p: float
-) -> dict[int, Tuple[float, float]]:
+) -> dict[int, tuple[float, float]]:
     """
-    Computes possible mass differences obtaining from changing one isotope.
+    Compute possible mass differences obtaining from changing one isotope.
 
     Parameters
     ----------
