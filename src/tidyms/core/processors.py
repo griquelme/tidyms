@@ -283,9 +283,7 @@ class Processor(ABC, pydantic.BaseModel):
     def process(self, data: AssayDataInterface) -> AssayDataInterface:
         ...
 
-    def process(
-        self, data: SampleData | SampleDataSnapshots | AssayDataInterface
-    ) -> SampleData | SampleDataSnapshots | AssayDataInterface:
+    def process(self, data):
         """Apply processor function to data."""
         config = self.to_config()
         if isinstance(data, SampleDataSnapshots):
