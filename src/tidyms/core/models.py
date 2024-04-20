@@ -440,41 +440,39 @@ class IsotopicEnvelope(pydantic.BaseModel):
     p: list[float]
 
 class Sample(pydantic.BaseModel):
-    """
-    Sample class to manage iteration over MSData objects.
-
-    Attributes
-    ----------
-    path : Path or str
-        Path to a raw data file.
-    id : str
-        Sample name.
-    ms_level : int, default=1
-        MS level of data to use.
-    start_time: float, default=0.0
-        Minimum acquisition time of MS scans to include. If ``None``, start from the first scan.
-    end_time: float or None, default=None
-        Maximum acquisition time of MS scans to include. If ``None``, end at the last scan.
-    group : str, default=""
-        Sample group.
-    order : int, default=0
-        Measurement order of sample in an assay.
-    batch : int, default=0
-        Analytical batch of sample in an assay.
-    extra : dict[str, Any] or None, default=None
-        Extra sample information
-
-    """
+    """Store sample information."""
 
     path: Annotated[Path, BeforeValidator(lambda x: Path(x))]
+    """Path to a raw data file"""
+
     id: str
+    """A unique sample identifier"""
+
     ms_level: pydantic.PositiveInt = pydantic.Field(default=1, repr=False)
+    """the sample MS level"""
+
     start_time: pydantic.NonNegativeFloat = pydantic.Field(default=0.0, repr=False)
+    """Minimum acquisition time of MS scans to include. If ``None``, start from the first scan"""
+
     end_time: pydantic.NonNegativeFloat | None = pydantic.Field(default=None, repr=False)
+    """Maximum acquisition time of MS scans to include. If ``None``, end at the last scan"""
+
     group: str = ""
+    """the sample group"""
+
     order: pydantic.NonNegativeInt = 0
+    """the sample measurement order in an assay"""
+
     batch: pydantic.NonNegativeInt = pydantic.Field(default=0, repr=False)
+    """the sample analytical batch number in an assay."""
+
     extra: dict[str, Any] | None = pydantic.Field(default=None, repr=False)
+    """extra sample information"""
+
+    reader: str | None = None
+    """The name of a registered data reader to read sample data. If ``None``, the
+    optimal reader is inferred from the file extension.
+    """
 
     @pydantic.field_serializer("path")
     def serialize_path(self, path: Path, _info) -> str:
