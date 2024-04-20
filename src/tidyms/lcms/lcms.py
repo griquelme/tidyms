@@ -221,7 +221,7 @@ class Peak(AnnotableFeature[MZTrace]):
 
     """
 
-    start: pydantic.PositiveInt
+    start: pydantic.NonNegativeInt
     apex: pydantic.PositiveInt
     end: pydantic.PositiveInt
 
@@ -368,7 +368,7 @@ class Peak(AnnotableFeature[MZTrace]):
                     tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end]
                 )
                 p.append(p_area)
-                mz.append(tmp_peak.mz)
+                mz.append(ft.mz)
         total_area = sum(p)
         p = [x / total_area for x in p]
         return mz, p
