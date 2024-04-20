@@ -6,8 +6,8 @@ from scipy.integrate import trapz
 from typing import Generator, Optional, Tuple
 from .core import constants as c
 from .fileio import MSData
-from .lcms import Chromatogram
-from .raw_data_utils import make_chromatograms
+from .lcms.lcms import Chromatogram
+from .algorithms.raw import make_chromatograms
 from .utils import find_closest, get_progress_bar
 from sklearn.impute import KNNImputer
 

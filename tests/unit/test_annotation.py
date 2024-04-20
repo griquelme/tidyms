@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from tidyms.annotation import annotation
-from tidyms.algorithms.raw_data_utils import make_roi
+from tidyms.algorithms.raw import make_roi
 from tidyms.io.msdata import MSData
 from tidyms.lcms import simulation
 
