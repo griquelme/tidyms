@@ -17,6 +17,7 @@ Functions
 
 import numpy as np
 from scipy.interpolate import interp1d
+from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 from scipy.special import erfc
 from scipy.stats import median_abs_deviation as mad
@@ -246,6 +247,17 @@ def find_centroids(
         _merge_close_peaks(centroid, total_spint, min_distance)
     return centroid, total_spint
 
+
+def smooth(x: FloatArray1D, smoothing_strength: float):
+    """
+    Smooths a signal using using a gaussian kernel.
+
+    Parameters
+    ----------
+    smoothing_strength : float
+        Standard deviation of the gaussian kernel.
+    """
+    return gaussian_filter1d(x, smoothing_strength)
 
 def _find_peak_extension(peaks: IntArray1D, baseline_index: IntArray1D) -> tuple[IntArray1D, IntArray1D]:
     """
