@@ -3,7 +3,7 @@ import pathlib
 import pytest
 from tidyms.annotation import annotation
 from tidyms.core.models import Sample
-from tidyms.core.processors import SampleData, ProcessingPipeline
+from tidyms.core.processors import ProcessingPipeline, SampleData
 from tidyms.lcms import LCTraceBaselineEstimator, LCTraceExtractor, MZTrace, Peak, PeakExtractor, simulation
 
 

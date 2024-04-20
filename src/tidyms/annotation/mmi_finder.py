@@ -164,7 +164,7 @@ def _check_candidate(
         return False
 
     mmi_mono_pair = [candidate, mono]
-    _, p = mono.compute_isotopic_envelope(mmi_mono_pair)
+    p = mono.compute_isotopic_envelope(mmi_mono_pair).p
     qp = p[1] / p[0]
     is_valid_qp = (qp >= min_qp) & (qp <= max_qp)
 

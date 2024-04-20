@@ -32,7 +32,7 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import Self
 
-from ..core.models import AnnotableFeature, Roi
+from ..core.models import AnnotableFeature, IsotopicEnvelope, Roi
 from ..core.numpy import FloatingArray, IntArray
 
 
@@ -333,7 +333,7 @@ class Peak(AnnotableFeature[MZTrace]):
     @staticmethod
     def compute_isotopic_envelope(
         features: list[Peak],
-    ) -> tuple[list[float], list[float]]:
+    ) -> IsotopicEnvelope:
         """
         Compute the isotopic envelope (m/z and abundance) of a list of peaks.
 
@@ -371,7 +371,7 @@ class Peak(AnnotableFeature[MZTrace]):
                 mz.append(ft.mz)
         total_area = sum(p)
         p = [x / total_area for x in p]
-        return mz, p
+        return IsotopicEnvelope(mz=mz, p=p)
 
 
 def _compare_features_lc(ft1: Peak, ft2: Peak) -> float:

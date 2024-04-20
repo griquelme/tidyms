@@ -165,8 +165,8 @@ def _validate_candidate(
     if monoisotopologue not in candidate:
         return 0
 
-    M, p = candidate[0].compute_isotopic_envelope(candidate)
+    envelope = candidate[0].compute_isotopic_envelope(candidate)
     em_correction = EM * charge * polarity
-    M = np.array(M) * charge - em_correction
-    p = np.array(p)
+    M = np.array(envelope.mz) * charge - em_correction
+    p = np.array(envelope.p)
     return validator.validate(M, p)
