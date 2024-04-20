@@ -194,7 +194,7 @@ class Feature(pydantic.BaseModel, Generic[RoiType]):
     """
 
     id: int = -1
-    roi: RoiType
+    roi: RoiType = pydantic.Field(repr=False)
     annotation: Annotation = Annotation()
     mz: float = nan
     height: float = nan
@@ -368,7 +368,7 @@ class AnnotableFeature(Feature[RoiType], ABC):
     @abstractmethod
     def compute_isotopic_envelope(
         features: Sequence[Feature],
-    ) -> tuple[list[float], list[float]]:
+    ) -> IsotopicEnvelope:
         """
         Compute the isotopic envelope from a list of isotopologue features.
 
