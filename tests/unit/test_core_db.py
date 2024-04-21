@@ -6,7 +6,6 @@ from sqlalchemy.exc import NoResultFound
 from tidyms.core import db, exceptions
 from tidyms.core.constants import IDFeatureDescriptors
 from tidyms.core.db import AssayData
-from tidyms.core.models import Annotation
 from tidyms.core.processors import ProcessingPipeline, SampleData
 
 from . import utils
@@ -194,38 +193,27 @@ class TestAssayDataFetchAnnotations:
     def test_all_samples(self, assay_data_with_sample_data, sample_data_list):
         actual = assay_data_with_sample_data.fetch_annotations()
         expected_all_samples = {x.sample.id for x in sample_data_list}
-        actual_all_samples = set(actual["sample_id"])
+        actual_all_samples = {x.sample_id for x in actual}
         assert actual_all_samples == expected_all_samples
 
     def test_fetch_single_sample(self, assay_data_with_sample_data, sample_data_list):
         sample_data = sample_data_list[3]
         sample_id = sample_data.sample.id
-        actual = assay_data_with_sample_data.fetch_annotations(sample_id)
-
-        # adapt sample descriptors to format return by AssayData
-        sample_annotations = sample_data.get_feature_annotations()
-        expected = dict()
-        for d in sample_annotations:
-            for k, v in d.items():
-                k_descriptor_list = expected.setdefault(k, list())
-                k_descriptor_list.append(v)
+        actual = {tuple(x) for x in assay_data_with_sample_data.fetch_annotations(sample_id)}
+        expected = {tuple(x.annotation) for x in sample_data.get_features()}
         assert actual == expected
 
     def test_fetch_invalid_sample_returns_dict_with_empty_lists(self, assay_data_with_sample_data):
         sample_id = "invalid_sample_id"
         actual = assay_data_with_sample_data.fetch_annotations(sample_id)
-        annotation_fields = list(Annotation.model_fields)
-        annotation_fields.extend([x.value for x in IDFeatureDescriptors])
-        for descriptor, values in actual.items():
-            assert descriptor in annotation_fields
-            assert values == list()
+        assert not actual
+        assert isinstance(actual, list)
 
     def test_fetch_has_feature_group(self, assay_data_with_sample_data):
         actual = assay_data_with_sample_data.fetch_annotations(has_feature_group=True)
-        feature_group = actual[IDFeatureDescriptors.FEATURE_GROUP]
-        assert feature_group
-        for group in feature_group:
-            assert group > -1
+        assert actual
+        for annotation in actual:
+            assert annotation.group > -1
 
 
 def test_set_feature_groups(assay_data_with_sample_data: AssayData):
@@ -234,7 +222,7 @@ def test_set_feature_groups(assay_data_with_sample_data: AssayData):
     sample_data_before_update = assay_data_with_sample_data.fetch_sample_data(sample_id)
     new_groups = list()
     for k, ft in enumerate(sample_data_before_update.get_features(), start=10000):
-        group = {IDFeatureDescriptors.ID.value: ft.id, IDFeatureDescriptors.FEATURE_GROUP.value: k}
+        group = {IDFeatureDescriptors.ID.value: ft.annotation.id, IDFeatureDescriptors.FEATURE_GROUP.value: k}
         ft.annotation.group = k
         new_groups.append(group)
     assay_data_with_sample_data.set_feature_groups(new_groups)

@@ -69,7 +69,7 @@ class TestFeature:
         expected = ConcreteFeature.from_str(serialized, feature.roi, feature.annotation)
         assert expected.data == feature.data
         assert expected.roi == feature.roi
-        assert expected.id == feature.id
+        assert expected.annotation.id == feature.annotation.id
 
 
     def test_mz_equals_get_mz(self, feature):

@@ -126,7 +126,7 @@ class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
             descriptor[c.IDFeatureDescriptors.SAMPLE_ID.value] = self.sample.id
             descriptor[c.IDFeatureDescriptors.FEATURE_GROUP.value] = ft.annotation.group
             descriptor[c.IDFeatureDescriptors.ROI_ID.value] = ft.roi.id
-            descriptor[c.IDFeatureDescriptors.ID.value] = ft.id
+            descriptor[c.IDFeatureDescriptors.ID.value] = ft.annotation.id
             descriptors.append(descriptor)
         return descriptors
 
@@ -138,7 +138,7 @@ class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
             annotation[c.IDFeatureDescriptors.SAMPLE_ID.value] = self.sample.id
             annotation[c.IDFeatureDescriptors.FEATURE_GROUP.value] = ft.annotation.group
             annotation[c.IDFeatureDescriptors.ROI_ID.value] = ft.roi.id
-            annotation[c.IDFeatureDescriptors.ID.value] = ft.id
+            annotation[c.IDFeatureDescriptors.ID.value] = ft.annotation.id
             annotations.append(annotation)
         return annotations
 

@@ -51,6 +51,7 @@ class SampleModel(Base):
     order: Mapped[int] = mapped_column(Integer, unique=True)
     batch: Mapped[int] = mapped_column(Integer)
     extra: Mapped[str] = mapped_column(String, nullable=True)
+    reader: Mapped[str] = mapped_column(String, nullable=True)
 
 
 class ProcessedSampleModel(Base):
@@ -345,7 +346,7 @@ class AssayData(Generic[FeatureType, RoiType]):
                     descriptor_dict[d].append(row.DescriptorModel.__dict__[d])
         return descriptor_dict
 
-    def fetch_annotations(self, sample_id: str | None = None, has_feature_group: bool = False) -> dict[str, list[int]]:
+    def fetch_annotations(self, sample_id: str | None = None, has_feature_group: bool = False) -> list[Annotation]:
         """Get annotations of features."""
         stmt = select(AnnotationModel)
         if has_feature_group:
@@ -356,14 +357,12 @@ class AssayData(Generic[FeatureType, RoiType]):
         elif sample_id is not None:
             stmt = stmt.where(AnnotationModel.sample_id == sample_id)
 
-        columns = [x.key for x in AnnotationModel.__table__.columns]
         with self.SessionFactory() as session:
             result = session.execute(stmt)
-            annotations = dict()
+            annotations = list()
             for row in result:
-                for col in columns:
-                    col_list = annotations.setdefault(col, list())
-                    col_list.append(row.AnnotationModel.__dict__[col])
+                ann = Annotation(**row.AnnotationModel.__dict__)
+                annotations.append(ann)
         return annotations
 
     def set_feature_groups(self, groups: list[FeatureGroupMap]):
@@ -610,12 +609,6 @@ class AssayData(Generic[FeatureType, RoiType]):
             except NoResultFound as e:
                 raise exceptions.SampleDataNotFound(sample_id) from e
 
-    def _label_roi_list(self, *rois: RoiType):
-        """Add a id label to ROIs."""
-        for k_roi, roi in enumerate(rois, start=self._roi_id):
-            roi.id = k_roi
-        self._roi_id += len(rois)
-
     def _add_roi_list(self, sample: Sample, session: Session, *rois: RoiType):
         """
         Store a list of ROI extracted from a sample.
@@ -720,40 +713,38 @@ class AssayData(Generic[FeatureType, RoiType]):
 
     def _label_sample_data(self, data: SampleData) -> None:
         """Label ROIs and features in sample data."""
-        roi_id_list = list()
-        ft_id_list = list()
         for roi in data.roi:
             roi.id = self._roi_id
-            roi_id_list.append(roi.id)
             self._roi_id += 1
             for ft in roi.features:
-                ft.id = self._feature_id
-                ft_id_list.append(ft.id)
+                ft.annotation.id = self._feature_id
+                ft.annotation.roi_id = ft.roi.id
+                ft.annotation.sample_id = data.sample.id
                 self._feature_id += 1
 
     def _fix_annotation_labels(self, features: list[FeatureType], annotations: list[dict]):
         """Add annotation labels provided by DB."""
         for ft, ann in zip(features, annotations):
             ann[IDFeatureDescriptors.ROI_ID] = ft.roi.id
-            ann[IDFeatureDescriptors.ID] = ft.id
+            ann[IDFeatureDescriptors.ID] = ft.annotation.id
 
     def _fix_descriptor_labels(self, features: list[FeatureType], descriptors: list[dict]):
         """Add annotation labels provided by DB."""
         for ft, d in zip(features, descriptors):
             d[IDFeatureDescriptors.ROI_ID] = ft.roi.id
-            d[IDFeatureDescriptors.ID] = ft.id
+            d[IDFeatureDescriptors.ID] = ft.annotation.id
 
     def _label_feature_list(self, feature_list: Sequence[FeatureType]):
         """Add an id label for each feature."""
         for k, ft in enumerate(feature_list, start=self._feature_id):
-            ft.id = k
+            ft.annotation.id = k
         self._feature_id += len(feature_list)
 
     def _add_feature_data(self, feature_list: Sequence[FeatureType], session: Session, sample_id: str):
         """Add feature data to a Session."""
         feature_model_list = list()
         for ft in feature_list:
-            model = FeatureModel(roi_id=ft.roi.id, data=ft.to_str(), id=ft.id, sample_id=sample_id)
+            model = FeatureModel(roi_id=ft.roi.id, data=ft.to_str(), id=ft.annotation.id, sample_id=sample_id)
             feature_model_list.append(model)
         session.add_all(feature_model_list)
 
@@ -984,19 +975,8 @@ def _feature_model_to_feature(
     model: FeatureModel, feature_type: type[FeatureType], roi: Roi
 ) -> FeatureType:
     """Create a Feature instance from a FeatureModel instance."""
-    ann_model = model.annotation
-    annotation = _annotation_model_to_annotation(ann_model)
+    annotation = Annotation(**model.annotation.__dict__)
     return feature_type.from_str(model.data, roi, annotation)
-
-
-def _annotation_model_to_annotation(model: AnnotationModel) -> Annotation:
-    """Create an Annotation instance from an AnnotationModel instance."""
-    return Annotation(
-        group=model.group,
-        isotopologue_label=model.isotopologue_label,
-        isotopologue_index=model.isotopologue_index,
-        charge=model.charge,
-    )
 
 
 def _sample_model_to_sample(model: SampleModel) -> Sample:

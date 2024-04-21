@@ -117,28 +117,32 @@ class Roi(pydantic.BaseModel):
 
 
 class Annotation(pydantic.BaseModel):
-    """
-    Store annotation data of features.
+    """Store annotation data of features."""
 
-    If information for an attribute is not available, ``-1`` is used.
+    id: int = -1
+    """The feature unique identifier."""
 
-    Attributes
-    ----------
-    group : int, default=-1
-        Feature group id. Groups features from different samples based
-        their chemical identity. Used to create a data matrix.
-    isotopologue_label : int, default=-1
-        Groups features from the same isotopic envelope in a sample.
-    isotopologue_index : int, default=-1
-        Position of the feature in an isotopic envelope.
-    charge : int, default=-1
-        Feature charge state.
-    """
+    roi_id: int = -1
+    """The ROI id where the feature was extracted from"""
+
+    sample_id: str = ""
+    """The sample id where the feature was extracted from"""
 
     group: int = -1
+    """Feature group id. Groups features from different samples based their chemical
+    identity. Used to create a data matrix. Set to ``-1`` if not assigned to any
+    group.
+    """
+
     isotopologue_label: int = -1
+    """Group features from the same isotopic envelope in a sample. Set to ``-1``
+    if not annotated."""
+
     isotopologue_index: int = -1
+    """Position of the feature in an isotopic envelope. Set to ``-1`` if not annotated."""
+
     charge: int = -1
+    """Feature charge state. Set to ``-1`` if not annotated."""
 
 RoiType = TypeVar("RoiType", bound=Roi)
 
@@ -193,7 +197,6 @@ class Feature(pydantic.BaseModel, Generic[RoiType]):
 
     """
 
-    id: int = -1
     roi: RoiType = pydantic.Field(repr=False)
     annotation: Annotation = Annotation()
     mz: float = nan
@@ -225,7 +228,7 @@ class Feature(pydantic.BaseModel, Generic[RoiType]):
             return self.get("mz") >= other.get("mz")
 
     def __hash__(self) -> int:
-        return self.id.__hash__()
+        return self.annotation.id.__hash__()
 
     def _set_mz(self):
         """Get the feature m/z."""

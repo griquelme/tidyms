@@ -18,10 +18,13 @@ class ConcreteRoi(models.Roi):
     data: list[float] = list()
 
     def __eq__(self, other: ConcreteRoi) -> bool:
-        return (self.data == other.data) and (self.id == other.id)
+        is_equal_data = (self.data == other.data) and (self.id == other.id)
+        is_equal_n_features = len(self.features) == len(other.features)
+        is_equal_features = all(x.equal(y) for x, y in zip(self.features, other.features)) # type: ignore
+        return  is_equal_data and is_equal_n_features and is_equal_features
 
 
-class ConcreteFeature(models.AnnotableFeature):
+class ConcreteFeature(models.AnnotableFeature[ConcreteRoi]):
     data: int
     custom_descriptor: float = nan
 
@@ -38,11 +41,7 @@ class ConcreteFeature(models.AnnotableFeature):
             self.height = self.area
 
     def equal(self, other: ConcreteFeature) -> bool:
-        return (
-            (self.data == other.data)
-            and (self.id == other.id)
-            and (self.annotation == other.annotation)
-        )
+        return self.data == other.data and self.annotation == other.annotation
 
     def compare(self, other: Self) -> float:
         return 1.0
