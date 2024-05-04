@@ -391,16 +391,14 @@ class AnnotableFeature(Feature[RoiType], ABC):
         ...
 
 
-class FeatureGroup(pydantic.BaseModel):
+class GroupAnnotation(pydantic.BaseModel):
     """
-    Represent a collection of features associated to the same chemical species.
+    Store annotation of a :term:`feature group`.
 
     Attributes
     ----------
     id : int
         An identifier for the Feature group.
-    mz : float
-        The feature group m/z.
     isotopologue_index: int or None, default=None
         The position of the feature in an envelope. Only defined if an
         isotopologue annotation algorithm was applied to the dataset.
@@ -425,15 +423,11 @@ class FeatureGroup(pydantic.BaseModel):
     """
 
     id: int
-    isotopologue_index: int | None = pydantic.Field(None, repr=False)
-    isotopologue_group: int | None = pydantic.Field(None, repr=False)
-    envelope: IsotopicEnvelope | None = pydantic.Field(None, repr=False)
-    charge: int | None = pydantic.Field(None, repr=False)
-    adduct: str | None = pydantic.Field(None, repr=False)
-
-    mz: float
-    height: float = pydantic.Field(repr=False)
-    area: float = pydantic.Field(repr=False)
+    isotopologue_index: int | None = pydantic.Field(default=None, repr=False)
+    isotopologue_group: int | None = pydantic.Field(default=None, repr=False)
+    envelope: IsotopicEnvelope | None = pydantic.Field(default=None, repr=False)
+    charge: int | None = pydantic.Field(default=None, repr=False)
+    adduct: str | None = pydantic.Field(default=None, repr=False)
 
 
 class IsotopicEnvelope(pydantic.BaseModel):
