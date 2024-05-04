@@ -5,14 +5,16 @@ match_features: Match features based on descriptors dispersion.
 
 """
 
-import numpy as np
 from functools import partial
+from typing import Any, Generator, Optional, cast
+
+import numpy as np
 from joblib import Parallel, delayed
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
-from typing import Any, cast, Generator, Optional
-from .utils import get_progress_bar
+
+from ..utils import get_progress_bar
 
 
 def match_features(
