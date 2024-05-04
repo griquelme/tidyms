@@ -174,7 +174,10 @@ def create_consensus_annotation(annotations: list[Annotation]) -> dict[int, Grou
         mmi = graph.get_node(all_mmi.pop())
         isotopologues_group = graph.get_neighbors(mmi.group)
         isotopologues_group.append(mmi)
-        for isotopologues in trim_isotopologues(isotopologues_group):
+        isotopologues_group = trim_isotopologues(isotopologues_group)
+        if not isotopologues_group:
+            continue
+        for isotopologues in isotopologues_group:
             consensus[isotopologues.group] = GroupAnnotation(
                 id=isotopologues.group,
                 isotopologue_group=isotopologue_group_id,
