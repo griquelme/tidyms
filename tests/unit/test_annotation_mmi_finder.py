@@ -19,7 +19,6 @@ class TestSelectTwoIsotopeElements:
         assert len(res) == len(expected)
         assert set(res) == set(expected)
 
-
     def test_dm_1_p0_greater_than_pi_custom_abundance(self):
         expected = ["H"]
         custom_abundances = {"H": np.array([0.95, 0.05])}
@@ -28,14 +27,12 @@ class TestSelectTwoIsotopeElements:
         assert len(res) == len(expected)
         assert set(res) == set(expected)
 
-
     def test_dm_1_no_elements(self):
         elements = ["O", "P", "S"]
         custom_abundances = {}
         dm = 1
         res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
         assert len(res) == 0
-
 
     def test_dm_1_p0_lower_than_pi(self):
         elements = ["B", "Li", "O", "P", "S"]
@@ -46,7 +43,6 @@ class TestSelectTwoIsotopeElements:
         assert len(actual) == len(expected)
         assert set(actual) == set(expected)
 
-
     def test_dm_1_p0_lower_and_higher_than_pi(self):
         elements = ["C", "H", "B", "Li", "O", "P", "S"]
         expected = ["C", "B", "Li"]
@@ -56,7 +52,6 @@ class TestSelectTwoIsotopeElements:
         assert len(actual) == len(expected)
         assert set(actual) == set(expected)
 
-
     def test_dm_2_p0_greater_than_pi(self):
         elements = ["Cl", "H", "N", "O", "P", "S"]
         expected = ["Cl"]
@@ -65,7 +60,6 @@ class TestSelectTwoIsotopeElements:
         actual = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
         assert len(actual) == len(expected)
         assert set(actual) == set(expected)
-
 
     def test_dm_2_p0_greater_than_pi_custom_abundance(self):
         elements = ["Cl", "Br", "N", "O", "P", "S"]
@@ -77,14 +71,12 @@ class TestSelectTwoIsotopeElements:
         assert len(actual) == len(expected)
         assert set(actual) == set(expected)
 
-
     def test_dm_2_no_elements(self):
         elements = ["O", "P", "S"]
         custom_abundances = {}
         dm = 2
         res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
         assert len(res) == 0
-
 
     def test_dm_2_p0_lower_than_pi(self):
         elements = ["In", "H", "O", "P", "S"]
@@ -94,7 +86,6 @@ class TestSelectTwoIsotopeElements:
         res = mmi_finder._select_two_isotope_element(elements, dm, custom_abundances)
         assert len(res) == len(expected)
         assert set(res) == set(expected)
-
 
     def test_dm_2_p0_lower_and_higher_than_pi(self):
         elements = ["Cl", "In", "Br", "O", "P", "S"]
@@ -150,7 +141,7 @@ def rules():
 def create_feature_list(mz: list[float], sp: list[float]) -> Sequence[ConcreteFeature]:
     features = list()
     for k in range(len(mz)):
-        ft = ConcreteFeature(data=0, mz=mz[k], area=sp[k], id=k, roi=ConcreteRoi())
+        ft = ConcreteFeature(data=0, mz=mz[k], area=sp[k], roi=ConcreteRoi())
         features.append(ft)
     return features
 
@@ -256,9 +247,7 @@ def test_MMIFinder():
     mz_tol = 0.005
     p_tol = 0.05
     min_similarity = 0.9
-    finder = mmi_finder.MMIFinder(
-        bounds, max_mass, max_charge, length, bin_size, mz_tol, p_tol, min_similarity
-    )
+    finder = mmi_finder.MMIFinder(bounds, max_mass, max_charge, length, bin_size, mz_tol, p_tol, min_similarity)
 
     _, M_cl, _ = PeriodicTable().get_element("Cl").get_abundances()
     dm_cl = M_cl[1] - M_cl[0]
