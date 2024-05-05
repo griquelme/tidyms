@@ -1,7 +1,32 @@
 """
-Functions to parse mzML files, optimized for low-memory usage.
+mzML reader implementation.
 
-Currently, it retrieves spectrum and chromatogram data.
+Rationale
+---------
+
+mzML files can have typical sizes that span from 50 MiB to more than 1000 MiB.
+mzML files are basically xml files with the acquired data and metadata
+associated with the acquisition conditions. The data is inside <spectrum> and
+<chromatogram> elements.  From the expected file sizes, it is clear that
+loading the entire file in memory is not desirable.
+There are tools to parse xml files in an incremental way (such as iterparse
+inside the xml module), but the problem with this approach is that accessing a
+specific scan in the file turns out to be rather slow.
+Indexed mzML files have an <indexedmzML> tag that allows to search in a fast
+way the location of spectrum and chromatogram tags.
+Taking advantage of this information, this module search spectrum and
+chromatogram elements and only loads the part associated with the selected
+spectrum or chromatogram.
+The function build_offset_list creates the list of offsets associated with
+chromatograms and spectra using the information in <indexedmzML>. In the
+case of non-indexed files, the offset list is built from scratch.
+The functions get_spectrum and get_chromatogram takes the offset information
+and extracts the relevant data from each spectrum/chromatogram.
+
+# mzml specification:
+# https://www.psidev.info/mzML
+# terms defined here:
+# https://raw.githubusercontent.com/HUPO-PSI/psi-ms-CV/master/psi-ms.obo
 
 build_offset_list : Finds offsets with the location of spectra and chromatograms
 get_spectrum : Extracts data from a spectrum using offsets.
@@ -10,41 +35,19 @@ get_chromatogram : Extracts data from a chromatogram using offsets.
 """
 
 import base64
-import numpy as np
 import re
 import zlib
 from os import SEEK_END
 from os.path import getsize
 from pathlib import Path
-from typing import cast, Optional
-from xml.etree.ElementTree import fromstring
-from xml.etree.ElementTree import Element
+from typing import Optional, cast
+from xml.etree.ElementTree import Element, fromstring
 
-# Rationale for the implementation:
-# mzML files can have typical sizes that span from 50 MiB to more than 1000 MiB.
-# mzML files are basically xml files with the acquired data and metadata
-# associated with the acquisition conditions. The data is inside <spectrum> and
-# <chromatogram> elements.  From the expected file sizes, it is clear that
-# loading the entire file in memory is not desirable.
-# There are tools to parse xml files in an incremental way (such as iterparse
-# inside the xml module), but the problem with this approach is that accessing a
-# specific scan in the file turns out to be rather slow.
-# Indexed mzML files have an <indexedmzML> tag that allows to search in a fast
-# way the location of spectrum and chromatogram tags.
-# Taking advantage of this information, this module search spectrum and
-# chromatogram elements and only loads the part associated with the selected
-# spectrum or chromatogram.
-# The function build_offset_list creates the list of offsets associated with
-# chromatograms and spectra using the information in <indexedmzML>. In the
-# case of non-indexed files, the offset list is built from scratch.
-# The functions get_spectrum and get_chromatogram takes the offset information
-# and extracts the relevant data from each spectrum/chromatogram.
+import numpy as np
 
+from ...core.models import Chromatogram, MSSpectrum
+from .registry import register
 
-# mzml specification:
-# https://www.psidev.info/mzML
-# terms defined here:
-# https://raw.githubusercontent.com/HUPO-PSI/psi-ms-CV/master/psi-ms.obo
 UNSUPPORTED_COMPRESSION = {
     "MS:1002312",
     "MS:1002313",
@@ -82,11 +85,10 @@ DATA_TYPES = {
     INT64: np.int64,
 }
 
-# TODO: add a Reader Interface.
 
-
+@register
 class MZMLReader:
-    """Reader class for mzML format."""
+    """mzML format reader."""
 
     def __init__(self, path: Path):
         self.path = path
@@ -140,9 +142,7 @@ def build_offset_list(filename: Path) -> tuple[list[int], list[int], int]:
     """
     if is_indexed(filename):
         index_offset = _get_index_offset(filename)
-        spectra_offset, chromatogram_offset = _build_offset_list_indexed(
-            filename, index_offset
-        )
+        spectra_offset, chromatogram_offset = _build_offset_list_indexed(filename, index_offset)
     else:
         spectra_offset, chromatogram_offset = _build_offset_list_non_indexed(filename)
         index_offset = getsize(filename)
@@ -177,9 +177,7 @@ def get_spectrum(
         dictionary with m/z, intensity, polarity , time, and ms level.
 
     """
-    xml_str = _get_xml_data(
-        filename, spectra_offset, chromatogram_offset, index_offset, n, "spectrum"
-    )
+    xml_str = _get_xml_data(filename, spectra_offset, chromatogram_offset, index_offset, n, "spectrum")
     elements = list(fromstring(xml_str))
     spectrum = dict()
     for el in elements:
@@ -198,6 +196,7 @@ def get_spectrum(
         elif tag == "binaryDataArrayList":
             sp_data = _parse_binary_data_list(el)
             spectrum.update(sp_data)
+
     return spectrum
 
 
@@ -224,9 +223,7 @@ def get_chromatogram(
     chromatogram: dict
 
     """
-    xml_str = _get_xml_data(
-        filename, spectra_offset, chromatogram_offset, index_offset, n, "chromatogram"
-    )
+    xml_str = _get_xml_data(filename, spectra_offset, chromatogram_offset, index_offset, n, "chromatogram")
     elements = fromstring(xml_str)
     name = elements.attrib.get("id")
     chromatogram = dict(name=name)
@@ -448,9 +445,7 @@ def _build_offset_list_non_indexed(filename: Path) -> tuple[list[int], list[int]
             spectrum_offset = _find_spectrum_tag_offset(line, spectrum_regex)
             if spectrum_offset:
                 spectrum_offset_list.append(ind + spectrum_offset)
-            chromatogram_offset = _find_chromatogram_tag_offset(
-                line, chromatogram_regex
-            )
+            chromatogram_offset = _find_chromatogram_tag_offset(line, chromatogram_regex)
             if chromatogram_offset:
                 chromatogram_offset_list.append(ind + chromatogram_offset)
             ind += len(line)
@@ -477,9 +472,7 @@ def _find_chromatogram_tag_offset(line: str, regex: re.Pattern) -> int:
         return start
 
 
-def _build_offset_list_indexed(
-    filename: Path, index_offset: int
-) -> tuple[list[int], list[int]]:
+def _build_offset_list_indexed(filename: Path, index_offset: int) -> tuple[list[int], list[int]]:
     """
     Build a list of offsets where spectra and chromatograms are stored.
 
