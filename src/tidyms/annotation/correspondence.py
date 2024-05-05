@@ -5,30 +5,52 @@ match_features: Match features based on descriptors dispersion.
 
 """
 
+from collections import Counter
 from functools import partial
-from typing import Any, Generator, Optional, cast
+from typing import Any, Generator, cast
 
 import numpy as np
+import pydantic
 from joblib import Parallel, delayed
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
 
+from ..core.constants import IDFeatureDescriptors
+from ..core.models import FeatureGroupMap
+from ..core.numpy import IntArray1D
 from ..utils import get_progress_bar
 
 
+class FeatureCorrespondenceParameters(pydantic.BaseModel):
+    """Store match_features parameters."""
+
+    groups: list[str] | None = None
+    """If provided, use only samples from these groups to create feature groups."""
+
+    min_fraction: float = 0.25
+    """The minimum fraction of samples of a given group in a cluster. If `groups`
+    is ``None``, the total number of sample is used to compute the minimum fraction.
+    """
+
+    max_deviation: float = 3.0
+    """The maximum deviation of a feature from a cluster, measured in numbers of
+    standard deviations from the cluster.
+    """
+
+    n_jobs: int | None = None
+    """Number of jobs to run in parallel. ``None`` means 1 unless in a :obj:`joblib.parallel_backend`
+    context. ``-1`` means using all processors."""
+
+    silent: bool = True
+    """If ``False``, shows a progress bar."""
+
+
 def match_features(
-    X: np.ndarray[Any, np.dtype[np.floating]],
-    samples: np.ndarray[Any, np.dtype[np.integer]],
-    groups: np.ndarray[Any, np.dtype[np.integer]],
-    samples_per_group: dict[int, int],
-    include_groups: Optional[list[int]],
-    tolerance: np.ndarray[Any, np.dtype[np.floating]],
-    min_fraction: float,
-    max_deviation: float,
-    n_jobs: Optional[int] = None,
-    silent: bool = True,
-) -> np.ndarray[Any, np.dtype[np.integer]]:
+    descriptors: dict[str, list],
+    descriptor_tolerance: dict[str, float],
+    params: FeatureCorrespondenceParameters,
+) -> list[FeatureGroupMap]:
     """
     Match features across samples using DBSCAN and GMM.
 
@@ -37,97 +59,77 @@ def match_features(
 
     Parameters
     ----------
-    X : numpy.ndarray
-        ``(N, M) ndarray`` with feature descriptors used in the matching
-        process. Each row is a feature and each column is a descriptor.
-    samples: numpy.ndarray
-        ``(N,) ndarray`` with sample names encoded using integers.
-    groups: numpy.ndarray
-        ``(N,) ndarray`` with sample groups encoded using integers.
-    samples_per_group : dict[int, int]
-        Maps a group to the number of samples in the group.
-    include_groups : List or None, default=None
-        Sample groups used to estimate the minimum cluster size and number of
-        chemical species in a cluster.
-    tolerance : numpy.ndarray
-        ``(M, ) ndarray `` with tolerances for each descriptor in `X`.
-    min_fraction : float
-        Minimum fraction of samples of a given group in a cluster. If
-        `include_groups` is ``None``, the total number of sample is used
-        to compute the minimum fraction.
-    max_deviation : float
-        The maximum deviation of a feature from a cluster, measured in numbers
-        of standard deviations from the cluster.
-    n_jobs: int or None, default=None
-        Number of jobs to run in parallel. ``None`` means 1 unless in a
-        :obj:`joblib.parallel_backend` context. ``-1`` means using all
-        processors.
-    silent : bool, default=True
-        If ``False``, shows a progress bar.
+    descriptors: dict[str, list]
+        An assay descriptor dictionary
+    tolerance : dict[str, float]
+        A dictionary that maps descriptors to tolerance value. Descriptors not
+        included in this dictionary are not included in the algorithm.
+    params : FeatureCorrespondenceParameters
+        the algorithm parameters
 
     Returns
     -------
     results: dictionary
-        `clusters_` Contains the results from the feature matching, where each
-        number is a different ionic species. Features labelled with `-1` are
-        considered noise. `indecisiveness` is a metric that counts the fraction
-        of features in a cluster that could be potentially assigned to more
-        than one cluster. Values close to zero indicate higher quality grouping.
 
     """
-    n_features, n_cols = X.shape
-    # scale columns to share the tolerance units
+    # adapt input to algorithm input
+    include_descriptors = list(descriptor_tolerance)
+    tolerance = np.array(list(descriptor_tolerance.values()))
+
+    # create feature matrix and scale descriptors
+    X = np.vstack([descriptors[x] for x in descriptors if x in include_descriptors]).T
+    n_features, _ = X.shape
     X *= tolerance / tolerance[0]
 
+    # create sample array
+    samples, _ = encode(descriptors[IDFeatureDescriptors.SAMPLE_ID])
+
+    # create group array
+    groups, group_mapping = encode(descriptors[IDFeatureDescriptors.FEATURE_GROUP])
+    samples_per_group = Counter(groups)
+    if params.groups:
+        include_groups = [group_mapping[x] for x in params.groups if x in group_mapping]
+    else:
+        include_groups = None
+
     # DBSCAN clustering
-    min_samples = _get_min_sample(samples_per_group, include_groups, min_fraction)
+    min_samples = _estimate_dbscan_min_sample(samples_per_group, include_groups, params.min_fraction)
     max_size = 100000
     eps = tolerance[0]
     cluster = _cluster_dbscan(X, eps, min_samples, max_size)
 
     # estimate the number of species per DBSCAN cluster
-    if include_groups is None:
-        include_groups = list(samples_per_group.keys())
-    species_per_cluster = _estimate_n_species(
-        samples, cluster, groups, samples_per_group, include_groups, min_fraction
+    species_per_cluster = _estimate_gmm_n_components(
+        samples, cluster, groups, samples_per_group, include_groups, params.min_fraction
     )
 
     # split DBSCAN clusters with multiple species
     cluster_iterator = _get_cluster_iterator(X, cluster, samples, species_per_cluster)
-    if not silent:
+    if not params.silent:
         progress_bar = get_progress_bar()
         total = _get_progress_bar_total(species_per_cluster)
         cluster_iterator = progress_bar(cluster_iterator, total=total)
 
-    func = partial(_split_cluster_worker, max_deviation=max_deviation)
+    func = partial(_split_cluster_worker, max_deviation=params.max_deviation)
     func = delayed(func)
-    data = Parallel(n_jobs=n_jobs)(func(x) for x in cluster_iterator)
+    data = Parallel(n_jobs=params.n_jobs)(func(x) for x in cluster_iterator)
     # TODO: Remove score computation.
     refined_cluster, score = _build_label(data, n_features)
-    return refined_cluster
+    feature_ids = descriptors[IDFeatureDescriptors.ID]
+    return [FeatureGroupMap(id=x, group=y) for x, y in zip(feature_ids, refined_cluster)]
 
 
-def _get_min_sample(
-    samples_per_group: dict[int, int],
-    include_groups: Optional[list[int]],
-    min_fraction: float,
+def encode(lst: list[str]) -> tuple[IntArray1D, dict[str, int]]:
+    """Encode a list as an array of integers."""
+    unique = set(lst)
+    mapping = {v: k for k, v in enumerate(unique)}
+    return np.array([mapping[x] for x in lst]), mapping
+
+
+def _estimate_dbscan_min_sample(
+    samples_per_group: dict[int, int], include_groups: list[int] | None, min_fraction: float
 ) -> int:
-    """
-    Compute the `min_sample` parameter used in the DBSCAN model.
-
-    Auxiliary function to feature_correspondence
-
-    Parameters
-    ----------
-    samples_per_group : Dict[int, int]
-    include_group : List[int] or None
-    min_fraction : number between 0 and 1
-
-    Returns
-    -------
-    min_sample : int
-
-    """
+    """Compute the DBSCAN model parameter `min_sample`."""
     if include_groups is None:
         min_samples = round(sum(samples_per_group.values()) * min_fraction)
     else:
@@ -215,12 +217,12 @@ def _cluster_dbscan(X: np.ndarray, eps: float, min_samples: int, max_size: int) 
     return cluster
 
 
-def _estimate_n_species(
+def _estimate_gmm_n_components(
     samples: np.ndarray[Any, np.dtype[np.integer]],
     clusters: np.ndarray[Any, np.dtype[np.integer]],
     groups: np.ndarray[Any, np.dtype[np.integer]],
     samples_per_group: dict[int, int],
-    include_groups: list[int],
+    include_groups: list[int] | None,
     min_fraction: float,
 ) -> dict[int, int]:
     """
@@ -234,6 +236,8 @@ def _estimate_n_species(
         A mapping from cluster label to the number of species estimated.
 
     """
+    if include_groups is None:
+        include_groups = list(samples_per_group)
     n_clusters: int = np.max(clusters) + 1
     n_groups = len(include_groups)
     species_array = np.zeros((n_groups, n_clusters), dtype=int)
