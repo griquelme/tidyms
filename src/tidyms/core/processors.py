@@ -75,9 +75,7 @@ class AssayDataInterface(Protocol, Generic[FeatureType, RoiType]):
         """Delete pipeline stored in DB."""
         ...
 
-    def fetch_descriptors(
-        self, samples: str | None = None, descriptors: list[str] | None = None
-    ) -> dict[str, list[float]]:
+    def fetch_descriptors(self, samples: str | None = None, descriptors: list[str] | None = None) -> dict[str, list]:
         """Fetch the descriptor table."""
         ...
 
@@ -103,6 +101,7 @@ class AssayDataInterface(Protocol, Generic[FeatureType, RoiType]):
     def list_samples(self) -> list[str]:
         """Retrieve a list of sample ids in the database."""
         ...
+
 
 class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
     """Stores data state during a sample processing pipeline."""
@@ -141,7 +140,6 @@ class SampleData(pydantic.BaseModel, Generic[FeatureType, RoiType]):
             annotation[c.IDFeatureDescriptors.ID.value] = ft.annotation.id
             annotations.append(annotation)
         return annotations
-
 
     def remove_empty_roi(self) -> None:
         """Delete empty ROI from sample data."""
@@ -272,16 +270,13 @@ class Processor(ABC, pydantic.BaseModel):
     pipeline: str | None = None
 
     @overload
-    def process(self, data: SampleData) -> SampleData:
-        ...
+    def process(self, data: SampleData) -> SampleData: ...
 
     @overload
-    def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots:
-        ...
+    def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots: ...
 
     @overload
-    def process(self, data: AssayDataInterface) -> AssayDataInterface:
-        ...
+    def process(self, data: AssayDataInterface) -> AssayDataInterface: ...
 
     def process(self, data):
         """Apply processor function to data."""
@@ -420,20 +415,17 @@ class ChainedProcessor(pydantic.BaseModel):
             type=self.__class__.__name__,
             pipeline=self.pipeline,
             order=self.order,
-            parameters={"processors": [x.to_config() for x in self.processors]}
+            parameters={"processors": [x.to_config() for x in self.processors]},
         )
 
     @overload
-    def process(self, data: SampleData) -> SampleData:
-        ...
+    def process(self, data: SampleData) -> SampleData: ...
 
     @overload
-    def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots:
-        ...
+    def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots: ...
 
     @overload
-    def process(self, data: AssayDataInterface) -> AssayDataInterface:
-        ...
+    def process(self, data: AssayDataInterface) -> AssayDataInterface: ...
 
     def process(
         self, data: SampleData | SampleDataSnapshots | AssayDataInterface
@@ -504,8 +496,7 @@ class RoiExtractor(Processor):
         sample_data.roi = self._extract_roi_func(sample_data.sample)
 
     @abstractmethod
-    def _extract_roi_func(self, sample: Sample) -> list[Roi]:
-        ...
+    def _extract_roi_func(self, sample: Sample) -> list[Roi]: ...
 
     @staticmethod
     def update_status_out(status_in: ProcessStatus) -> ProcessStatus:
@@ -539,8 +530,7 @@ class RoiTransformer(Processor):
         return status_in
 
     @abstractmethod
-    def _transform_roi(self, roi: Roi):
-        ...
+    def _transform_roi(self, roi: Roi): ...
 
 
 class FeatureTransformer(Processor):
@@ -568,8 +558,7 @@ class FeatureTransformer(Processor):
         return status_in
 
     @abstractmethod
-    def _transform_feature(self, feature: Feature):
-        ...
+    def _transform_feature(self, feature: Feature): ...
 
 
 class FeatureExtractor(Processor):
@@ -617,8 +606,7 @@ class FeatureExtractor(Processor):
                     roi.add_feature(ft)
 
     @abstractmethod
-    def _extract_features_func(self, roi: Roi) -> Sequence[Feature]:
-        ...
+    def _extract_features_func(self, roi: Roi) -> Sequence[Feature]: ...
 
 
 class MultipleSampleProcessor(Processor):
@@ -710,7 +698,6 @@ class ProcessorRegistry:
             config.parameters["processors"] = [cls.create_from_config(x) for x in config.parameters["processors"]]
             return ChainedProcessor(**config.parameters)
         return proc_cls(**config.parameters)
-
 
     @classmethod
     def get_processor(cls, type_: str) -> type[ProcessorItem]:
@@ -907,16 +894,13 @@ class ProcessingPipeline(pydantic.BaseModel):
         return ProcessingPipeline(id=d["id"], processors=processors)
 
     @overload
-    def process(self, data: AssayDataInterface) -> AssayDataInterface:
-        ...
+    def process(self, data: AssayDataInterface) -> AssayDataInterface: ...
 
     @overload
-    def process(self, data: SampleData) -> SampleData:
-        ...
+    def process(self, data: SampleData) -> SampleData: ...
 
     @overload
-    def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots:
-        ...
+    def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots: ...
 
     def process(
         self, data: SampleData | SampleDataSnapshots | AssayDataInterface
