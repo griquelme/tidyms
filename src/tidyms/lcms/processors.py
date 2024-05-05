@@ -1,19 +1,19 @@
 """Tools to process LC-MS-based datasets."""
 
-from typing import Any
-
-import numpy as np
 import pydantic
+from numpy import zeros_like
 
+from ..algorithms.raw import MakeRoiParameters, make_roi
+from ..algorithms.signal import detect_peaks, estimate_baseline, estimate_noise, smooth
+from ..annotation.correspondence import FeatureCorrespondenceParameters, match_features
 from ..core import constants as c
-from ..core.models import Sample
-from ..core.processors import RoiExtractor
-from ..io.msdata import MSData
-from ..algorithms.raw import make_roi
-from .lcms import MZTrace
+from ..core.models import FeatureGroupMap, Sample
+from ..core.processors import AssayDataInterface, FeatureExtractor, FeatureMatcher, RoiExtractor, RoiTransformer
+from ..io import MSData, get_reader
+from .lcms import MZTrace, Peak
 
 
-class LCTraceExtractor(RoiExtractor):
+class LCTraceExtractor(RoiExtractor, MakeRoiParameters):
     """
     Extracts regions-of-interest (ROI) from raw data represented as m/z traces.
 
@@ -21,297 +21,194 @@ class LCTraceExtractor(RoiExtractor):
     closeness in m/z. See the :ref:`user guide <roi-creation>` for a description
     of the algorithm used.
 
-    Attributes
-    ----------
-    tolerance : positive number, default=0.01
-        m/z tolerance to connect values across consecutive scans.
-    max_missing : non-negative integer, default=1
-        maximum number of consecutive missing values in a trace. If during the
-        extension of a trace the number of consecutive values surpasses this
-        threshold the trace is flagged as completed.
-    min_length : positive integer, default=2
-        Completed traces with length lower than this value are discarded. The
-        length of a trace is the number of non-NaN elements.
-    min_intensity : non-negative number , default=250.0
-        At least one element in a completed trace must have an intensity greater
-        than this value. Completed traces that do not meet this condition are
-        discarded.
-    pad: int, default=0
-        Pad dummy values at the beginning and at the end of a trace. This produces
-        better peak picking results when searching low intensity peaks in a trace.
-    smoothing_strength: float or None, default=1.0
-        Smooth the intensity of each trace using a Gaussian kernel. The smoothing
-        strength is the standard deviation of the gaussian. If ``None``, no smoothing
-        is applied.
-    targeted_mz : numpy.ndarray or None, default=None
-        A list of m/z values to perform a targeted trace creation. If this
-        value is provided, only traces with these m/z values will be created.
-
     See Also
     --------
-    lcms.LCTrace : Representation of a ROI using m/z traces.
+    lcms.MZTrace : Representation of a ROI using m/z traces.
+    lcms.MakeRoiParameters : Parameters used by the ROI extraction algorithm
 
     """
 
-    tolerance: pydantic.PositiveFloat = 0.01
-    max_missing: pydantic.NonNegativeInt = 1
-    targeted_mz: list[float] | None = None
-    min_intensity: pydantic.PositiveFloat = 250
-    min_length: pydantic.PositiveInt = 2
-    pad: pydantic.NonNegativeInt = 0
-
     def _extract_roi_func(self, sample: Sample) -> list[MZTrace]:
-        ms_data = MSData(sample.path)
-        params = self.get_parameters()
-        return make_roi(
-            ms_data,
-            ms_level=sample.ms_level,
-            start_time=sample.start_time,
-            end_time=sample.end_time,
-            **params,
+        reader = None if sample.reader is None else get_reader(sample.reader)
+        ms_data = MSData(sample.path, reader=reader)
+        params = self.model_copy()
+        params.ms_level = sample.ms_level
+        params.start_time = sample.start_time
+        params.end_time = sample.end_time
+        return make_roi(ms_data, params)
+
+    def get_default_parameters(self, instrument: c.MSInstrument, separation: c.SeparationMode, polarity: c.Polarity):
+        """
+        Set the processor default parameters.
+
+        Parameters
+        ----------
+        instrument : MSInstrument
+        separation : SeparationMode
+        polarity : Polarity
+
+        """
+        params = dict(max_missing=1, pad=2, min_intensity=250.0)
+
+        if instrument == c.MSInstrument.QTOF:
+            params["tolerance"] = 0.01
+        elif instrument == c.MSInstrument.ORBITRAP:
+            params["tolerance"] = 0.005
+        else:
+            raise NotImplementedError
+
+        if separation == c.SeparationMode.UPLC:
+            params["min_length"] = 10
+        elif separation == c.SeparationMode.HPLC:
+            params["min_length"] = 20
+        else:
+            raise NotImplementedError
+        return params
+
+
+class LCTraceBaselineEstimator(RoiTransformer):
+    """
+    Estimate the noise level and baseline in an m/z trace.
+
+    The default values for this filter usually produce good results in all LC
+    traces. Do not modify these values unless you know what you are doing.
+    See :ref:`here <peak-picking>` for a description of the noise estimation
+    and baseline estimation algorithms.
+
+    """
+
+    robust: bool = True
+    """If ``True``, use the median absolute deviation as an estimator of the
+    noise standard deviation. If ``False``. use the standard deviation."""
+
+    min_slice_size: pydantic.PositiveInt = 200
+    """The minimum size of a signal slice for local noise estimation. If the signal
+    size is smaller than this value, the noise is estimated using the whole array.
+    """
+
+    n_slices: pydantic.PositiveInt = 5
+    """Number of slices to create. The size of each slice must be greater than
+    `min_slice_size`.
+    """
+
+    smoothing_strength: pydantic.PositiveFloat | None = 1.0
+    """If specified, apply a temporary gaussian smoothing to the trace intensity.
+    This step usually improves baseline estimation.
+    """
+
+    min_proba: float = pydantic.Field(default=0.05, le=0.5, gt=0.0)
+    """The minimum probability of a signal chunk to be considered as baseline."""
+
+    def _transform_roi(self, roi: MZTrace):
+        roi.noise = estimate_noise(
+            roi.spint, min_slice_size=self.min_slice_size, n_slices=self.n_slices, robust=self.robust
         )
+        if self.smoothing_strength is not None:
+            roi.spint = smooth(roi.spint, self.smoothing_strength)
+        roi.baseline = estimate_baseline(roi.spint, roi.noise, min_proba=self.min_proba)
 
-    def set_default_parameters(self, instrument: c.MSInstrument, separation: c.SeparationMode, polarity: c.Polarity):
-        """Set the default parameters."""
-        defaults: dict[str, Any] = {"max_missing": 1, "pad": 2, "min_intensity": 250}
-        instrument_parameters = {
-            c.QTOF: {"tolerance": 0.01},
-            c.ORBITRAP: {"tolerance": 0.005},
-        }
-        separation_parameters = {c.UPLC: {"min_length": 10}, c.HPLC: {"min_length": 20}}
-        defaults.update(instrument_parameters[instrument])
-        defaults.update(separation_parameters[separation])
-        self.set_parameters(defaults)
+    def get_default_parameters(self, instrument: c.MSInstrument, separation: c.SeparationMode, polarity: c.Polarity):
+        """
+        Set the processor default parameters.
 
-    @staticmethod
-    def _validate_parameters(parameters: dict):
-        schema = {
-            "targeted_mz": {"nullable": True, "check_with": is_all_positive},
-            "min_intensity": {"type": "number", "min": 0.0},
-            "min_length": {"type": "integer", "min": 2},
-            "pad": {"type": "integer", "min": 0},
-        }
-        validator = ValidatorWithLowerThan(schema)
-        validate(parameters, validator)
+        Parameters
+        ----------
+        instrument : MSInstrument
+        separation : SeparationMode
+        polarity : Polarity
+
+        """
+        return dict()
 
 
-# class LCFeatureExtractor(FeatureExtractor):
-#     """
-#     Detect peaks in LC m/z traces.
+class PeakExtractor(FeatureExtractor):
+    """
+    Extract peaks from LC m/z traces.
 
-#     Peaks are stored in the `features` attribute of each LCTrace.
+    A complete description can be found :ref:`here <feature-extraction>`.
 
-#     A complete description can be found :ref:`here <feature-extraction>`.
+    """
 
-#     """
+    def get_default_parameters(self, instrument: c.MSInstrument, separation: c.SeparationMode, polarity: c.Polarity):
+        """
+        Set the processor default parameters.
 
-#     def __init__(
-#         self,
-#         filters: Optional[dict[str, tuple[Optional[float], Optional[float]]]] = None,
-#     ):
-#         super().__init__(filters)
+        Parameters
+        ----------
+        instrument : MSInstrument
+        separation : SeparationMode
+        polarity : Polarity
 
-#     @staticmethod
-#     def _check_data(sample_data: SampleDataSnapshots):
-#         pass
+        """
+        params = dict()
+        if separation == c.SeparationMode.HPLC:
+            params["filters"] = {"width": (10, 90), "snr": (5, None)}
+        elif separation == c.SeparationMode.UPLC:
+            params["filters"] = {"width": (4, 60), "snr": (5, None)}
+        else:
+            raise NotImplementedError
+        return params
 
-#     def set_default_parameters(self, instrument: str, separation: str):
-#         """Set the default parameters."""
-#         if separation == c.HPLC:
-#             filters = {"width": (10, 90), "snr": (5, None)}
-#         else:  # mode = "uplc"
-#             filters = {"width": (4, 60), "snr": (5, None)}
-#         defaults = {"filters": filters}
-#         self.set_parameters(defaults)
+    def _extract_features_func(self, roi: MZTrace):
+        if roi.noise is None:
+            roi.noise = estimate_noise(roi.spint)
 
-#     @staticmethod
-#     def _extract_features_func(roi: LCTrace, **params):
-#         start, apex, end = peaks.detect_peaks(
-#             roi.spint, roi.noise, roi.baseline, **params
-#         )
-#         roi.features = [Peak(s, a, e, roi) for s, a, e in zip(start, apex, end)]
+        if roi.baseline is None:
+            roi.baseline = zeros_like(roi.spint)
 
-#     @staticmethod
-#     def _validate_parameters(parameters: dict):
-#         filters = parameters["filters"]
-#         valid_descriptors = Peak.descriptor_names()
-#         for descriptor in filters:
-#             if descriptor not in valid_descriptors:
-#                 msg = f"{descriptor} is not a valid descriptor name."
-#                 raise ValueError(msg)
+        start, apex, end = detect_peaks(roi.spint, roi.noise, roi.baseline)
+        return [Peak(start=s, apex=a, end=e, roi=roi) for s, a, e in zip(start, apex, end)]
 
 
-# class LCFeatureMatcher(FeatureMatcher):
-#     """
-#     Perform feature correspondence on LC-MS data using a cluster-based approach.
+class LCFeatureMatcher(FeatureMatcher, FeatureCorrespondenceParameters):
+    """
+    Perform feature correspondence on LC-MS datasets using a cluster-based approach.
 
-#     Features are initially grouped by m/z and Rt similarity using DBSCAN. In
-#     a second step, these clusters are further processed using a GMM approach,
-#     obtaining clusters where each sample contributes with only one sample.
+    Features are initially grouped by m/z and Rt similarity using DBSCAN. In
+    a second step, these clusters are further processed using a GMM approach,
+    obtaining clusters where each sample contributes with only one sample.
 
-#     See the :ref:`user guide <ft-correspondence>` for a detailed description of
-#     the algorithm.
+    See the :ref:`user guide <ft-correspondence>` for a detailed description of
+    the algorithm.
 
-#     Attributes
-#     ----------
-#     mz_tolerance : float, default=0.01
-#         m/z tolerance used to group close features. Sets the `eps` parameter in
-#         the DBSCAN algorithm.
-#     rt_tolerance : float, default=3.0
-#         Rt tolerance in seconds used to group close features. Sets the `eps`
-#         parameter in the DBSCAN algorithm.
-#     min_fraction : float, default=0.25
-#         Minimum fraction of samples of a given group in a cluster. If
-#         `include_groups` is ``None``, the total number of sample is used
-#         to compute the minimum fraction.
-#     include_groups : List or None, default=None
-#         Sample groups used to estimate the minimum cluster size and number of
-#         chemical species in a cluster.
-#     max_deviation : float, default=3.0
-#         The maximum deviation of a feature from a cluster, measured in numbers
-#         of standard deviations from the cluster.
-#     n_jobs: int or None, default=None
-#         Number of jobs to run in parallel. ``None`` means 1 unless in a
-#         :obj:`joblib.parallel_backend` context. ``-1`` means using all
-#         processors.
-#     silent : bool, default=True
-#         If False, shows a progress.
+    """
 
-#     """
+    mz_tolerance: pydantic.PositiveFloat = 0.01
+    """m/z tolerance used to group close features. Sets the `eps` parameter in the DBSCAN algorithm."""
 
-#     def __init__(
-#         self,
-#         mz_tolerance: float = 0.01,
-#         rt_tolerance: float = 3.0,
-#         min_fraction: float = 0.25,
-#         include_groups: Optional[list[str]] = None,
-#         max_deviation: float = 3.0,
-#         n_jobs: Optional[int] = None,
-#         silent: bool = True,
-#     ):
-#         self.mz_tolerance = mz_tolerance
-#         self.rt_tolerance = rt_tolerance
-#         self.min_fraction = min_fraction
-#         self.include_groups = include_groups
-#         self.max_deviation = max_deviation
-#         self.n_jobs = n_jobs
-#         self.silent = silent
+    rt_tolerance: pydantic.PositiveFloat = 3.0
+    """Rt tolerance in seconds used to group close features. Sets the `eps` parameter in the DBSCAN algorithm."""
 
-#     def _func(self, data: AssayData) -> dict[int, int]:
-#         descriptors_names = [c.MZ, c.RT]
-#         descriptors = data.fetch_descriptors(descriptors=descriptors_names)
-#         feature_id = descriptors.pop("id")
-#         dataset_samples = data.list_samples()
+    def _func(self, data: AssayDataInterface) -> list[FeatureGroupMap]:
+        tolerance = {"mz": self.mz_tolerance, "rt": self.rt_tolerance}
+        descriptors = data.fetch_descriptors(descriptors=list(tolerance))
+        return match_features(descriptors, tolerance, self)
 
-#         # adapt input to match_features function
-#         sample_names = descriptors.pop("sample_id")  # TODO: fix hardcoded names
-#         samples = _create_sample_code_array(sample_names, dataset_samples)
-#         groups = _create_group_code_array(sample_names, dataset_samples)
-#         X = np.vstack([descriptors[x] for x in descriptors_names]).T
-#         parameters = self.get_parameters()
-#         _adapt_parameters(parameters, dataset_samples)
-#         samples_per_group = _count_samples_per_group(dataset_samples)
+    def get_default_parameters(self, instrument: c.MSInstrument, separation: c.SeparationMode, polarity: c.Polarity):
+        """
+        Set the processor default parameters.
 
-#         labels = match_features(X, samples, groups, samples_per_group, **parameters)
+        Parameters
+        ----------
+        instrument : MSInstrument
+        separation : SeparationMode
+        polarity : Polarity
 
-#         feature_id_to_label = {x: int(y) for x, y in zip(feature_id, labels)}
+        """
+        params = {"min_fraction": 0.25, "max_deviation": 3.0, "include_groups": None, "n_jobs": None, "silent": True}
 
-#         return feature_id_to_label
+        if instrument == c.MSInstrument.QTOF:
+            params["mz_tolerance"] = 0.01
+        elif instrument == c.MSInstrument.ORBITRAP:
+            params["mz_tolerance"] = 0.005
+        else:
+            raise NotImplementedError
 
-#     def set_default_parameters(self, instrument: str, separation: str) -> dict:
-#         """
-#         Set default values based on instrument type and separation method.
+        if separation == c.SeparationMode.HPLC:
+            params["rt_tolerance"] = 10
+        elif separation == c.SeparationMode.UPLC:
+            params["rt_tolerance"] = 5
+        else:
+            raise NotImplementedError
 
-#         Parameters
-#         ----------
-#         instrument : str
-#             MS instrument used for the measurements. See
-
-#         """
-#         if instrument == c.QTOF:
-#             mz_tolerance = 0.01
-#         elif instrument == c.ORBITRAP:
-#             mz_tolerance = 0.005
-#         else:
-#             msg = f"Valid instruments are: {c.MS_INSTRUMENTS}. Got {instrument}."
-#             raise ValueError(msg)
-
-#         if separation == c.HPLC:
-#             rt_tolerance = 10
-#         elif separation == c.UPLC:
-#             rt_tolerance = 5
-#         else:
-#             msg = f"Valid separation modes are: {c.LC_MODES}. Got {separation}."
-#             raise ValueError(msg)
-
-#         defaults = {
-#             "mz_tolerance": mz_tolerance,
-#             "rt_tolerance": rt_tolerance,
-#             "min_fraction": 0.25,
-#             "max_deviation": 3.0,
-#             "include_groups": None,
-#             "n_jobs": None,
-#             "silent": True,
-#         }
-#         return defaults
-
-#     @staticmethod
-#     def _validate_parameters(parameters: dict):
-#         schema = {
-#             "mz_tolerance": {"type": "number", "min": 0.0},
-#             "rt_tolerance": {"type": "number", "min": 0.0},
-#             "min_fraction": {"type": "number", "min": 0.0, "max": 1.0},
-#             "max_deviation": {"type": "number", "min": 0.0},
-#             "include_classes": {
-#                 "type": "list",
-#                 "nullable": True,
-#                 "schema": {"type": "string"},
-#             },
-#             "n_jobs": {"nullable": True, "type": "integer"},
-#             "silent": {"type": "boolean"},
-#         }
-#         validator = ValidatorWithLowerThan(schema)
-#         validate(parameters, validator)
-
-
-# def _count_samples_per_group(dataset_samples: list[Sample]) -> dict[int, int]:
-#     unique_groups = {x.group for x in dataset_samples}
-#     group_to_code = {name: k for k, name in enumerate(unique_groups)}
-#     groups = [group_to_code[x.group] for x in dataset_samples]
-#     counts = dict()
-#     for g in groups:
-#         counts[g] = counts.get(g, 0) + 1
-#     return counts
-
-
-# def _create_sample_code_array(sample_names: list[str], dataset_samples: list[Sample]):
-#     """Create an array where each element is an integer associated with the sample id."""
-#     unique_samples = {x.id for x in dataset_samples}
-#     sample_to_code = {name: k for k, name in enumerate(unique_samples)}
-#     return np.array([sample_to_code[x] for x in sample_names])
-
-
-# def _create_group_code_array(
-#     sample_names: list[str], dataset_samples: list[Sample]
-# ) -> np.ndarray[Any, np.dtype[np.integer]]:
-#     """Create an array where each element is an integer associated with the sample group."""
-#     unique_samples = {x.id for x in dataset_samples}
-#     unique_groups = {x.group for x in dataset_samples}
-#     group_to_code = {name: k for k, name in enumerate(unique_groups)}
-#     sample_to_group = {x.id: x.group for x in dataset_samples}
-#     sample_to_group_code = {
-#         k: group_to_code[sample_to_group[k]] for k in unique_samples
-#     }
-#     return np.array([sample_to_group_code[x] for x in sample_names])
-
-
-# def _adapt_parameters(parameters: dict, dataset_samples: list[Sample]):
-#     """Adapt LCFeatureMatcher parameters to match_features function."""
-#     mz_tolerance = parameters.pop("mz_tolerance")
-#     rt_tolerance = parameters.pop("rt_tolerance")
-#     parameters["tolerance"] = np.array([mz_tolerance, rt_tolerance])
-#     if parameters["include_groups"] is not None:
-#         unique_groups = {x.group for x in dataset_samples}
-#         group_to_code = {name: k for k, name in enumerate(unique_groups)}
-#         include_groups = [group_to_code[x] for x in parameters["include_groups"]]
-#         parameters["include_groups"] = include_groups
+        return params
