@@ -5,6 +5,7 @@ import pytest
 from tidyms.annotation import mmi_finder
 from tidyms.annotation.annotation_data import AnnotationData
 from tidyms.chem import PeriodicTable
+
 from .utils import ConcreteFeature, ConcreteRoi
 
 

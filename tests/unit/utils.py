@@ -9,7 +9,7 @@ from typing import Sequence
 
 from tidyms.core import constants as c
 from tidyms.core import models, processors
-from tidyms.core.models import Feature, Roi
+from tidyms.core.models import Feature, Roi, IsotopicEnvelope
 from tidyms.core.processors import SampleData
 from typing_extensions import Self
 
@@ -20,8 +20,8 @@ class ConcreteRoi(models.Roi):
     def __eq__(self, other: ConcreteRoi) -> bool:
         is_equal_data = (self.data == other.data) and (self.id == other.id)
         is_equal_n_features = len(self.features) == len(other.features)
-        is_equal_features = all(x.equal(y) for x, y in zip(self.features, other.features)) # type: ignore
-        return  is_equal_data and is_equal_n_features and is_equal_features
+        is_equal_features = all(x.equal(y) for x, y in zip(self.features, other.features))  # type: ignore
+        return is_equal_data and is_equal_n_features and is_equal_features
 
 
 class ConcreteFeature(models.AnnotableFeature[ConcreteRoi]):
@@ -47,9 +47,12 @@ class ConcreteFeature(models.AnnotableFeature[ConcreteRoi]):
         return 1.0
 
     @staticmethod
-    def compute_isotopic_envelope(features: list[Feature]) -> tuple[list[float], list[float]]:
+    def compute_isotopic_envelope(features: list[ConcreteFeature]) -> IsotopicEnvelope:
         total_area = sum([x.area for x in features])
-        return [x.mz for x in features], [x.area / total_area for x in features]
+        mz = [x.mz for x in features]
+        p = [x.area / total_area for x in features]
+        return IsotopicEnvelope(mz=mz, p=p)
+
 
 @processors.ProcessorRegistry.register
 class DummyRoiExtractor(processors.RoiExtractor):
@@ -136,9 +139,7 @@ def create_dummy_roi() -> ConcreteRoi:
     return ConcreteRoi(data=data)
 
 
-def create_dummy_feature(
-    roi: ConcreteRoi, annotation: models.Annotation
-) -> ConcreteFeature:
+def create_dummy_feature(roi: ConcreteRoi, annotation: models.Annotation) -> ConcreteFeature:
     data = randint(0, 10)
     return ConcreteFeature(roi=roi, data=data, annotation=annotation, height=float(data))
 
