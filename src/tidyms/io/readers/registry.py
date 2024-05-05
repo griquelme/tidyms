@@ -1,6 +1,6 @@
 """Maintain a runtime registry of readers."""
 
-
+from functools import wraps
 from typing import TypeVar
 
 from ...core.exceptions import ReaderNotFound
@@ -21,6 +21,7 @@ def get_reader_from_extension(ext: str) -> type[Reader]:
         raise ValueError(msg)
 
     return get_reader(type_)
+
 
 def get_reader(type_: str) -> type[Reader]:
     """
@@ -52,7 +53,21 @@ def list_reader_types() -> list[str]:
     return list(_REGISTERED_READERS)
 
 
-def register(reader: type[ReaderType]) -> type[ReaderType]:
-    """Add a reader to the registry."""
-    _REGISTERED_READERS[reader.__name__] = reader
-    return reader
+def register(*formats: str):
+    """Add a reader to the registry.
+
+    Parameters
+    ----------
+    formats : str
+        the formats associated with the reader. Files with these formats will
+        automatically recognized when working with :py:class:`tidyms.io.MSData`.
+
+    """
+
+    def wrapper(reader: type[ReaderType]) -> type[ReaderType]:
+        _REGISTERED_READERS[reader.__name__] = reader
+        for fmt in formats:
+            _EXTENSION_TO_READER[fmt] = reader.__name__
+        return reader
+
+    return wrapper
