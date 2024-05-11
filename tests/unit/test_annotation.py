@@ -39,6 +39,8 @@ def test__annotate_empty_feature_list(annotation_tools_params):
 
 @pytest.fixture
 def peak_list(tmp_path: pathlib.Path) -> list[Peak]:
+    # load simulated reader to make it to MSData
+    from tidyms.lcms.simulation import SimulatedLCMSDataReader  # noqa
 
     formulas = ["[C10H20O2]-", "[C10H20BO3]-", "[C20H40BO5]2-", "[C18H19N2O3]-", "[C18H20N2O3Cl]-", "[C10H20Cl]-"]
     rt_list = [50, 75, 150, 200, 200, 175]
@@ -65,8 +67,8 @@ def peak_list(tmp_path: pathlib.Path) -> list[Peak]:
         processors=[
             LCTraceExtractor(id="roi_extractor"),
             LCTraceBaselineEstimator(id="baseline_estimator"),
-            PeakExtractor(id="peak_extractor")
-        ]
+            PeakExtractor(id="peak_extractor"),
+        ],
     )
     pipe.process(data)
 
