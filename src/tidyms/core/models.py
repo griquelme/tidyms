@@ -66,9 +66,7 @@ class Roi(pydantic.BaseModel):
 
     """
 
-    model_config = pydantic.ConfigDict(
-        validate_assignment=True, arbitrary_types_allowed=True
-    )
+    model_config = pydantic.ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
     id: int = -1
     features: list[Feature] = list()
 
@@ -144,7 +142,9 @@ class Annotation(pydantic.BaseModel):
     charge: int = -1
     """Feature charge state. Set to ``-1`` if not annotated."""
 
+
 RoiType = TypeVar("RoiType", bound=Roi)
+
 
 class Feature(pydantic.BaseModel, Generic[RoiType]):
     """
@@ -436,6 +436,7 @@ class IsotopicEnvelope(pydantic.BaseModel):
     mz: list[float]
     p: list[float]
 
+
 class Sample(pydantic.BaseModel):
     """Store sample information."""
 
@@ -510,9 +511,18 @@ class Chromatogram(pydantic.BaseModel):
     """Chromatogram representation."""
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+
     index: int = -1
+    """The chromatogram order in a data file"""
+
+    name: str | None = None
+    """The chromatogram name in a data file"""
+
     time: FloatArray1D
+    """The time data"""
+
     int: FloatArray1D
+    """The intensity data"""
 
 
 class FeatureGroupMap(TypedDict):
