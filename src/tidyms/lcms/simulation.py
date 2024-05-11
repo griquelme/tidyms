@@ -25,7 +25,7 @@ from ..core.numpy import FloatArray1D
 from ..io.readers.registry import register
 
 
-@register
+@register()
 class SimulatedLCMSDataReader:
     """Read simulated LC-MS data files."""
 
