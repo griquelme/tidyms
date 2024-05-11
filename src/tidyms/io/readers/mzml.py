@@ -35,12 +35,13 @@ get_chromatogram : Extracts data from a chromatogram using offsets.
 """
 
 import base64
+import enum
 import re
 import zlib
 from os import SEEK_END
 from os.path import getsize
 from pathlib import Path
-from typing import Optional, cast
+from typing import Any, BinaryIO, TextIO, cast
 from xml.etree.ElementTree import Element, fromstring
 
 import numpy as np
@@ -48,51 +49,87 @@ import numpy as np
 from ...core.models import Chromatogram, MSSpectrum
 from .registry import register
 
-UNSUPPORTED_COMPRESSION = {
-    "MS:1002312",
-    "MS:1002313",
-    "MS:1002314",
-    "MS:1002746",
-    "MS:1002747",
-    "MS:1002748",
-    "MS:1003088",
-    "MS:1003089",
-    "MS:1003090",
-}
-ZLIB = "MS:1000574"
-MZ_ARRAY = "MS:1000514"
-INT_ARRAY = "MS:1000515"
-TIME_ARRAY = "MS:1000595"
+UNSUPPORTED_COMPRESSION = frozenset(
+    (
+        "MS:1002312",
+        "MS:1002313",
+        "MS:1002314",
+        "MS:1002746",
+        "MS:1002747",
+        "MS:1002748",
+        "MS:1003088",
+        "MS:1003089",
+        "MS:1003090",
+    )
+)
+
+
+class _CompressionType(str, enum.Enum):
+    """The compression types defined in the mzML spec and their accession numbers."""
+
+    ZLIB = "MS:1000574"
+
+
 MS_LEVEL = "MS:1000511"
-TIME = "MS:1000016"  # time value in scans
-NEGATIVE_POLARITY = "MS:1000129"
-POSITIVE_POLARITY = "MS:1000130"
-# time units
-SECONDS = "UO:0000010"
-MINUTES = "UO:0000031"
 
-# data types
-FLOAT16 = "UNKNOWN"
-FLOAT32 = "MS:1000521"
-FLOAT64 = "MS:1000523"
-INT32 = "MS:1000519"
-INT64 = "MS:1000522"
-DATA_TYPES = {
-    FLOAT16: np.float16,
-    FLOAT32: np.float32,
-    FLOAT64: np.float64,
-    INT32: np.int32,
-    INT64: np.int64,
+
+class _ArrayType(str, enum.Enum):
+    """The array types defined in the mzML specification and their accession numbers."""
+
+    MZ_ARRAY = "MS:1000514"
+    """An array with m/z data"""
+
+    INT_ARRAY = "MS:1000515"
+    """An array with spectral intensity"""
+
+    TIME_ARRAY = "MS:1000595"
+    """An array with with time data"""
+
+    TIME = "MS:1000016"  # time value in scans
+
+
+class _Polarity(str, enum.Enum):
+    """mzML polarity values."""
+
+    NEGATIVE = "MS:1000129"
+    POSITIVE = "MS:1000130"
+
+
+class _TimeUnits(str, enum.Enum):
+    """mzML time units."""
+
+    SECONDS = "UO:0000010"
+    MINUTES = "UO:0000031"
+
+
+class _DataTypes(str, enum.Enum):
+    FLOAT16 = "UNKNOWN"
+    FLOAT32 = "MS:1000521"
+    FLOAT64 = "MS:1000523"
+    INT32 = "MS:1000519"
+    INT64 = "MS:1000522"
+
+
+_MZML_TYPE_TO_NUMPY_TYPE = {
+    _DataTypes.FLOAT16.value: np.float16,
+    _DataTypes.FLOAT32.value: np.float32,
+    _DataTypes.FLOAT64.value: np.float64,
+    _DataTypes.INT32.value: np.int32,
+    _DataTypes.INT64.value: np.int64,
 }
 
 
-@register
+class MZMLError(ValueError):
+    """Exception raised when an error happens while parsing an mzML file."""
+
+
+@register(".mzML")
 class MZMLReader:
     """mzML format reader."""
 
-    def __init__(self, path: Path):
-        self.path = path
-        sp_offset, chrom_offset, index_offset = build_offset_list(path)
+    def __init__(self, src: Path | BinaryIO | TextIO):
+        self.path = cast(Path, src)  # TODO: remove cast
+        sp_offset, chrom_offset, index_offset = build_offset_list(self.path)
         self.spectra_offset = sp_offset
         self.chromatogram_offset = chrom_offset
         self.index_offset = index_offset
@@ -100,7 +137,7 @@ class MZMLReader:
         self.n_chromatograms = len(self.chromatogram_offset)
         self.n_spectra = len(self.spectra_offset)
 
-    def get_spectrum(self, index: int) -> dict:
+    def get_spectrum(self, index: int) -> MSSpectrum:
         """Retrieve a spectrum from file."""
         return get_spectrum(
             self.path,
@@ -110,7 +147,15 @@ class MZMLReader:
             index,
         )
 
-    def get_chromatogram(self, index: int) -> dict:
+    def get_n_spectra(self) -> int:
+        """Return the number of spectra in the file."""
+        return self.n_spectra
+
+    def get_n_chromatograms(self) -> int:
+        """Return the number of chromatogram in the file."""
+        return self.n_chromatograms
+
+    def get_chromatogram(self, index: int) -> Chromatogram:
         """Retrieve a chromatogram from file."""
         return get_chromatogram(
             self.path,
@@ -123,7 +168,7 @@ class MZMLReader:
 
 def build_offset_list(filename: Path) -> tuple[list[int], list[int], int]:
     """
-    Find the offset values where Spectrum or Chromatogram elementsstart.
+    Find the offset values where Spectrum or Chromatogram elements start.
 
     Parameters
     ----------
@@ -155,7 +200,7 @@ def get_spectrum(
     chromatogram_offset: list[int],
     index_offset: int,
     n: int,
-) -> dict:
+) -> MSSpectrum:
     """
     Extract spectrum data from file.
 
@@ -187,9 +232,9 @@ def get_spectrum(
             if accession == MS_LEVEL:
                 ms_level = el.attrib.get("value")
                 spectrum["ms_level"] = 1 if ms_level is None else int(ms_level)
-            elif accession == NEGATIVE_POLARITY:
+            elif accession == _Polarity.NEGATIVE:
                 spectrum["polarity"] = -1
-            elif accession == POSITIVE_POLARITY:
+            elif accession == _Polarity.POSITIVE:
                 spectrum["polarity"] = 1
         elif tag == "scanList":
             spectrum["time"] = _get_time(el)
@@ -197,7 +242,7 @@ def get_spectrum(
             sp_data = _parse_binary_data_list(el)
             spectrum.update(sp_data)
 
-    return spectrum
+    return MSSpectrum(**spectrum)
 
 
 def get_chromatogram(
@@ -206,7 +251,7 @@ def get_chromatogram(
     chromatogram_offset: list[int],
     index_offset: int,
     n: int,
-) -> dict:
+) -> Chromatogram:
     """
     Extract time and intensity from xml chunk.
 
@@ -226,13 +271,13 @@ def get_chromatogram(
     xml_str = _get_xml_data(filename, spectra_offset, chromatogram_offset, index_offset, n, "chromatogram")
     elements = fromstring(xml_str)
     name = elements.attrib.get("id")
-    chromatogram = dict(name=name)
+    chromatogram: dict[str, Any] = dict(name=name)
     for el in list(elements):
         tag = el.tag
         if tag == "binaryDataArrayList":
             chrom_data = _parse_binary_data_list(el)
             chromatogram.update(chrom_data)
-    return chromatogram
+    return Chromatogram(**chromatogram)
 
 
 class ReverseReader:
@@ -275,7 +320,7 @@ class ReverseReader:
     def __exit__(self, t, value, traceback):
         self.file.close()
 
-    def read_chunk(self) -> Optional[str]:
+    def read_chunk(self) -> str | None:
         """
         Read a chunk of data from the file, starting from the end.
 
@@ -325,18 +370,18 @@ def _read_binary_data_array(element: Element) -> tuple[np.ndarray, str]:
             accession = e.attrib.get("accession")
             if accession in UNSUPPORTED_COMPRESSION:
                 msg = "Currently only zlib compression is supported."
-                raise NotImplementedError(msg)
-            elif accession == ZLIB:
+                raise MZMLError(msg)
+            elif accession == _CompressionType.ZLIB:
                 has_zlib_compression = True
-            elif accession == INT_ARRAY:
-                kind = "spint"
-            elif accession == MZ_ARRAY:
+            elif accession == _ArrayType.INT_ARRAY:
+                kind = "int"
+            elif accession == _ArrayType.MZ_ARRAY:
                 kind = "mz"
-            elif accession == TIME_ARRAY:
+            elif accession == _ArrayType.TIME_ARRAY:
                 kind = "time"
                 units = e.attrib.get("unitAccession")
-            if accession in DATA_TYPES:
-                dtype = DATA_TYPES[accession]
+            if accession in _MZML_TYPE_TO_NUMPY_TYPE:
+                dtype = _MZML_TYPE_TO_NUMPY_TYPE[accession]
     if data:
         data = base64.b64decode(data)
         if has_zlib_compression:
@@ -416,8 +461,9 @@ def _get_index_offset(filename: Path) -> int:
         ind = -1
         while ind == -1:
             chunk = fin.read_chunk()
-            xml = chunk + xml
-            ind = chunk.find(tag)
+            if chunk is not None:
+                xml = chunk + xml
+                ind = chunk.find(tag)
         # starts at the beginning of the text tag
         start = ind + len(tag)
         xml = xml[start:]
@@ -427,9 +473,7 @@ def _get_index_offset(filename: Path) -> int:
 
 
 def _build_offset_list_non_indexed(filename: Path) -> tuple[list[int], list[int]]:
-    """
-    Build manually the indices for non-indexed mzML files.
-    """
+    """Build manually the indices for non-indexed mzML files."""
     # indices are build by finding the offset where spectrum or chromatogram
     # elements starts.
     spectrum_regex = re.compile("<spectrum .[^(><.)]+>")
@@ -452,7 +496,7 @@ def _build_offset_list_non_indexed(filename: Path) -> tuple[list[int], list[int]
     return spectrum_offset_list, chromatogram_offset_list
 
 
-def _find_spectrum_tag_offset(line: str, regex: re.Pattern) -> int:
+def _find_spectrum_tag_offset(line: str, regex: re.Pattern) -> int | None:
     if line.lstrip().startswith("<spectrum"):
         match = regex.search(line)
         if match:
@@ -462,7 +506,7 @@ def _find_spectrum_tag_offset(line: str, regex: re.Pattern) -> int:
         return start
 
 
-def _find_chromatogram_tag_offset(line: str, regex: re.Pattern) -> int:
+def _find_chromatogram_tag_offset(line: str, regex: re.Pattern) -> int | None:
     if line.lstrip().startswith("<chromatogram"):
         match = regex.search(line)
         if match:
@@ -502,6 +546,8 @@ def _build_offset_list_indexed(filename: Path, index_offset: int) -> tuple[list[
     chromatogram_offset = list()
     for index in index_xml:
         for offset in index:
+            if offset.text is None:
+                raise MZMLError("Non integer offset found in indexed file.")
             value = int(offset.text)
             if index.attrib["name"] == "spectrum":
                 spectra_offset.append(value)
@@ -540,19 +586,18 @@ def _get_xml_data(
 
     """
     if kind == "spectrum":
-        l, other = spectra_offset, chromatogram_offset
+        lst, other = spectra_offset, chromatogram_offset
         end_tag = "</spectrum>"
     elif kind == "chromatogram":
-        l, other = chromatogram_offset, spectra_offset
+        lst, other = chromatogram_offset, spectra_offset
         end_tag = "</chromatogram>"
     else:
-        raise ValueError("Kind must be `spectrum` or `chromatogram`")
+        raise MZMLError("Kind must be `spectrum` or `chromatogram`")
 
-    start = l[n]
-    # Here we search the closest offset to start such that the complete data
-    # is contained in the text
+    start = lst[n]
+    # Here we search the closest offset to start such that the complete data is contained in the text
     try:
-        end = l[n + 1]
+        end = lst[n + 1]
     except IndexError:
         try:
             end = other[0]
@@ -575,7 +620,7 @@ def _get_time(element):
         if tag == "scan":
             for ee in list(e):
                 accession = ee.attrib.get("accession")
-                if accession == TIME:
+                if accession == _ArrayType.TIME:
                     value = float(ee.attrib.get("value"))
                     units = ee.attrib.get("unitAccession")
                     value = _time_to_seconds(value, units)
@@ -583,6 +628,6 @@ def _get_time(element):
 
 
 def _time_to_seconds(value, units):
-    if units == MINUTES:
+    if units == _TimeUnits.MINUTES:
         value = value * 60
     return value

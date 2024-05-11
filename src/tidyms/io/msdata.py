@@ -11,7 +11,8 @@ from typing_extensions import Callable
 from ..core.constants import MSDataMode
 from ..core.models import Chromatogram, MSSpectrum
 from .readers.interface import Reader
-from .readers.registry import get_reader
+from .readers.mzml import MZMLReader  # noqa
+from .readers.registry import get_reader, get_reader_from_extension
 
 
 class MSData:
@@ -25,37 +26,35 @@ class MSData:
     src : pathlib.Path
         Raw data source.
     reader : Reader or None, default=None
-        The Reader class to read raw data. If ``None``, the reader is inferred
-        using the file extension.
+        The Reader class to read raw data. If ``None``, the reader is inferred using the file extension.
     centroid : MSDataMode, default=MSDataMode.CENTROID
         The mode in which the data is stored.
     centroider : Callable[[MSSpectrum], MSSpectrum] or None, default=None
-        A function that takes a spectrum in profile mode and converts it to
-        centroid mode.
+        A function that takes a spectrum in profile mode and converts it to centroid mode.
     cache : int, default=-1
-        The maximum size of the cache, in bytes. The cache will store spectrum
-        data until it surpasses this value. At this point, old entries will be
-        deleted from the cache. If set to``-1``, the cache can grow
-        indefinitely. When working with data streams, the cache size is set
-        to ``-1``, as there is no guarantee that the `seek` method is implemented
-        in the file object.
+        The maximum cache size, in bytes. The cache will store spectrum data until it surpasses this value. At this
+        point, old entries will be deleted from the cache. If set to``-1``, the cache can grow indefinitely. When
+        working with data streams, the cache size is set to ``-1``, as there is no guarantee that the `seek` method,
+        which is required for repeated access to the file object, is implemented.
 
     """
 
     def __init__(
         self,
         src: pathlib.Path | TextIO | BinaryIO,
-        reader: type[Reader] | None = None,
+        reader: type[Reader] | str | None = None,
         centroid: MSDataMode = MSDataMode.CENTROID,
         centroider: Callable[[MSSpectrum], MSSpectrum] | None = None,
-        cache: int = -1
+        cache: int = -1,
     ):
         if isinstance(src, pathlib.Path) and reader is None:
             ext = src.suffix
-            reader = get_reader(ext)
+            reader = get_reader_from_extension(ext)
+        elif isinstance(reader, str):
+            reader = get_reader(reader)
         elif reader is None:
-                msg = "Reader must be specified for file objects."
-                raise ValueError(msg)
+            msg = "Reader must be specified for file objects."
+            raise ValueError(msg)
 
         self._centroider = centroider
         self._reader = reader(src)
@@ -140,16 +139,15 @@ class MSDataCache:
     """
     Cache spectra data to avoid reading from disk.
 
-    Old entries are deleted if the cache grows larger than total data size in
-    bytes. The maximum size of the cache is defined by `max_size`. If set to
-    ``-1``, the cache can grow indefinitely.
+    Old entries are deleted if the cache grows larger than total data size in bytes. The maximum size of the cache is
+    defined by `max_size`. If set to ``-1``, the cache can grow indefinitely.
 
     """
 
     def __init__(self, max_size: int = -1):
-         self.cache: OrderedDict[int, MSSpectrum] = OrderedDict()
-         self.size = 0
-         self.max_size = max_size
+        self.cache: OrderedDict[int, MSSpectrum] = OrderedDict()
+        self.size = 0
+        self.max_size = max_size
 
     def add(self, spectrum: MSSpectrum) -> None:
         """Store a spectrum."""
@@ -161,7 +159,7 @@ class MSDataCache:
         """Retrieve a spectrum from the cache. If not found, returns ``None``."""
         spectrum = self.cache.get(index)
         if isinstance(spectrum, MSSpectrum):
-             self.cache.move_to_end(index)
+            self.cache.move_to_end(index)
         return spectrum
 
     def trim_cache(self) -> None:
@@ -173,4 +171,4 @@ class MSDataCache:
 
 
 def _get_spectrum_size(spectrum: MSSpectrum) -> int:
-     return spectrum.int.nbytes + spectrum.mz.nbytes
+    return spectrum.int.nbytes + spectrum.mz.nbytes
