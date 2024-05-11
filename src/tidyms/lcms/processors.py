@@ -9,7 +9,7 @@ from ..annotation.correspondence import FeatureCorrespondenceParameters, match_f
 from ..core import constants as c
 from ..core.models import FeatureGroupMap, Sample
 from ..core.processors import AssayDataInterface, FeatureExtractor, FeatureMatcher, RoiExtractor, RoiTransformer
-from ..io import MSData, get_reader
+from ..io import MSData
 from .lcms import MZTrace, Peak
 
 
@@ -29,8 +29,7 @@ class LCTraceExtractor(RoiExtractor, MakeRoiParameters):
     """
 
     def _extract_roi_func(self, sample: Sample) -> list[MZTrace]:
-        reader = None if sample.reader is None else get_reader(sample.reader)
-        ms_data = MSData(sample.path, reader=reader)
+        ms_data = MSData(sample.path, reader=sample.reader)
         params = self.model_copy()
         params.ms_level = sample.ms_level
         params.start_time = sample.start_time
