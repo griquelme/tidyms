@@ -1,6 +1,5 @@
 """Maintain a runtime registry of readers."""
 
-from functools import wraps
 from typing import TypeVar
 
 from ...core.exceptions import ReaderNotFound
