@@ -902,9 +902,7 @@ class ProcessingPipeline(pydantic.BaseModel):
     @overload
     def process(self, data: SampleDataSnapshots) -> SampleDataSnapshots: ...
 
-    def process(
-        self, data: SampleData | SampleDataSnapshots | AssayDataInterface
-    ) -> SampleData | SampleDataSnapshots | AssayDataInterface:
+    def process(self, data):
         """
         Apply the processing pipeline.
 
