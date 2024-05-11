@@ -2,7 +2,7 @@
 
 
 class FeatureTypeNotRegistered(ValueError):
-    """"Exception raised when trying to fetch a non-registered Feature type."""
+    """Exception raised when trying to fetch a non-registered Feature type."""
 
 
 class IncompatibleProcessorStatus(ValueError):
@@ -43,3 +43,7 @@ class SampleDataNotFound(ValueError):
 
 class PipelineNotFound(ValueError):
     """Exception raised when a pipeline is not found in the DB."""
+
+
+class ExampleDatasetNotFound(ValueError):
+    """Exception raised when a non existing dataset is requested."""
