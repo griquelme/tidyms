@@ -33,8 +33,12 @@ class RoiTypeNotRegistered(ValueError):
     """Exception raised when trying to fetch a non-registered ROI type."""
 
 
-class SampleAlreadyInAssay(ValueError):
+class SampleIdAlreadyInAssay(ValueError):
     """Exception raised when trying to add a sample with an existing id."""
+
+
+class SampleWithRepeatedOrder(ValueError):
+    """Exception raised when trying to add a sample with a repeated order in an assay."""
 
 
 class SampleDataNotFound(ValueError):
