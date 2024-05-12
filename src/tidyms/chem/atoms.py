@@ -16,12 +16,15 @@ Exceptions
 - InvalidIsotope
 
 """
+
+from __future__ import annotations
+
 import json
-import numpy as np
 import os.path
 from string import digits
 from typing import Dict, Final, Tuple, Union
 
+import numpy as np
 
 EM: Final[float] = 0.00054858  # electron mass
 
@@ -64,9 +67,11 @@ class Isotope:
         return "Isotope({})".format(str(self))
 
     def get_element(self) -> "Element":
+        """Get the corresponding element."""
         return PeriodicTable().get_element(self.z)
 
     def get_symbol(self) -> str:
+        """Get the element symbol."""
         return self.get_element().symbol
 
 
@@ -107,7 +112,7 @@ class Element(object):
 
     def get_abundances(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Returns the Mass number, exact mass and abundance of each Isotope.
+        Return the Mass number, exact mass and abundance of each Isotope.
 
         Returns
         -------
@@ -126,23 +131,17 @@ class Element(object):
         return m, M, p
 
     def get_mmi(self) -> Isotope:
-        """
-        Returns the isotope with the lowest atomic mass.
-
-        """
+        """Return the isotope with the lowest atomic mass."""
         return min(self.isotopes.values(), key=lambda x: x.a)
 
     def get_monoisotope(self) -> Isotope:
-        """
-        Returns the most abundant isotope.
-
-        """
+        """Return the most abundant isotope."""
         return max(self.isotopes.values(), key=lambda x: x.abundance)
 
 
-def PeriodicTable():
+def PeriodicTable() -> _PeriodicTable:
     """
-    Reference the PeriodicTable object.
+    Refer to the PeriodicTable object.
 
     Examples
     --------
@@ -166,7 +165,7 @@ class _PeriodicTable:
 
     """
 
-    instance = None
+    instance: None | _PeriodicTable = None
 
     def __init__(self):
         self._symbol_to_element = _make_periodic_table()
@@ -181,7 +180,7 @@ class _PeriodicTable:
 
     def get_element(self, element: Union[str, int]) -> Element:
         """
-        Returns an Element object using its symbol or atomic number.
+        Return an Element object using its symbol or atomic number.
 
         Parameters
         ----------
@@ -201,10 +200,10 @@ class _PeriodicTable:
 
         """
         if isinstance(element, int):
-            element = self._z_to_element[element]
+            res = self._z_to_element[element]
         else:
-            element = self._symbol_to_element[element]
-        return element
+            res = self._symbol_to_element[element]
+        return res
 
     def __iter__(self):
         for el in self._symbol_to_element.values():
@@ -212,7 +211,7 @@ class _PeriodicTable:
 
     def get_isotope(self, x: str, copy: bool = False) -> Isotope:
         """
-        Returns an isotope object from a string representation.
+        Return an isotope object from a string representation.
 
         Parameters
         ----------
@@ -267,4 +266,4 @@ def _make_periodic_table() -> Dict[str, Element]:
 
 
 class InvalidIsotope(ValueError):
-    pass
+    """Exception raised when an invalid isotope string is passed."""
