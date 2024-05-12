@@ -107,6 +107,3 @@ def register_feature(feature: type[FeatureType]) -> type[FeatureType]:
     """
     _REGISTERED_FEATURES[feature.__name__] = feature
     return feature
-
-
-
