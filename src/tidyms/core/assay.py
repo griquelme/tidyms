@@ -19,15 +19,27 @@ import yaml
 
 from ..utils import get_progress_bar
 from . import exceptions
+from .constants import MSInstrument, Polarity, SeparationMode
 from .db import AssayData
 from .models import Feature, Roi, Sample
-from .processors import ProcessingPipeline, ProcessorRegistry, SampleData, SampleDataSnapshots
+from .processors import (
+    BaseIsotopologueAnnotator,
+    FeatureExtractor,
+    ProcessingPipeline,
+    ProcessorRegistry,
+    ProcessStatus,
+    RoiExtractor,
+    SampleData,
+    SampleDataSnapshots,
+)
+from .registry import get_feature_type, get_roi_type
 
 logger = logging.getLogger(__file__)
 
 
 FeatureType = TypeVar("FeatureType", bound=Feature)
 RoiType = TypeVar("RoiType", bound=Roi)
+
 
 class AssayConfiguration(pydantic.BaseModel):
     """
@@ -51,10 +63,28 @@ class AssayConfiguration(pydantic.BaseModel):
     """
 
     roi: str
+    """A string representation of the ROI type used in the assay"""
+
     feature: str
+    """A string representation of the Feature type used in the assay"""
+
     samples: list[Sample] = list()
+    """The list of samples in the assay"""
+
     path: pathlib.Path | None = None
+    """The path to the assay database."""
+
     sample_pipeline: ProcessingPipeline
+    """The sample processing pipeline."""
+
+    polarity: Polarity = Polarity.NEGATIVE
+    """The polarity in which samples were measured."""
+
+    separation: SeparationMode = SeparationMode.UPLC
+    """The separation mode used in the analytical method."""
+
+    instrument: MSInstrument = MSInstrument.QTOF
+    """The instrument used to measure the samples."""
 
 
 class Assay(Generic[FeatureType, RoiType]):
@@ -65,22 +95,14 @@ class Assay(Generic[FeatureType, RoiType]):
 
     """
 
-    def __init__(
-        self,
-        roi_type: type[RoiType],
-        feature_type: type[FeatureType],
-        sample_pipeline: ProcessingPipeline,
-        path: pathlib.Path | None = None,
-    ):
-        self._config = AssayConfiguration(
-            roi=roi_type.__name__,
-            feature=feature_type.__name__,
-            path=path,
-            sample_pipeline=sample_pipeline
-        )
-        self._data = AssayData(path, roi_type, feature_type)
-        self._staging: set[str]
+    def __init__(self, config: AssayConfiguration):
+        self._config = config
+        roi_type: type[RoiType] = get_roi_type(config.roi)  # type: ignore
+        feature_type: type[FeatureType] = get_feature_type(config.feature)  # type: ignore
+        self._data = AssayData(config.path, roi_type, feature_type)
+        self._staging: set[str] = set()
 
+        self.config.sample_pipeline.set_default_parameters()
 
     @property
     def config(self):
@@ -101,10 +123,22 @@ class Assay(Generic[FeatureType, RoiType]):
         samples : list[Sample]
 
         """
+        all_ids = {x.id for x in self.config.samples}
+        all_orders = {x.order for x in self.config.samples}
+        add_list = list()
         for sample in samples:
-            if sample.id in self._staging:
-                raise exceptions.SampleAlreadyInAssay(sample.id)
-            self.config.samples.append(sample)
+            if sample.id in all_ids:
+                raise exceptions.SampleIdAlreadyInAssay(sample.id)
+
+            if sample.order in all_orders:
+                raise exceptions.SampleWithRepeatedOrder(sample.order)
+
+            all_ids.add(sample.id)
+            all_orders.add(sample.order)
+            add_list.append(sample)
+
+        self.config.samples.extend(add_list)
+        self._staging = self._staging.union([x.id for x in add_list])
 
     @classmethod
     def from_yaml(cls, yaml_path: pathlib.Path) -> Assay:
@@ -126,10 +160,13 @@ class Assay(Generic[FeatureType, RoiType]):
 
         return cls(**d)
 
-
     def list_processed_samples(self) -> list[str]:
         """List all samples processed by the single sample pipeline."""
         return self.data.list_samples()
+
+    def list_unprocessed_samples(self) -> list[str]:
+        """List all samples added to the assay that were not processed by the single sample pipeline."""
+        return list(self._staging)
 
     def get_feature_descriptors(
         self, sample_id: str | None = None, descriptors: list[str] | None = None
@@ -160,7 +197,7 @@ class Assay(Generic[FeatureType, RoiType]):
         """
         return self.data.fetch_descriptors(descriptors=descriptors, sample_id=sample_id)
 
-    def get_features(self, key, by: str, groups: list[str] | None = None) -> list[FeatureType]:
+    def get_features(self, key, by: str = "sample", groups: list[str] | None = None) -> list[FeatureType]:
         """
         Retrieve features from the assay.
 
@@ -173,7 +210,7 @@ class Assay(Generic[FeatureType, RoiType]):
             to ``"id"`` or ``"label"`` an integer must be provided. If `by` is
             set to ``"sample"`` a string with the corresponding sample id must
             be passed.
-        by : {"sample", "id", "label"}
+        by : {"sample", "id", "label"}, default="sample"
             Criteria to select features. ``"sample"`` returns all features from
             a given sample, ``"id"``, retrieves a feature by id and ``"label"``
             retrieves features labelled by a correspondence algorithm.
@@ -198,7 +235,7 @@ class Assay(Generic[FeatureType, RoiType]):
 
         return features
 
-    def get_roi(self, key, by: str) -> Sequence[RoiType]:
+    def get_roi(self, key, by: str = "sample", load_features: bool = True) -> Sequence[RoiType]:
         """
         Retrieve ROIs from the assay. ROIs can be retrieved by sample, or id.
 
@@ -214,6 +251,8 @@ class Assay(Generic[FeatureType, RoiType]):
         groups : list[str] or None, default=None
             Select features from these sample groups. Applied only if `by` is
             set to ``"label"``.
+        load_features : bool, default=True
+            Wether to load features extracted from the ROIs.
 
         Returns
         -------
@@ -228,9 +267,9 @@ class Assay(Generic[FeatureType, RoiType]):
 
         """
         if by == "sample":
-            roi_list = self._data.get_roi_list(key)
+            roi_list = self._data.get_roi_list(key, load_features=load_features)
         elif by == "id":
-            roi_list = [self._data.get_roi_by_id(key)]
+            roi_list = [self._data.get_roi_by_id(key, load_features=load_features)]
         else:
             msg = f"`by` must be one of 'sample' or 'id'. Got {by}."
             raise ValueError(msg)
@@ -271,20 +310,14 @@ class Assay(Generic[FeatureType, RoiType]):
         """
         valid_samples = self._staging
         if samples is not None:
-            valid_samples  = valid_samples & set(samples)
+            valid_samples = valid_samples & set(samples)
         sample_list = [x for x in self.config.samples if x.id in valid_samples]
-
 
         def iterator() -> Generator[tuple[ProcessingPipeline, Sample], None, None]:
             """Provide independent pipeline instances to subprocess worker."""
             for sample in sample_list:
                 pipeline = self.config.sample_pipeline.model_copy(deep=True)
                 yield pipeline, sample
-
-        def worker(pipeline: ProcessingPipeline, sample: Sample) -> SampleData | SampleDataSnapshots:
-            """Apply pipeline to a sample data instance."""
-            sample_data = SampleData(sample=sample)
-            return pipeline.process(sample_data)
 
         if not silent:
             tqdm_func = get_progress_bar()
@@ -294,13 +327,24 @@ class Assay(Generic[FeatureType, RoiType]):
             bar = None
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(worker, pipe, data) for pipe, data in iterator()]
+            futures = [executor.submit(_process_sample_worker, pipe, data) for pipe, data in iterator()]
             for future in concurrent.futures.as_completed(futures):
                 data = future.result()
                 if bar is not None:
                     bar.set_description(f"Processing {data.sample.id}")
                     bar.update()
+
+                if isinstance(data, SampleData):
+                    if delete_empty_roi:
+                        data.remove_empty_roi()
+                    self.data.add_sample_data(data)
         self._staging = self._staging - set(valid_samples)
+
+    def set_default_parameters(self) -> None:
+        """Set default parameters in assay pipelines using assay instrument, separation mode and polarity."""
+        self.config.sample_pipeline.set_default_parameters(
+            instrument=self.config.instrument, separation=self.config.separation, polarity=self.config.polarity
+        )
 
     def to_yaml(self, yaml_path: pathlib.Path) -> None:
         """Dump model into a YAML file."""
@@ -311,3 +355,22 @@ class Assay(Generic[FeatureType, RoiType]):
 
         with yaml_path.open("wt") as file_out:
             yaml.dump(yaml_dict, file_out)
+
+    def _update_assay_status(self) -> None:
+        """Set the assay status."""
+        status = ProcessStatus()
+
+        all_samples_processed = not self._staging
+        has_roi_extractor = any(isinstance(x, RoiExtractor) for x in self.config.sample_pipeline)
+        has_feature_extractor = any(isinstance(x, FeatureExtractor) for x in self.config.sample_pipeline)
+        has_isotopologue_annotator = any(isinstance(x, BaseIsotopologueAnnotator) for x in self.config.sample_pipeline)
+
+        status.all_roi_extracted = all_samples_processed and has_roi_extractor
+        status.all_feature_extracted = all_samples_processed and has_feature_extractor
+        status.all_isotopologue_annotated = all_samples_processed and has_isotopologue_annotator
+
+
+def _process_sample_worker(pipeline: ProcessingPipeline, sample: Sample) -> SampleData | SampleDataSnapshots:
+    """Apply pipeline to a sample data instance."""
+    sample_data = SampleData(sample=sample)
+    return pipeline.process(sample_data)
