@@ -12,6 +12,7 @@ class ProcessorType(enum.Enum):
     FEATURE_EXTRACTOR = "FeatureExtractor"
     FEATURE_TRANSFORMER = "FeatureTransformer"
     CHAINED_PROCESSOR = "ChainedProcessor"
+    ISOTOPOLOGUE_ANNOTATOR = "IsotopologueAnnotator"
 
 
 class DataType(enum.Enum):
@@ -20,6 +21,7 @@ class DataType(enum.Enum):
     SAMPLE = "sample"
     ASSAY = "assay"
     MATRIX = "matrix"
+
 
 class SeparationMode(enum.Enum):
     """Analytical method separation platform."""
