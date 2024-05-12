@@ -178,7 +178,7 @@ class LCFeatureMatcher(FeatureMatcher, FeatureCorrespondenceParameters):
     rt_tolerance: pydantic.PositiveFloat = 3.0
     """Rt tolerance in seconds used to group close features. Sets the `eps` parameter in the DBSCAN algorithm."""
 
-    def _func(self, data: AssayDataInterface) -> list[FeatureGroupMap]:
+    def _func(self, data: AssayDataInterface[Peak, MZTrace]) -> list[FeatureGroupMap]:
         tolerance = {"mz": self.mz_tolerance, "rt": self.rt_tolerance}
         descriptors = data.fetch_descriptors(descriptors=list(tolerance))
         return match_features(descriptors, tolerance, self)
