@@ -4,7 +4,7 @@ from tidyms.lcms import simulation
 
 @pytest.fixture
 def lcms_sample_factory():
-    config = simulation.SimulatedLCMSDataConfiguration(min_signal_intensity=1.0, n_scans=40)
+    config = simulation.SimulatedLCMSDataConfiguration(min_signal_intensity=1.0, n_scans=40, amp_noise=0.0)
     formula_list = ["[C54H104O6]+", "[C27H40O2]+", "[C24H26O12]+"]
     rt_list = [10.0, 20.0, 30.0]
     int_list = [100.0, 200.0, 300.0]

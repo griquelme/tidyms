@@ -9,30 +9,28 @@ from tidyms.lcms import LCTraceBaselineEstimator, LCTraceExtractor, MZTrace, Pea
 
 @pytest.fixture
 def annotation_tools_params():
-    bounds = {
-        "C": (0, 50),
-        "H": (0, 100),
-        "O": (0, 20),
-        "N": (0, 20),
-        "Cl": (0, 2),
-        "B": (0, 1),
-    }
-    params = {
-        "bounds": bounds,
-        "max_mass": 2500,
-        "max_length": 10,
-        "max_charge": 3,
-        "min_M_tol": 0.005,
-        "max_M_tol": 0.01,
-        "p_tol": 0.05,
-        "min_similarity": 0.9,
-        "min_p": 0.01,
-    }
-    return params
+    return annotation.AnnotatorParameters(
+        bounds={
+            "C": (0, 50),
+            "H": (0, 100),
+            "O": (0, 20),
+            "N": (0, 20),
+            "Cl": (0, 2),
+            "B": (0, 1),
+        },
+        max_mass=2500,
+        max_length=10,
+        max_charge=3,
+        min_M_tol=0.005,
+        max_M_tol=0.01,
+        p_tol=0.05,
+        min_similarity=0.9,
+        min_p=0.01,
+    )
 
 
 def test__annotate_empty_feature_list(annotation_tools_params):
-    tools = annotation.create_annotation_tools(**annotation_tools_params)
+    tools = annotation.create_annotation_tools(annotation_tools_params)
     feature_list = list()
     annotation.annotate(feature_list, *tools)
 
@@ -53,7 +51,7 @@ def peak_list(tmp_path: pathlib.Path) -> list[Peak]:
         )
         adducts.append(adduct)
 
-    sample_config = simulation.SimulatedLCMSDataConfiguration(n_scans=300)
+    sample_config = simulation.SimulatedLCMSDataConfiguration(n_scans=300, amp_noise=0.0)
 
     factory = simulation.SimulatedLCMSSampleFactory(config=sample_config, adducts=adducts)
     path = tmp_path / "sample.json"
@@ -76,7 +74,7 @@ def peak_list(tmp_path: pathlib.Path) -> list[Peak]:
 
 
 def test_annotate(peak_list: list[Peak], annotation_tools_params):
-    tools = annotation.create_annotation_tools(**annotation_tools_params)
+    tools = annotation.create_annotation_tools(annotation_tools_params)
     annotation.annotate(peak_list, *tools)
 
     # group features by isotopologue label.

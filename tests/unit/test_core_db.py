@@ -137,7 +137,7 @@ class TestAssayDataSampleData:
 
     def test_add_sample_data_with_same_id_raises_error(self, sample_data, assay_data):
         assay_data.add_sample_data(sample_data)
-        with pytest.raises(exceptions.SampleAlreadyInAssay):
+        with pytest.raises(exceptions.SampleIdAlreadyInAssay):
             assay_data.add_sample_data(sample_data)
 
 
@@ -149,6 +149,7 @@ def sample_data_list(tmp_path_factory) -> list[SampleData]:
         sample_data = utils.create_dummy_sample_data(tmp_path, k, with_roi=True, with_feature=True)
         samples.append(sample_data)
     return samples
+
 
 @pytest.fixture(scope="module")
 def assay_data_with_sample_data(sample_data_list):

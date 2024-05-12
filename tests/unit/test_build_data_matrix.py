@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from tidyms import _build_data_matrix
+from tidyms.algorithms import _build_data_matrix
 from tidyms.core import constants as c
 import pytest
 
