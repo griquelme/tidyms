@@ -22,7 +22,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 from . import exceptions
 from .constants import IDFeatureDescriptors
 from .models import Annotation, Feature, FeatureGroupMap, FeatureType, Roi, RoiType, Sample
-from .processors import ProcessingPipeline, ProcessorConfiguration, ProcessorRegistry, SampleData
+from .processors import ProcessingPipeline, ProcessorConfiguration, ProcessorRegistry, ProcessStatus, SampleData
 
 Base = orm.declarative_base()
 
@@ -158,6 +158,7 @@ class AssayData(Generic[FeatureType, RoiType]):
     ):
         self.roi = roi
         self.feature = feature
+        self.status = ProcessStatus()
 
         if path is None:
             db_address = "sqlite:///:memory:"
@@ -192,7 +193,7 @@ class AssayData(Generic[FeatureType, RoiType]):
     ) -> None:
         """Store a SampleData instance."""
         if data.sample.id in self.list_samples():
-            raise exceptions.SampleAlreadyInAssay(data.sample.id)
+            raise exceptions.SampleIdAlreadyInAssay(data.sample.id)
 
         self._label_sample_data(data)
         features = data.get_features()
@@ -210,7 +211,6 @@ class AssayData(Generic[FeatureType, RoiType]):
             self._add_roi_list(data.sample, session, *data.roi)
             self._add_features(session, data.sample.id, descriptors, annotations, *features)
             session.commit()
-
 
     def fetch_sample_data(self, sample_id: str) -> SampleData[FeatureType, RoiType]:
         """Store a SampleData instance."""
@@ -268,7 +268,7 @@ class AssayData(Generic[FeatureType, RoiType]):
                     order=proc.order,
                     parameters=proc.parameters,
                     type=proc.type,
-                    )
+                )
                 config_list.append(proc_info)
             config_list = sorted(config_list, key=lambda x: x.order)
         if not config_list:
@@ -291,9 +291,7 @@ class AssayData(Generic[FeatureType, RoiType]):
             session.execute(stmt)
             session.commit()
 
-    def fetch_descriptors(
-        self, sample_id: str | None = None, descriptors: Sequence[str] | None = None
-    ) -> dict:
+    def fetch_descriptors(self, sample_id: str | None = None, descriptors: Sequence[str] | None = None) -> dict:
         """
         Retrieve the feature descriptors.
 
@@ -425,7 +423,7 @@ class AssayData(Generic[FeatureType, RoiType]):
             session.add_all([SampleModel(**x.model_dump()) for x in samples])
         except IntegrityError as e:
             msg = "Trying to insert a sample with an existing ID"
-            raise exceptions.SampleAlreadyInAssay(msg) from e
+            raise exceptions.SampleIdAlreadyInAssay(msg) from e
 
     def flag_processed(self, samples: list[Sample], pipeline: str):
         """
@@ -444,9 +442,7 @@ class AssayData(Generic[FeatureType, RoiType]):
             are defined by `PREPROCESSING_STEPS` in the `_constants` module.
 
         """
-        processed = [
-            ProcessedSampleModel(sample_id=x.id, pipeline=pipeline) for x in samples
-        ]
+        processed = [ProcessedSampleModel(sample_id=x.id, pipeline=pipeline) for x in samples]
         with self.SessionFactory() as session:
             session.add_all(processed)
             session.commit()
@@ -463,9 +459,7 @@ class AssayData(Generic[FeatureType, RoiType]):
         """
         # TODO: add samples to unflag
         with self.SessionFactory() as session:
-            stmt = delete(ProcessedSampleModel).where(
-                ProcessedSampleModel.pipeline == pipeline
-            )
+            stmt = delete(ProcessedSampleModel).where(ProcessedSampleModel.pipeline == pipeline)
             session.execute(stmt)
             session.commit()
 
@@ -501,11 +495,7 @@ class AssayData(Generic[FeatureType, RoiType]):
 
         """
         with self.SessionFactory() as session:
-            stmt = (
-                select(SampleModel)
-                .join(ProcessedSampleModel)
-                .where(ProcessedSampleModel.pipeline == pipeline)
-            )
+            stmt = select(SampleModel).join(ProcessedSampleModel).where(ProcessedSampleModel.pipeline == pipeline)
             processed_samples = list()
             for row in session.execute(stmt):
                 sample = _sample_model_to_sample(row.SampleModel)
@@ -544,9 +534,7 @@ class AssayData(Generic[FeatureType, RoiType]):
 
         """
         with self.SessionFactory() as session:
-            stmt = select(ProcessorModel).where(
-                ProcessorModel.pipeline == name
-            )
+            stmt = select(ProcessorModel).where(ProcessorModel.pipeline == name)
             parameters = dict()
             for row in session.execute(stmt):
                 param_model = row.ProcessParameterModel
@@ -568,9 +556,7 @@ class AssayData(Generic[FeatureType, RoiType]):
         parameter_model_list = list()
         for step, param in parameters.items():
             param_str = json.dumps(param)
-            model = ProcessorModel(
-                step=step, parameters=param_str, pipeline=name
-            )
+            model = ProcessorModel(step=step, parameters=param_str, pipeline=name)
             parameter_model_list.append(model)
 
         with self.SessionFactory() as session:
@@ -591,9 +577,7 @@ class AssayData(Generic[FeatureType, RoiType]):
         """
         update = list()
         for step, param in parameters.items():
-            update.append(
-                {"pipeline": name, "step": step, "parameters": json.dumps(param)}
-            )
+            update.append({"pipeline": name, "step": step, "parameters": json.dumps(param)})
 
         with self.SessionFactory() as session:
             session.execute(sa.update(ProcessorModel), update)
@@ -653,9 +637,7 @@ class AssayData(Generic[FeatureType, RoiType]):
             roi_list = list()
             for row in result:
                 model = row.RoiModel
-                roi = _roi_model_to_roi(
-                    model, self.roi, self.feature, load_features=load_features
-                )
+                roi = _roi_model_to_roi(model, self.roi, self.feature, load_features=load_features)
                 roi_list.append(roi)
         return roi_list
 
@@ -674,18 +656,12 @@ class AssayData(Generic[FeatureType, RoiType]):
         """
         with self.SessionFactory() as session:
             if load_features:
-                stmt = (
-                    select(RoiModel)
-                    .where(RoiModel.id == roi_id)
-                    .options(orm.immediateload(RoiModel.features))
-                )
+                stmt = select(RoiModel).where(RoiModel.id == roi_id).options(orm.immediateload(RoiModel.features))
             else:
                 stmt = select(RoiModel).where(RoiModel.id == roi_id)
             result = session.execute(stmt).scalar()
             if result is not None:
-                roi = _roi_model_to_roi(
-                    result, self.roi, self.feature, load_features=load_features
-                )
+                roi = _roi_model_to_roi(result, self.roi, self.feature, load_features=load_features)
             else:
                 roi = None
 
@@ -801,9 +777,7 @@ class AssayData(Generic[FeatureType, RoiType]):
         sample_data = self.fetch_sample_data(sample_id)
         return sample_data.get_features()
 
-    def get_features_by_label(
-        self, label: int, groups: list[str] | None = None
-    ) -> list[FeatureType]:
+    def get_features_by_label(self, label: int, groups: list[str] | None = None) -> list[FeatureType]:
         """
         Retrieve all samples with an specific feature label.
 
@@ -822,11 +796,7 @@ class AssayData(Generic[FeatureType, RoiType]):
         """
         with self.SessionFactory() as session:
             cond = AnnotationModel.label == label
-            stmt = (
-                select(FeatureModel)
-                .join(AnnotationModel)
-                .options(orm.immediateload(FeatureModel.roi))
-            )
+            stmt = select(FeatureModel).join(AnnotationModel).options(orm.immediateload(FeatureModel.roi))
             if groups is not None:
                 cond = cond & (SampleModel.group.in_(groups))
                 stmt = stmt.join(SampleModel)
@@ -835,9 +805,7 @@ class AssayData(Generic[FeatureType, RoiType]):
             result = session.execute(stmt)
             feature_list = list()
             for row in result:
-                roi = _roi_model_to_roi(
-                    row.FeatureModel.roi, self.roi, self.feature, load_features=False
-                )
+                roi = _roi_model_to_roi(row.FeatureModel.roi, self.roi, self.feature, load_features=False)
                 feature = _feature_model_to_feature(row.FeatureModel, self.feature, roi)
                 feature_list.append(feature)
         return feature_list
@@ -864,9 +832,7 @@ class AssayData(Generic[FeatureType, RoiType]):
             )
             result = session.execute(stmt).scalar()
             if result is not None:
-                roi = _roi_model_to_roi(
-                    result.roi, self.roi, self.feature, load_features=False
-                )
+                roi = _roi_model_to_roi(result.roi, self.roi, self.feature, load_features=False)
                 feature = _feature_model_to_feature(result, self.feature, roi)
 
             else:
@@ -971,9 +937,7 @@ def _roi_model_to_roi(
     return roi
 
 
-def _feature_model_to_feature(
-    model: FeatureModel, feature_type: type[FeatureType], roi: Roi
-) -> FeatureType:
+def _feature_model_to_feature(model: FeatureModel, feature_type: type[FeatureType], roi: Roi) -> FeatureType:
     """Create a Feature instance from a FeatureModel instance."""
     annotation = Annotation(**model.annotation.__dict__)
     return feature_type.from_str(model.data, roi, annotation)
