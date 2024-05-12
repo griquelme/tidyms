@@ -77,16 +77,22 @@ def match_features(
     tolerance = np.array(list(descriptor_tolerance.values()))
 
     # create feature matrix and scale descriptors
-    X = np.vstack([descriptors[x] for x in descriptors if x in include_descriptors]).T
+    X = np.vstack([descriptors[x] for x in include_descriptors]).T
     n_features, _ = X.shape
-    X *= tolerance / tolerance[0]
+
+    # scale X using minimum tolerance value
+    argmin = np.argmin(tolerance).item()
+    X = X * tolerance[argmin] / tolerance
 
     # create sample array
     samples, _ = encode(descriptors[IDFeatureDescriptors.SAMPLE_ID])
 
     # create group array
     groups, group_mapping = encode(descriptors[IDFeatureDescriptors.FEATURE_GROUP])
-    samples_per_group = Counter(groups)
+
+    # count samples per group
+    group_sample_pairs = {(x, y) for x, y in zip(groups, samples)}
+    samples_per_group = Counter([x[0] for x in group_sample_pairs])
     if params.groups:
         include_groups = [group_mapping[x] for x in params.groups if x in group_mapping]
     else:
