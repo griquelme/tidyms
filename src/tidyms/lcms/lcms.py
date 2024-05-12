@@ -34,8 +34,10 @@ from typing_extensions import Self
 
 from ..core.models import AnnotableFeature, IsotopicEnvelope, Roi
 from ..core.numpy import FloatingArray, IntArray
+from ..core.registry import register_feature, register_roi
 
 
+@register_roi
 class MZTrace(Roi):
     """
     ROI implementation using m/z traces.
@@ -113,7 +115,7 @@ class MZTrace(Roi):
                 self.time[~missing],
                 self.spint[~missing],
                 assume_sorted=True,
-                fill_value="extrapolate", # type: ignore
+                fill_value="extrapolate",  # type: ignore
             )
 
             sp_max = np.nanmax(self.spint)
@@ -169,12 +171,14 @@ class LCTrace(MZTrace):
 
     pass
 
+
 class InvalidPeakException(ValueError):
     """Exception raised when invalid indices are passed to the Peak constructor."""
 
     pass
 
 
+@register_feature
 class Peak(AnnotableFeature[MZTrace]):
     """
     Representation of a chromatographic peak. Computes peak descriptors.
@@ -245,10 +249,10 @@ class Peak(AnnotableFeature[MZTrace]):
 
         """
         msg = "start must be lower than loc and loc must be lower than end"
-        assert (self.start < self.apex < self.end), msg
+        assert self.start < self.apex < self.end, msg
 
         msg = "peak end must be lower than m/z trace length."
-        assert (self.end < self.roi.scan.size), msg
+        assert self.end < self.roi.scan.size, msg
 
         return self
 
@@ -308,7 +312,6 @@ class Peak(AnnotableFeature[MZTrace]):
         else:
             self.snr = self.get("height") / self.roi.noise[self.apex]
 
-
     def _set_mz(self) -> None:
         weights = self.roi.get_slice_height(self.start, self.end)
         try:
@@ -364,9 +367,7 @@ class Peak(AnnotableFeature[MZTrace]):
                 end = bisect.bisect(ft.roi.scan, scan_end)
                 apex = (start + end) // 2  # dummy value
                 tmp_peak = Peak(start=start, apex=apex, end=end, roi=ft.roi)
-                p_area = trapz(
-                    tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end]
-                )
+                p_area = trapz(tmp_peak.roi.spint[start:end], tmp_peak.roi.time[start:end])
                 p.append(p_area)
                 mz.append(ft.mz)
         total_area = sum(p)
