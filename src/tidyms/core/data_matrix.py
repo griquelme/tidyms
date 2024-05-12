@@ -6,47 +6,42 @@ DataMatrix : Stores data in `tidy` format.
 
 """
 
+from typing import Any, Callable, Generic, Sequence, TypeVar
+
 import numpy as np
-from typing import Any, Optional, Sequence
+import pydantic
 
-from .models import Sample
-from . import constants as c
+from .models import BaseFeatureGroup, Sample
+from .numpy import FloatArray1D, FloatingArray
 
-# TODO: think about using a dict of labels to columns as data matrix
-
-
-class DataMatrixColumn:
-    """
-    Store column data from a DataMatrix associated with a feature.
-
-    Attribute
-    ---------
-    data : np.ndarray
-        ``(p,) floating ndarray`` with feature measurements in different samples.
-    descriptors : dict[str, float]
-        Feature descriptors.
-    label : int
-        Feature label obtained from feature correspondence.
-
-    """
-
-    def __init__(
-        self,
-        data: np.ndarray[Any, np.dtype[np.floating]],
-        descriptors: dict[str, float],
-        label: int,
-    ):
-        self.data = data
-        self.descriptors = descriptors
-        self.label = label
-
-    @property
-    def mz(self) -> float:
-        """Get the feature m/z."""
-        return self.descriptors[c.MZ]
+FeatureGroupType = TypeVar("FeatureGroupType", bound=BaseFeatureGroup)
 
 
-class DataMatrix:
+class FeatureVector(pydantic.BaseModel, Generic[FeatureGroupType]):
+    """Data matrix column view."""
+
+    model_config = pydantic.ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
+
+    data: FloatArray1D = pydantic.Field(repr=False)
+    """The column values."""
+
+    feature: FeatureGroupType
+    """The feature information associated with the matrix column."""
+
+
+class SampleVector(pydantic.BaseModel):
+    """Data matrix row view."""
+
+    model_config = pydantic.ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
+
+    data: FloatArray1D = pydantic.Field(repr=False)
+    """The column values."""
+
+    sample: Sample
+    """The sample information associated with the matrix row."""
+
+
+class DataMatrix(Generic[FeatureGroupType]):
     """
     The Data Matrix class.
 
@@ -65,31 +60,72 @@ class DataMatrix:
     # TODO: get column by label.
     # TODO: DataContainer functionality
 
-    def __init__(self, columns: list[DataMatrixColumn], samples: list[Sample]):
+    def __init__(self, samples: list[Sample], features: list[FeatureVector[FeatureGroupType]]):
         n_samples = len(samples)
-        for column in columns:
-            if column.data.size != n_samples:
-                msg = "DataMatrixColumns must have a length equal to the number of samples."
+        n_features = len(features)
+
+        for ft in features:
+            if ft.data.size != n_samples:
+                id_ = ft.feature.annotation.id
+                msg = f"Data matrix feature vector {id_} length does not match the number of samples."
                 raise ValueError(msg)
-        self.samples: Sequence[Sample] = samples
-        self.columns: Sequence[DataMatrixColumn] = sorted(columns, key=lambda x: x.mz)
-        self._cache = dict()
+
+        # store samples and features metadata
+        self._samples = samples
+        self._features = [x.feature for x in features]
+        self._X = np.zeros((n_features, n_samples))
+
+        # store mappings for samples and features for fast retrieval
+        self._sample_id_to_sample = {x.id: k for k, x in enumerate(samples)}
+        self._feature_id_to_sample = {x.annotation.id: k for k, x in enumerate(self._features)}
+
+        for k, ft in enumerate(features):
+            self._X[k] = ft.data
+
+    def get_n_features(self) -> int:
+        """Return the number of features in the matrix."""
+        return len(self._features)
+
+    def get_n_samples(self) -> int:
+        """Return the number of samples in the matrix."""
+        return len(self._samples)
+
+    def get_matrix(self) -> FloatingArray:
+        """Return a copy of the data matrix as a 2D numpy array."""
+        return self._X.copy()
+
+    def sort_features(self, key=Callable[[FeatureGroupType], float]) -> None:
+        """Sort features in the data matrix."""
+
+        def default_sort_comparison(x: FeatureGroupType) -> float:
+            return x.mz
+
+        sort_func = default_sort_comparison if key is None else key
+
+        sorted_index = sorted(range(self.get_n_features()), key=lambda x: sort_func(self._features[x]))
+
+        self._features = [self._features[x] for x in sorted_index]
+        self._X = self._X[sorted_index]
+        self._feature_id_to_sample = {x.annotation.id: k for k, x in enumerate(self._features)}
 
     @property
     def X(self) -> np.ndarray[Any, np.dtype[np.floating]]:
-        """Create a 2D array with the matrix data."""
-        X = self._cache.get("X")
-        if X is None:
-            X = np.vstack([x.data for x in self.columns]).T
-            self._cache["X"] = X
-        return X
+        """Matrix getter."""
+        return self._X
+
+    @property
+    def features(self) -> list[FeatureGroupType]:
+        """Feature group getter."""
+        return self._features
+
+    @property
+    def samples(self) -> list[Sample]:
+        """Samples getter."""
+        return self._samples
 
 
 def create_data_matrix_from_feature_table(
-    descriptors: dict[str, list],
-    samples: list[Sample],
-    value_descriptor: str,
-    aggregate: Optional[list[str]],
+    descriptors: dict[str, list], samples: list[Sample], value_descriptor: str, aggregate: list[str] | None
 ):
     """
     Create a DataMatrix using feature descriptors.
@@ -113,9 +149,7 @@ def create_data_matrix_from_feature_table(
     """
     samples = sorted(samples, key=lambda x: x.order)
     sample_id: Sequence[str] = descriptors["sample_id"]
-    labels: Sequence[int] = descriptors[
-        "label"
-    ]  # TODO: fix after removing container module
+    labels: Sequence[int] = descriptors["label"]  # TODO: fix after removing container module
     values: Sequence[float] = descriptors[value_descriptor]
 
     if aggregate is None:
@@ -128,7 +162,7 @@ def create_data_matrix_from_feature_table(
     columns = list()
     for k, k_descriptors in column_descriptors.items():
         if k in column_values:
-            col = DataMatrixColumn(column_values[k], k_descriptors, k)
+            col = FeatureVector(column_values[k], k_descriptors, k)
             columns.append(col)
 
     return DataMatrix(columns, samples)
@@ -164,9 +198,7 @@ def _create_column_descriptors(
     """Compute aggregated values for each selected descriptor."""
     labels: Sequence[int] = descriptors["labels"]
     unique_labels, inverse_index = np.unique(labels, return_inverse=True)
-    grouped_index = (
-        dict()
-    )  # contains a list with indices of features for each label group
+    grouped_index = dict()  # contains a list with indices of features for each label group
     for i in inverse_index:
         label = unique_labels[i]
         label_index = grouped_index.setdefault(label, list())
