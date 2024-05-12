@@ -1,15 +1,13 @@
 """Processor class for sample isotopologue annotation."""
 
-import pydantic
-
 from ..chem import get_chnops_bounds
 from ..core.constants import MSInstrument, Polarity, SeparationMode
 from ..core.models import AnnotableFeatureType
 from ..core.processors import BaseIsotopologueAnnotator
-from .annotation import annotate, create_annotation_tools
+from .annotation import AnnotatorParameters, annotate, create_annotation_tools
 
 
-class IsotopologueAnnotator(BaseIsotopologueAnnotator):
+class IsotopologueAnnotator(BaseIsotopologueAnnotator, AnnotatorParameters):
     """
     Annotates isotopologues in a sample.
 
@@ -20,41 +18,13 @@ class IsotopologueAnnotator(BaseIsotopologueAnnotator):
     Annotations are stored to the `annotation` attribute of each feature.
     """
 
-    bounds: dict[str, tuple[int, int]] | None = None
+    bounds: dict[str, tuple[int, int]] = dict()
     """A dictionary of expected elements to minimum and maximum formula coefficients. If ``None``, bounds are
     obtained using :func:`tidyms.chem.get_chnops_bound` with ``2000`` as parameter.
     """
 
-    max_mass: pydantic.PositiveFloat = 2000.0
-    """Maximum exact mass of the features"""
-
-    max_charge: int = 3
-    """Maximum charge of the features. Use negative values for negative polarity."""
-
-    max_length: int = 10
-    """Maximum length of the envelopes."""
-
-    min_M_tol: pydantic.PositiveFloat = 0.005
-    """Minimum mass tolerance used during search. isotopologues with abundance equal to 1 use this value.
-    Isotopologues with abundance equal to 0 use `max_M_tol`. For values in between, a weighted tolerance
-    is used based on the abundance.
-    """
-
-    max_M_tol: pydantic.PositiveFloat = 0.01
-    """Maximum mass tolerance used during search"""
-
-    p_tol: float
-    """Abundance tolerance"""
-
-    min_similarity: float = pydantic.Field(default=0.9, ge=0.5, le=1.0)
-    """Minimum cosine similarity between a pair of features"""
-
-    min_p: float = pydantic.Field(default=0.005, ge=0.0, le=0.1)
-    """Minimum abundance of isotopes to include in candidate search."""
-
-    def _func(self, features: list[AnnotableFeatureType]):
-        parameters = self.get_parameters()
-        tools = create_annotation_tools(**parameters)
+    def _annotate_func(self, features: list[AnnotableFeatureType]):
+        tools = create_annotation_tools(self)
         annotate(features, *tools)
 
     def get_default_parameters(self, instrument: MSInstrument, separation: SeparationMode, polarity: Polarity):

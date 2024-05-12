@@ -3,6 +3,7 @@
 from typing import Sequence
 
 import numpy as np
+import pydantic
 
 from ..chem import EnvelopeValidator
 from ..chem.atoms import EM, PeriodicTable
@@ -12,74 +13,83 @@ from .envelope_finder import EnvelopeFinder
 from .mmi_finder import MMIFinder
 
 
-def create_annotation_tools(
-    bounds: dict[str, tuple[int, int]],
-    max_mass: float,
-    max_charge: int,
-    max_length: int,
-    min_M_tol: float,
-    max_M_tol: float,
-    p_tol: float,
-    min_similarity: float,
-    min_p: float,
-) -> tuple[MMIFinder, EnvelopeFinder, EnvelopeValidator]:
+class AnnotatorParameters(pydantic.BaseModel):
+    """Store isotopologue annotator parameters."""
+
+    bounds: dict[str, tuple[int, int]] = dict()
+    """A dictionary of expected elements to minimum and maximum formula coefficients. If ``None``, bounds are
+    obtained using :func:`tidyms.chem.get_chnops_bound` with ``2000`` as parameter.
+    """
+
+    max_mass: pydantic.PositiveFloat = 2000.0
+    """Maximum exact mass of the features"""
+
+    max_charge: int = 3
+    """Maximum charge of the features. Use negative values for negative polarity."""
+
+    max_length: int = 10
+    """Maximum length of the envelopes."""
+
+    min_M_tol: pydantic.PositiveFloat = 0.005
+    """Minimum mass tolerance used during search. isotopologues with abundance equal to 1 use this value.
+    Isotopologues with abundance equal to 0 use `max_M_tol`. For values in between, a weighted tolerance
+    is used based on the abundance.
+    """
+
+    max_M_tol: pydantic.PositiveFloat = 0.01
+    """Maximum mass tolerance used during search"""
+
+    p_tol: float = 0.05
+    """Abundance tolerance"""
+
+    min_similarity: float = pydantic.Field(default=0.9, ge=0.5, le=1.0)
+    """Minimum cosine similarity between a pair of features"""
+
+    min_p: float = pydantic.Field(default=0.005, ge=0.0, le=0.1)
+    """Minimum abundance of isotopes to include in candidate search."""
+
+
+def create_annotation_tools(config: AnnotatorParameters) -> tuple[MMIFinder, EnvelopeFinder, EnvelopeValidator]:
     """
     Create an annotator object. Auxiliary function to _annotate.
 
     Parameters
     ----------
-    bounds : Dict
-        A dictionary of expected elements to minimum and maximum formula coefficients.
-    max_mass : float
-        Maximum exact mass of the features.
-    max_charge : int
-        Maximum charge of the features. Use negative values for negative polarity.
-    max_length : int
-        Maximum length of the envelopes.
-    min_M_tol : float
-        Minimum mass tolerance used during search. isotopologues with abundance
-        equal to 1 use this value. Isotopologues with abundance equal to 0 use
-        `max_M_tol`. For values in between, a weighted tolerance is used based
-        on the abundance.
-    max_M_tol : float
-    p_tol : float
-        Abundance tolerance.
-    min_similarity : float
-        Minimum cosine similarity between a pair of features
-    min_p : float
-        Minimum abundance of isotopes to include in candidate search.
+    config: AnnotatorParameters
 
     Returns
     -------
-    annotator: _IsotopologueAnnotator
+    MMIFinder
+    EnvelopeFinder
+    EnvelopeValidator
 
     """
     # remove elements with only 1 stable isotope
     p_table = PeriodicTable()
-    bounds = {k: bounds[k] for k in bounds if len(p_table.get_element(k).isotopes) > 1}
+    bounds = {k: config.bounds[k] for k in config.bounds if len(p_table.get_element(k).isotopes) > 1}
 
     bin_size = 100
     elements = list(bounds)
     mmi_finder: MMIFinder = MMIFinder(
-        bounds,
-        max_mass,
-        max_charge,
-        max_length,
+        config.bounds,
+        config.max_mass,
+        config.max_charge,
+        config.max_length,
         bin_size,
-        max_M_tol,
-        p_tol,
-        min_similarity,
+        config.max_M_tol,
+        config.p_tol,
+        config.min_similarity,
     )
     envelope_finder: EnvelopeFinder = EnvelopeFinder(
-        elements, max_M_tol, max_length, min_p, min_similarity
+        elements, config.max_M_tol, config.max_length, config.min_p, config.min_similarity
     )
     envelope_validator = EnvelopeValidator(
         bounds,
-        max_M=max_mass,
-        max_length=max_length,
-        min_M_tol=min_M_tol,
-        max_M_tol=max_M_tol,
-        p_tol=p_tol,
+        max_M=config.max_mass,
+        max_length=config.max_length,
+        min_M_tol=config.min_M_tol,
+        max_M_tol=config.max_M_tol,
+        p_tol=config.p_tol,
     )
     return mmi_finder, envelope_finder, envelope_validator
 
