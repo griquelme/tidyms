@@ -66,6 +66,8 @@ class SimulatedLCMSDataConfiguration(pydantic.BaseModel):
     mz_noise: pydantic.NonNegativeFloat = 0.001
     """Additive noise added to m/z in each scan"""
 
+    amp_noise: pydantic.NonNegativeFloat = 10.0
+
     mz_width: pydantic.PositiveFloat = 0.005
     """The peak width in the m/z domain"""
 
@@ -269,4 +271,9 @@ class MSSpectrumFactory:
         for ft in self.sample.features:
             amp = ft.int * np.power(np.e, -0.5 * ((time - ft.rt) / ft.width) ** 2)
             intensity += amp * np.power(np.e, -0.5 * ((mz - ft.mz) / mz_width) ** 2)
+
+        if self.sample.config.amp_noise > 0.0:
+            intensity += np.random.normal(size=intensity.size, scale=self.sample.config.amp_noise)
+            intensity[intensity < 0] = 0.0
+
         return intensity
