@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from functools import partial
 from joblib import Parallel, delayed
-from scipy.integrate import trapz
+from scipy.integrate import trapezoid
 from typing import Generator, Optional, Tuple
 from . import _constants as c
 from .fileio import MSData
@@ -13,7 +13,16 @@ from sklearn.impute import KNNImputer
 
 
 missing_data_iterator_type = Generator[
-    Tuple[MSData, str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, pd.Index],
+    Tuple[
+        MSData,
+        str,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        pd.Index,
+    ],
     None,
     None,
 ]
@@ -242,7 +251,7 @@ def _get_sample_fill_values(
         if area is None:
             not_found_index.append(c_ft)
             if estimate_not_found:
-                area = trapz(
+                area = trapezoid(
                     chrom.spint[c_start_index:c_end_index],
                     chrom.time[c_start_index:c_end_index],
                 )

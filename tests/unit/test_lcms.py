@@ -3,7 +3,7 @@ from tidyms import utils
 import tidyms as ms
 import numpy as np
 import pytest
-from scipy.integrate import trapz
+from scipy.integrate import trapezoid
 from typing import Tuple
 from math import isclose
 
@@ -189,7 +189,7 @@ def test_peak_area(lc_roi_with_peak):
     test_area = peak.get_area()
     y = lc_roi.spint[peak.start : peak.end]
     x = lc_roi.time[peak.start : peak.end]
-    expected_area = trapz(y, x)
+    expected_area = trapezoid(y, x)
     assert test_area == expected_area
 
 
